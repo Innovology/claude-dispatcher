@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/transcript"
 )
@@ -189,7 +190,13 @@ func (m model) tableView(w int) string {
 	head := dimStyle.Render(fmt.Sprintf("  %-*s %-*s %-*s %*s",
 		featW, "FEATURE", repoW, "REPO", stateW, "STATE", ageW, "AGE"))
 	rows := []string{head}
+	grouped := anyProduct(m.dispatches, func(d *state.Dispatch) string { return d.Product })
+	prevProduct := "\x00" // sentinel: no group rendered yet
 	for i, d := range m.dispatches {
+		if grouped && d.Product != prevProduct {
+			prevProduct = d.Product
+			rows = append(rows, dimStyle.Render(sectionRule(groupLabel(d.Product), w)))
+		}
 		marker := "  "
 		if i == m.cursor {
 			marker = "▸ "
@@ -226,6 +233,7 @@ func (m model) detailView(w, h int) string {
 		kv("status", statusStyles[d.Status].Render(statusGlyph(d.Status)+" "+statusLabel(d.Status)), w),
 		kv("why", d.StatusReason, w),
 		kv("branch", d.Branch, w),
+		kv("worktree", orDash(d.WorktreePath), w),
 		kv("product", orDash(d.Product), w),
 		kv("tmux", d.TmuxSession, w),
 		kv("session", orDash(sid), w),
@@ -331,18 +339,18 @@ func (m model) formView() string {
 		b.WriteString(dimStyle.Render("filter: ") + f.filter + "▏\n\n")
 		visible := f.filtered()
 		shown := min(len(visible), 15)
+		grouped := anyProduct(visible[:shown], func(r repos.Repo) string { return r.Product })
+		prevProduct := "\x00" // sentinel: no group rendered yet
 		for i := 0; i < shown; i++ {
+			if grouped && visible[i].Product != prevProduct {
+				prevProduct = visible[i].Product
+				b.WriteString(dimStyle.Render(sectionRule(groupLabel(visible[i].Product), 40)) + "\n")
+			}
 			marker := "  "
 			line := visible[i].Name
-			if visible[i].Product != "" {
-				line += dimStyle.Render("  (" + visible[i].Product + ")")
-			}
 			if i == f.cursor {
 				marker = "▸ "
 				line = headerStyle.Render(visible[i].Name)
-				if visible[i].Product != "" {
-					line += dimStyle.Render("  (" + visible[i].Product + ")")
-				}
 			}
 			b.WriteString(marker + line + "\n")
 		}
@@ -367,6 +375,15 @@ func configPathLabel() string {
 		return "~" + strings.TrimPrefix(p, home)
 	}
 	return p
+}
+
+// sectionRule renders "── label ────…" padded with dashes to width.
+func sectionRule(label string, w int) string {
+	s := "── " + label + " "
+	if pad := w - len([]rune(s)); pad > 0 {
+		s += strings.Repeat("─", pad)
+	}
+	return s
 }
 
 func kv(k, v string, w int) string {
