@@ -22,9 +22,13 @@
   dispatch works on a feature branch, even in repos that ship from main
   (PR from branch onto main).
 - "Done means live": a feature stays open until deployed, unless explicitly
-  stated otherwise. Deploys are always GitHub Actions — automatic done-signal
-  from Actions is the first roadmap item. `d` in the cockpit is the manual
-  override.
+  stated otherwise. Deploys are always GitHub Actions; `internal/track`
+  flips features to done when the deploy workflow succeeds after PR merge
+  (merge counts as live for repos with no deploy workflow). `d` in the
+  cockpit is the manual override. Auto-done only advances while a cockpit
+  is open (the tracker runs from the cockpit's poll loop).
+- Commit attribution is by provenance (dispatch records its branch SHAs),
+  NEVER by Co-Authored-By trailers — the user strips those from commits.
 - User is on a Claude subscription (not API billing): portfolio roll-up
   speaks in tokens/effort, never dollars.
 

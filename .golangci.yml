@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Lifecycle-critical paths (the hook, the cockpit loop) deliberately
+      # swallow errors — a failed status write must never disturb a live
+      # Claude session. Those spots use explicit `_ =` assignments instead.
+      check-blank: false
+
+formatters:
+  enable:
+    - gofmt

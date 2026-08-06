@@ -54,17 +54,38 @@ an optional `[products]` map (product → repo names) for the roll-up lens.
 | `r` | refresh |
 | `q` | quit |
 
-## Roadmap (deliberately deferred from the MVP)
+## The shipping loop
 
-1. Automatic done-signal from GitHub Actions deploys ("done means live").
-2. PR tracking via `gh`; deploys on the shipping strip.
-3. Portfolio roll-up: effort and token spend per product (tokens, not
+- Commits are attributed to dispatchers by **provenance**: each dispatch
+  records the SHAs produced on its feature branch (base tip at launch →
+  branch tip at each turn). No trailers or markers in your git history.
+- Each dispatch is linked to its PR by branch name (`gh pr list --head`).
+- **Done means live**: when the PR merges, the tracker watches the repo's
+  deploy workflow (auto-detected by name — deploy/release/publish/ship/prod
+  — or overridden in `[deploy_workflows]`) and flips the feature to done on
+  a successful run. Repos with no deploy workflow count merge as live.
+  Auto-done advances while a cockpit is open; `d` remains the manual
+  override.
+- The shipping strip shows: commits today, via-dispatch %, PRs launched
+  today (one `gh search` across all of GitHub), features that went live
+  today, and active repos.
+
+## Roadmap (deliberately deferred)
+
+1. Portfolio roll-up: effort and token spend per product (tokens, not
    dollars — subscription billing).
-4. Feature history: jump back into a shipped feature and rehydrate its
+2. Feature history: jump back into a shipped feature and rehydrate its
    sessions (`claude --resume`) and branch diff.
-5. Adopting sessions started outside the cockpit (the hook already logs
+3. Adopting sessions started outside the cockpit (the hook already logs
    them to `events.jsonl`).
-6. Diff pane on ultrawide layouts.
+4. Diff pane on ultrawide layouts.
+
+## Development
+
+`make check` runs build, vet, lint (golangci-lint), and the race-enabled
+test suite — the same gates CI runs on every PR. The CI workflow is named
+"CI" deliberately: this tool's own deploy detection treats deploy-ish
+workflow names as a live signal.
 
 ## Troubleshooting
 

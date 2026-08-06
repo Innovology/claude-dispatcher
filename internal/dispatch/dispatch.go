@@ -65,7 +65,7 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 	if err := tmux.NewSession(d.TmuxSession, r.Path, cmd); err != nil {
 		d.Status = state.StatusExited
 		d.StatusReason = "tmux launch failed"
-		state.Save(d)
+		_ = state.Save(d)
 		return nil, err
 	}
 	return d, nil

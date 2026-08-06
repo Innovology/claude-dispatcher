@@ -13,10 +13,12 @@ import (
 
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/ship"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/tmux"
+	"claude-dispatcher/internal/track"
 )
 
 type mode int
@@ -51,6 +53,7 @@ type (
 	stateChangedMsg struct{}
 	tickMsg         struct{}
 	shipTickMsg     struct{}
+	trackedMsg      struct{ updated int }
 	launchedMsg     struct {
 		d   *state.Dispatch
 		err error
@@ -75,7 +78,7 @@ func Run() error {
 	if err == nil {
 		if err := watcher.Add(state.DispatchesDir()); err == nil {
 			go forwardEvents(watcher, stateCh)
-			defer watcher.Close()
+			defer func() { _ = watcher.Close() }()
 		}
 	}
 
@@ -112,10 +115,19 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		loadDispatches,
 		collectShip(m.repos),
+		trackRefresh(m.cfg),
 		waitState(m.stateCh),
 		tick(),
 		shipTick(),
 	)
+}
+
+// trackRefresh polls PR/deploy state and persists changes; the fsnotify
+// watcher then reloads the records like any other status change.
+func trackRefresh(cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		return trackedMsg{updated: track.Refresh(state.LoadAll(), cfg)}
+	}
 }
 
 // loadDispatches reads all records, reconciling any whose tmux session has
@@ -130,14 +142,18 @@ func loadDispatches() tea.Msg {
 		if !tmux.HasSession(d.TmuxSession) {
 			d.Status = state.StatusExited
 			d.StatusReason = "tmux session gone"
-			state.Save(d)
+			_ = state.Save(d)
 		}
 	}
 	return dispatchesMsg(state.LoadAll())
 }
 
 func collectShip(rs []repos.Repo) tea.Cmd {
-	return func() tea.Msg { return shipMsg(ship.Collect(rs, state.LoadAll())) }
+	return func() tea.Msg {
+		s := ship.Collect(rs, state.LoadAll())
+		s.PRsToday, s.PRsOK = gh.PRsCreatedToday()
+		return shipMsg(s)
+	}
 }
 
 func waitState(ch chan struct{}) tea.Cmd {
@@ -175,7 +191,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(loadDispatches, tick())
 
 	case shipTickMsg:
-		return m, tea.Batch(collectShip(m.repos), shipTick())
+		return m, tea.Batch(trackRefresh(m.cfg), shipTick())
+
+	case trackedMsg:
+		return m, collectShip(m.repos)
 
 	case dispatchesMsg:
 		m.dispatches = msg
@@ -232,7 +251,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.form = f
 		m.mode = modeForm
 	case "r":
-		return m, tea.Batch(loadDispatches, collectShip(m.repos))
+		return m, tea.Batch(loadDispatches, trackRefresh(m.cfg))
 	case "enter", "a":
 		if d := m.selected(); d != nil {
 			if !tmux.HasSession(d.TmuxSession) {
@@ -247,18 +266,18 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if d := m.selected(); d != nil {
 			d.Status = state.StatusDone
 			d.StatusReason = "marked shipped"
-			state.Save(d)
+			_ = state.Save(d)
 			m.notice = fmt.Sprintf("%q marked shipped", d.Feature)
 			return m, loadDispatches
 		}
 	case "x":
 		if d := m.selected(); d != nil {
-			tmux.KillSession(d.TmuxSession)
+			_ = tmux.KillSession(d.TmuxSession)
 			if d.Status != state.StatusDone {
 				d.Status = state.StatusExited
 				d.StatusReason = "killed from cockpit"
 			}
-			state.Save(d)
+			_ = state.Save(d)
 			m.notice = fmt.Sprintf("killed %q", d.Feature)
 			return m, loadDispatches
 		}

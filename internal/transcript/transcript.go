@@ -38,9 +38,9 @@ func Tail(path string, n int) []string {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if fi, err := f.Stat(); err == nil && fi.Size() > tailBytes {
-		f.Seek(fi.Size()-tailBytes, io.SeekStart)
+		_, _ = f.Seek(fi.Size()-tailBytes, io.SeekStart)
 	}
 	data, err := io.ReadAll(f)
 	if err != nil {
@@ -58,9 +58,12 @@ func Tail(path string, n int) []string {
 		if json.Unmarshal([]byte(row), &l) != nil || l.Type != "assistant" {
 			continue
 		}
-		for _, s := range renderContent(l.Message.Content) {
+		// Blocks are appended reversed so the final whole-slice flip restores
+		// their in-message order.
+		blocks := renderContent(l.Message.Content)
+		for i := len(blocks) - 1; i >= 0; i-- {
 			if len(out) < n {
-				out = append(out, s)
+				out = append(out, blocks[i])
 			}
 		}
 	}
