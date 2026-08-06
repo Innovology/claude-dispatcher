@@ -69,6 +69,7 @@ func Run() error {
 	if !tmux.Available() {
 		return errors.New("tmux not found on PATH — it is required")
 	}
+	tmux.EnsureDetachKey()
 	if err := state.EnsureDirs(); err != nil {
 		return err
 	}
@@ -258,6 +259,10 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.notice = "no live tmux session for this dispatcher"
 				return m, nil
 			}
+			// Re-apply on every attach: covers sessions from before this
+			// feature and any user status-line changes since launch.
+			tmux.EnsureDetachKey()
+			tmux.SetStatusHint(d.TmuxSession)
 			return m, tea.ExecProcess(tmux.AttachCmd(d.TmuxSession), func(err error) tea.Msg {
 				return attachReturnedMsg{err: err}
 			})

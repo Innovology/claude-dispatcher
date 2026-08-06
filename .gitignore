@@ -1,2 +1,3 @@
 claude-dispatcher
 *.log
+dist/
