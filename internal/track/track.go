@@ -51,7 +51,7 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 			}
 		}
 		if changed {
-			state.Save(d)
+			_ = state.Save(d)
 			updated++
 		}
 	}

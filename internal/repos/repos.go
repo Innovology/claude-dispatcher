@@ -34,7 +34,7 @@ func Discover(cfg *config.Config) []Repo {
 	var out []Repo
 	for _, root := range cfg.ExpandedRoots() {
 		root := filepath.Clean(root)
-		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil || !d.IsDir() {
 				return nil
 			}

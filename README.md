@@ -80,6 +80,13 @@ an optional `[products]` map (product → repo names) for the roll-up lens.
    them to `events.jsonl`).
 4. Diff pane on ultrawide layouts.
 
+## Development
+
+`make check` runs build, vet, lint (golangci-lint), and the race-enabled
+test suite — the same gates CI runs on every PR. The CI workflow is named
+"CI" deliberately: this tool's own deploy detection treats deploy-ish
+workflow names as a live signal.
+
 ## Troubleshooting
 
 - **Everything stuck on "launching"** — the hook isn't firing. Re-run

@@ -1,6 +1,6 @@
 BIN := $(HOME)/.local/bin/claude-dispatcher
 
-.PHONY: build install vet run
+.PHONY: build install vet run test lint check
 
 build:
 	go build ./...
@@ -12,6 +12,15 @@ install:
 
 vet:
 	go vet ./...
+
+test:
+	go test ./... -race -count=1
+
+lint:
+	golangci-lint run
+	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
+
+check: build vet lint test
 
 run: install
 	$(BIN)

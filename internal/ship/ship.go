@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 )
 
+// Stats are pure git + dispatch-record numbers; PRsToday/PRsOK are filled in
+// by the caller (the cockpit adds them from gh) so Collect stays hermetic.
 type Stats struct {
 	Commits      int // commits today across all tracked repos (all branches)
 	Dispatched   int // of which were produced under a dispatch
@@ -42,7 +43,6 @@ func Collect(rs []repos.Repo, ds []*state.Dispatch) Stats {
 	}
 
 	stats := Stats{ReposTotal: len(rs), CollectedAt: time.Now()}
-	stats.PRsToday, stats.PRsOK = gh.PRsCreatedToday()
 	today := time.Now().Format("2006-01-02")
 	for _, d := range ds {
 		if d.DeployedAt != nil && d.DeployedAt.Local().Format("2006-01-02") == today {

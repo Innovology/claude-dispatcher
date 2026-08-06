@@ -1,0 +1,36 @@
+# Named "CI" on purpose: claude-dispatcher's own deploy detection treats
+# workflows named deploy/release/publish/ship/prod as a live signal, and this
+# repo's checks must never read as a deploy.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+      - run: go test ./... -race -count=1
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
