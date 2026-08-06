@@ -66,6 +66,7 @@ an optional `[products]` map (product → repo names) for the roll-up lens.
 |---|---|
 | `n` | dispatch: pick repo → name feature → write prompt (`ctrl+d` to launch) |
 | `enter` / `a` | attach to the selected dispatcher's tmux session |
+| `Ctrl-\` (inside a session) | detach, back to the cockpit (`Ctrl-b d` also works) |
 | `d` | mark shipped (done means live — manual until Actions integration) |
 | `x` | kill the tmux session |
 | `r` | refresh |

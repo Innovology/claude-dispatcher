@@ -26,7 +26,24 @@ func NewSession(name, dir, shellCommand string) error {
 	if err != nil {
 		return fmt.Errorf("tmux new-session: %s", strings.TrimSpace(string(out)))
 	}
+	EnsureDetachKey()
+	SetStatusHint(name)
 	return nil
+}
+
+// SetStatusHint puts the way home in the session's status line. Note the
+// trailing colon: set-option rejects the "=name" exact-match form that
+// attach/kill accept.
+func SetStatusHint(name string) {
+	_ = exec.Command("tmux", "set-option", "-t", name+":", "status-right",
+		` Ctrl-\ → back to dispatch `).Run()
+}
+
+// EnsureDetachKey binds Ctrl-\ (prefix-free, server-wide) to detach. The
+// default Ctrl-b d is a timed sequence that trips people up — holding Ctrl
+// for the whole chord gets silently swallowed by tmux. One chord instead.
+func EnsureDetachKey() {
+	_ = exec.Command("tmux", "bind-key", "-n", `C-\`, "detach-client").Run()
 }
 
 func KillSession(name string) error {

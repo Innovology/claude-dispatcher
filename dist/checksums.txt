@@ -1,0 +1,4 @@
+83b81dfa3e4c3fba2fcd77663eaf83f26449c1274fedb066bc88cbdaa37d4140  claude-dispatcher_0.1.0_darwin_amd64.tar.gz
+2848e08e228efe92b2c4aad36d290ee0ba395dcb58ef501dea4adb688c0dbddd  claude-dispatcher_0.1.0_darwin_arm64.tar.gz
+a391a8ad52012213eab5f71fc6b91f7dd3645bc423c85834f10014fdbc4f1d21  claude-dispatcher_0.1.0_linux_amd64.tar.gz
+0bc7c02725b011b2be33d3df280365dac493e5b9826b26082488ef73e728c456  claude-dispatcher_0.1.0_linux_arm64.tar.gz
