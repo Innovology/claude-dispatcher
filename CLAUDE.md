@@ -8,8 +8,16 @@
   by commit hash.
 
 ## Agreed decisions (2026-08-06)
-- Multi-repo, not multi-worktree: independent repos are the organising
-  primitive; discovery via configured roots.
+- Multi-repo: independent repos are the organising primitive; discovery via
+  configured roots. Each dispatch runs in its own git worktree of its repo,
+  under `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so
+  concurrent dispatches — and the human — never fight over one checkout.
+  `x` removes a clean worktree; a dirty one is kept for inspection.
+  (Supersedes the original "not multi-worktree" call, revised later the
+  same day after two sessions collided in one working copy.)
+- Products are the grouping lens: the cockpit list and the dispatch form's
+  repo picker group by the `[products]` config, most urgent group first;
+  unmapped repos fall under "other". No separate group concept.
 - Sessions run as interactive `claude` inside per-dispatch tmux sessions
   (`disp-<slug>`); tmux is a hard dependency and the process supervisor. The
   cockpit is a stateless viewer — "jump in" hands the terminal to tmux.

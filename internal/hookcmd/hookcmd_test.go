@@ -64,6 +64,17 @@ func TestResolve(t *testing.T) {
 	if d := resolve("", "SessionStart", hookInput{Cwd: "/repo/two"}); d == nil || d.ID != "id2" {
 		t.Error("SessionStart should bind launching dispatch by cwd")
 	}
+	worktreed := &state.Dispatch{ID: "id3", RepoPath: "/repo/three",
+		WorktreePath: "/wt/three", Status: state.StatusLaunching}
+	if err := state.Save(worktreed); err != nil {
+		t.Fatal(err)
+	}
+	if d := resolve("", "SessionStart", hookInput{Cwd: "/wt/three"}); d == nil || d.ID != "id3" {
+		t.Error("SessionStart should bind launching dispatch by worktree cwd")
+	}
+	if d := resolve("", "SessionStart", hookInput{Cwd: "/repo/three"}); d != nil {
+		t.Error("a worktree-backed dispatch must not bind by repo cwd")
+	}
 	if d := resolve("", "Stop", hookInput{Cwd: "/repo/two"}); d != nil {
 		t.Error("cwd binding must be SessionStart-only")
 	}

@@ -108,11 +108,18 @@ func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
 		}
 	}
 	// A freshly launched dispatch has no session id yet; bind the first
-	// SessionStart arriving from its repo. Records are sorted newest-first
-	// within a status, so the most recent launch wins.
+	// SessionStart arriving from its worktree (or repo, for records from
+	// before per-dispatch worktrees). Records are sorted newest-first within
+	// a status, so the most recent launch wins.
 	if event == "SessionStart" && in.Cwd != "" {
 		for _, d := range all {
-			if d.Status == state.StatusLaunching && samePath(d.RepoPath, in.Cwd) {
+			if d.Status != state.StatusLaunching {
+				continue
+			}
+			if d.WorktreePath != "" && samePath(d.WorktreePath, in.Cwd) {
+				return d
+			}
+			if d.WorktreePath == "" && samePath(d.RepoPath, in.Cwd) {
 				return d
 			}
 		}

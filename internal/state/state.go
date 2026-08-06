@@ -52,13 +52,18 @@ func (s Status) Priority() int {
 }
 
 type Dispatch struct {
-	ID             string `json:"id"`
-	Feature        string `json:"feature"`
-	Slug           string `json:"slug"`
-	RepoPath       string `json:"repo_path"`
-	RepoName       string `json:"repo_name"`
-	Product        string `json:"product,omitempty"`
-	Branch         string `json:"branch"`
+	ID       string `json:"id"`
+	Feature  string `json:"feature"`
+	Slug     string `json:"slug"`
+	RepoPath string `json:"repo_path"`
+	RepoName string `json:"repo_name"`
+	Product  string `json:"product,omitempty"`
+	Branch   string `json:"branch"`
+	// WorktreePath is the dispatch's own checkout of Branch (a git worktree
+	// under WorktreesDir); the claude session runs there so concurrent
+	// dispatches never fight over the repo's working copy. RepoPath stays the
+	// main repo — refs, PRs, and commit provenance are read from there.
+	WorktreePath   string `json:"worktree_path,omitempty"`
 	Prompt         string `json:"prompt"`
 	TmuxSession    string `json:"tmux_session"`
 	SessionID      string `json:"session_id,omitempty"`
@@ -88,6 +93,9 @@ func Dir() string {
 }
 
 func DispatchesDir() string { return filepath.Join(Dir(), "dispatches") }
+
+// WorktreesDir holds per-dispatch git worktrees, worktrees/<repo>/<slug>.
+func WorktreesDir() string { return filepath.Join(Dir(), "worktrees") }
 
 func EnsureDirs() error { return os.MkdirAll(DispatchesDir(), 0o755) }
 
