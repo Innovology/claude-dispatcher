@@ -63,6 +63,11 @@ type Dispatch struct {
 	TmuxSession    string    `json:"tmux_session"`
 	SessionID      string    `json:"session_id,omitempty"`
 	TranscriptPath string    `json:"transcript_path,omitempty"`
+	// BaseSHA is the branch tip at launch; commits in BaseSHA..Branch were
+	// produced under this dispatch. That provenance — not commit trailers —
+	// is how work is attributed to dispatchers.
+	BaseSHA        string    `json:"base_sha,omitempty"`
+	Commits        []string  `json:"commits,omitempty"`
 	Status         Status    `json:"status"`
 	StatusReason   string    `json:"status_reason,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`

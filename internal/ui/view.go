@@ -209,6 +209,7 @@ func (m model) detailView(w, h int) string {
 		kv("product", orDash(d.Product), w),
 		kv("tmux", d.TmuxSession, w),
 		kv("session", orDash(sid), w),
+		kv("commits", fmt.Sprintf("%d", len(d.Commits)), w),
 		kv("updated", humanAge(time.Since(d.UpdatedAt))+" ago", w),
 		"",
 		dimStyle.Render("prompt"),
@@ -233,7 +234,7 @@ func (m model) shipView(w int) string {
 	}
 	lines := []string{
 		kv("commits", fmt.Sprintf("%d", s.Commits), w),
-		kv("claude-stamped", fmt.Sprintf("%d (%d%%)", s.Stamped, s.StampedPct()), w),
+		kv("via dispatch", fmt.Sprintf("%d (%d%%)", s.Dispatched, s.DispatchedPct()), w),
 		kv("repos active", fmt.Sprintf("%d of %d", s.ReposActive, s.ReposTotal), w),
 		"",
 		dimStyle.Render(fmt.Sprintf("as of %s · all branches", s.CollectedAt.Format("15:04"))),

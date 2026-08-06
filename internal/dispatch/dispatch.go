@@ -35,6 +35,10 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 	if err := ensureBranch(r.Path, branch); err != nil {
 		return nil, err
 	}
+	baseSHA := ""
+	if out, err := exec.Command("git", "-C", r.Path, "rev-parse", "HEAD").Output(); err == nil {
+		baseSHA = strings.TrimSpace(string(out))
+	}
 
 	d := &state.Dispatch{
 		ID:          state.NewID(),
@@ -44,6 +48,7 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 		RepoName:    r.Name,
 		Product:     r.Product,
 		Branch:      branch,
+		BaseSHA:     baseSHA,
 		Prompt:      prompt,
 		TmuxSession: tmux.UniqueName("disp-" + slug),
 		Status:      state.StatusLaunching,
