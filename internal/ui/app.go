@@ -13,6 +13,7 @@ import (
 
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/ship"
 	"claude-dispatcher/internal/state"
@@ -77,7 +78,7 @@ func Run() error {
 	if err == nil {
 		if err := watcher.Add(state.DispatchesDir()); err == nil {
 			go forwardEvents(watcher, stateCh)
-			defer watcher.Close()
+			defer func() { _ = watcher.Close() }()
 		}
 	}
 
@@ -141,14 +142,18 @@ func loadDispatches() tea.Msg {
 		if !tmux.HasSession(d.TmuxSession) {
 			d.Status = state.StatusExited
 			d.StatusReason = "tmux session gone"
-			state.Save(d)
+			_ = state.Save(d)
 		}
 	}
 	return dispatchesMsg(state.LoadAll())
 }
 
 func collectShip(rs []repos.Repo) tea.Cmd {
-	return func() tea.Msg { return shipMsg(ship.Collect(rs, state.LoadAll())) }
+	return func() tea.Msg {
+		s := ship.Collect(rs, state.LoadAll())
+		s.PRsToday, s.PRsOK = gh.PRsCreatedToday()
+		return shipMsg(s)
+	}
 }
 
 func waitState(ch chan struct{}) tea.Cmd {
@@ -261,18 +266,18 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if d := m.selected(); d != nil {
 			d.Status = state.StatusDone
 			d.StatusReason = "marked shipped"
-			state.Save(d)
+			_ = state.Save(d)
 			m.notice = fmt.Sprintf("%q marked shipped", d.Feature)
 			return m, loadDispatches
 		}
 	case "x":
 		if d := m.selected(); d != nil {
-			tmux.KillSession(d.TmuxSession)
+			_ = tmux.KillSession(d.TmuxSession)
 			if d.Status != state.StatusDone {
 				d.Status = state.StatusExited
 				d.StatusReason = "killed from cockpit"
 			}
-			state.Save(d)
+			_ = state.Save(d)
 			m.notice = fmt.Sprintf("killed %q", d.Feature)
 			return m, loadDispatches
 		}

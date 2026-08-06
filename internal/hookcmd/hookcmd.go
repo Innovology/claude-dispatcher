@@ -45,7 +45,7 @@ func Run(args []string) int {
 	}
 	raw, _ := io.ReadAll(os.Stdin)
 	var in hookInput
-	json.Unmarshal(raw, &in)
+	_ = json.Unmarshal(raw, &in)
 
 	dispatcherID := os.Getenv("CLAUDE_DISPATCHER_ID")
 	if event != "PostToolUse" { // PostToolUse is too chatty for the log
@@ -66,7 +66,7 @@ func Run(args []string) int {
 		changed = refreshCommits(d) || changed
 	}
 	if changed {
-		state.Save(d)
+		_ = state.Save(d)
 	}
 	return 0
 }

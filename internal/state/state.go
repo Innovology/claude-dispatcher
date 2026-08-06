@@ -170,6 +170,6 @@ func AppendEvent(ev Event) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	f.Write(append(b, '\n'))
+	defer func() { _ = f.Close() }()
+	_, _ = f.Write(append(b, '\n'))
 }
