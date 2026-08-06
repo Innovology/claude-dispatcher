@@ -46,7 +46,7 @@ func newForm(rs []repos.Repo) *form {
 	prompt := textarea.New()
 	prompt.Placeholder = "Describe the work to dispatch…"
 
-	return &form{repos: rs, feature: feature, prompt: prompt}
+	return &form{repos: groupRepos(rs), feature: feature, prompt: prompt}
 }
 
 func (f *form) resize(width, height int) {
