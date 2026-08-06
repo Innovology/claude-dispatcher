@@ -209,6 +209,7 @@ func (m model) detailView(w, h int) string {
 		kv("product", orDash(d.Product), w),
 		kv("tmux", d.TmuxSession, w),
 		kv("session", orDash(sid), w),
+		kv("pr", prLabel(d), w),
 		kv("commits", fmt.Sprintf("%d", len(d.Commits)), w),
 		kv("updated", humanAge(time.Since(d.UpdatedAt))+" ago", w),
 		"",
@@ -232,13 +233,18 @@ func (m model) shipView(w int) string {
 	if s.CollectedAt.IsZero() {
 		return dimStyle.Render("collecting…")
 	}
+	prs := "—"
+	if s.PRsOK {
+		prs = fmt.Sprintf("%d", s.PRsToday)
+	}
 	lines := []string{
 		kv("commits", fmt.Sprintf("%d", s.Commits), w),
 		kv("via dispatch", fmt.Sprintf("%d (%d%%)", s.Dispatched, s.DispatchedPct()), w),
+		kv("prs launched", prs, w),
+		kv("features live", fmt.Sprintf("%d", s.FeaturesLive), w),
 		kv("repos active", fmt.Sprintf("%d of %d", s.ReposActive, s.ReposTotal), w),
 		"",
 		dimStyle.Render(fmt.Sprintf("as of %s · all branches", s.CollectedAt.Format("15:04"))),
-		dimStyle.Render("PRs + deploys: roadmap"),
 	}
 	return strings.Join(lines, "\n")
 }
@@ -295,6 +301,17 @@ func (m model) formView() string {
 
 func kv(k, v string, w int) string {
 	return dimStyle.Render(fmt.Sprintf("%-15s", k)) + truncate(v, max(1, w-15))
+}
+
+func prLabel(d *state.Dispatch) string {
+	if d.PRNumber == 0 {
+		return "—"
+	}
+	label := fmt.Sprintf("#%d %s", d.PRNumber, strings.ToLower(d.PRState))
+	if d.DeployedAt != nil {
+		label += " · live " + humanAge(time.Since(*d.DeployedAt)) + " ago"
+	}
+	return label
 }
 
 func orDash(s string) string {

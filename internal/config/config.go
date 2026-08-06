@@ -17,6 +17,10 @@ type Config struct {
 	// Products maps a product name to the repo directory names that belong to
 	// it, powering the portfolio roll-up lens.
 	Products map[string][]string `toml:"products"`
+	// DeployWorkflows overrides deploy-workflow auto-detection per repo
+	// directory name. Unlisted repos use the first workflow whose name looks
+	// deploy-ish (deploy/release/publish/ship/prod).
+	DeployWorkflows map[string]string `toml:"deploy_workflows"`
 }
 
 func Dir() string {
@@ -81,6 +85,14 @@ roots = [%q]
 # acme-shop = ["shop-api", "shop-web"]
 # side-thing = ["side-thing"]
 [products]
+
+# Per-repo deploy workflow override ("done means live" watches this workflow
+# succeed after a feature's PR merges). Unlisted repos auto-detect the first
+# workflow named like deploy/release/publish/ship/prod; repos with no deploy
+# workflow count merge itself as live.
+# [deploy_workflows]
+# shop-api = "Deploy production"
+[deploy_workflows]
 `
 
 // WriteDefault creates the config file if absent, defaulting the scan root to

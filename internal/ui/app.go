@@ -17,6 +17,7 @@ import (
 	"claude-dispatcher/internal/ship"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/tmux"
+	"claude-dispatcher/internal/track"
 )
 
 type mode int
@@ -51,6 +52,7 @@ type (
 	stateChangedMsg struct{}
 	tickMsg         struct{}
 	shipTickMsg     struct{}
+	trackedMsg      struct{ updated int }
 	launchedMsg     struct {
 		d   *state.Dispatch
 		err error
@@ -112,10 +114,19 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		loadDispatches,
 		collectShip(m.repos),
+		trackRefresh(m.cfg),
 		waitState(m.stateCh),
 		tick(),
 		shipTick(),
 	)
+}
+
+// trackRefresh polls PR/deploy state and persists changes; the fsnotify
+// watcher then reloads the records like any other status change.
+func trackRefresh(cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		return trackedMsg{updated: track.Refresh(state.LoadAll(), cfg)}
+	}
 }
 
 // loadDispatches reads all records, reconciling any whose tmux session has
@@ -175,7 +186,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(loadDispatches, tick())
 
 	case shipTickMsg:
-		return m, tea.Batch(collectShip(m.repos), shipTick())
+		return m, tea.Batch(trackRefresh(m.cfg), shipTick())
+
+	case trackedMsg:
+		return m, collectShip(m.repos)
 
 	case dispatchesMsg:
 		m.dispatches = msg
@@ -232,7 +246,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.form = f
 		m.mode = modeForm
 	case "r":
-		return m, tea.Batch(loadDispatches, collectShip(m.repos))
+		return m, tea.Batch(loadDispatches, trackRefresh(m.cfg))
 	case "enter", "a":
 		if d := m.selected(); d != nil {
 			if !tmux.HasSession(d.TmuxSession) {

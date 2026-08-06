@@ -52,26 +52,31 @@ func (s Status) Priority() int {
 }
 
 type Dispatch struct {
-	ID             string    `json:"id"`
-	Feature        string    `json:"feature"`
-	Slug           string    `json:"slug"`
-	RepoPath       string    `json:"repo_path"`
-	RepoName       string    `json:"repo_name"`
-	Product        string    `json:"product,omitempty"`
-	Branch         string    `json:"branch"`
-	Prompt         string    `json:"prompt"`
-	TmuxSession    string    `json:"tmux_session"`
-	SessionID      string    `json:"session_id,omitempty"`
-	TranscriptPath string    `json:"transcript_path,omitempty"`
+	ID             string `json:"id"`
+	Feature        string `json:"feature"`
+	Slug           string `json:"slug"`
+	RepoPath       string `json:"repo_path"`
+	RepoName       string `json:"repo_name"`
+	Product        string `json:"product,omitempty"`
+	Branch         string `json:"branch"`
+	Prompt         string `json:"prompt"`
+	TmuxSession    string `json:"tmux_session"`
+	SessionID      string `json:"session_id,omitempty"`
+	TranscriptPath string `json:"transcript_path,omitempty"`
 	// BaseSHA is the branch tip at launch; commits in BaseSHA..Branch were
 	// produced under this dispatch. That provenance — not commit trailers —
 	// is how work is attributed to dispatchers.
-	BaseSHA        string    `json:"base_sha,omitempty"`
-	Commits        []string  `json:"commits,omitempty"`
-	Status         Status    `json:"status"`
-	StatusReason   string    `json:"status_reason,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	BaseSHA      string     `json:"base_sha,omitempty"`
+	Commits      []string   `json:"commits,omitempty"`
+	PRNumber     int        `json:"pr_number,omitempty"`
+	PRState      string     `json:"pr_state,omitempty"` // OPEN, MERGED, CLOSED
+	PRURL        string     `json:"pr_url,omitempty"`
+	PRMergedAt   *time.Time `json:"pr_merged_at,omitempty"`
+	DeployedAt   *time.Time `json:"deployed_at,omitempty"`
+	Status       Status     `json:"status"`
+	StatusReason string     `json:"status_reason,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 func Dir() string {

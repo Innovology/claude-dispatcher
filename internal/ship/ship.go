@@ -10,16 +10,20 @@ import (
 	"sync"
 	"time"
 
+	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 )
 
 type Stats struct {
-	Commits     int // commits today across all tracked repos (all branches)
-	Dispatched  int // of which were produced under a dispatch
-	ReposActive int // repos with at least one commit today
-	ReposTotal  int
-	CollectedAt time.Time
+	Commits      int // commits today across all tracked repos (all branches)
+	Dispatched   int // of which were produced under a dispatch
+	PRsToday     int // PRs the user launched today, across all of GitHub
+	PRsOK        bool
+	FeaturesLive int // features that went live today
+	ReposActive  int // repos with at least one commit today
+	ReposTotal   int
+	CollectedAt  time.Time
 }
 
 func (s Stats) DispatchedPct() int {
@@ -38,6 +42,13 @@ func Collect(rs []repos.Repo, ds []*state.Dispatch) Stats {
 	}
 
 	stats := Stats{ReposTotal: len(rs), CollectedAt: time.Now()}
+	stats.PRsToday, stats.PRsOK = gh.PRsCreatedToday()
+	today := time.Now().Format("2006-01-02")
+	for _, d := range ds {
+		if d.DeployedAt != nil && d.DeployedAt.Local().Format("2006-01-02") == today {
+			stats.FeaturesLive++
+		}
+	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
