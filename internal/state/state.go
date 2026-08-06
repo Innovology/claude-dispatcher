@@ -75,8 +75,13 @@ type Dispatch struct {
 	DeployedAt   *time.Time `json:"deployed_at,omitempty"`
 	Status       Status     `json:"status"`
 	StatusReason string     `json:"status_reason,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// WaitingOnTasks records that the last Stop event carried in-flight
+	// background tasks: the session is paused, not waiting on the human, and
+	// will wake itself. Guards against a later idle_prompt notification (whose
+	// payload has no task info) downgrading the status to needs-input.
+	WaitingOnTasks bool      `json:"waiting_on_tasks,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func Dir() string {

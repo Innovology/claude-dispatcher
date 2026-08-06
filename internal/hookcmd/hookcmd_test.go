@@ -1,6 +1,7 @@
 package hookcmd
 
 import (
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
@@ -34,6 +35,52 @@ func TestApplyTransitions(t *testing.T) {
 			t.Errorf("%s + %s: got (%s, changed=%v), want (%s, changed=%v)",
 				c.from, c.event, d.Status, changed, c.want, c.changed)
 		}
+	}
+}
+
+// A Stop with in-flight background tasks means the session is paused waiting
+// to be woken, not waiting on the human — and the later idle_prompt (which
+// carries no task info) must not undo that verdict.
+func TestApplyBackgroundTaskWait(t *testing.T) {
+	tasks := []json.RawMessage{json.RawMessage(`{"task_id":"t1"}`), json.RawMessage(`{"task_id":"t2"}`)}
+	d := &state.Dispatch{Status: state.StatusWorking}
+
+	if !apply(d, "Stop", hookInput{BackgroundTasks: tasks}) {
+		t.Fatal("Stop with pending tasks should report a change")
+	}
+	if d.Status != state.StatusWorking || !d.WaitingOnTasks {
+		t.Fatalf("want working+waiting, got %s waiting=%v", d.Status, d.WaitingOnTasks)
+	}
+	if d.StatusReason != "waiting on 2 background tasks" {
+		t.Errorf("unexpected reason %q", d.StatusReason)
+	}
+
+	if apply(d, "Notification:idle_prompt", hookInput{}) {
+		t.Error("idle_prompt must not downgrade a task-waiting dispatch")
+	}
+	if d.Status != state.StatusWorking {
+		t.Errorf("status downgraded to %s", d.Status)
+	}
+
+	// Background work done, session woke, ran, and stopped for real.
+	if !apply(d, "Stop", hookInput{}) {
+		t.Fatal("plain Stop should report a change")
+	}
+	if d.Status != state.StatusNeedsInput || d.WaitingOnTasks {
+		t.Fatalf("want needs-input+cleared, got %s waiting=%v", d.Status, d.WaitingOnTasks)
+	}
+}
+
+func TestApplyUserPromptClearsTaskWait(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking, WaitingOnTasks: true}
+	apply(d, "UserPromptSubmit", hookInput{})
+	if d.WaitingOnTasks {
+		t.Error("UserPromptSubmit should clear WaitingOnTasks")
+	}
+	d = &state.Dispatch{Status: state.StatusLaunching, WaitingOnTasks: true}
+	apply(d, "SessionStart", hookInput{})
+	if d.WaitingOnTasks {
+		t.Error("SessionStart should clear WaitingOnTasks")
 	}
 }
 
