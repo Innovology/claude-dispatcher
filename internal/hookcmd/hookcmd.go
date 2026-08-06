@@ -23,7 +23,10 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"claude-dispatcher/internal/state"
 )
@@ -58,10 +61,34 @@ func Run(args []string) int {
 	if d == nil {
 		return 0
 	}
-	if apply(d, event, in) {
+	changed := apply(d, event, in)
+	if event == "Stop" || event == "SessionEnd" {
+		changed = refreshCommits(d) || changed
+	}
+	if changed {
 		state.Save(d)
 	}
 	return 0
+}
+
+// refreshCommits records the SHAs produced on the feature branch since
+// launch. Provenance ("this dispatch made these commits") is the attribution
+// signal — no trailers or markers in the repo's public history.
+func refreshCommits(d *state.Dispatch) bool {
+	if d.BaseSHA == "" || d.Branch == "" {
+		return false
+	}
+	out, err := exec.Command("git", "-C", d.RepoPath, "rev-list",
+		d.BaseSHA+"..refs/heads/"+d.Branch).Output()
+	if err != nil {
+		return false
+	}
+	shas := strings.Fields(string(out))
+	if slices.Equal(shas, d.Commits) {
+		return false
+	}
+	d.Commits = shas
+	return true
 }
 
 func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {

@@ -137,7 +137,7 @@ func loadDispatches() tea.Msg {
 }
 
 func collectShip(rs []repos.Repo) tea.Cmd {
-	return func() tea.Msg { return shipMsg(ship.Collect(rs)) }
+	return func() tea.Msg { return shipMsg(ship.Collect(rs, state.LoadAll())) }
 }
 
 func waitState(ch chan struct{}) tea.Cmd {
