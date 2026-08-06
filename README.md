@@ -34,11 +34,28 @@ working, which are done, and — critically — which are blocked waiting on you
 
 ## Install
 
+Via Homebrew:
+
 ```sh
-make install                  # builds to ~/.local/bin/claude-dispatcher
+brew install innovology/tap/claude-dispatcher
 claude-dispatcher init        # config + repo scan + hook install (asks first)
 claude-dispatcher             # open the cockpit
 ```
+
+Or from source:
+
+```sh
+make install                  # builds to ~/.local/bin/claude-dispatcher
+```
+
+Note: the status hook embeds the absolute path of the binary that ran
+`init`. If you switch install methods later, re-run `init` so the hook
+points at the new binary.
+
+Releases are cut by tagging (`git tag v0.x.y && git push --tags`); the
+Release workflow needs a `HOMEBREW_TAP_TOKEN` secret (fine-grained PAT with
+contents:write on `Innovology/homebrew-tap`) and skips publishing when the
+secret is absent.
 
 Config lives at `~/.config/claude-dispatcher/config.toml`: scan `roots` and
 an optional `[products]` map (product → repo names) for the roll-up lens.

@@ -1,0 +1,46 @@
+version: 2
+
+project_name: claude-dispatcher
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+
+homebrew_casks:
+  - repository:
+      owner: Innovology
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/Innovology/claude-dispatcher
+    description: Terminal dispatch cockpit for Claude Code sessions across many repositories
+    dependencies:
+      - formula: tmux
+    caveats: |
+      Requires the claude CLI (Claude Code) on your PATH.
+      Run `claude-dispatcher init` to configure repo roots and install the
+      status hook.
+    # Unsigned binary: clear the quarantine attribute so Gatekeeper does not
+    # block first run.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/claude-dispatcher"]
+          end

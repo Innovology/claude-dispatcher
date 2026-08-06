@@ -15,12 +15,16 @@ import (
 	"claude-dispatcher/internal/ui"
 )
 
+// version is stamped by the release build via -ldflags.
+var version = "dev"
+
 const usage = `claude-dispatcher — dispatch cockpit for Claude Code sessions
 
 Usage:
   claude-dispatcher            open the cockpit
   claude-dispatcher init       write config, discover repos, install the status hook
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
+  claude-dispatcher version    print the version
   claude-dispatcher help       show this help
 `
 
@@ -42,6 +46,8 @@ func main() {
 	case "hook":
 		// Never fail loudly: a hook error must not disturb the Claude session.
 		os.Exit(hookcmd.Run(args[1:]))
+	case "version", "--version", "-v":
+		fmt.Println("claude-dispatcher", version)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:

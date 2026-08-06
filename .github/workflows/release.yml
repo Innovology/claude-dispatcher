@@ -1,0 +1,35 @@
+# Named "Release" deliberately: for this repo a release IS the deploy, so
+# claude-dispatcher's own deploy detection correctly treats a successful run
+# as "feature live".
+#
+# Requires the HOMEBREW_TAP_TOKEN secret (fine-grained PAT with contents:write
+# on Innovology/homebrew-tap). Without it the release step is skipped so tag
+# pushes never half-publish.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: goreleaser/goreleaser-action@v6
+        if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
