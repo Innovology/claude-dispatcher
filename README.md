@@ -59,12 +59,16 @@ secret is absent.
 
 Config lives at `~/.config/claude-dispatcher/config.toml`: scan `roots` and
 an optional `[products]` map (product → repo names) for the roll-up lens.
+Opening the cockpit with no config drops you into a first-run settings view
+to pick the scan roots; press `s` in the cockpit any time to edit them
+(`init` is still what installs the status hook).
 
 ## Keys
 
 | key | action |
 |---|---|
 | `n` | dispatch: pick repo → name feature → write prompt (`ctrl+d` to launch) |
+| `s` | settings: edit the repo scan roots (add/remove, saves config.toml) |
 | `enter` / `a` | attach to the selected dispatcher's tmux session |
 | `Ctrl-\` (inside a session) | detach, back to the cockpit (`Ctrl-b d` also works) |
 | `d` | mark shipped (done means live — manual until Actions integration) |

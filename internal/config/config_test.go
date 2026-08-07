@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,55 @@ func TestExpandedRootsDedupes(t *testing.T) {
 	}
 	if got[0] != "/a" || !strings.HasSuffix(got[1], "/b") {
 		t.Errorf("unexpected roots %v", got)
+	}
+}
+
+func TestSaveLoadRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	in := &Config{
+		Roots: []string{"~/repos", "/work/other"},
+		Products: map[string][]string{
+			"acme shop": {"shop-api", "shop-web"},
+		},
+		DeployWorkflows: map[string]string{
+			"shop-api": "Deploy production",
+		},
+	}
+	if err := Save(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(out.Roots, in.Roots) {
+		t.Errorf("roots = %v, want %v", out.Roots, in.Roots)
+	}
+	if !slices.Equal(out.Products["acme shop"], in.Products["acme shop"]) {
+		t.Errorf("products = %v, want %v", out.Products, in.Products)
+	}
+	if out.DeployWorkflows["shop-api"] != "Deploy production" {
+		t.Errorf("deploy_workflows = %v", out.DeployWorkflows)
+	}
+}
+
+func TestWriteDefaultDoesNotOverwrite(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if _, created, err := WriteDefault(); err != nil || !created {
+		t.Fatalf("first WriteDefault: created=%v err=%v", created, err)
+	}
+	if err := Save(&Config{Roots: []string{"/custom"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := WriteDefault(); err != nil || created {
+		t.Fatalf("second WriteDefault must be a no-op: created=%v err=%v", created, err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.Roots, []string{"/custom"}) {
+		t.Errorf("roots clobbered: %v", cfg.Roots)
 	}
 }
 

@@ -132,7 +132,7 @@ func (f *form) updateRepoStep(msg tea.KeyMsg) (formResult, tea.Cmd) {
 		return formActive, nil
 	case "enter":
 		if len(visible) == 0 {
-			f.errMsg = "no repo matches — check roots in config"
+			f.errMsg = "no repo matches — esc then s to edit scan roots"
 			return formActive, nil
 		}
 		f.cursor = min(f.cursor, len(visible)-1)
