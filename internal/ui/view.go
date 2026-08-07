@@ -2,11 +2,13 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/transcript"
 )
@@ -75,9 +77,12 @@ func (m model) View() string {
 	footer := m.footerView()
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	var body string
-	if m.mode == modeForm && m.form != nil {
+	switch {
+	case m.mode == modeForm && m.form != nil:
 		body = pane("dispatch", m.formView(), m.width, bodyH)
-	} else {
+	case m.mode == modeSettings && m.settings != nil:
+		body = pane("settings", m.settingsView(), m.width, bodyH)
+	default:
 		body = m.tiledView(m.width, bodyH)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
@@ -136,7 +141,8 @@ func (m model) headerView() string {
 
 func (m model) footerView() string {
 	var help string
-	if m.mode == modeForm && m.form != nil {
+	switch {
+	case m.mode == modeForm && m.form != nil:
 		switch m.form.step {
 		case stepRepo:
 			help = "type to filter · ↑/↓ · enter select repo · esc cancel"
@@ -148,8 +154,22 @@ func (m model) footerView() string {
 		if m.form.errMsg != "" {
 			return " " + errStyle.Render(m.form.errMsg) + dimStyle.Render("  ·  "+help)
 		}
-	} else {
-		help = "n dispatch · enter attach · d shipped · x kill · r refresh · q quit"
+	case m.mode == modeSettings && m.settings != nil:
+		if m.settings.adding {
+			help = "enter add · esc back"
+		} else {
+			help = "a add root · x remove · ↑/↓ · enter save"
+			if m.settings.firstRun {
+				help += " · esc quit"
+			} else {
+				help += " · esc cancel"
+			}
+		}
+		if m.settings.errMsg != "" {
+			return " " + errStyle.Render(m.settings.errMsg) + dimStyle.Render("  ·  "+help)
+		}
+	default:
+		help = "n dispatch · s settings · enter attach · d shipped · x kill · r refresh · q quit"
 	}
 	if m.notice != "" {
 		return " " + noticeStyle.Render(m.notice) + dimStyle.Render("  ·  "+help)
@@ -249,6 +269,48 @@ func (m model) shipView(w int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m model) settingsView() string {
+	s := m.settings
+	var b strings.Builder
+	if s.firstRun {
+		b.WriteString(headerStyle.Render("welcome — where do your repos live?") + "\n")
+		b.WriteString(dimStyle.Render("dispatch works across every git repo found under these roots") + "\n\n")
+	}
+	b.WriteString(headerStyle.Render("scan roots") +
+		dimStyle.Render("  ·  scanned 3 levels deep for git repos") + "\n\n")
+	if len(s.roots) == 0 {
+		b.WriteString(dimStyle.Render("  no roots configured — press a to add one") + "\n")
+	}
+	for i, root := range s.roots {
+		marker := "  "
+		line := root
+		if i == s.cursor && !s.adding {
+			marker = "▸ "
+			line = headerStyle.Render(root)
+		}
+		count := ""
+		switch n, ok := s.counts[root]; {
+		case !ok || n < 0:
+			count = dimStyle.Render("  scanning…")
+		case n == 1:
+			count = dimStyle.Render("  1 repo")
+		default:
+			count = dimStyle.Render(fmt.Sprintf("  %d repos", n))
+		}
+		b.WriteString(marker + line + count + "\n")
+	}
+	if s.adding {
+		b.WriteString("\n" + headerStyle.Render("add root") + "\n")
+		b.WriteString(s.input.View() + "\n")
+	}
+	b.WriteString("\n" + dimStyle.Render("saved to "+configPathLabel()))
+	if s.firstRun {
+		b.WriteString("\n" + dimStyle.Render(
+			"tip: run `claude-dispatcher init` afterwards to install the status hook"))
+	}
+	return b.String()
+}
+
 func (m model) formView() string {
 	f := m.form
 	stepTitle := func(n int, label string, active bool) string {
@@ -297,6 +359,14 @@ func (m model) formView() string {
 		b.WriteString(f.prompt.View())
 	}
 	return b.String()
+}
+
+func configPathLabel() string {
+	p := config.Path()
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(p, home) {
+		return "~" + strings.TrimPrefix(p, home)
+	}
+	return p
 }
 
 func kv(k, v string, w int) string {

@@ -6,6 +6,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +27,7 @@ type mode int
 const (
 	modeList mode = iota
 	modeForm
+	modeSettings
 )
 
 const (
@@ -42,6 +44,7 @@ type model struct {
 	cursor        int
 	mode          mode
 	form          *form
+	settings      *settings
 	ship          ship.Stats
 	stateCh       chan struct{}
 	notice        string
@@ -62,9 +65,16 @@ type (
 )
 
 func Run() error {
+	firstRun := false
 	cfg, err := config.Load()
 	if err != nil {
-		return errors.New("no config found — run `claude-dispatcher init` first")
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("reading %s: %w", config.Path(), err)
+		}
+		// No config yet: open straight into the settings view so the first
+		// launch configures scan roots instead of bouncing to `init`.
+		firstRun = true
+		cfg = &config.Config{}
 	}
 	if !tmux.Available() {
 		return errors.New("tmux not found on PATH — it is required")
@@ -87,6 +97,10 @@ func Run() error {
 		cfg:     cfg,
 		repos:   repos.Discover(cfg),
 		stateCh: stateCh,
+	}
+	if firstRun {
+		m.mode = modeSettings
+		m.settings = newSettings([]string{config.DefaultRoot()}, true)
 	}
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
@@ -113,14 +127,18 @@ func forwardEvents(w *fsnotify.Watcher, ch chan struct{}) {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		loadDispatches,
 		collectShip(m.repos),
 		trackRefresh(m.cfg),
 		waitState(m.stateCh),
 		tick(),
 		shipTick(),
-	)
+	}
+	if m.settings != nil {
+		cmds = append(cmds, countRoots(m.settings.roots))
+	}
+	return tea.Batch(cmds...)
 }
 
 // trackRefresh polls PR/deploy state and persists changes; the fsnotify
@@ -183,6 +201,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.form != nil {
 			m.form.resize(m.width, m.height)
 		}
+		if m.settings != nil {
+			m.settings.resize(m.width, m.height)
+		}
+		return m, nil
+
+	case rootCountsMsg:
+		if m.settings != nil {
+			for root, n := range msg {
+				m.settings.counts[root] = n
+			}
+		}
 		return m, nil
 
 	case stateChangedMsg:
@@ -225,8 +254,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, loadDispatches
 
 	case tea.KeyMsg:
-		if m.mode == modeForm {
+		switch m.mode {
+		case modeForm:
 			return m.updateForm(msg)
+		case modeSettings:
+			return m.updateSettings(msg)
 		}
 		return m.updateList(msg)
 	}
@@ -251,6 +283,12 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		f.resize(m.width, m.height)
 		m.form = f
 		m.mode = modeForm
+	case "s":
+		s := newSettings(m.cfg.Roots, false)
+		s.resize(m.width, m.height)
+		m.settings = s
+		m.mode = modeSettings
+		return m, countRoots(s.roots)
 	case "r":
 		return m, tea.Batch(loadDispatches, trackRefresh(m.cfg))
 	case "enter", "a":
@@ -291,6 +329,35 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selectedID = d.ID
 	}
 	return m, nil
+}
+
+func (m model) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	done, cmd := m.settings.update(msg)
+	switch done {
+	case settingsCancelled:
+		if m.settings.firstRun {
+			// Nothing to fall back to without a config — leave the cockpit.
+			return m, tea.Quit
+		}
+		m.mode = modeList
+		m.settings = nil
+		return m, nil
+	case settingsSaved:
+		m.cfg.Roots = m.settings.roots
+		if err := config.Save(m.cfg); err != nil {
+			m.settings.errMsg = "save failed: " + err.Error()
+			return m, nil
+		}
+		m.repos = repos.Discover(m.cfg)
+		m.mode = modeList
+		m.notice = fmt.Sprintf("config saved — %d repos discovered", len(m.repos))
+		if m.settings.firstRun {
+			m.notice += " · run `claude-dispatcher init` to install the status hook"
+		}
+		m.settings = nil
+		return m, collectShip(m.repos)
+	}
+	return m, cmd
 }
 
 func (m model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
