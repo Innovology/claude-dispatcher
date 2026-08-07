@@ -2,34 +2,96 @@
 # claude-dispatcher's own deploy detection correctly treats a successful run
 # as "feature live".
 #
+# Two triggers:
+#   - push to main (a folded PR): auto-tags the next patch version and
+#     publishes. Put "release: minor" or "release: major" in the merge commit
+#     message for a bigger bump, or "[skip release]" to not release. Merges
+#     touching only docs/meta files (paths-ignore below) skip automatically;
+#     path filters are not evaluated for tag pushes, so the escape hatch is
+#     unaffected.
+#   - pushing a v* tag by hand remains the manual escape hatch.
+#
 # Requires the HOMEBREW_TAP_TOKEN secret (fine-grained PAT with contents:write
-# on Innovology/homebrew-tap). Without it the release step is skipped so tag
-# pushes never half-publish.
+# on Innovology/homebrew-tap). Without it nothing is tagged or published, so
+# merges and tag pushes never half-release.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - LICENSE
+      - .gitignore
+      - .github/**
 
 permissions:
   contents: write
 
+# Serialize runs so two quick merges cannot compute the same next version.
+concurrency:
+  group: release
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    # The `secrets` context is NOT available in `if:` expressions — putting it
+    # there makes the whole workflow file invalid, which is why every release
+    # run before this failed in 0s. Map it into env once and gate on that.
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Check tap token
+        id: gate
+        run: |
+          if [ -n "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_TOKEN is not set — skipping tag and publish." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Tag next version
+        id: autotag
+        if: ${{ github.ref_type == 'branch' && steps.gate.outputs.ok == 'true' }}
+        run: |
+          set -euo pipefail
+          msg="$(git log -1 --pretty=%B)"
+          if grep -qiF '[skip release]' <<<"$msg"; then
+            echo "merge commit says [skip release] — not releasing"
+            exit 0
+          fi
+          latest="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+          latest="${latest:-v0.0.0}"
+          if [ "$(git rev-list -n 1 "$latest" 2>/dev/null || true)" = "$(git rev-parse HEAD)" ]; then
+            echo "HEAD is already tagged $latest — nothing to release"
+            exit 0
+          fi
+          IFS=. read -r major minor patch <<<"${latest#v}"
+          if grep -qiE 'release: *major' <<<"$msg"; then
+            major=$((major + 1)); minor=0; patch=0
+          elif grep -qiE 'release: *minor' <<<"$msg"; then
+            minor=$((minor + 1)); patch=0
+          else
+            patch=$((patch + 1))
+          fi
+          next="v$major.$minor.$patch"
+          echo "tagging $next (previous: $latest)"
+          git tag "$next"
+          git push origin "$next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with:
           go-version: stable
       - uses: goreleaser/goreleaser-action@v6
-        if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        if: ${{ steps.gate.outputs.ok == 'true' && (github.ref_type == 'tag' || steps.autotag.outputs.tag != '') }}
         with:
           distribution: goreleaser
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
