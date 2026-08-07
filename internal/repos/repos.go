@@ -1,5 +1,6 @@
 // Package repos discovers the git repositories the cockpit operates across.
-// Repos are the organising primitive — not worktrees.
+// Repos are the organising primitive; each dispatch then gets its own git
+// worktree of its repo so concurrent dispatches never share a checkout.
 package repos
 
 import (

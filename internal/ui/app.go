@@ -227,7 +227,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, collectShip(m.repos)
 
 	case dispatchesMsg:
-		m.dispatches = msg
+		m.dispatches = groupByProduct(msg)
 		m.cursor = m.findSelected()
 		return m, nil
 
@@ -322,6 +322,9 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			_ = state.Save(d)
 			m.notice = fmt.Sprintf("killed %q", d.Feature)
+			if !dispatch.CleanupWorktree(d.RepoPath, d.WorktreePath) {
+				m.notice += " · worktree kept (uncommitted changes)"
+			}
 			return m, loadDispatches
 		}
 	}

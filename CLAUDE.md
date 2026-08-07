@@ -7,9 +7,20 @@
 - **Feature** — the human unit of work; history is navigated by feature, not
   by commit hash.
 
-## Agreed decisions (2026-08-06)
-- Multi-repo, not multi-worktree: independent repos are the organising
-  primitive; discovery via configured roots.
+## Agreed decisions (2026-08-06, worktrees added 2026-08-07)
+- **Multi-repo, multi-worktree, multi-product** — three independent axes:
+  - *Repo* is the organising primitive; discovery via configured roots.
+  - *Worktree* is per-dispatch isolation: each dispatch gets its own git
+    worktree of its repo under
+    `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so concurrent
+    dispatches — and the human — never fight over one checkout. `x` removes a
+    clean worktree; a dirty one is kept for inspection. (Supersedes the
+    original "multi-repo, not multi-worktree" call, reversed the next day
+    after two sessions collided in one working copy and a commit landed on
+    the wrong branch.)
+  - *Product* is the grouping lens: the cockpit list and the dispatch form's
+    repo picker group by the `[products]` config, most urgent group first;
+    unmapped repos fall under "other". No separate group concept.
 - Sessions run as interactive `claude` inside per-dispatch tmux sessions
   (`disp-<slug>`); tmux is a hard dependency and the process supervisor. The
   cockpit is a stateless viewer — "jump in" hands the terminal to tmux.
