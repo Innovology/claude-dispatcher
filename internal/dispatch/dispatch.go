@@ -105,13 +105,22 @@ func ensureWorktree(repoPath, path, branch string) error {
 }
 
 // CleanupWorktree removes a dispatch's worktree when git deems it safe (no
-// modified or untracked files); a dirty worktree is kept for inspection.
-// Reports whether the worktree was removed.
+// modified or untracked files); a dirty worktree is kept for inspection so
+// killing a dispatcher never discards unshipped work.
+//
+// It reports whether the worktree is gone, not whether this call removed it:
+// an absent path (never had a worktree, or already cleaned up) is "gone", so
+// callers can report "kept" on false without special-casing.
 func CleanupWorktree(repoPath, worktreePath string) bool {
 	if worktreePath == "" {
-		return false
+		return true
 	}
-	return exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run() == nil
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return true
+	}
+	_ = exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
+	_, err := os.Stat(worktreePath)
+	return os.IsNotExist(err)
 }
 
 func shellQuote(s string) string {

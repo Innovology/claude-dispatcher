@@ -44,10 +44,13 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 	})
 }
 
-// killCmd kills each feature's tmux session and marks the record exited.
+// killCmd kills each feature's tmux session, marks the record exited, and
+// reclaims its worktree. A worktree with uncommitted changes is left alone —
+// killing a dispatcher must never discard unshipped work — and the notice
+// says how many were kept.
 func killCmd(features []string) tea.Cmd {
 	return func() tea.Msg {
-		n := 0
+		n, kept := 0, 0
 		for _, f := range features {
 			rec := recordFor(f)
 			if rec == nil {
@@ -59,6 +62,9 @@ func killCmd(features []string) tea.Cmd {
 				rec.StatusReason = "killed from cockpit"
 				_ = state.Save(rec)
 			}
+			if rec.WorktreePath != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
+				kept++
+			}
 			n++
 		}
 		if n == 0 {
@@ -68,7 +74,11 @@ func killCmd(features []string) tea.Cmd {
 		if n != 1 {
 			word += "s"
 		}
-		return actionMsg{notice: fmt.Sprintf("killed %d %s", n, word)}
+		notice := fmt.Sprintf("killed %d %s", n, word)
+		if kept > 0 {
+			notice += fmt.Sprintf(" · %d worktree(s) kept (uncommitted changes)", kept)
+		}
+		return actionMsg{notice: notice}
 	}
 }
 

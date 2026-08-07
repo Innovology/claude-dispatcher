@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -323,14 +322,8 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			_ = state.Save(d)
 			m.notice = fmt.Sprintf("killed %q", d.Feature)
-			if d.WorktreePath != "" {
-				if _, err := os.Stat(d.WorktreePath); err == nil {
-					if dispatch.CleanupWorktree(d.RepoPath, d.WorktreePath) {
-						m.notice += " · worktree removed"
-					} else {
-						m.notice += " · worktree kept (uncommitted changes)"
-					}
-				}
+			if !dispatch.CleanupWorktree(d.RepoPath, d.WorktreePath) {
+				m.notice += " · worktree kept (uncommitted changes)"
 			}
 			return m, loadDispatches
 		}

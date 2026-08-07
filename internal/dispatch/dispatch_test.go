@@ -73,7 +73,7 @@ func TestCleanupWorktree(t *testing.T) {
 	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
 		t.Fatal(err)
 	}
-	// Dirty worktree is kept.
+	// Dirty worktree is kept — killing a dispatcher must not discard work.
 	if err := os.WriteFile(filepath.Join(wt, "wip.txt"), []byte("wip"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +93,13 @@ func TestCleanupWorktree(t *testing.T) {
 	if _, err := os.Stat(wt); !os.IsNotExist(err) {
 		t.Fatal("worktree directory still present")
 	}
-	if CleanupWorktree(repo, "") {
-		t.Fatal("empty path must be a no-op")
+	// "Gone" is the contract, so a second call and a dispatch that never had
+	// a worktree both report gone rather than a spurious "kept".
+	if !CleanupWorktree(repo, wt) {
+		t.Error("an already-removed worktree should report gone")
+	}
+	if !CleanupWorktree(repo, "") {
+		t.Error("a dispatch with no worktree should report gone")
 	}
 }
 
