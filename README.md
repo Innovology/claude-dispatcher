@@ -48,9 +48,40 @@ Or from source:
 make install                  # builds to ~/.local/bin/claude-dispatcher
 ```
 
+`~/.local/bin` must be on your PATH, ahead of Homebrew's, or a `brew`-installed
+copy will keep winning and you will run an older cockpit than you just built:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+```
+
 Note: the status hook embeds the absolute path of the binary that ran
-`init`. If you switch install methods later, re-run `init` so the hook
-points at the new binary.
+`init`. If you switch install methods later, re-run `init` so the hook points
+at the new binary — otherwise the cockpit runs one build while the hooks that
+feed it status run another.
+
+## Releasing
+
+Releases need a `HOMEBREW_TAP_TOKEN` secret on this repo: a fine-grained
+personal access token, scoped to the `Innovology/homebrew-tap` repository,
+with **Repository permissions -> Contents: Read and write**. Create it at
+[github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new),
+then add it:
+
+```sh
+gh secret set HOMEBREW_TAP_TOKEN -R Innovology/claude-dispatcher
+```
+
+Verify it is registered (`total_count` must be 1, not 0):
+
+```sh
+gh api repos/Innovology/claude-dispatcher/actions/secrets
+```
+
+Without the secret the Release workflow succeeds but tags and publishes
+nothing, so a merge never half-releases. Note that the token is only read by
+the workflow — publishing from a laptop instead bakes the builder's home
+directory into the shipped binaries.
 
 Releases are cut automatically: folding a PR into main makes the Release
 workflow tag the next patch version and publish the tarballs + Homebrew cask.
