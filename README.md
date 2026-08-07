@@ -1,36 +1,68 @@
 # Claude Dispatcher
 
-A terminal-native dispatch cockpit for running many Claude Code sessions
-across many independent git repositories. It sits **above** your repos, not
-inside any one of them: launch dispatchers, see at a glance which are
-working, which are done, and — critically — which are blocked waiting on you.
+**A terminal cockpit for running a factory of Claude Code sessions across all your repos.** Dispatch work to many repositories at once, then see — at a glance, on one screen — what's working, what shipped, and the one thing that's actually blocked waiting on you.
 
-## Vocabulary
+It sits **above** your repos, not inside any one of them. Every dispatcher is a real `claude` session in its own tmux; the cockpit is a fast, keyboard-driven viewer over all of them.
 
-- **Dispatcher** — a single unit of execution. You dispatch defined work to
-  it and it carries it out. Not an agent.
-- **Dispatch** — sending work to a dispatcher; also the cockpit itself.
-- **Feature** — the human unit of work. History is navigated by feature, not
-  by commit hash.
+![The triage lens: what wants you, grouped by product, with a live roll-up](docs/floor.svg)
 
-## How it works
+---
 
-- Each dispatcher is an interactive `claude` session inside its own tmux
-  session (`disp-<feature-slug>`), started on a `feature/<slug>` branch in
-  the target repo. Sessions survive cockpit restarts; "jump in" is a plain
-  tmux attach at full fidelity.
-- Status comes from a single global Claude Code lifecycle hook (installed by
-  `init` into `~/.claude/settings.json` with your consent). The hook maps
-  events to states: **working**, **needs you** (turn complete or waiting for
-  a prompt), **blocked** (permission approval), **exited**, **done**.
-- The cockpit is a stateless viewer over
-  `~/.local/state/claude-dispatcher/`, refreshed by fsnotify.
-- Wide screens tile into more panes (dispatchers → detail → shipping stats)
-  at 110 and 170 columns; narrow terminals collapse back to essentials.
+## Why
 
-## Requirements
+You can run ten Claude Code sessions. You can't watch ten terminals. The cockpit collapses the whole fleet into one triage surface: it surfaces the blocked and the finished, keeps the busy ones out of your way, and hands the terminal straight to tmux when you want to jump in.
 
-- macOS/Linux, `tmux`, `git`, the `claude` CLI. `gh` optional (roadmap).
+- **One screen, the whole factory** — dispatchers, PRs, deploys, backlog, usage and velocity across every repo and product.
+- **Real data, live** — dispatch records + `git` + `gh` + Linear + Azure Boards, refreshed on an fsnotify watch and a poll. Nothing is mocked.
+- **Keyboard-first** — eight lenses on the number keys, one key per action, a `:` command palette, and `?` for the map.
+- **Done means live** — a feature stays open until it's actually deployed, not merely merged.
+- **Tokens, not dollars** — built for a Claude subscription; usage speaks in tokens and effort.
+
+## Eight lenses
+
+Switch with the number keys. Each lens is a different question about the same factory.
+
+| | lens | the question it answers |
+|---|---|---|
+| `1` | **triage** | what is blocked, claims done, or waiting on me right now? |
+| `2` | **products** | how is each product (many repos) doing? |
+| `3` | **product** | inside one product: velocity, in-flight lanes, review / team / shipped |
+| `4` | **queue** | what's drafted and ready to dispatch as a batch? |
+| `5` | **backlog** | GitHub Issues · Linear · Azure Boards, in one list |
+| `6` | **usage** | 5-hour and weekly consumption vs my learned limits |
+| `7` | **decisions** | ADRs and decision records per repo |
+| `8` | **velocity** | DORA + what actually reached production |
+
+**The triage detail pane** reads the whole story of a dispatcher — what Claude said, the commit → PR → checks → merge → deploy chain, the PR stack, the live output tail — and lets you reply, attach, or ship without leaving it.
+
+![The dispatcher detail: the said → chain → agents → stack story](docs/floor-detail.svg)
+
+**A product** in one view — velocity tiles, in-flight kanban lanes, and review / team / shipped tabs:
+
+![The product lens](docs/product.svg)
+
+**Velocity** — DORA delivery metrics beside what actually shipped, because a thousand commits that never merge isn't velocity:
+
+![The velocity lens](docs/velocity.svg)
+
+**One backlog** across GitHub Issues, Linear and Azure Boards — pick, then dispatch:
+
+![The backlog lens](docs/backlog.svg)
+
+## Usage limits, learned
+
+There is no API for a Claude subscription's limits — so the cockpit **learns** them. It measures your 5-hour rolling and weekly consumption from the session transcripts, and treats the usage at each real rate-limit (429) as that window's cap: *assume that's the limit, until we sail past it and it's fine — then raise it.* The estimate persists and sharpens over time.
+
+![The usage lens: 5-hour and weekly windows against learned caps](docs/usage.svg)
+
+## Actions are real
+
+Everything on the triage lens is wired to the live session, behind a confirm where it matters:
+
+- **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back)
+- **`r`** reply into the session without attaching
+- **`y`** ship — `gh pr merge --squash --auto`, then mark live
+- **`x`** kill the session · **`enter` on a backlog ticket** dispatches it
 
 ## Install
 
@@ -38,120 +70,87 @@ Via Homebrew:
 
 ```sh
 brew install innovology/tap/claude-dispatcher
-claude-dispatcher init        # config + repo scan + hook install (asks first)
-claude-dispatcher             # open the cockpit
+claude-dispatcher init     # config + repo scan + status hook (asks first)
+claude-dispatcher v2       # open the v2 cockpit
 ```
 
-Or from source:
+Or from source (needs Go):
 
 ```sh
-make install                  # builds to ~/.local/bin/claude-dispatcher
+make install               # builds to ~/.local/bin/claude-dispatcher
 ```
 
-`~/.local/bin` must be on your PATH, ahead of Homebrew's, or a `brew`-installed
-copy will keep winning and you will run an older cockpit than you just built:
+`~/.local/bin` must be on your PATH ahead of Homebrew's, or a `brew`-installed copy keeps winning:
 
 ```sh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```
 
-Note: the status hook embeds the absolute path of the binary that ran
-`init`. If you switch install methods later, re-run `init` so the hook points
-at the new binary — otherwise the cockpit runs one build while the hooks that
-feed it status run another.
+> The status hook embeds the absolute path of the binary that ran `init`. If you switch install methods, re-run `init` so the hook points at the new binary.
+
+**Requirements:** macOS or Linux · `tmux` · `git` · the `claude` CLI · `gh` (for PR/deploy signals). Linear and Azure Boards are optional and off until configured.
+
+## Quickstart
+
+```sh
+claude-dispatcher init     # first run: writes config, scans for repos, installs the hook
+claude-dispatcher v2       # open the cockpit
+```
+
+Press `1`–`8` to move between lenses, `j`/`k` to move, `→` into the detail, `/` to filter, `:` for the command palette, `?` for all keys, and `,` for settings.
+
+## Settings
+
+Press `,` in the cockpit (or `:settings`) to edit — written straight to `~/.config/claude-dispatcher/config.toml`:
+
+- **scan roots** — the directories scanned (3 levels deep) for git repos
+- **products** — map product names to repos for the roll-up (`[products]` in the file)
+- **Linear API key** — turns on the Linear backlog source (or set `LINEAR_API_KEY`)
+- **Azure org / project** — turns on Azure Boards (needs the `az` CLI; or set `AZURE_DEVOPS_ORG` / `AZURE_DEVOPS_PROJECT`)
+- **weekly token budget** — optional; when set, the usage lens gauges against it, otherwise it shows learned caps and raw tokens
+
+Environment variables override file values, so a secret can stay out of the file.
+
+## How it works
+
+- Each dispatcher is an interactive `claude` session inside its own tmux session (`disp-<slug>`), started on a `feature/<slug>` branch. Sessions survive cockpit restarts; the cockpit is a stateless viewer over `~/.local/state/claude-dispatcher/`.
+- Status comes from **one** global Claude Code lifecycle hook (installed by `init` into `~/.claude/settings.json`). It maps events to states: working, needs you, blocked, done, exited.
+- Commits are attributed to dispatchers by **provenance** — each dispatch records the SHAs its feature branch produced (base tip at launch → branch tip). No trailers in your git history.
+- **Done means live:** when a PR merges, the tracker watches the repo's deploy workflow (auto-detected by name, or set in `[deploy_workflows]`) and flips the feature to done on a green run. Repos with no deploy workflow count merge as live.
+- The layout is **responsive**: wide terminals tile into three panes, narrower ones collapse to essentials.
+
+## Keys (v2 cockpit)
+
+| key | action |
+|---|---|
+| `1`–`8` | switch lens (triage · products · product · queue · backlog · usage · decisions · velocity) |
+| `j` / `k` · `→` / `←` | move · into the detail pane and back |
+| `/` · `t` · `w` | filter · change grouping · show the working ones |
+| `enter` / `a` | attach the selected dispatcher's tmux session |
+| `r` · `y` · `x` | reply · ship (squash-merge) · kill — the last two ask first |
+| `D` · `F` | diff of everything it changed · follow the live output |
+| `,` · `:` · `?` | settings · command palette · all keys |
+| `q` | quit |
+
+The classic single-view cockpit is still there as the default `claude-dispatcher` (no subcommand); `v2` opens the eight-lens redesign.
+
+## Development
+
+`make check` runs build, vet, lint (golangci-lint), and the race-enabled test suite — the gates CI runs on every PR.
 
 ## Releasing
 
-Releases need a `HOMEBREW_TAP_TOKEN` secret on this repo: a fine-grained
-personal access token, scoped to the `Innovology/homebrew-tap` repository,
-with **Repository permissions -> Contents: Read and write**. Create it at
-[github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new),
-then add it:
+Merging a PR into `main` cuts the next patch release automatically (goreleaser tarballs + Homebrew cask). Put `release: minor` / `release: major` in the merge commit for a bigger bump, or `[skip release]` to merge without releasing; doc-only merges skip on their own. Releases need a `HOMEBREW_TAP_TOKEN` secret (a fine-grained PAT with contents:write on `Innovology/homebrew-tap`):
 
 ```sh
 gh secret set HOMEBREW_TAP_TOKEN -R Innovology/claude-dispatcher
 ```
 
-Verify it is registered (`total_count` must be 1, not 0):
-
-```sh
-gh api repos/Innovology/claude-dispatcher/actions/secrets
-```
-
-Without the secret the Release workflow succeeds but tags and publishes
-nothing, so a merge never half-releases. Note that the token is only read by
-the workflow — publishing from a laptop instead bakes the builder's home
-directory into the shipped binaries.
-
-Releases are cut automatically: folding a PR into main makes the Release
-workflow tag the next patch version and publish the tarballs + Homebrew cask.
-Put `release: minor` or `release: major` in the merge commit message for a
-bigger bump, or `[skip release]` to merge without releasing; merges touching
-only docs/meta files (`*.md`, `LICENSE`, `.gitignore`, `.github/`) skip on
-their own. Manual tagging (`git tag v0.x.y && git push --tags`) remains the
-escape hatch. The workflow needs a `HOMEBREW_TAP_TOKEN` secret (fine-grained
-PAT with contents:write on `Innovology/homebrew-tap`) and neither tags nor
-publishes when the secret is absent.
-
-Config lives at `~/.config/claude-dispatcher/config.toml`: scan `roots` and
-an optional `[products]` map (product → repo names) for the roll-up lens.
-Opening the cockpit with no config drops you into a first-run settings view
-to pick the scan roots; press `s` in the cockpit any time to edit them
-(`init` is still what installs the status hook).
-
-## Keys
-
-| key | action |
-|---|---|
-| `n` | dispatch: pick repo → name feature → write prompt (`ctrl+d` to launch) |
-| `s` | settings: edit the repo scan roots (add/remove, saves config.toml) |
-| `enter` / `a` | attach to the selected dispatcher's tmux session |
-| `Ctrl-\` (inside a session) | detach, back to the cockpit (`Ctrl-b d` also works) |
-| `d` | mark shipped (done means live — manual until Actions integration) |
-| `x` | kill the tmux session |
-| `r` | refresh |
-| `q` | quit |
-
-## The shipping loop
-
-- Commits are attributed to dispatchers by **provenance**: each dispatch
-  records the SHAs produced on its feature branch (base tip at launch →
-  branch tip at each turn). No trailers or markers in your git history.
-- Each dispatch is linked to its PR by branch name (`gh pr list --head`).
-- **Done means live**: when the PR merges, the tracker watches the repo's
-  deploy workflow (auto-detected by name — deploy/release/publish/ship/prod
-  — or overridden in `[deploy_workflows]`) and flips the feature to done on
-  a successful run. Repos with no deploy workflow count merge as live.
-  Auto-done advances while a cockpit is open; `d` remains the manual
-  override.
-- The shipping strip shows: commits today, via-dispatch %, PRs launched
-  today (one `gh search` across all of GitHub), features that went live
-  today, and active repos.
-
-## Roadmap (deliberately deferred)
-
-1. Portfolio roll-up: effort and token spend per product (tokens, not
-   dollars — subscription billing).
-2. Feature history: jump back into a shipped feature and rehydrate its
-   sessions (`claude --resume`) and branch diff.
-3. Adopting sessions started outside the cockpit (the hook already logs
-   them to `events.jsonl`).
-4. Diff pane on ultrawide layouts.
-
-## Development
-
-`make check` runs build, vet, lint (golangci-lint), and the race-enabled
-test suite — the same gates CI runs on every PR. The CI workflow is named
-"CI" deliberately: this tool's own deploy detection treats deploy-ish
-workflow names as a live signal.
+Without it the Release workflow succeeds but tags and publishes nothing, so a merge never half-releases.
 
 ## Troubleshooting
 
-- **Everything stuck on "launching"** — the hook isn't firing. Re-run
-  `claude-dispatcher init`; confirm the entries in `~/.claude/settings.json`
-  point at the installed binary path.
-- **Statuses lag** — `needs you` vs `blocked` relies on the `Notification`
-  hook matchers `idle_prompt` / `permission_prompt`; `Stop` covers turn
-  completion regardless.
-- Rebuilds must go to the same path (`make install`) because the hook embeds
-  the absolute binary path.
+- **Everything stuck on "launching"** — the hook isn't firing. Re-run `claude-dispatcher init`; confirm `~/.claude/settings.json` points at the installed binary.
+- **`needs you` vs `blocked` lag** — those rely on the `Notification` hook matchers (`idle_prompt` / `permission_prompt`); `Stop` covers turn completion regardless.
+- **Backlog empty** — set a Linear key / Azure org in settings, and check `gh auth status` for GitHub Issues.
+- Rebuilds must go to the same path (`make install`) because the hook embeds the absolute binary path.
