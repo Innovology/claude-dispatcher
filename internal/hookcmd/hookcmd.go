@@ -5,10 +5,16 @@
 //	SessionStart                   -> working (binds session_id/transcript)
 //	UserPromptSubmit               -> working
 //	PostToolUse                    -> working, only to clear "blocked"
-//	Stop                           -> needs-input (turn complete)
-//	Notification:idle_prompt       -> needs-input
+//	Stop                           -> needs-input (turn complete), or working
+//	                                  if background tasks are still in flight
+//	Notification:idle_prompt       -> needs-input (unless waiting on tasks)
 //	Notification:permission_prompt -> blocked
 //	SessionEnd                     -> exited (unless already done)
+//
+// A Stop with a non-empty background_tasks payload means the session is
+// paused waiting for background work to wake it, not waiting on the human;
+// the idle_prompt payload carries no task info, so the Stop's verdict is
+// persisted (WaitingOnTasks) and idle_prompt defers to it.
 //
 // Events are attributed to a dispatch by, in order: the CLAUDE_DISPATCHER_ID
 // env var (set at launch, inherited through tmux -> claude -> hook), the
@@ -21,6 +27,7 @@ package hookcmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -36,6 +43,9 @@ type hookInput struct {
 	TranscriptPath string `json:"transcript_path"`
 	Cwd            string `json:"cwd"`
 	HookEventName  string `json:"hook_event_name"`
+	// Stop/SubagentStop only; item shape is Claude Code's business — only the
+	// count matters here.
+	BackgroundTasks []json.RawMessage `json:"background_tasks"`
 }
 
 func Run(args []string) int {
@@ -136,9 +146,11 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		}
 		d.Status = state.StatusWorking
 		d.StatusReason = "session started"
+		d.WaitingOnTasks = false
 	case "UserPromptSubmit":
 		d.Status = state.StatusWorking
 		d.StatusReason = "processing your prompt"
+		d.WaitingOnTasks = false
 	case "PostToolUse":
 		// A tool completing means any permission prompt was approved.
 		if d.Status != state.StatusBlocked {
@@ -147,9 +159,19 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "permission approved, working"
 	case "Stop":
+		d.WaitingOnTasks = len(in.BackgroundTasks) > 0
+		if d.WaitingOnTasks {
+			d.Status = state.StatusWorking
+			d.StatusReason = fmt.Sprintf("waiting on %d background %s",
+				len(in.BackgroundTasks), plural(len(in.BackgroundTasks), "task"))
+			break
+		}
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "turn complete — waiting on you"
 	case "Notification:idle_prompt":
+		if d.WaitingOnTasks {
+			return false // paused on background work, not on the human
+		}
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "waiting for your next prompt"
 	case "Notification:permission_prompt":
@@ -162,6 +184,13 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		return false
 	}
 	return true
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 func samePath(a, b string) bool {

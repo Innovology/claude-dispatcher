@@ -24,6 +24,17 @@ type Config struct {
 	// directory name. Unlisted repos use the first workflow whose name looks
 	// deploy-ish (deploy/release/publish/ship/prod).
 	DeployWorkflows map[string]string `toml:"deploy_workflows"`
+
+	// Integrations (optional). Matching env vars, when set, override these so a
+	// secret can be kept out of the file. Edited in-app from the cockpit.
+	LinearAPIKey string `toml:"linear_api_key,omitempty"` // Linear backlog source
+	AzureOrg     string `toml:"azure_org,omitempty"`      // Azure DevOps org URL
+	AzureProject string `toml:"azure_project,omitempty"`  // Azure DevOps project
+	// WeeklyTokenLimit is the subscription's weekly token budget. There is no
+	// API to read it (Claude Code exposes usage only interactively), so it is a
+	// user setting; 0 means unknown and the usage lens shows raw tokens instead
+	// of a percentage.
+	WeeklyTokenLimit int `toml:"weekly_token_limit,omitempty"`
 }
 
 func Dir() string {
@@ -100,6 +111,16 @@ func Save(c *Config) error {
 	b.WriteString("# Directories scanned (up to 3 levels deep) for git repositories.\n")
 	b.WriteString("# Editable from the cockpit: press s.\n")
 	b.WriteString("roots = " + tomlStrings(c.Roots) + "\n\n")
+	// Top-level integration keys must precede the first [table] in TOML.
+	b.WriteString("# Integrations (optional; edit in-app with `s`). Matching env vars override.\n")
+	b.WriteString("# linear_api_key enables the Linear backlog source.\n")
+	fmt.Fprintf(&b, "linear_api_key = %q\n", c.LinearAPIKey)
+	b.WriteString("# Azure Boards backlog (needs the az CLI logged in): the org URL and project.\n")
+	fmt.Fprintf(&b, "azure_org = %q\n", c.AzureOrg)
+	fmt.Fprintf(&b, "azure_project = %q\n", c.AzureProject)
+	b.WriteString("# Your subscription's weekly token budget (no API exposes it, so set it here).\n")
+	b.WriteString("# 0 = unknown → the usage lens shows raw tokens instead of a percentage.\n")
+	fmt.Fprintf(&b, "weekly_token_limit = %d\n\n", c.WeeklyTokenLimit)
 	b.WriteString("# Map product names to repo directory names for the portfolio roll-up.\n")
 	b.WriteString("# acme-shop = [\"shop-api\", \"shop-web\"]\n")
 	b.WriteString("[products]\n")
