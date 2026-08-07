@@ -155,7 +155,7 @@ Environment variables override file values, so a secret can stay out of the file
 
 ## Releasing
 
-Merging a PR into `main` cuts the next patch release automatically (goreleaser builds macOS/Linux tarballs, Windows `.zip`s, and the Homebrew cask). Put `release: minor` / `release: major` in the merge commit for a bigger bump, or `[skip release]` to merge without releasing; doc-only merges skip on their own. Releases need a `HOMEBREW_TAP_TOKEN` secret (a fine-grained PAT with contents:write on `Innovology/homebrew-tap`):
+Merging a PR into `main` cuts the next patch release automatically (goreleaser builds macOS/Linux tarballs, Windows `.zip`s, and the Homebrew cask). Label the PR `release:minor` / `release:major` (or `skip-release`) to control the bump — the PR template reminds you. A `release: minor` line or `[skip release]` in the merge commit still works as a fallback; doc-only merges skip on their own. Releases need a `HOMEBREW_TAP_TOKEN` secret (a fine-grained PAT with contents:write on `Innovology/homebrew-tap`):
 
 ```sh
 gh secret set HOMEBREW_TAP_TOKEN -R Innovology/claude-dispatcher
