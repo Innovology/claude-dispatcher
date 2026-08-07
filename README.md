@@ -90,6 +90,21 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
 **Requirements:** macOS or Linux · `tmux` · `git` · the `claude` CLI · `gh` (for PR/deploy signals). Linear and Azure Boards are optional and off until configured.
 
+## Windows
+
+**Recommended: run under WSL2.** The full experience — real `tmux`, in-place attach, reply-without-attaching, the whole cockpit — depends on `tmux` as the process supervisor, and `tmux` is a Linux tool. Install a WSL2 distro (Ubuntu is fine), then use the **Linux** build exactly as documented above (`brew` via Linuxbrew, or `make install`). This is the recommended way to run the dispatcher on a Windows machine.
+
+**Native preview (winget / scoop).** A native Windows build is published for early access once the publishers below are configured. It is honestly a preview: without `tmux` there is no shared session multiplexer, so **each dispatch opens in its own console window**, and **in-place attach and reply are not yet supported** — the `tmux`-grade session model for Windows is still being built. For the real cockpit experience today, use WSL2, and watch [`claude-dispatcher v2`](#keys-v2-cockpit) as the native session model lands.
+
+Once configured, install natively with:
+
+```powershell
+winget install Innovology.claude-dispatcher
+# or
+scoop bucket add innovology https://github.com/Innovology/scoop-bucket
+scoop install claude-dispatcher
+```
+
 ## Quickstart
 
 ```sh
@@ -140,13 +155,31 @@ The classic single-view cockpit is still there as the default `claude-dispatcher
 
 ## Releasing
 
-Merging a PR into `main` cuts the next patch release automatically (goreleaser tarballs + Homebrew cask). Put `release: minor` / `release: major` in the merge commit for a bigger bump, or `[skip release]` to merge without releasing; doc-only merges skip on their own. Releases need a `HOMEBREW_TAP_TOKEN` secret (a fine-grained PAT with contents:write on `Innovology/homebrew-tap`):
+Merging a PR into `main` cuts the next patch release automatically (goreleaser builds macOS/Linux tarballs, Windows `.zip`s, and the Homebrew cask). Put `release: minor` / `release: major` in the merge commit for a bigger bump, or `[skip release]` to merge without releasing; doc-only merges skip on their own. Releases need a `HOMEBREW_TAP_TOKEN` secret (a fine-grained PAT with contents:write on `Innovology/homebrew-tap`):
 
 ```sh
 gh secret set HOMEBREW_TAP_TOKEN -R Innovology/claude-dispatcher
 ```
 
 Without it the Release workflow succeeds but tags and publishes nothing, so a merge never half-releases.
+
+### Windows publishing (optional)
+
+The `scoop` and `winget` publishers are wired into `.goreleaser.yml` but stay a no-op until you set their tokens — the existing macOS/Linux + Homebrew release keeps working unchanged with only `HOMEBREW_TAP_TOKEN`. To turn on native Windows publishing, set up each publish repo exactly like the Homebrew tap:
+
+- **scoop** — create an `Innovology/scoop-bucket` repo, then add a fine-grained PAT with contents:write on it:
+
+  ```sh
+  gh secret set SCOOP_BUCKET_TOKEN -R Innovology/claude-dispatcher
+  ```
+
+- **winget** (optional) — fork `microsoft/winget-pkgs` to `Innovology/winget-pkgs`, then add a PAT with contents:write on the fork (goreleaser opens the manifest PR against it under publisher `Innovology`):
+
+  ```sh
+  gh secret set WINGET_TOKEN -R Innovology/claude-dispatcher
+  ```
+
+Each publisher's `skip_upload` is templated on its token, so an unset token means the manifest is generated but never pushed — a release can never half-publish.
 
 ## Troubleshooting
 

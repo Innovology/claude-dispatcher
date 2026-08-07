@@ -14,7 +14,7 @@ import (
 
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
-	"claude-dispatcher/internal/tmux"
+	"claude-dispatcher/internal/supervisor"
 )
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -57,7 +57,7 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 		WorktreePath: worktree,
 		BaseSHA:      baseSHA,
 		Prompt:       prompt,
-		TmuxSession:  tmux.UniqueName("disp-" + slug),
+		TmuxSession:  supervisor.UniqueName("disp-" + slug),
 		Status:       state.StatusLaunching,
 		CreatedAt:    time.Now(),
 	}
@@ -65,11 +65,11 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 		return nil, err
 	}
 
-	// When claude exits we drop to a shell so the tmux session stays open for
+	// launchCommand is OS-specific (bash on Unix, cmd.exe on Windows); it keeps
+	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude %s; exec ${SHELL:-/bin/sh}",
-		d.ID, shellQuote(prompt))
-	if err := tmux.NewSession(d.TmuxSession, worktree, cmd); err != nil {
+	cmd := launchCommand(d.ID, prompt)
+	if err := supervisor.NewSession(d.TmuxSession, worktree, cmd); err != nil {
 		d.Status = state.StatusExited
 		d.StatusReason = "tmux launch failed"
 		_ = state.Save(d)
@@ -121,8 +121,4 @@ func CleanupWorktree(repoPath, worktreePath string) bool {
 	_ = exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
 	_, err := os.Stat(worktreePath)
 	return os.IsNotExist(err)
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

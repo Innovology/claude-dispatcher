@@ -43,6 +43,22 @@ jobs:
         with:
           version: latest
 
+  # Native Windows build gate. Runtime behaviour of the Windows session backend
+  # still needs validation on a real machine; this keeps the tree compiling and
+  # vetting for windows so the port can't silently regress. (Tests are not run
+  # here yet — several sandbox their config via $HOME, which os.UserHomeDir does
+  # not honour on Windows; that is a separate cross-platform-tests task.)
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./internal/supervisor/... -count=1
+
   upload-coverage-go:
     needs: test
     if: ${{ !cancelled() && needs.test.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
