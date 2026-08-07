@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 
+	"claude-dispatcher/internal/cockpit"
 	"claude-dispatcher/internal/hookcmd"
 	"claude-dispatcher/internal/initcmd"
 	"claude-dispatcher/internal/ui"
@@ -22,6 +23,7 @@ const usage = `claude-dispatcher — dispatch cockpit for Claude Code sessions
 
 Usage:
   claude-dispatcher            open the cockpit
+  claude-dispatcher v2         open the v2 cockpit (eight-lens redesign, preview)
   claude-dispatcher init       write config, discover repos, install the status hook
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
@@ -38,6 +40,11 @@ func main() {
 		return
 	}
 	switch args[0] {
+	case "v2":
+		if err := cockpit.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "claude-dispatcher:", err)
+			os.Exit(1)
+		}
 	case "init":
 		if err := initcmd.Run(); err != nil {
 			fmt.Fprintln(os.Stderr, "init:", err)

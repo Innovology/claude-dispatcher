@@ -1,0 +1,113 @@
+package cockpit
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/state"
+)
+
+// captureVars snapshots the current data vars so a test can restore them and
+// not leak real/empty data into the seed-based smoke tests.
+func captureVars() snapshot {
+	return snapshot{
+		dispatches: dispatches, stacks: stacks, saidBy: saidBy, fromBy: fromBy,
+		tailLines: tailLines, diffsBy: diffsBy, products: products,
+		reposByProduct: reposByProduct, productOrder: productOrder,
+		productNote: productNote, staleRepos: staleRepos, working: working,
+		productStats: productStats, backlogTickets: backlogTickets,
+		reviews: reviews, team: team, teamVerdict: teamVerdict, shipped: shipped,
+		productVelocity: productVelocity, decisions: decisions,
+		decisionRepoOrder: decisionRepoOrder, plugins: plugins,
+		usageWindows: usageWindows, usageModels: usageModels,
+		usageProjection: usageProjection, usageAdvice: usageAdvice,
+		doraOrg: doraOrg, doraFactory: doraFactory, doraSplit: doraSplit,
+		doraWeeks: doraWeeks, outputWeeks: outputWeeks, outputHead: outputHeadline,
+		outputUnit: outputUnit, outputDelta: outputDelta, outputSpark: outputSpark,
+		notVelocity: notVelocity, queueItems: queueItems, records: liveRecords,
+	}
+}
+
+// TestLiveSnapshotRenders runs the real collectors against a temp state dir of
+// synthetic records, applies the snapshot, and renders every lens — proving the
+// record→view mapping and applySnapshot never panic and stay renderable.
+func TestLiveSnapshotRenders(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
+
+	now := time.Now()
+	recs := []*state.Dispatch{
+		{ID: "aaa111", Feature: "webhook retries", Slug: "webhook-retries", RepoName: "shop-api", RepoPath: dir + "/shop-api", Product: "shop", Branch: "feature/webhook-retries", Prompt: "retry webhooks idempotently", Status: state.StatusBlocked, StatusReason: "waiting on a permission approval", PRNumber: 12, PRState: "OPEN", PRURL: "https://x/12", Commits: []string{"a", "b"}, CreatedAt: now.Add(-40 * time.Minute), UpdatedAt: now.Add(-4 * time.Minute)},
+		{ID: "bbb222", Feature: "csv export", Slug: "csv-export", RepoName: "shop-web", RepoPath: dir + "/shop-web", Product: "shop", Branch: "feature/csv-export", Prompt: "export a csv", Status: state.StatusNeedsInput, StatusReason: "turn complete — waiting on you", Commits: []string{"c"}, CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-22 * time.Minute)},
+		{ID: "ccc333", Feature: "seat limits", Slug: "seat-limits", RepoName: "shop-api", RepoPath: dir + "/shop-api", Product: "shop", Branch: "feature/seat-limits", Prompt: "seat limits per plan", Status: state.StatusDone, StatusReason: "deployed — live", PRNumber: 9, PRState: "MERGED", DeployedAt: &now, PRMergedAt: &now, Commits: []string{"d", "e", "f"}, CreatedAt: now.Add(-6 * time.Hour), UpdatedAt: now.Add(-1 * time.Hour)},
+	}
+	for _, r := range recs {
+		if err := state.Save(r); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+	}
+
+	saved := captureVars()
+	defer applySnapshot(saved)
+
+	cfg := &config.Config{Products: map[string][]string{"shop": {"shop-api", "shop-web"}}}
+	snap := loadSnapshot(cfg)
+	applySnapshot(snap)
+
+	// Real records replaced the seed.
+	if len(dispatches) != 3 {
+		t.Fatalf("expected 3 live dispatches, got %d", len(dispatches))
+	}
+	var feats []string
+	for _, d := range dispatches {
+		feats = append(feats, d.feature)
+	}
+	joined := strings.Join(feats, ",")
+	for _, want := range []string{"webhook retries", "csv export", "seat limits"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("live dispatches missing %q (got %s)", want, joined)
+		}
+	}
+	// The action layer can resolve a real record.
+	if recordFor("webhook retries") == nil {
+		t.Error("recordFor did not resolve a live record")
+	}
+
+	// Every lens renders against live data without panic or overflow.
+	for i := 1; i <= 8; i++ {
+		m := newModel()
+		m.width, m.height = 190, 44
+		m = press(m, itoa(i))
+		out := m.View()
+		if strings.TrimSpace(out) == "" {
+			t.Fatalf("lens %d empty on live data", i)
+		}
+		if lines := strings.Count(out, "\n") + 1; lines > m.height {
+			t.Fatalf("lens %d overflows height on live data", i)
+		}
+	}
+}
+
+// TestLiveSnapshotEmpty proves an empty portfolio (no records, no config)
+// degrades to honest empty states rather than crashing.
+func TestLiveSnapshotEmpty(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
+
+	saved := captureVars()
+	defer applySnapshot(saved)
+
+	snap := loadSnapshot(&config.Config{})
+	applySnapshot(snap)
+
+	for i := 1; i <= 8; i++ {
+		m := newModel()
+		m.width, m.height = 130, 40
+		m = press(m, itoa(i))
+		if strings.TrimSpace(m.View()) == "" {
+			t.Fatalf("lens %d empty-portfolio render blank", i)
+		}
+	}
+}
