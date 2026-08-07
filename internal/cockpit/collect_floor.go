@@ -61,7 +61,7 @@ func collectFloor(ctx *collectCtx, s *snapshot) {
 		var prMeta string
 		if rec.PRNumber > 0 {
 			id := prID(forge, rec.PRNumber)
-			prColor := cGreen
+			var prColor string
 			if rec.PRState == "MERGED" {
 				prMeta = "merged"
 				if rec.PRMergedAt != nil {

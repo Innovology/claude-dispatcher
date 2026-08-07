@@ -370,7 +370,6 @@ func (m model) selected() dispatch {
 	return e.x
 }
 
-func (m model) floorSelected() dispatch      { return m.selected() }
 func (m model) floorSelectedFeature() string { return m.selected().feature }
 func (m model) floorEntryIsHeader() bool     { return m.entry().header }
 
@@ -380,10 +379,10 @@ func (m model) headerTickets(g floorGroup) []ticket {
 	var out []ticket
 	for _, t := range backlogTickets {
 		match := false
-		switch {
-		case mode == "product":
+		switch mode {
+		case "product":
 			match = t.product == g.label
-		case mode == "repo":
+		case "repo":
 			match = t.repo == g.label
 		default: // forge
 			match = (g.label == "github" && t.src == "gh") || (g.label == "azure devops" && t.src == "ado")

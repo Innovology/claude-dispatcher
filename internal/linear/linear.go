@@ -62,7 +62,7 @@ func Assigned() ([]Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var payload struct {
 		Data struct {

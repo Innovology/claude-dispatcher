@@ -76,10 +76,10 @@ func (m model) productLanes() []lane {
 		if x.product != name {
 			continue
 		}
-		switch {
-		case x.state == "claimed":
+		switch x.state {
+		case "claimed":
 			claims = append(claims, laneCard{feature: x.feature, repo: x.repo, meta: "accept to close · " + x.age, metaColor: cViolet})
-		case x.state == "review" || x.state == "blocked":
+		case "review", "blocked":
 			meta := x.signal
 			if len(x.prs) > 0 && x.prs[0].id != "" {
 				meta = x.prs[0].id + " · " + x.signal
