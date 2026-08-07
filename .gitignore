@@ -1,3 +1,5 @@
 claude-dispatcher
 *.log
 dist/
+coverage.out
+coverage.xml
