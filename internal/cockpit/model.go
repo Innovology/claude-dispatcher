@@ -33,10 +33,11 @@ type model struct {
 	width, height int
 
 	// live-data plumbing (nil cfg → stay on demo seed data)
-	cfg      *config.Config
-	stateCh  chan struct{}
-	loading  bool
-	settings *settingsState
+	cfg          *config.Config
+	stateCh      chan struct{}
+	loading      bool
+	settings     *settingsState
+	dispatchForm *dispatchForm
 
 	lens          string
 	cursor        int

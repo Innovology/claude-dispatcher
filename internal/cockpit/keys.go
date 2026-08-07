@@ -61,8 +61,13 @@ func (m model) runCommand() (model, tea.Cmd) {
 		m.settings = newSettings(m.cfg)
 		return m, nil
 	}
+	if c.name == "dispatch" || c.name == "new dispatch" {
+		m.paletteOpen, m.paletteText = false, ""
+		m.dispatchForm = newDispatchForm(m.cfg)
+		return m, m.dispatchForm.filter.Focus()
+	}
 	direct := map[string]string{
-		"backlog": "backlog", "usage": "usage", "dispatch": "queue",
+		"backlog": "backlog", "usage": "usage",
 		"decisions": "decisions", "plugins": "decisions", "velocity": "velocity",
 	}
 	lens := m.lens
@@ -83,6 +88,10 @@ func (m model) runCommand() (model, tea.Cmd) {
 func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	if m.settings != nil {
 		mm, cmd := m.updateSettings(k)
+		return mm, cmd
+	}
+	if m.dispatchForm != nil {
+		mm, cmd := m.updateDispatchForm(k)
 		return mm, cmd
 	}
 	if m.confirm != nil {
@@ -182,6 +191,10 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	if k == "," {
 		m.settings = newSettings(m.cfg)
 		return m, nil
+	}
+	if k == "+" {
+		m.dispatchForm = newDispatchForm(m.cfg)
+		return m, m.dispatchForm.filter.Focus()
 	}
 	if k == "tab" {
 		if m.narrowPane == "list" {

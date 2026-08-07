@@ -71,7 +71,7 @@ Via Homebrew:
 ```sh
 brew install innovology/tap/claude-dispatcher
 claude-dispatcher init     # config + repo scan + status hook (asks first)
-claude-dispatcher v2       # open the v2 cockpit
+claude-dispatcher            # open the cockpit
 ```
 
 Or from source (needs Go):
@@ -94,7 +94,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
 **Recommended: run under WSL2.** The full experience — real `tmux`, in-place attach, reply-without-attaching, the whole cockpit — depends on `tmux` as the process supervisor, and `tmux` is a Linux tool. Install a WSL2 distro (Ubuntu is fine), then use the **Linux** build exactly as documented above (`brew` via Linuxbrew, or `make install`). This is the recommended way to run the dispatcher on a Windows machine.
 
-**Native preview (winget / scoop).** A native Windows build is published for early access once the publishers below are configured. It is honestly a preview: without `tmux` there is no shared session multiplexer, so **each dispatch opens in its own console window**, and **in-place attach and reply are not yet supported** — the `tmux`-grade session model for Windows is still being built. For the real cockpit experience today, use WSL2, and watch [`claude-dispatcher v2`](#keys-v2-cockpit) as the native session model lands.
+**Native preview (winget / scoop).** A native Windows build is published for early access once the publishers below are configured. It is honestly a preview: without `tmux` there is no shared session multiplexer, so **each dispatch opens in its own console window**, and **in-place attach (window focus) and reply (console input injection) are best-effort and still being hardened** — the `tmux`-grade session model for Windows is still being built. For the real cockpit experience today, use WSL2, and watch the cockpit as the native session model lands.
 
 Once configured, install natively with:
 
@@ -109,7 +109,7 @@ scoop install claude-dispatcher
 
 ```sh
 claude-dispatcher init     # first run: writes config, scans for repos, installs the hook
-claude-dispatcher v2       # open the cockpit
+claude-dispatcher            # open the cockpit
 ```
 
 Press `1`–`8` to move between lenses, `j`/`k` to move, `→` into the detail, `/` to filter, `:` for the command palette, `?` for all keys, and `,` for settings.
@@ -134,11 +134,12 @@ Environment variables override file values, so a secret can stay out of the file
 - **Done means live:** when a PR merges, the tracker watches the repo's deploy workflow (auto-detected by name, or set in `[deploy_workflows]`) and flips the feature to done on a green run. Repos with no deploy workflow count merge as live.
 - The layout is **responsive**: wide terminals tile into three panes, narrower ones collapse to essentials.
 
-## Keys (v2 cockpit)
+## Keys
 
 | key | action |
 |---|---|
 | `1`–`8` | switch lens (triage · products · product · queue · backlog · usage · decisions · velocity) |
+| `+` | dispatch new work — repo → feature → prompt |
 | `j` / `k` · `→` / `←` | move · into the detail pane and back |
 | `/` · `t` · `w` | filter · change grouping · show the working ones |
 | `enter` / `a` | attach the selected dispatcher's tmux session |
@@ -147,7 +148,6 @@ Environment variables override file values, so a secret can stay out of the file
 | `,` · `:` · `?` | settings · command palette · all keys |
 | `q` | quit |
 
-The classic single-view cockpit is still there as the default `claude-dispatcher` (no subcommand); `v2` opens the eight-lens redesign.
 
 ## Development
 

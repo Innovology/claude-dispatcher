@@ -165,6 +165,8 @@ func (m model) overlayView(w, h int) (string, bool) {
 	switch {
 	case m.settings != nil:
 		return m.viewSettings(w, h), true
+	case m.dispatchForm != nil:
+		return m.viewDispatchForm(w, h), true
 	case m.helpOpen:
 		return m.viewHelp(w, h), true
 	case m.diffOpen:

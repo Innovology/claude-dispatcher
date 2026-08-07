@@ -13,7 +13,6 @@ import (
 	"claude-dispatcher/internal/cockpit"
 	"claude-dispatcher/internal/hookcmd"
 	"claude-dispatcher/internal/initcmd"
-	"claude-dispatcher/internal/ui"
 )
 
 // version is stamped by the release build via -ldflags.
@@ -22,8 +21,7 @@ var version = "dev"
 const usage = `claude-dispatcher — dispatch cockpit for Claude Code sessions
 
 Usage:
-  claude-dispatcher            open the cockpit
-  claude-dispatcher v2         open the v2 cockpit (eight-lens redesign, preview)
+  claude-dispatcher            open the cockpit (eight lenses)
   claude-dispatcher init       write config, discover repos, install the status hook
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
@@ -32,19 +30,20 @@ Usage:
 
 func main() {
 	args := os.Args[1:]
+	// Platform-specific hidden subcommands (e.g. Windows `win-focus`). A no-op
+	// returning false on non-Windows, so this stays cross-platform.
+	if handled, code := maybeWindowsSubcommand(args); handled {
+		os.Exit(code)
+	}
 	if len(args) == 0 {
-		if err := ui.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, "claude-dispatcher:", err)
-			os.Exit(1)
-		}
+		runCockpit()
 		return
 	}
 	switch args[0] {
 	case "v2":
-		if err := cockpit.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, "claude-dispatcher:", err)
-			os.Exit(1)
-		}
+		// Retained as a hidden alias for muscle memory — the cockpit is now the
+		// default, so bare `claude-dispatcher` opens it.
+		runCockpit()
 	case "init":
 		if err := initcmd.Run(); err != nil {
 			fmt.Fprintln(os.Stderr, "init:", err)
@@ -60,5 +59,12 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		os.Exit(2)
+	}
+}
+
+func runCockpit() {
+	if err := cockpit.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "claude-dispatcher:", err)
+		os.Exit(1)
 	}
 }
