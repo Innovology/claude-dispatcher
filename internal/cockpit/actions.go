@@ -16,7 +16,7 @@ import (
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
-	"claude-dispatcher/internal/tmux"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // actionMsg carries a completed action's notice back to the UI and triggers a
@@ -33,13 +33,13 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		m.notice = "no live session for \"" + feature + "\""
 		return m, nil
 	}
-	if !tmux.HasSession(rec.TmuxSession) {
+	if !supervisor.HasSession(rec.TmuxSession) {
 		m.notice = "no live tmux session for \"" + feature + "\""
 		return m, nil
 	}
-	tmux.EnsureDetachKey()
-	tmux.SetStatusHint(rec.TmuxSession)
-	return m, tea.ExecProcess(tmux.AttachCmd(rec.TmuxSession), func(err error) tea.Msg {
+	supervisor.EnsureBackKey()
+	supervisor.SetStatusHint(rec.TmuxSession)
+	return m, tea.ExecProcess(supervisor.AttachCmd(rec.TmuxSession), func(err error) tea.Msg {
 		return attachReturnedMsg{err: err}
 	})
 }
@@ -56,7 +56,7 @@ func killCmd(features []string) tea.Cmd {
 			if rec == nil {
 				continue
 			}
-			_ = tmux.KillSession(rec.TmuxSession)
+			_ = supervisor.KillSession(rec.TmuxSession)
 			if rec.Status != state.StatusDone {
 				rec.Status = state.StatusExited
 				rec.StatusReason = "killed from cockpit"
@@ -124,10 +124,10 @@ func markDoneCmd(feature string) tea.Cmd {
 func replyCmd(feature, text string) tea.Cmd {
 	return func() tea.Msg {
 		rec := recordFor(feature)
-		if rec == nil || !tmux.HasSession(rec.TmuxSession) {
+		if rec == nil || !supervisor.HasSession(rec.TmuxSession) {
 			return actionMsg{notice: "no live session to reply to"}
 		}
-		_ = exec.Command("tmux", "send-keys", "-t", "="+rec.TmuxSession, text, "Enter").Run()
+		_ = supervisor.SendKeys(rec.TmuxSession, text)
 		return actionMsg{notice: "replied to \"" + feature + "\" · session resumed"}
 	}
 }

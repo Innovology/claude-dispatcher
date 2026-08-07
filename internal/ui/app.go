@@ -18,7 +18,7 @@ import (
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/ship"
 	"claude-dispatcher/internal/state"
-	"claude-dispatcher/internal/tmux"
+	"claude-dispatcher/internal/supervisor"
 	"claude-dispatcher/internal/track"
 )
 
@@ -76,10 +76,10 @@ func Run() error {
 		firstRun = true
 		cfg = &config.Config{}
 	}
-	if !tmux.Available() {
+	if !supervisor.Available() {
 		return errors.New("tmux not found on PATH — it is required")
 	}
-	tmux.EnsureDetachKey()
+	supervisor.EnsureBackKey()
 	if err := state.EnsureDirs(); err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func loadDispatches() tea.Msg {
 		case state.StatusDone, state.StatusExited:
 			continue
 		}
-		if !tmux.HasSession(d.TmuxSession) {
+		if !supervisor.HasSession(d.TmuxSession) {
 			d.Status = state.StatusExited
 			d.StatusReason = "tmux session gone"
 			_ = state.Save(d)
@@ -293,15 +293,15 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(loadDispatches, trackRefresh(m.cfg))
 	case "enter", "a":
 		if d := m.selected(); d != nil {
-			if !tmux.HasSession(d.TmuxSession) {
+			if !supervisor.HasSession(d.TmuxSession) {
 				m.notice = "no live tmux session for this dispatcher"
 				return m, nil
 			}
 			// Re-apply on every attach: covers sessions from before this
 			// feature and any user status-line changes since launch.
-			tmux.EnsureDetachKey()
-			tmux.SetStatusHint(d.TmuxSession)
-			return m, tea.ExecProcess(tmux.AttachCmd(d.TmuxSession), func(err error) tea.Msg {
+			supervisor.EnsureBackKey()
+			supervisor.SetStatusHint(d.TmuxSession)
+			return m, tea.ExecProcess(supervisor.AttachCmd(d.TmuxSession), func(err error) tea.Msg {
 				return attachReturnedMsg{err: err}
 			})
 		}
@@ -315,7 +315,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "x":
 		if d := m.selected(); d != nil {
-			_ = tmux.KillSession(d.TmuxSession)
+			_ = supervisor.KillSession(d.TmuxSession)
 			if d.Status != state.StatusDone {
 				d.Status = state.StatusExited
 				d.StatusReason = "killed from cockpit"
