@@ -52,10 +52,15 @@ Note: the status hook embeds the absolute path of the binary that ran
 `init`. If you switch install methods later, re-run `init` so the hook
 points at the new binary.
 
-Releases are cut by tagging (`git tag v0.x.y && git push --tags`); the
-Release workflow needs a `HOMEBREW_TAP_TOKEN` secret (fine-grained PAT with
-contents:write on `Innovology/homebrew-tap`) and skips publishing when the
-secret is absent.
+Releases are cut automatically: folding a PR into main makes the Release
+workflow tag the next patch version and publish the tarballs + Homebrew cask.
+Put `release: minor` or `release: major` in the merge commit message for a
+bigger bump, or `[skip release]` to merge without releasing; merges touching
+only docs/meta files (`*.md`, `LICENSE`, `.gitignore`, `.github/`) skip on
+their own. Manual tagging (`git tag v0.x.y && git push --tags`) remains the
+escape hatch. The workflow needs a `HOMEBREW_TAP_TOKEN` secret (fine-grained
+PAT with contents:write on `Innovology/homebrew-tap`) and neither tags nor
+publishes when the secret is absent.
 
 Config lives at `~/.config/claude-dispatcher/config.toml`: scan `roots` and
 an optional `[products]` map (product → repo names) for the roll-up lens.

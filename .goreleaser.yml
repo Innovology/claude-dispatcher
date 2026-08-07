@@ -11,6 +11,10 @@ builds:
       - CGO_ENABLED=0
     goos: [darwin, linux]
     goarch: [amd64, arm64]
+    # -trimpath keeps builder filesystem paths (home dir, module cache) out
+    # of the shipped binaries.
+    flags:
+      - -trimpath
     ldflags:
       - -s -w -X main.version={{.Version}}
 
