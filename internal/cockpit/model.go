@@ -242,6 +242,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Ctrl-L: force a full clear + repaint, the universal "redraw" key —
+		// handy after a tmux attach or any terminal noise garbles the screen.
+		if msg.String() == "ctrl+l" {
+			return m, tea.ClearScreen
+		}
 		return m.handleKey(msg.String())
 	}
 	return m, nil
