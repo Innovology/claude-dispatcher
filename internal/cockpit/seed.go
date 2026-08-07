@@ -223,6 +223,7 @@ var commands = []command{
 	{name: "decisions", hint: "adrs and decision trees · 4 proposed by claude, unreviewed"},
 	{name: "plugins", hint: "deciduous, adr-tools, structurizr · enable per repo"},
 	{name: "dispatch", hint: "repo → feature → prompt, or paste a batch"},
+	{name: "new dispatch", hint: "open the repo → feature → prompt form"},
 	{name: "product cortiva", hint: "open the product — 4 repos, 9 in flight"},
 	{name: "reply", hint: "answer the selected dispatcher without attaching"},
 	{name: "attach", hint: "tmux attach at full fidelity · ctrl+\\ to come back"},

@@ -6,11 +6,18 @@
 // a small JSON registry under state.Dir(). This makes the supervisor surface
 // real on Windows without WSL2.
 //
-// Known gaps versus the tmux backend, honest by design:
-//   - In-place attach ("jump in") is not possible — the session already owns
-//     its own console window; AttachCmd only prints where to find it.
-//   - Reply / SendKeys into another console is not reliably possible, so it
-//     returns a clear error rather than pretending.
+// Parity with the tmux backend, best-effort and pending real-Windows validation:
+//   - "Jump in" (attach) raises the session's own console window to the
+//     foreground. There is no in-terminal handoff like tmux; foregrounding the
+//     session's window is the analogue. AttachCmd shells out to the hidden
+//     `win-focus` subcommand (see supervisor_windows_focus.go), which the
+//     cockpit runs via tea.ExecProcess. Windows foreground-lock rules may limit
+//     the raise — it is a preview.
+//   - Reply (SendKeys) injects the text as console input into the session's
+//     process via AttachConsole + WriteConsoleInput (see
+//     supervisor_windows_input.go), so the running claude reads it as typed
+//     input. It fails with a clear error rather than a silent success when the
+//     caller's console prevents attaching.
 //
 // This file is validated to compile and vet under GOOS=windows; its runtime
 // behaviour is pending a real Windows run.
@@ -18,7 +25,6 @@ package supervisor
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -144,18 +150,35 @@ func KillSession(name string) error {
 	return exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F").Run()
 }
 
-// SendKeys is not supported: injecting input into another process's console is
-// not reliably possible. Return an honest error rather than a silent no-op.
+// SendKeys injects text (plus Enter) into the session's console as if typed at
+// the prompt: it looks up the session's PID, then attaches to that console and
+// writes the keystrokes to its input buffer (see supervisor_windows_input.go).
+// Best-effort — a clear error, never a silent success, if the injection fails.
 func SendKeys(name, text string) error {
-	return errors.New("reply is not supported on the Windows console backend yet — attach to the window and type")
+	reg := loadRegistry()
+	pid, ok := reg[name]
+	if !ok {
+		return fmt.Errorf("reply: no tracked session %q", name)
+	}
+	if !processAlive(pid) {
+		return fmt.Errorf("reply: session %q is not running", name)
+	}
+	return injectConsoleInput(pid, encodeKeystrokes(text))
 }
 
-// AttachCmd cannot hand the terminal over — the session runs in its own console
-// window. Return a command that prints where to find it, so a tea.ExecProcess
-// attach degrades to a clear line rather than a broken handoff.
+// AttachCmd raises the session's console window to the foreground by re-invoking
+// this binary's hidden `win-focus <name>` subcommand. The cockpit runs it via
+// tea.ExecProcess; on Windows there is no in-terminal handoff like tmux, so
+// foregrounding the session's own window is the analogue (a preview — see the
+// package doc and supervisor_windows_focus.go). If we cannot resolve our own
+// path, fall back to a command that prints where to find the window.
 func AttachCmd(name string) *exec.Cmd {
-	return exec.Command("cmd", "/c", "echo",
-		fmt.Sprintf("claude-dispatcher: session %s runs in its own console window titled %q -- switch to that window to attach.", name, name))
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return exec.Command("cmd", "/c", "echo",
+			fmt.Sprintf("claude-dispatcher: session %s runs in its own console window titled %q -- switch to that window to attach.", name, name))
+	}
+	return exec.Command(exe, "win-focus", name)
 }
 
 // UniqueName returns base, or base-2, base-3, … if a session already exists.
