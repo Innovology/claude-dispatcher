@@ -9,7 +9,7 @@ before:
 builds:
   - env:
       - CGO_ENABLED=0
-    goos: [darwin, linux]
+    goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
     # -trimpath keeps builder filesystem paths (home dir, module cache) out
     # of the shipped binaries.
@@ -19,7 +19,12 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
+  # Unix stays tar.gz; Windows ships a .zip (native tooling and the
+  # scoop/winget publishers below both expect zip archives).
   - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
 
 checksum:
   name_template: checksums.txt
@@ -48,3 +53,37 @@ homebrew_casks:
           if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/claude-dispatcher"]
           end
+
+# Windows native package managers. Both mirror the Homebrew tap pattern: a
+# separate publish repo reached with its own fine-grained PAT. The skip_upload
+# template makes each a pure no-op when its token is unset, so a release that
+# only has HOMEBREW_TAP_TOKEN (the current v1 pipeline) still succeeds — the
+# manifest is generated but never pushed.
+scoops:
+  - repository:
+      owner: Innovology
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: https://github.com/Innovology/claude-dispatcher
+    description: Terminal dispatch cockpit for Claude Code sessions across many repositories
+    license: MIT
+    # No-op unless SCOOP_BUCKET_TOKEN is set, so a token-less run never fails.
+    skip_upload: '{{ if .Env.SCOOP_BUCKET_TOKEN }}false{{ else }}true{{ end }}'
+
+winget:
+  - name: claude-dispatcher
+    publisher: Innovology
+    package_identifier: Innovology.claude-dispatcher
+    short_description: Terminal dispatch cockpit for Claude Code sessions across many repositories
+    homepage: https://github.com/Innovology/claude-dispatcher
+    license: MIT
+    repository:
+      # A fork of microsoft/winget-pkgs the user owns; goreleaser opens the
+      # PR against it. Kept as branch commits so nothing publishes until a
+      # WINGET_TOKEN is present.
+      owner: Innovology
+      name: winget-pkgs
+      token: "{{ .Env.WINGET_TOKEN }}"
+      branch: "claude-dispatcher-{{ .Version }}"
+    # No-op unless WINGET_TOKEN is set, so a token-less run never fails.
+    skip_upload: '{{ if .Env.WINGET_TOKEN }}false{{ else }}true{{ end }}'

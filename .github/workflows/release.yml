@@ -41,6 +41,11 @@ jobs:
     # run before this failed in 0s. Map it into env once and gate on that.
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      # Optional Windows publishers. Unset by default; the .goreleaser.yml
+      # scoop/winget entries skip_upload when their token is empty, so the
+      # release still succeeds with only HOMEBREW_TAP_TOKEN configured.
+      SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
