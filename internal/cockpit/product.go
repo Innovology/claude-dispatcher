@@ -11,6 +11,9 @@ package cockpit
 import (
 	"strings"
 
+	"claude-dispatcher/internal/gh"
+	"claude-dispatcher/internal/repos"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -195,16 +198,28 @@ func (m model) productLeftPane(cw int) []string {
 	out = append(out, line(summary, cw, cMid, ""))
 	out = append(out, "")
 	out = append(out, line("repos", cw, cDim, ""))
+	if len(reposByProduct[name]) == 0 {
+		out = append(out, fg(cFaint, "no repos in this product yet — 2, then a to assign some"))
+	}
 	for _, r := range reposByProduct[name] {
-		out = append(out, row(cw, "", flexc(r.name, cFg), cr(r.forge, 6, cFaint)))
-		out = append(out, row(cw, "", c(itoa(r.out)+" out", 8, cDim), flexc(r.ci, r.ciColor)))
+		out = append(out, row(cw, "", flexc(r.name, cFg), cr(itoa(r.out)+" out", 8, cDim)))
+		out = append(out, line(r.ci, cw, r.ciColor, ""))
 	}
 	out = append(out, "")
 	out = append(out, line("product deploy", cw, cDim, ""))
-	out = append(out, line("Deploy production · gh actions", cw, cMid, ""))
-	out = append(out, fg(cGreen, "✓")+fg(cMid, " last green 41m ago · 6 runs today"))
+	// Read from the repo's actual deploy workflow. This block used to assert
+	// "Deploy production · gh actions ✓ last green 41m ago · 6 runs today" for
+	// every product on every machine — the design's mock, transcribed.
+	pipeline, glyph, status, statusColor := m.deployLine(name)
+	out = append(out, line(pipeline, cw, cMid, ""))
+	if status != "" {
+		out = append(out, fg(statusColor, glyph)+fg(cMid, " "+status))
+	}
 	out = append(out, "")
 	out = append(out, line("stale repos in "+name, cw, cDim, ""))
+	if !productHasStale(name) {
+		out = append(out, fg(cFaint, "nothing stale"))
+	}
 	for _, s := range staleRepos {
 		if s.product != name {
 			continue
@@ -695,4 +710,61 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		m.notice = "opening " + m.shipSelected().pr
 	}
 	return m, nil
+}
+
+// deployLine describes the product's deploy pipeline and its latest run. It
+// reports honestly when there is no workflow, when gh cannot answer, and when a
+// run is still going — none of which is the same as green.
+func (m model) deployLine(product string) (pipeline, glyph, status, color string) {
+	refs := reposByProduct[product]
+	if len(refs) == 0 {
+		return "no repos in this product", "", "", cFaint
+	}
+	r, ok := discoveredRepo(refs[0].name)
+	if !ok {
+		return "deploy workflow unknown", "", "", cFaint
+	}
+	override := ""
+	if m.cfg != nil {
+		override = m.cfg.DeployWorkflows[refs[0].name]
+	}
+	p := gh.DeployStatus(r.Path, override)
+	if p.Name == "" {
+		return "no deploy workflow · merge counts as live", "", "", cFaint
+	}
+	pipeline = p.Name + " · " + refs[0].name
+	runs := ""
+	if p.RunsToday > 0 {
+		runs = " · " + itoa(p.RunsToday) + " " + plural(p.RunsToday, "run", "runs") + " today"
+	}
+	switch {
+	case p.Status != "completed" && p.Status != "":
+		return pipeline, "●", "running now" + runs, cBlue
+	case p.Conclusion == "success":
+		return pipeline, "✓", "last green " + floorAge(p.At) + " ago" + runs, cGreen
+	case p.Conclusion == "":
+		return pipeline, "·", "no runs yet", cFaint
+	default:
+		return pipeline, "✗", "last run " + p.Conclusion + " " + floorAge(p.At) + " ago" + runs, cRed
+	}
+}
+
+// productHasStale reports whether any stale repo belongs to the product.
+func productHasStale(name string) bool {
+	for _, s := range staleRepos {
+		if s.product == name {
+			return true
+		}
+	}
+	return false
+}
+
+// discoveredRepo finds a scanned repo by name.
+func discoveredRepo(name string) (repos.Repo, bool) {
+	for _, r := range lastDiscovered {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return repos.Repo{}, false
 }

@@ -109,6 +109,12 @@ func (m model) footerHelp() string {
 	if m.lens == "floor" {
 		return m.cqFooterHelp()
 	}
+	if m.lens == "products" && m.clOpen {
+		if m.clNaming {
+			return "type the name · enter creates it · esc cancels"
+		}
+		return "j/k move · tab pane · space mark · enter assign · u unassign · n new · a done"
+	}
 	if h, ok := footerByLens[m.lens]; ok {
 		return h
 	}

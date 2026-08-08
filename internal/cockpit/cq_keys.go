@@ -192,11 +192,33 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 	// second `w` brings back exactly the draft you left.
 	if k == "w" {
 		m.cqWork = !m.cqWork
+		m.cqWorkCursor = 0
 		return m, nil, true
 	}
 	if m.cqWork {
-		if k == "esc" {
+		flat := cqWorkFlat()
+		switch k {
+		case "esc":
 			m.cqWork = false
+			return m, nil, true
+		case "j", "down":
+			m.cqWorkCursor = mini(m.cqWorkCursor+1, maxi(len(flat)-1, 0))
+			return m, nil, true
+		case "k", "up":
+			m.cqWorkCursor = maxi(m.cqWorkCursor-1, 0)
+			return m, nil, true
+		case "enter":
+			if len(flat) > 0 {
+				mm, cmd := m.attach(flat[clampCursor(m.cqWorkCursor, len(flat))].feature)
+				return mm, cmd, true
+			}
+			return m, nil, true
+		case "x":
+			if len(flat) > 0 {
+				feat := flat[clampCursor(m.cqWorkCursor, len(flat))].feature
+				m.notice = "killing \"" + feat + "\"…"
+				return m, killCmd([]string{feat}), true
+			}
 			return m, nil, true
 		}
 		if !isLensDigit(k) && k != ":" {

@@ -46,6 +46,10 @@ type snapshot struct {
 
 	backlogTickets []ticket
 
+	// discovered is the scanned repo list, carried so the view layer can reach a
+	// repo's path without re-walking the disk.
+	discovered []repos.Repo
+
 	reviews         map[string][]reviewItem
 	team            map[string][]teamRow
 	teamVerdict     map[string]string
@@ -137,6 +141,7 @@ func loadSnapshot(cfg *config.Config) snapshot {
 	}
 	var s snapshot
 	s.dataMode = "live"
+	s.discovered = ctx.repos
 	collectFloor(ctx, &s)
 	// collectCQ must follow collectFloor: it reads the forge, diff and
 	// transcript work that load already did rather than paying for it twice.
@@ -199,6 +204,9 @@ func applySnapshot(s snapshot) {
 	}
 	if s.backlogTickets != nil {
 		backlogTickets = s.backlogTickets
+	}
+	if s.discovered != nil {
+		lastDiscovered = s.discovered
 	}
 	if s.reviews != nil {
 		reviews = s.reviews

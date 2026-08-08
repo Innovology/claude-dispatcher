@@ -90,13 +90,18 @@ func productsPane(lines []string, w int) string {
 }
 
 func (m model) viewProducts(w, h int) string {
+	if m.clOpen {
+		return m.viewCluster(w, h)
+	}
 	fitv := m.fit()
 	pc := clampCursor(m.productCursor, len(products))
 
 	// Pane geometry: right focus panel is flex:0 0 30%; the left table fills the
 	// rest with a one-column rule between them. Narrow terminals show the table
 	// only (fitNarrow disables the detail pane).
-	twoPane := fitv.showDetail
+	// With nothing grouped there is no product to focus, so the onboarding gets
+	// the full width instead of sitting beside a panel about "unassigned".
+	twoPane := fitv.showDetail && m.hasRealProducts()
 	leftW := w
 	rightW := 0
 	if twoPane {
@@ -134,7 +139,20 @@ func (m model) viewProducts(w, h int) string {
 func (m model) productsLeft(cw, pc int) []string {
 	var out []string
 
-	out = append(out, line("portfolio · a product is many repos", cw, cDim, ""))
+	loose, looseColor := m.looseLine()
+	out = append(out, spread(fg(cDim, "portfolio · a product is many repos"), fg(looseColor, loose), cw+2*pad))
+
+	// With nothing mapped, the table below would be a single "unassigned" row
+	// explaining nothing. Say what a product is for and how to make one.
+	if !m.hasRealProducts() {
+		return append(out, m.productsOnboarding(cw)...)
+	}
+
+	out = append(out, row(cw, "",
+		c("a", 2, cFg), flexc("assign repos to products", cDim),
+		c("n", 2, cFg), flexc("new product", cDim),
+	))
+	out = append(out, "")
 	out = append(out, row(cw, "",
 		c("", 2, ""),
 		flexc("PRODUCT", cFaint),
@@ -292,7 +310,17 @@ func (m model) productsRight(cw, pc int) []string {
 }
 
 func (m model) updateProducts(k string) (model, tea.Cmd) {
+	if m.clOpen {
+		mm, cmd, _ := m.updateCluster(k)
+		return mm, cmd
+	}
 	switch k {
+	case "a", "n":
+		// Assigning repos to products is the only way to create the grouping
+		// every other lens reads, so it lives one key away from the portfolio.
+		m.clOpen, m.clPane, m.clRepo, m.clMarked = true, "repos", 0, map[string]bool{}
+		m.clNaming, m.clNewName = k == "n", ""
+		return m, nil
 	case "j", "down":
 		if m.productCursor < len(products)-1 {
 			m.productCursor++
@@ -310,4 +338,101 @@ func (m model) updateProducts(k string) (model, tea.Cmd) {
 		m.notice = "opened " + products[clampCursor(m.productCursor, len(products))].name
 	}
 	return m, nil
+}
+
+// hasRealProducts reports whether any product other than the "unassigned"
+// display bucket exists. A portfolio of one unassigned bucket is not a
+// portfolio, and the lens says so rather than tabulating it.
+func (m model) hasRealProducts() bool {
+	for _, p := range products {
+		if p.name != clUnassigned {
+			return true
+		}
+	}
+	return false
+}
+
+// looseLine counts repos in no product. It is the whole reason the assignment
+// editor exists, so it sits in the header and turns amber once it is the
+// majority of the portfolio.
+func (m model) looseLine() (string, string) {
+	loose, total := 0, 0
+	for prod, refs := range reposByProduct {
+		total += len(refs)
+		if prod == clUnassigned {
+			loose += len(refs)
+		}
+	}
+	if total == 0 {
+		return "", cFaint
+	}
+	if loose == 0 {
+		return "every repo assigned", cFaint
+	}
+	s := itoa(loose) + " of " + itoa(total) + " repos in no product"
+	if loose*2 > total {
+		return s, cAmber
+	}
+	return s, cFaint
+}
+
+// productsOnboarding is the empty-portfolio state: what a product is, why the
+// cockpit needs one, and the two keys that make one — followed by the repos
+// waiting to be grouped.
+func (m model) productsOnboarding(cw int) []string {
+	var out []string
+	out = append(out, "", fg(cFg, "no products yet"))
+	for _, ln := range productsWrap("A product is the thing you ship — usually several repos. This cockpit groups everything by it: which blockers come first, what shipped, whether you are going fast.", mini(cw, 86)) {
+		out = append(out, fg(cMid, ln))
+	}
+
+	rows := m.clRepos()
+	out = append(out, fg(cDim, itoa(len(rows))+" "+plural(len(rows), "repo", "repos")+" found, none grouped"))
+	out = append(out, "")
+	out = append(out, row(cw, "",
+		c("n", 2, cFg), flexc("name a product, then move repos in", cDim),
+		c("a", 2, cFg), flexc("open the repo list and assign", cDim),
+	))
+	if s := productsSuggestion(rows); s != "" {
+		out = append(out, "", fg(cFaint, s))
+	}
+
+	out = append(out, "")
+	out = append(out, row(cw, "",
+		flexc("REPO", cFaint), c("FORGE", 7, cFaint),
+		cr("OUT", 9, cFaint), cr("LAST", 10, cFaint),
+	))
+	for i, r := range rows {
+		if i >= 8 {
+			out = append(out, fg(cFaint, "…and "+itoa(len(rows)-8)+" more"))
+			break
+		}
+		out = append(out, row(cw, "",
+			flexc(r.name, cMid), c(r.forge, 7, cFaint),
+			cr(itoa(r.out), 9, cDim), cr(r.last, 10, cFaint),
+		))
+	}
+	return out
+}
+
+// productsSuggestion offers the grouping the repo names already imply, so the
+// first product is one keypress of thought rather than a blank page. It only
+// speaks when a prefix covers more than one repo.
+func productsSuggestion(rows []clRepoRow) string {
+	byPrefix := map[string]int{}
+	for _, r := range rows {
+		if i := strings.IndexAny(r.name, "-_"); i > 0 {
+			byPrefix[r.name[:i]]++
+		}
+	}
+	best, n := "", 1
+	for p, c := range byPrefix {
+		if c > n || (c == n && p < best) {
+			best, n = p, c
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	return "Your repo names suggest a start: " + itoa(n) + " of them begin \"" + best + "\"."
 }

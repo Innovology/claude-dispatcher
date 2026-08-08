@@ -269,12 +269,19 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 				forge = ctx.forge(r.Path)
 			}
 			g := repoGHFor(name)
+			last := "—"
+			if r, ok := discByName[name]; ok {
+				if d, ok := stqDaysSinceCommit(r.Path); ok {
+					last = itoa(d) + "d"
+				}
+			}
 			grid = append(grid, repoRef{
 				name:    name,
 				forge:   forge,
 				out:     openByRepo[name],
 				ci:      g.ci,
 				ciColor: g.ciColor,
+				last:    last,
 			})
 		}
 		s.reposByProduct[p] = grid

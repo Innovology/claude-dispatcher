@@ -61,6 +61,10 @@ type repoRef struct {
 	name, forge string
 	out         int
 	ci, ciColor string
+	// last is how long since the repo's last commit ("3d", "—" when git could
+	// not say). The assignment editor shows it so a repo nobody has touched in
+	// months is obvious while you are deciding where it belongs.
+	last string
 }
 
 type staleRepo struct {

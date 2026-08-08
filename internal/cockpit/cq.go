@@ -629,3 +629,13 @@ func cqSentence(s string) string {
 	}
 	return string(r) + "."
 }
+
+// cqWorkFlat is the working view's rows in the order they render, so a cursor
+// over the grouped display has something one-dimensional to index.
+func cqWorkFlat() []cqWorkRow {
+	var out []cqWorkRow
+	for _, g := range cqWorking {
+		out = append(out, g.rows...)
+	}
+	return out
+}
