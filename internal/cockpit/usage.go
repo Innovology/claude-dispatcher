@@ -113,7 +113,7 @@ func (m model) usageRight(w int) []string {
 	for _, md := range usageModels {
 		out = append(out, "")
 		col := cGreen
-		if md.name == "opus" {
+		if usgIsPremium(md.name) {
 			col = cAmber
 		}
 		lead := fg(cWhite, padTo(md.name, 9, alignLeft)) + "  " +
@@ -150,6 +150,17 @@ func (m model) usageRight(w int) []string {
 }
 
 // ---- usage-local helpers ----------------------------------------------------
+
+// usgIsPremium reports whether a model row is one of the expensive tiers, which
+// the by-model bars draw in amber rather than green.
+func usgIsPremium(name string) bool {
+	for _, p := range usgPremium {
+		if name == p {
+			return true
+		}
+	}
+	return false
+}
 
 // usageFill lays left flush-left and right flush-right within width w, the
 // terminal analogue of the design's margin-left:auto.

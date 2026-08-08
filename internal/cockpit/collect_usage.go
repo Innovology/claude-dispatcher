@@ -8,6 +8,8 @@ package cockpit
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"claude-dispatcher/internal/state"
@@ -66,14 +68,15 @@ func collectUsage(ctx *collectCtx, s *snapshot) {
 
 	// ---- by model (this week) -----------------------------------------------
 	notes := map[string]string{
+		"fable":  "the top tier — hardest and longest-horizon work",
+		"mythos": "the top tier — hardest and longest-horizon work",
 		"opus":   "blocked, urgent and long-context work",
 		"sonnet": "the default for feature work",
 		"haiku":  "pr writing, changelogs, quick passes",
-		"other":  "other models",
 	}
 	wk := sum.Weekly
 	models := []usageModel{}
-	for _, name := range []string{"opus", "sonnet", "haiku", "other"} {
+	for _, name := range usgModelOrder(wk.ByModel) {
 		tok := wk.ByModel[name]
 		if tok == 0 {
 			continue
@@ -104,9 +107,16 @@ func collectUsage(ctx *collectCtx, s *snapshot) {
 	// ---- advice / what would change it --------------------------------------
 	advice := []usageAdviceItem{}
 	if wk.Total > 0 {
-		if op := wk.ByModel["opus"]; op > 0 {
+		// The premium tiers together, not opus alone — fable/mythos price above
+		// opus, so counting only opus understates what the week actually cost.
+		premium := 0
+		for _, name := range usgPremium {
+			premium += wk.ByModel[name]
+		}
+		if premium > 0 {
 			advice = append(advice, usageAdviceItem{
-				text: fmt.Sprintf("opus is %d%% of the week's tokens — the expensive share", 100*op/wk.Total), color: cAmber,
+				text: fmt.Sprintf("%s is %d%% of the week's tokens — the expensive share",
+					usgJoin(usgPresent(wk.ByModel, usgPremium)), 100*premium/wk.Total), color: cAmber,
 			})
 		}
 		advice = append(advice, usageAdviceItem{
@@ -120,6 +130,58 @@ func collectUsage(ctx *collectCtx, s *snapshot) {
 		})
 	}
 	s.usageAdvice = advice
+}
+
+// usgPremium are the tiers that price above the rest — the "expensive share".
+var usgPremium = []string{"fable", "mythos", "opus"}
+
+// usgModelOrder lists the models to render: the known families in tier order
+// first, then anything unrecognised, heaviest first. An unknown model shows
+// under its own id rather than being swept into a nameless "other" row.
+func usgModelOrder(byModel map[string]int) []string {
+	known := map[string]bool{}
+	for _, f := range usage.Families {
+		known[f] = true
+	}
+	order := append([]string{}, usage.Families...)
+
+	rest := []string{}
+	for name := range byModel {
+		if !known[name] {
+			rest = append(rest, name)
+		}
+	}
+	sort.Slice(rest, func(i, j int) bool {
+		if byModel[rest[i]] != byModel[rest[j]] {
+			return byModel[rest[i]] > byModel[rest[j]]
+		}
+		return rest[i] < rest[j]
+	})
+	return append(order, rest...)
+}
+
+// usgPresent keeps only the names that drew tokens this week.
+func usgPresent(byModel map[string]int, names []string) []string {
+	out := []string{}
+	for _, n := range names {
+		if byModel[n] > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// usgJoin renders a name list as prose: "fable", "fable and opus",
+// "fable, mythos and opus".
+func usgJoin(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
 }
 
 // usgAgo formats a rough age like "3h", "2d".
