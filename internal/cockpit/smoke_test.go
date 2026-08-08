@@ -43,57 +43,55 @@ func TestEveryLensRenders(t *testing.T) {
 	}
 }
 
-// TestFloorInteractions exercises the floor lens navigation, filtering,
-// grouping, marks and overlays.
-func TestFloorInteractions(t *testing.T) {
+// TestChromeOverlaysFromTriage walks the overlays reachable from the triage
+// lens. Its own keys are covered in cq_test.go; what matters here is that the
+// palette and the help sheet still open over it and render.
+func TestChromeOverlaysFromTriage(t *testing.T) {
+	installCQFixture(t) // a non-empty queue, so the prompt does not eat the keys
 	m := newModel()
 	m.width, m.height = 190, 44
 
-	for _, k := range []string{"j", "j", "l", "k", "h", "t", "t", "w", "w", "space", "M", "p", "G", "g", "D"} {
-		m = press(m, k)
-		renderClean(t, m, "floor key "+k)
-	}
-	// close diff
-	m = press(m, "esc")
-
-	// filter flow: open, type, render, escape.
-	m = press(m, "/")
-	for _, ch := range []string{"c", "o", "r"} {
-		m = press(m, ch)
-	}
-	renderClean(t, m, "floor filtered")
-	m = press(m, "esc")
-
-	// help + palette overlays.
 	m = press(m, "?")
 	renderClean(t, m, "help")
 	m = press(m, "esc")
+
 	m = press(m, ":")
 	m = press(m, "u")
 	renderClean(t, m, "palette")
 	m = press(m, "esc")
+
+	m = press(m, "w")
+	renderClean(t, m, "working view")
+	m = press(m, "esc")
 }
 
-// TestFloorShipAndConfirm walks the ship confirmation and the merge animation.
-func TestFloorShipAndConfirm(t *testing.T) {
+// TestShipConfirmAndMergeAnimation walks the ship confirmation and the merge
+// animation. No key opens a ship confirm on the triage lens now, so the pending
+// confirm is set up directly.
+func TestShipConfirmAndMergeAnimation(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "y") // opens confirm on the selected shippable dispatcher
-	if m.confirm == nil {
-		t.Skip("selected dispatcher is not shippable; nothing to confirm")
+	m.confirm = &confirmState{
+		label: "ship \"one\" to production?", kind: "ship", feature: "one", repo: "alpha-api",
 	}
 	renderClean(t, m, "confirm bar")
 	mm, _ := m.doConfirm()
-	// advance the merge animation to completion.
+	if mm.shipFx == nil {
+		t.Fatal("confirming a ship should start the merge animation")
+	}
 	for i := 0; i < 20; i++ {
 		next, _ := mm.advanceShip()
 		mm = next
+	}
+	if mm.shipFx != nil || mm.justLanded != "one" {
+		t.Errorf("the animation should finish and land: fx=%+v landed=%q", mm.shipFx, mm.justLanded)
 	}
 	renderClean(t, mm, "post-ship")
 }
 
 // TestProductTabs cycles the review/team/shipped tabs and their overlays.
 func TestProductTabs(t *testing.T) {
+	installFixture(t) // there has to be a product to open
 	m := newModel()
 	m.width, m.height = 190, 44
 	m = press(m, "2")     // products
@@ -119,6 +117,7 @@ func TestProductTabs(t *testing.T) {
 
 // TestBacklogAndDecisions covers the remaining interactive lenses.
 func TestBacklogAndDecisions(t *testing.T) {
+	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
 
@@ -140,7 +139,7 @@ func TestAnimationMessagesDoNotPanic(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 130, 40
 	var tm tea.Model = m
-	for _, msg := range []tea.Msg{followTickMsg{}, shipTickMsg{}, landClearMsg{}, undoClearMsg{seq: 1}, tea.WindowSizeMsg{Width: 120, Height: 40}} {
+	for _, msg := range []tea.Msg{shipTickMsg{}, landClearMsg{}, undoClearMsg{seq: 1}, cqFlashMsg{seq: 1}, tea.WindowSizeMsg{Width: 120, Height: 40}} {
 		tm, _ = tm.Update(msg)
 	}
 	if strings.TrimSpace(tm.(model).View()) == "" {

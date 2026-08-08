@@ -2,13 +2,13 @@ package cockpit
 
 // interactions2_test.go extends smoke_test.go / live_test.go with the key
 // branches those didn't reach: overlay open/close variants, the palette's
-// navigation and dispatch, the settings editor's field types, the floor's
-// follow/kill/attach/reply/header-ticket/stack keys, the backlog's
+// navigation and dispatch, the settings editor's field types, the backlog's
 // dispatch/pick-all keys, the decisions lens's remaining nav, the products
 // and product lenses' remaining tabs/overlays, and a handful of small pure
-// helpers in model.go/seed.go/live.go. Tests that read/write the package's
-// global data vars always snapshot and restore them; nothing here touches a
-// real tmux session, gh, or the network.
+// helpers in model.go/types.go/live.go. The triage lens's own keys live in
+// cq_test.go. Tests that read/write the package's global data vars always
+// snapshot and restore them; nothing here touches a real tmux session, gh, or
+// the network.
 
 import (
 	"os/exec"
@@ -22,30 +22,55 @@ import (
 
 // ---- keys.go: applyEdit / filteredCommands / runCommand ---------------------
 
+// runes builds the message a terminal delivers for a run of typed characters.
+// Bubbletea batches a fast burst or a paste into one message like this.
+func runes(s string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+}
+
 func TestApplyEditBranches(t *testing.T) {
-	if next, submit, cancel := applyEdit("hello", "esc"); next != "hello" || submit || !cancel {
+	if next, submit, cancel := applyEdit("hello", "esc", tea.KeyMsg{Type: tea.KeyEsc}); next != "hello" || submit || !cancel {
 		t.Errorf("esc: %q %v %v", next, submit, cancel)
 	}
-	if next, submit, cancel := applyEdit("hello", "enter"); next != "hello" || !submit || cancel {
+	if next, submit, cancel := applyEdit("hello", "enter", tea.KeyMsg{Type: tea.KeyEnter}); next != "hello" || !submit || cancel {
 		t.Errorf("enter: %q %v %v", next, submit, cancel)
 	}
-	if next, _, _ := applyEdit("hello", "backspace"); next != "hell" {
+	if next, _, _ := applyEdit("hello", "backspace", tea.KeyMsg{Type: tea.KeyBackspace}); next != "hell" {
 		t.Errorf("backspace: %q", next)
 	}
-	if next, _, _ := applyEdit("", "backspace"); next != "" {
+	if next, _, _ := applyEdit("", "backspace", tea.KeyMsg{Type: tea.KeyBackspace}); next != "" {
 		t.Errorf("backspace on empty: %q", next)
 	}
-	if next, _, _ := applyEdit("hi", "space"); next != "hi " {
-		t.Errorf("space: %q", next)
+	if next, _, _ := applyEdit("hi", "space", tea.KeyMsg{}); next != "hi " {
+		t.Errorf("space by name: %q", next)
 	}
-	if next, _, _ := applyEdit("hi", " "); next != "hi " {
+	if next, _, _ := applyEdit("hi", " ", tea.KeyMsg{Type: tea.KeySpace}); next != "hi " {
 		t.Errorf("literal space: %q", next)
 	}
-	if next, _, _ := applyEdit("hi", "!"); next != "hi!" {
-		t.Errorf("single rune default: %q", next)
+	if next, _, _ := applyEdit("hi", "!", runes("!")); next != "hi!" {
+		t.Errorf("single rune: %q", next)
 	}
-	if next, submit, cancel := applyEdit("hi", "up"); next != "hi" || submit || cancel {
-		t.Errorf("unknown multi-rune key should be a no-op: %q %v %v", next, submit, cancel)
+	if next, submit, cancel := applyEdit("hi", "up", tea.KeyMsg{Type: tea.KeyUp}); next != "hi" || submit || cancel {
+		t.Errorf("a named key types nothing: %q %v %v", next, submit, cancel)
+	}
+	if next, _, _ := applyEdit("", "alt+d", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d"), Alt: true}); next != "" {
+		t.Errorf("alt chord is not text: %q", next)
+	}
+}
+
+// A burst of typing, or a paste, arrives as ONE message carrying every rune.
+// Rebuilding text from the key name alone dropped the whole run, which left the
+// filter, palette, reply box and the new-dispatch form dead to normal typing.
+func TestApplyEditKeepsWholeBurst(t *testing.T) {
+	burst := runes("count")
+	next, _, _ := applyEdit("", burst.String(), burst)
+	if next != "count" {
+		t.Errorf("burst dropped: got %q, want %q", next, "count")
+	}
+
+	paste := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("fix the retry loop"), Paste: true}
+	if next, _, _ = applyEdit("", paste.String(), paste); next != "fix the retry loop" {
+		t.Errorf("paste dropped: got %q", next)
 	}
 }
 
@@ -90,10 +115,10 @@ func TestRunCommandBranches(t *testing.T) {
 
 	// A "product X" command opens the product lens.
 	m = newModel()
-	m.paletteOpen, m.paletteText = true, "product cortiva"
+	m.paletteOpen, m.paletteText = true, "product"
 	mm, _ = m.runCommand()
 	if mm.lens != "product" {
-		t.Errorf("runCommand('product cortiva') lens = %q", mm.lens)
+		t.Errorf("runCommand('product') lens = %q", mm.lens)
 	}
 
 	// A command outside the direct map / product prefix leaves the lens
@@ -129,6 +154,9 @@ func TestRunCommandBranches(t *testing.T) {
 func TestHandleKeyOverlayVariants(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 190, 44
+	// Off the triage lens first: there the dispatch prompt owns the keyboard
+	// whenever the queue is empty, so '?' and ':' would be typed, not routed.
+	m = press(m, "2")
 
 	// help: open with '?', close with 'q'.
 	m = press(m, "?")
@@ -139,28 +167,6 @@ func TestHandleKeyOverlayVariants(t *testing.T) {
 	if m.helpOpen {
 		t.Error("q should close help")
 	}
-
-	// diff: open with 'D', close with 'q'.
-	m = press(m, "D")
-	if !m.diffOpen {
-		t.Fatal("D should open diff")
-	}
-	m = press(m, "q")
-	if m.diffOpen {
-		t.Error("q should close diff")
-	}
-
-	// filter: open, type, submit with enter (keeps the typed filter).
-	m = press(m, "/")
-	m = press(m, "x")
-	m = press(m, "enter")
-	if m.filterOpen {
-		t.Error("enter should close the filter editor")
-	}
-	if m.filter != "x" {
-		t.Errorf("submitted filter = %q, want to keep typed text", m.filter)
-	}
-	m = press(m, "esc") // clear marks/filter back to a clean state
 
 	// palette: open, navigate down/up, then run via enter.
 	m = press(m, ":")
@@ -191,17 +197,6 @@ func TestHandleKeyOverlayVariants(t *testing.T) {
 		t.Error("esc should close settings")
 	}
 
-	// tab toggles narrowPane both ways.
-	before := m.narrowPane
-	m = press(m, "tab")
-	if m.narrowPane == before {
-		t.Error("tab should toggle narrowPane")
-	}
-	m = press(m, "tab")
-	if m.narrowPane != before {
-		t.Error("tab again should toggle narrowPane back")
-	}
-
 	// q / ctrl+c both quit.
 	_, cmd := m.handleKey("q")
 	if cmd == nil {
@@ -213,13 +208,33 @@ func TestHandleKeyOverlayVariants(t *testing.T) {
 	}
 }
 
-func TestHandleKeyConfirmCancel(t *testing.T) {
+// ctrl+c is resolved before every overlay and lens, so no mode can trap the
+// process — including the triage draft, which otherwise swallows q.
+func TestCtrlCAlwaysQuits(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "x") // opens a kill confirm on the selected dispatcher
-	if m.confirm == nil {
-		t.Skip("nothing selected to confirm a kill on")
+	m.cqDispatch = true
+	m = press(m, "x") // typed into the dispatch draft
+	if m.cqDraft != "x" {
+		t.Fatalf("cqDraft = %q, want the key typed into the draft", m.cqDraft)
 	}
+	if _, cmd := m.handleKey("ctrl+c"); cmd == nil {
+		t.Error("ctrl+c should quit from the dispatch draft")
+	}
+	m.settings = newSettings(nil)
+	if _, cmd := m.handleKey("ctrl+c"); cmd == nil {
+		t.Error("ctrl+c should quit from an overlay")
+	}
+}
+
+func TestHandleKeyConfirmCancel(t *testing.T) {
+	// Nothing on the triage lens opens a confirm any more (its acts fire behind
+	// an 850ms flash), so the pending confirm is set up directly — the bar and
+	// its y/n/esc handling are still live chrome.
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.confirm = &confirmState{label: "kill \"one\"", kind: "kill", feature: "one"}
+
 	m = press(m, "n")
 	if m.confirm != nil {
 		t.Error("n should cancel the confirm")
@@ -228,49 +243,17 @@ func TestHandleKeyConfirmCancel(t *testing.T) {
 		t.Errorf("notice = %q, want cancelled", m.notice)
 	}
 
-	m = press(m, "x")
-	if m.confirm == nil {
-		t.Fatal("x should reopen a confirm")
-	}
+	m.confirm = &confirmState{label: "kill \"one\"", kind: "kill", feature: "one"}
+	renderClean(t, m, "confirm bar")
 	m = press(m, "esc")
 	if m.confirm != nil {
 		t.Error("esc should also cancel the confirm")
 	}
 }
 
-func TestHandleKeyReplyFocused(t *testing.T) {
-	m := newModel()
-	m.width, m.height = 190, 44
-	m = press(m, "r") // focuses the reply input on the floor's selected dispatcher
-	if !m.replyFocused {
-		t.Fatal("r should focus reply")
-	}
-	m = press(m, "h")
-	m = press(m, "i")
-	if m.replyText != "hi" {
-		t.Errorf("replyText = %q", m.replyText)
-	}
-	// esc cancels without submitting.
-	m = press(m, "esc")
-	if m.replyFocused {
-		t.Error("esc should unfocus reply")
-	}
-
-	// submit path returns a replyCmd (feature resolves via floorSelectedFeature).
-	m = press(m, "r")
-	m = press(m, "!")
-	next, cmd := m.handleKey("enter")
-	mm := next.(model)
-	if mm.replyFocused {
-		t.Error("enter should unfocus reply")
-	}
-	if cmd == nil {
-		t.Error("submitting a reply should return a cmd")
-	}
-}
-
 func TestUndoKey(t *testing.T) {
 	m := newModel()
+	m.lens = "products" // on triage an empty queue types 'u' into the draft
 	m.undo = "ship widget"
 	mm, _ := m.handleKey("u")
 	if mm.(model).undo != "" {
@@ -281,93 +264,13 @@ func TestUndoKey(t *testing.T) {
 	}
 }
 
-// ---- floor.go: remaining updateFloor branches --------------------------------
-
-func TestFloorFollowToggle(t *testing.T) {
-	m := newModel()
-	m.width, m.height = 190, 44
-	m = press(m, "F")
-	if !m.follow {
-		t.Fatal("F should turn follow on")
-	}
-	m = press(m, "F")
-	if m.follow {
-		t.Error("F again should turn follow off")
-	}
-}
-
-func TestFloorAttachKillMarkDoneDeny(t *testing.T) {
-	m := newModel()
-	m.width, m.height = 190, 44
-
-	// enter/a attach: seed data has no live record, so this degrades to a
-	// notice rather than a real tmux exec.
-	next, _ := m.handleKey("enter")
-	mm := next.(model)
-	if !strings.Contains(mm.notice, "no live") {
-		t.Errorf("attach notice = %q", mm.notice)
-	}
-
-	m2 := newModel()
-	m2.width, m2.height = 190, 44
-	next2, cmd := m2.handleKey("d")
-	if cmd == nil {
-		t.Error("d should return a markDoneCmd")
-	}
-	_ = next2
-
-	m3 := newModel()
-	m3.width, m3.height = 190, 44
-	m3 = press(m3, "n")
-	if m3.notice == "" {
-		t.Error("n should always leave a notice")
-	}
-}
-
-func TestFloorGroupHeaderTicketNav(t *testing.T) {
-	m := newModel()
-	m.width, m.height = 190, 44
-	m = press(m, "l") // cursor is still 0: the first entry in product grouping is a header
-	if !m.entry().header {
-		t.Skip("first entry is not a header under the current seed grouping")
-	}
-	for _, k := range []string{"j", "j", "k", "enter", "d"} {
-		m = press(m, k)
-		renderClean(t, m, "header ticket nav "+k)
-	}
-	if m.notice == "" {
-		t.Error("header ticket dispatch should always leave a notice")
-	}
-}
-
-func TestFloorStackNavAndReply(t *testing.T) {
-	m := newModel()
-	m.width, m.height = 190, 44
-	m = press(m, "j") // move off the header row
-	m = press(m, "l") // detail pane
-	if m.entry().header {
-		t.Skip("cursor landed back on a header under the current seed grouping")
-	}
-	for _, k := range []string{"j", "k", "enter"} {
-		m = press(m, k)
-		renderClean(t, m, "stack nav "+k)
-	}
-	m = press(m, "r")
-	if !m.replyFocused {
-		t.Fatal("r in the stack pane should focus reply")
-	}
-	m = press(m, "esc")
-	if m.replyFocused {
-		t.Error("esc should cancel the stack-pane reply")
-	}
-}
-
 // ---- backlog.go: dispatch / pick-all / source cycle --------------------------
 
 func TestBacklogDispatchAndPickAll(t *testing.T) {
+	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "5") // backlog lens, cursor 0: CTV-124, taken == ""
+	m = press(m, "5") // backlog lens, cursor 0: an untaken ticket
 
 	// Untaken ticket: enter returns a launchCmd (m.cfg is nil, so the cmd
 	// itself degrades harmlessly if ever invoked — see actions_test.go).
@@ -377,7 +280,7 @@ func TestBacklogDispatchAndPickAll(t *testing.T) {
 	}
 	m = next.(model)
 
-	// Move to a ticket that already has a dispatcher (seed: index 3, "fixture import").
+	// Move to a ticket that already has a dispatcher (fixture: index 3).
 	m.backlogCursor = 3
 	next2, cmd2 := m.handleKey("enter")
 	m = next2.(model)
@@ -423,7 +326,7 @@ func TestDecisionsRemainingKeys(t *testing.T) {
 
 func TestDecisionsEmptyRepoBranch(t *testing.T) {
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 	decisions = map[string][]decision{"empty-repo": {}}
 	decisionRepoOrder = []string{"empty-repo"}
 	// pluginForRepo falls back to plugins[3] by convention (mirrors the
@@ -452,6 +355,7 @@ func TestDecisionsEmptyRepoBranch(t *testing.T) {
 // ---- products.go / product.go: remaining tabs/overlays -----------------------
 
 func TestProductsBoundaryAndEnter(t *testing.T) {
+	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
 	m = press(m, "2")
@@ -472,9 +376,10 @@ func TestProductsBoundaryAndEnter(t *testing.T) {
 }
 
 func TestProductReviewTabFull(t *testing.T) {
+	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "3") // product lens, defaults to "cortiva" (productCursor 0)
+	m = press(m, "3") // product lens, first product in the fixture
 	m = press(m, "R")
 
 	// cursor 0 is a "mine" review: approving your own PR is refused.
@@ -536,6 +441,7 @@ func TestProductTeamTabNoop(t *testing.T) {
 }
 
 func TestProductShippedTabFull(t *testing.T) {
+	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
 	m = press(m, "3")
@@ -580,7 +486,7 @@ func TestSettingsEditEveryField(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 
 	m := newModel()
 	m.width, m.height = 190, 44
@@ -688,46 +594,6 @@ func TestKeyToMsgBranches(t *testing.T) {
 	}
 }
 
-// ---- model.go: small selection helpers ---------------------------------------
-
-func TestModelSmallHelpers(t *testing.T) {
-	m := newModel()
-	m.groupBy = ""
-	if got := m.groupByMode(); got != "product" {
-		t.Errorf("groupByMode default = %q", got)
-	}
-	m.groupBy = "repo"
-	if got := m.groupByMode(); got != "repo" {
-		t.Errorf("groupByMode explicit = %q", got)
-	}
-
-	x := dispatch{feature: "f1", agents: []agent{{model: "opus"}}}
-	if got := m.modelOf(x); got != "opus" {
-		t.Errorf("modelOf falls back to agent model: %q", got)
-	}
-	m.modelsBy = map[string]string{"f1": "haiku"}
-	if got := m.modelOf(x); got != "haiku" {
-		t.Errorf("modelOf override: %q", got)
-	}
-	xNoAgent := dispatch{feature: "f2"}
-	if got := m.modelOf(xNoAgent); got != "sonnet" {
-		t.Errorf("modelOf default: %q", got)
-	}
-
-	y := dispatch{feature: "f3", mode: "auto"}
-	if got := m.modeOf(y); got != "auto" {
-		t.Errorf("modeOf falls back to x.mode: %q", got)
-	}
-	m.modesBy = map[string]string{"f3": "full"}
-	if got := m.modeOf(y); got != "full" {
-		t.Errorf("modeOf override: %q", got)
-	}
-	yNoMode := dispatch{feature: "f4"}
-	if got := m.modeOf(yNoMode); got != "edits" {
-		t.Errorf("modeOf default: %q", got)
-	}
-}
-
 func TestDoConfirmNilAndKill(t *testing.T) {
 	m := newModel()
 	mm, cmd := m.doConfirm()
@@ -738,10 +604,7 @@ func TestDoConfirmNilAndKill(t *testing.T) {
 
 	m2 := newModel()
 	m2.width, m2.height = 190, 44
-	m2 = press(m2, "x")
-	if m2.confirm == nil {
-		t.Skip("nothing selected to confirm a kill on")
-	}
+	m2.confirm = &confirmState{label: "kill \"one\"", kind: "kill", features: []string{"one"}}
 	mm2, cmd2 := m2.doConfirm()
 	if cmd2 == nil {
 		t.Error("doConfirm(kill) should return a batched cmd")
@@ -756,15 +619,9 @@ func TestDoConfirmNilAndKill(t *testing.T) {
 
 // ---- seed.go: fallback branches -----------------------------------------------
 
-func TestRepoProductAndModeByIDFallbacks(t *testing.T) {
+func TestRepoProductFallback(t *testing.T) {
 	if got := repoProduct("no-such-repo-xyz"); got != "—" {
 		t.Errorf("repoProduct(unknown) = %q, want —", got)
-	}
-	if got := modeByID("no-such-mode"); got != modes[1] {
-		t.Errorf("modeByID(unknown) = %+v, want the 'edits' fallback", got)
-	}
-	if got := modeByID("plan"); got.label != "plan only" {
-		t.Errorf("modeByID(plan) = %+v", got)
 	}
 }
 

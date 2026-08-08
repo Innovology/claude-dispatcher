@@ -14,6 +14,7 @@ import (
 
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
@@ -102,6 +103,7 @@ func shipCmd(feature string) tea.Cmd {
 		rec.Status = state.StatusDone
 		rec.StatusReason = "shipped from cockpit"
 		_ = state.Save(rec)
+		gh.InvalidateCache() // the merge just changed what the forge would say
 		return actionMsg{notice: "✓ " + feature + " marked live" + merged}
 	}
 }

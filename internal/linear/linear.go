@@ -23,7 +23,7 @@ func Configured() bool {
 // Issue is a single Linear issue assigned to the current viewer.
 type Issue struct {
 	ID          string
-	Identifier  string // e.g. "CTV-124"
+	Identifier  string // e.g. "ENG-124"
 	Title       string
 	Description string
 	Priority    string // "Urgent"/"High"/"Medium"/"Low"/"No priority"

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -357,17 +358,28 @@ func TestFloorStateBranches(t *testing.T) {
 	}
 }
 
-func TestFloorProduct(t *testing.T) {
-	saved := captureVars()
-	defer applySnapshot(saved)
-	reposByProduct = map[string][]repoRef{"shop": {{name: "shop-api"}}}
-	productOrder = []string{"shop"}
+// productFor resolves from the config in ctx, not from the package's product
+// vars — collectFloor runs before collectProducts fills those, so reading them
+// meant every dispatch landed in no group at all on the first load.
+func TestCollectCtxProductFor(t *testing.T) {
+	ctx := &collectCtx{cfg: &config.Config{
+		Products: map[string][]string{"shop": {"shop-api"}},
+	}}
 
-	if got := floorProduct(&state.Dispatch{Product: "explicit"}); got != "explicit" {
-		t.Errorf("explicit product: got %q", got)
+	if got := ctx.productFor(&state.Dispatch{Product: "shop"}); got != "shop" {
+		t.Errorf("recorded product: got %q, want shop", got)
 	}
-	if got := floorProduct(&state.Dispatch{RepoName: "shop-api"}); got != "shop" {
-		t.Errorf("fallback via repoProduct: got %q", got)
+	if got := ctx.productFor(&state.Dispatch{RepoName: "shop-api"}); got != "shop" {
+		t.Errorf("mapped by repo name: got %q, want shop", got)
+	}
+	// A repo with no mapping, and a stale product no longer in the config,
+	// both fold into "unassigned" — the same key collectProducts uses, so the
+	// floor's groups line up with the products lens.
+	if got := ctx.productFor(&state.Dispatch{RepoName: "not-mapped"}); got != "unassigned" {
+		t.Errorf("unmapped repo: got %q, want unassigned", got)
+	}
+	if got := ctx.productFor(&state.Dispatch{Product: "retired"}); got != "unassigned" {
+		t.Errorf("product no longer in config: got %q, want unassigned", got)
 	}
 }
 
@@ -422,38 +434,6 @@ func TestFloorAsk(t *testing.T) {
 	}
 	if got.evidence != "3 commits · 5m" {
 		t.Errorf("evidence = %q", got.evidence)
-	}
-}
-
-func TestFloorStackState(t *testing.T) {
-	if got := floorStackState(&state.Dispatch{PRState: "MERGED"}, gh.Checks{}, gh.Review{}); got != "merged" {
-		t.Errorf("merged: %q", got)
-	}
-	if got := floorStackState(&state.Dispatch{}, gh.Checks{Failing: 1}, gh.Review{}); got != "blocked" {
-		t.Errorf("failing checks: %q", got)
-	}
-	if got := floorStackState(&state.Dispatch{}, gh.Checks{}, gh.Review{ChangesRequested: 1}); got != "blocked" {
-		t.Errorf("changes requested: %q", got)
-	}
-	if got := floorStackState(&state.Dispatch{}, gh.Checks{}, gh.Review{}); got != "ready" {
-		t.Errorf("ready: %q", got)
-	}
-}
-
-func TestFloorActivityAndSaid(t *testing.T) {
-	tail := []string{"said one", "⚙ Bash", "⚙ Read", "said two", "⚙ Grep", "⚙ Edit", "⚙ Write"}
-	acts := floorActivity(tail)
-	if len(acts) != 4 {
-		t.Fatalf("floorActivity len = %d, want capped at 4", len(acts))
-	}
-	if got := floorSaid(tail); got != "said two" {
-		t.Errorf("floorSaid = %q, want %q", got, "said two")
-	}
-	if got := floorSaid([]string{"⚙ Bash"}); got != "" {
-		t.Errorf("floorSaid all-tool = %q, want empty", got)
-	}
-	if got := floorSaid(nil); got != "" {
-		t.Errorf("floorSaid nil = %q, want empty", got)
 	}
 }
 

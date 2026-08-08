@@ -16,6 +16,7 @@ func TestSettingsEditPersists(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 160, 40
 	m.cfg = &config.Config{Roots: []string{"~/repos"}}
+	m.lens = "products" // ',' is swallowed by the triage lens; the palette is its way in
 
 	m = press(m, ",") // open settings
 	if m.settings == nil {

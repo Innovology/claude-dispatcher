@@ -35,13 +35,13 @@ func TestFirstLine(t *testing.T) {
 func withFakeRecord(t *testing.T, feature string, rec *state.Dispatch) {
 	t.Helper()
 	saved := captureVars()
-	t.Cleanup(func() { applySnapshot(saved) })
+	t.Cleanup(func() { restoreVars(saved) })
 	liveRecords = map[string]*state.Dispatch{feature: rec}
 }
 
 func TestAttachNoRecord(t *testing.T) {
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 	liveRecords = map[string]*state.Dispatch{}
 
 	m := newModel()
@@ -70,7 +70,7 @@ func TestAttachNoTmuxSession(t *testing.T) {
 
 func TestKillCmdNothingToKill(t *testing.T) {
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 	liveRecords = map[string]*state.Dispatch{}
 
 	msg := killCmd(nil)()
@@ -90,7 +90,7 @@ func TestKillCmdReal(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 
 	rec := &state.Dispatch{
 		ID: "kill1", Feature: "to kill", TmuxSession: "cockpit-test-nonexistent-4471",
@@ -133,7 +133,7 @@ func TestKillCmdReal(t *testing.T) {
 
 func TestShipCmdNoRecord(t *testing.T) {
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 	liveRecords = map[string]*state.Dispatch{}
 
 	msg := shipCmd("ghost")()
@@ -179,7 +179,7 @@ func TestShipCmdWithOpenPRMergeFails(t *testing.T) {
 
 func TestMarkDoneCmd(t *testing.T) {
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 	liveRecords = map[string]*state.Dispatch{}
 
 	msg := markDoneCmd("ghost")()
@@ -204,7 +204,7 @@ func TestMarkDoneCmd(t *testing.T) {
 
 func TestReplyCmdNoSession(t *testing.T) {
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 	liveRecords = map[string]*state.Dispatch{}
 
 	msg := replyCmd("ghost", "hello")()
@@ -264,7 +264,7 @@ func TestLaunchCmdEnsureBranchFails(t *testing.T) {
 
 func TestUpdateMessageBranches(t *testing.T) {
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 
 	m := newModel()
 	var tm tea.Model = m
@@ -332,20 +332,21 @@ func TestUpdateMessageBranches(t *testing.T) {
 		t.Error("attachReturnedMsg without cfg should not reload")
 	}
 
-	// followTickMsg: not following → no-op; following → ticks and grows tailN.
-	tm, cmd = tm.Update(followTickMsg{})
-	if cmd != nil {
-		t.Error("followTickMsg while not following should be a no-op")
+	// cqFlashMsg: a stale seq is ignored, the current one ends the flash and
+	// clears the item it was fired on.
+	mStale := tm.(model)
+	mStale.cqFlash, mStale.cqFlashSeq, mStale.cqFlashID = "killed", 4, "id-1"
+	tm, _ = mStale.Update(cqFlashMsg{seq: 1})
+	if tm.(model).cqFlash != "killed" {
+		t.Error("a superseded cqFlashMsg must not clear the flash")
 	}
-	mFollow := tm.(model)
-	mFollow.follow = true
-	before := mFollow.tailN
-	tm2, cmd2 := mFollow.Update(followTickMsg{})
-	if cmd2 == nil {
-		t.Error("followTickMsg while following should tick again")
+	tm, _ = tm.(model).Update(cqFlashMsg{seq: 4})
+	mDone := tm.(model)
+	if mDone.cqFlash != "" {
+		t.Error("the matching cqFlashMsg should end the flash")
 	}
-	if tm2.(model).tailN != before+1 {
-		t.Error("followTickMsg while following should grow tailN")
+	if !mDone.cqSuppressed["id-1"] || mDone.cqCleared != 1 || mDone.cqUndo == nil {
+		t.Errorf("ending a flash should clear the item and offer an undo: %+v", mDone.cqUndo)
 	}
 
 	// shipTickMsg with no shipFx is a no-op via advanceShip.
@@ -461,9 +462,6 @@ func TestApplyConfigEnv(t *testing.T) {
 }
 
 func TestAnimateHelpersDirect(t *testing.T) {
-	if cmd := followTick(); cmd == nil {
-		t.Error("followTick should return a cmd")
-	}
 	if cmd := shipTick(); cmd == nil {
 		t.Error("shipTick should return a cmd")
 	}

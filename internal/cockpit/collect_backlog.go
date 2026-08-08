@@ -22,15 +22,17 @@ import (
 func collectBacklog(ctx *collectCtx, s *snapshot) {
 	tickets := []ticket{}
 
-	// GitHub Issues, per repo. gh.Issues degrades to (nil,false) on any error,
-	// so an unreachable repo (or an Azure-forge repo with no gh remote) just
-	// contributes nothing.
+	// GitHub Issues for every repo at once. This used to ask each discovered
+	// repo separately — 57 requests for an answer one search returns, and the
+	// main reason a refresh could exhaust the hourly API quota. Issues for
+	// repos the user has not checked out are ignored, keeping the backlog
+	// scoped to the configured scan roots exactly as before.
+	assigned, searched := gh.AssignedIssues()
 	for _, r := range ctx.repos {
-		issues, ok := gh.Issues(r.Path)
-		if !ok {
-			continue
+		if !searched {
+			break
 		}
-		for _, is := range issues {
+		for _, is := range assigned[r.Name] {
 			id := r.Name + "#" + strconv.Itoa(is.Number)
 			tickets = append(tickets, ticket{
 				id:      id,

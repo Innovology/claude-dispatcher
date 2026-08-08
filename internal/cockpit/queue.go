@@ -13,13 +13,6 @@ type queueItem struct {
 	feature, repo, status, color, edge, prompt string
 }
 
-// queueItems is the drafted batch, verbatim from the design's QUEUE.
-var queueItems = []queueItem{
-	{feature: "webhook retry ui", repo: "cortiva-hq", status: "ready", color: cGreen, edge: "#2f6b41", prompt: "surface failed stripe webhooks in the admin with a one-click retry. reuse the audit log table."},
-	{feature: "ado deploy detect", repo: "claude-dispatcher", status: "ready", color: cGreen, edge: "#2f6b41", prompt: "treat a successful azure pipelines release run as the live signal, same as gh deploy workflows."},
-	{feature: "invoice vat lines", repo: "nw-billing", status: "needs prompt", color: cAmber, edge: "#6b4f1e", prompt: "(no prompt yet — press e)"},
-}
-
 // viewQueue renders the two-pane queue lens: the drafted batch on the left
 // (~58%) and the capacity read-out on the right. On a narrow terminal only the
 // left pane is shown.
@@ -74,28 +67,58 @@ func (m model) queueLeft(iw int) []string {
 	return out
 }
 
-// queueRight builds the capacity pane content lines to inner width iw. The copy
-// is static, matching the design.
+// queueRight builds the capacity pane content lines to inner width iw. Every
+// figure is counted from the live floor: how many dispatchers are out now, how
+// many want you, and what the queued batch would add.
 func (m model) queueRight(iw int) []string {
-	var out []string
-	out = append(out, line("capacity", iw, cDim, ""))
-	out = append(out, line("27 out, 6 want you", iw, cWhite, ""))
-	for _, nl := range queueWrap("after this batch: 30 out. Past 24 you stop reading turns — that is measured from your own reply latency, not a guess.", iw, 4) {
-		out = append(out, line(nl, iw, cMid, ""))
+	out, want := 0, 0
+	for _, x := range dispatches {
+		if x.state == "live" || x.state == "closed" {
+			continue
+		}
+		out++
+		if x.urgent {
+			want++
+		}
 	}
 
-	out = append(out, "")
-	out = append(out, line("recently shipped, reusable", iw, cDim, ""))
-	for _, r := range []struct{ name, meta string }{
-		{"hook backoff", " · claude-dispatcher · 4h"},
-		{"pdf export", " · cortiva-hq · 3h"},
-		{"wind arrows", " · altsports-web · 2h"},
-	} {
-		out = append(out, padTo(fg(cMid, r.name)+fg(cFaint, r.meta), iw, alignLeft))
+	var L []string
+	L = append(L, line("capacity", iw, cDim, ""))
+	L = append(L, line(itoa(out)+" out, "+itoa(want)+" want you", iw, cWhite, ""))
+	if n := len(queueItems); n > 0 {
+		for _, nl := range queueWrap("after this batch: "+itoa(out+n)+" out. Past 24 you stop reading turns — that is measured from your own reply latency, not a guess.", iw, 4) {
+			L = append(L, line(nl, iw, cMid, ""))
+		}
 	}
 
-	out = append(out, "")
-	out = append(out, line("c clones one into another repo with its prompt", iw, cDim, ""))
+	L = append(L, "")
+	L = append(L, line("recently shipped, reusable", iw, cDim, ""))
+	if recent := m.recentlyShipped(3); len(recent) > 0 {
+		for _, r := range recent {
+			L = append(L, padTo(fg(cMid, r.feature)+fg(cFaint, " · "+r.repo+" · "+r.age), iw, alignLeft))
+		}
+	} else {
+		L = append(L, line("nothing shipped yet", iw, cFaint, ""))
+	}
+
+	L = append(L, "")
+	L = append(L, line("c clones one into another repo with its prompt", iw, cDim, ""))
+	return L
+}
+
+// recentlyShipped returns up to n features that have reached live, most recent
+// first, for cloning into another repo.
+func (m model) recentlyShipped(n int) []dispatch {
+	var out []dispatch
+	for _, x := range dispatches {
+		if x.state != "live" && x.state != "closed" {
+			continue
+		}
+		out = append(out, x)
+		if len(out) == n {
+			break
+		}
+	}
 	return out
 }
 

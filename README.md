@@ -4,8 +4,6 @@
 
 It sits **above** your repos, not inside any one of them. Every dispatcher is a real `claude` session in its own tmux; the cockpit is a fast, keyboard-driven viewer over all of them.
 
-![The triage lens: what wants you, grouped by product, with a live roll-up](docs/floor.svg)
-
 ---
 
 ## Why
@@ -35,25 +33,15 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 **The triage detail pane** reads the whole story of a dispatcher — what Claude said, the commit → PR → checks → merge → deploy chain, the PR stack, the live output tail — and lets you reply, attach, or ship without leaving it.
 
-![The dispatcher detail: the said → chain → agents → stack story](docs/floor-detail.svg)
-
 **A product** in one view — velocity tiles, in-flight kanban lanes, and review / team / shipped tabs:
-
-![The product lens](docs/product.svg)
 
 **Velocity** — DORA delivery metrics beside what actually shipped, because a thousand commits that never merge isn't velocity:
 
-![The velocity lens](docs/velocity.svg)
-
 **One backlog** across GitHub Issues, Linear and Azure Boards — pick, then dispatch:
-
-![The backlog lens](docs/backlog.svg)
 
 ## Usage limits, learned
 
 There is no API for a Claude subscription's limits — so the cockpit **learns** them. It measures your 5-hour rolling and weekly consumption from the session transcripts, and treats the usage at each real rate-limit (429) as that window's cap: *assume that's the limit, until we sail past it and it's fine — then raise it.* The estimate persists and sharpens over time.
-
-![The usage lens: 5-hour and weekly windows against learned caps](docs/usage.svg)
 
 ## Actions are real
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"claude-dispatcher/internal/config"
 )
 
@@ -29,6 +31,76 @@ func typeStr(m model, s string) model {
 	return m
 }
 
+// burst drives the model through the real Update path with s delivered as ONE
+// key message, which is how a terminal reports typing at speed or a paste.
+// typeStr above sends a message per character and so cannot catch a handler
+// that only ever reads the first rune.
+func typeBurst(m model, s string) model {
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+	return next.(model)
+}
+
+// TestDispatchFormAcceptsBurstTyping guards the whole reason a new dispatch
+// could not be started: typing at human speed put nothing in the repo filter,
+// so the list never narrowed and the form looked dead. Only a deliberate
+// one-key-per-message test passed.
+func TestDispatchFormAcceptsBurstTyping(t *testing.T) {
+	root := seedRepoRoot(t, "shop-api", "shop-web", "blog")
+	cfg := &config.Config{Roots: []string{root}}
+
+	m := newModel()
+	m.cfg = cfg
+	// '+' is a global key; the triage lens swallows it (its own prompt is the
+	// way to a new dispatch there), so open the form from another lens.
+	m.lens = "products"
+	m = press(m, "+")
+	if m.dispatchForm == nil {
+		t.Fatal("+ did not open the dispatch form")
+	}
+
+	m = typeBurst(m, "shop")
+	if got := m.dispatchForm.filter.Value(); got != "shop" {
+		t.Fatalf("filter = %q, want %q — the burst was dropped", got, "shop")
+	}
+	if got := len(m.dispatchForm.filtered()); got != 2 {
+		t.Fatalf("filtered() = %d repos, want 2 (shop-api, shop-web)", got)
+	}
+
+	// And through the feature + prompt steps, where a pasted prompt is normal.
+	m = press(m, "enter")
+	m = typeBurst(m, "payment retry flow")
+	if got := m.dispatchForm.feature.Value(); got != "payment retry flow" {
+		t.Fatalf("feature = %q", got)
+	}
+	m = press(m, "enter")
+	m = typeBurst(m, "retry failed charges with backoff")
+	if got := m.dispatchForm.prompt.Value(); got != "retry failed charges with backoff" {
+		t.Fatalf("prompt = %q", got)
+	}
+}
+
+// The triage lens's dispatch draft, the command palette and the resume box all
+// share applyEdit and had the same hole.
+func TestOverlayInputsAcceptBurstTyping(t *testing.T) {
+	m := newModel()
+	m.cqDispatch = true // the triage lens's dispatch draft
+	if got := typeBurst(m, "stripe").cqDraft; got != "stripe" {
+		t.Errorf("dispatch draft = %q, want %q", got, "stripe")
+	}
+
+	m = newModel()
+	m.paletteOpen = true
+	if got := typeBurst(m, "usage").paletteText; got != "usage" {
+		t.Errorf("palette = %q, want %q", got, "usage")
+	}
+
+	m = newModel()
+	m.resumeOpen = true
+	if got := typeBurst(m, "ship it").resumeText; got != "ship it" {
+		t.Errorf("resume = %q, want %q", got, "ship it")
+	}
+}
+
 // TestDispatchFormFlow opens the overlay with `+`, filters and picks a repo,
 // names a feature, writes a prompt, and submits — asserting each step
 // transition and the final launch hand-off, without touching real git.
@@ -42,6 +114,7 @@ func TestDispatchFormFlow(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 160, 40
 	m.cfg = cfg
+	m.lens = "products" // '+' is swallowed by the triage lens
 
 	// Open the form.
 	m = press(m, "+")
@@ -89,10 +162,8 @@ func TestDispatchFormFlow(t *testing.T) {
 		t.Fatal("empty prompt should be rejected and keep the form open")
 	}
 	m = typeStr(m, "do the thing")
-	var cmd interface{}
-	next, c := m.handleKey("enter")
+	next, cmd := m.handleKey("enter")
 	m = next.(model)
-	cmd = c
 	if m.dispatchForm != nil {
 		t.Fatal("submitting the prompt should close the form")
 	}
@@ -113,6 +184,7 @@ func TestDispatchFormEscBacksOut(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 130, 30
 	m.cfg = cfg
+	m.lens = "products" // '+' is swallowed by the triage lens
 
 	m = press(m, "+")
 	m = press(m, "enter") // pick the only repo

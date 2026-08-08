@@ -2,6 +2,7 @@ package cockpit
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -80,16 +81,17 @@ func (m model) headerView() string {
 	if !fitv.showSummary {
 		return gutter(left, pad)
 	}
-	newLabel := ""
-	if m.newCount > 0 {
-		newLabel = fg(cAmber, "▲ "+itoa(m.newCount)+" new since you looked") + "   "
+	// The design hardcodes this strip ("27 out · 5 products · 57 repos",
+	// "week 65%", "21:56") because it is a static mock. Every figure here is
+	// counted or omitted instead: a header that states a number the user cannot
+	// act on is worse than a header that says nothing.
+	parts := []string{fg(cDim, m.portfolioLine())}
+	if w := weekWindow(); w != nil {
+		parts = append(parts, fg(cFaint, "week ")+fg(usageBandColor(w.pace), itoa(w.used)+"%")+fg(cFaint, " · resets "+usageResetDay()))
 	}
-	right := newLabel +
-		fg(cDim, "27 out · 5 products · 57 repos") + "   " +
-		fg(cFaint, "week ") + fg(cAmber, "65%") + fg(cFaint, " · resets thu") + "   " +
-		fg(cFaint, fitv.cols+" · 21:56")
+	parts = append(parts, fg(cFaint, fitv.cols+" · "+nowHHMM()))
 
-	return spread(left, right, m.width)
+	return spread(left, strings.Join(parts, "   "), m.width)
 }
 
 func (m model) footerView() string {
@@ -103,33 +105,19 @@ func (m model) footerView() string {
 }
 
 func (m model) footerHelp() string {
-	if m.lens != "floor" {
-		if h, ok := footerByLens[m.lens]; ok {
-			return h
-		}
-		return "1 triage"
+	// The triage lens's keys change with its mode, so it writes its own.
+	if m.lens == "floor" {
+		return m.cqFooterHelp()
 	}
-	if m.pane != "detail" {
-		return "j/k · → detail · / filter · space mark · y ship · D diff · F follow · u undo · ? keys"
+	if h, ok := footerByLens[m.lens]; ok {
+		return h
 	}
-	if m.floorEntryIsHeader() {
-		return "j/k through the tickets · enter dispatch one · ← back to the list · : palette"
-	}
-	return "j/k through the stack · enter open pr · r reply · ← back to the list · : palette"
+	return "1 triage"
 }
 
-// barsView renders the marks bar and confirm bar that sit above the footer.
+// barsView renders the confirm bar that sits above the footer.
 func (m model) barsView() string {
 	var lines []string
-	if len(m.marked) > 0 {
-		names := make([]string, 0, len(m.marked))
-		for n := range m.marked {
-			names = append(names, n)
-		}
-		left := fg(cWhite, itoa(len(m.marked))+" marked") + "  " + fg(cMid, strings.Join(names, " · "))
-		right := fg(cDim, "x kill all · r reply all · M model · esc clear")
-		lines = append(lines, spread(left, right, m.width))
-	}
 	if m.confirm != nil {
 		left := fg(cAmber, "confirm") + "  " + fg(cWhite, m.confirm.label)
 		right := fg(cWhite, "y") + fg(cDim, " do it · ") + fg(cWhite, "n") + fg(cDim, " cancel")
@@ -141,7 +129,7 @@ func (m model) barsView() string {
 func (m model) lensBody(w, h int) string {
 	switch m.lens {
 	case "floor":
-		return m.viewFloor(w, h)
+		return m.viewCQ(w, h)
 	case "products":
 		return m.viewProducts(w, h)
 	case "product":
@@ -169,8 +157,6 @@ func (m model) overlayView(w, h int) (string, bool) {
 		return m.viewDispatchForm(w, h), true
 	case m.helpOpen:
 		return m.viewHelp(w, h), true
-	case m.diffOpen:
-		return m.viewDiff(w, h), true
 	case m.reviewOpen:
 		return m.viewReview(w, h), true
 	case m.resumeOpen:
@@ -196,4 +182,69 @@ func spread(left, right string, w int) string {
 	}
 	gap := inner - lw - rw
 	return strings.Repeat(" ", pad) + left + strings.Repeat(" ", gap) + right + strings.Repeat(" ", pad)
+}
+
+// portfolioLine is the header's "N out · M products · R repos" summary, counted
+// from what is actually loaded. Clauses whose count is zero are dropped rather
+// than printed, so an empty portfolio reads as empty instead of as zeroes.
+func (m model) portfolioLine() string {
+	out := 0
+	for _, x := range dispatches {
+		if x.state != "live" && x.state != "closed" {
+			out++
+		}
+	}
+	var parts []string
+	if out > 0 {
+		parts = append(parts, itoa(out)+" out")
+	}
+	if n := len(products); n > 0 {
+		parts = append(parts, itoa(n)+" "+plural(n, "product", "products"))
+	}
+	if n := m.repoCount(); n > 0 {
+		parts = append(parts, itoa(n)+" "+plural(n, "repo", "repos"))
+	}
+	if len(parts) == 0 {
+		return "nothing dispatched yet"
+	}
+	return strings.Join(parts, " · ")
+}
+
+// weekWindow returns the weekly usage window, or nil when usage has not been
+// measured yet — the header then omits the clause entirely.
+func weekWindow() *usageWindow {
+	for i := range usageWindows {
+		if strings.Contains(strings.ToLower(usageWindows[i].label), "week") {
+			return &usageWindows[i]
+		}
+	}
+	return nil
+}
+
+// usageBandColor colours the weekly figure by pace: over budget is amber, well
+// over is red.
+func usageBandColor(pace float64) string {
+	switch {
+	case pace >= 1.5:
+		return cRed
+	case pace >= 1.0:
+		return cAmber
+	}
+	return cMid
+}
+
+// usageResetDay names the weekday the weekly window rolls over on.
+func usageResetDay() string {
+	return strings.ToLower(time.Now().Add(7 * 24 * time.Hour).Format("Mon"))
+}
+
+// nowHHMM is the wall clock in the header.
+func nowHHMM() string { return time.Now().Format("15:04") }
+
+// plural picks the singular or plural form for n.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }

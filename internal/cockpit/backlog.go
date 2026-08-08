@@ -14,45 +14,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// backlogTickets is the BACKLOG data, in display order. taken is "" when the
-// design had null (no dispatcher on it yet).
-var backlogTickets = []ticket{
-	{id: "CTV-124", src: "lin", title: "Bulk export of audit log to S3", product: "cortiva", repo: "cortiva-hq", pri: "high", age: "2d", labels: "compliance", taken: "",
-		body:   "Enterprise accounts want the audit log pushed to their own bucket nightly rather than pulled via csv. Needs per-tenant credentials and a dry-run mode.",
-		prompt: "nightly audit log export to a customer-owned s3 bucket, per-tenant credentials, dry-run flag. reuse the filters from #148."},
-	{id: "CTV-123", src: "lin", title: "Rate limit headers missing on 200s", product: "cortiva", repo: "cortiva-api", pri: "urgent", age: "4h", labels: "bug · customer", taken: "",
-		body:   "We return X-RateLimit-* only on 429. Two integrators are polling blind. Should be on every response.",
-		prompt: "emit X-RateLimit-Limit/Remaining/Reset on every api response, not just 429s. extend the bucket added in #152."},
-	{id: "AB#2298", src: "ado", title: "Release-Prod migrate stage fails on eu region", product: "northwind", repo: "nw-billing", pri: "urgent", age: "11m", labels: "incident", taken: "",
-		body:   "The migrate stage cannot reach the eu replica. Blocking invoice pdf from going live.",
-		prompt: "diagnose why the Release-Prod migrate stage cannot reach the eu replica and fix the pipeline. do not touch the schema."},
-	{id: "altsports_1#219", src: "gh", title: "Fixture CSV: support 2019 date format", product: "altsports", repo: "altsports_1", pri: "high", age: "1d", labels: "good first", taken: "fixture import",
-		body:   "Three specs fail on the 2019 dd-mm-yyyy variant. Normalising dates in the parser touches every importer.",
-		prompt: "normalise legacy date formats in the fixture importer, keep the other importers passing."},
-	{id: "CTV-119", src: "lin", title: "Mobile: retry queue for offline writes", product: "cortiva", repo: "cortiva-mobile", pri: "med", age: "3d", labels: "mobile", taken: "",
-		body:   "Offline reads landed in #48. Writes still fail silently when the device is offline.",
-		prompt: "queue writes made offline and replay them on reconnect, surface a pending badge. build on the cache from #48."},
-	{id: "claude-dispatcher#66", src: "gh", title: "Detect Azure Pipelines as a live signal", product: "dispatch", repo: "claude-dispatcher", pri: "high", age: "6h", labels: "tracker", taken: "",
-		body:   "A successful ADO release run should mark a feature live, same as a gh deploy workflow. Half the portfolio is on ADO.",
-		prompt: "treat a successful azure pipelines release run as the live signal, same as gh deploy workflows."},
-	{id: "kalish-core#51", src: "gh", title: "Ingest spans missing upload id", product: "kalish", repo: "kalish-core", pri: "med", age: "5d", labels: "observability", taken: "",
-		body:   "Traces exist but you cannot correlate a span back to the upload that caused it.",
-		prompt: "attach the upload id to every ingest span so one trace covers one upload end to end."},
-	{id: "CTV-116", src: "lin", title: "Invite: keep legacy token route?", product: "cortiva", repo: "cortiva-hq", pri: "med", age: "6m", labels: "decision", taken: "invite flow",
-		body:   "Blocking the invite rebuild. Emails already sent carry /invite/:token links.",
-		prompt: "decide and implement: keep /invite/:token alive for 90 days with a redirect, or hard-cut it."},
-	{id: "nw-portal#88", src: "ado", title: "Portal session drops after 30 minutes", product: "northwind", repo: "nw-portal", pri: "high", age: "2d", labels: "bug", taken: "",
-		body:   "Entra tokens are not refreshed, so users are bounced mid-form.",
-		prompt: "refresh entra tokens silently before expiry so the portal session survives a working day."},
-	{id: "altsports-web#44", src: "gh", title: "League table: tie-break by head-to-head", product: "altsports", repo: "altsports-web", pri: "low", age: "1w", labels: "rules", taken: "",
-		body:   "Class rules put head-to-head above points difference. We do the opposite.",
-		prompt: "correct the league tie-break order to head-to-head before points difference, with a test per rule."},
-	{id: "CTV-101", src: "lin", title: "Docs drift behind the pdf export", product: "cortiva", repo: "cortiva-docs", pri: "low", age: "3d", labels: "docs · stale repo", taken: "",
-		body:   "cortiva-docs has not been touched in 17 days and still documents the old export flow.",
-		prompt: "update the export docs to match #144, including the pagination note."},
-	{id: "kalish-ops#79", src: "gh", title: "Rota timezone: venue local vs account default", product: "kalish", repo: "kalish-ops", pri: "high", age: "41m", labels: "decision", taken: "shift rota",
-		body:   "The dispatcher is idle waiting on this answer.",
-		prompt: "anchor the rota to venue local time, fall back to the account default when the venue has none."},
+// flCountTickets counts the tickets matching pred. The triage lens uses it to
+// offer the backlog only when there is really something untaken in it.
+func flCountTickets(pred func(ticket) bool) int {
+	n := 0
+	for _, t := range backlogTickets {
+		if pred(t) {
+			n++
+		}
+	}
+	return n
 }
 
 // backlogList filters the tickets by the active source filter. "all" is

@@ -23,110 +23,130 @@ func collectFloor(ctx *collectCtx, s *snapshot) {
 	s.records = map[string]*state.Dispatch{}
 	s.saidBy = map[string]string{}
 	s.tailLines = map[string][]string{}
-	s.fromBy = map[string]string{}
 	s.diffsBy = map[string]struct {
 		files []diffFile
 		hunk  []hunkLine
 	}{}
-	s.stacks = map[string][]stackItem{}
 
-	for _, rec := range ctx.records {
-		st := floorState(rec)
-		if st == "" {
-			continue // exited with no shipped PR — not on the floor
+	// Each record costs several git and gh round-trips, and they are
+	// independent, so gather them concurrently and assemble in record order —
+	// the floor's ordering must not depend on which request finished first.
+	rows := make([]floorRow, len(ctx.records))
+	forEach(ctx.records, func(i int, rec *state.Dispatch) {
+		rows[i] = buildFloorRow(ctx, rec)
+	})
+
+	for _, r := range rows {
+		if !r.ok {
+			continue
 		}
-		forge := ctx.forge(rec.RepoPath)
-		commits := len(rec.Commits)
-
-		// Diff provenance: what BaseSHA..Branch actually changed.
-		plus, minus, files, dfs := floorNumstat(rec.RepoPath, rec.BaseSHA, rec.Branch)
-
-		// PR review + checks signals (gh only; ado degrades to zero).
-		var checks gh.Checks
-		var review gh.Review
-		if forge == "gh" && rec.PRNumber > 0 {
-			checks = gh.PRChecksFor(rec.RepoPath, rec.PRNumber)
-			review = gh.PRReviewFor(rec.RepoPath, rec.PRNumber)
-		}
-
-		// Transcript preview: one read reused for said/tail/activity.
-		tail := transcript.Tail(rec.TranscriptPath, 8)
-		acts := floorActivity(tail)
-
-		age := floorAge(rec.UpdatedAt)
-		urgent := st == "blocked" || st == "needs"
-
-		// PR reference + its short meta, reused by the stack view.
-		var prs []prRef
-		var prMeta string
-		if rec.PRNumber > 0 {
-			id := prID(forge, rec.PRNumber)
-			var prColor string
-			if rec.PRState == "MERGED" {
-				prMeta = "merged"
-				if rec.PRMergedAt != nil {
-					prMeta = "merged " + floorAge(*rec.PRMergedAt) + " ago"
-				}
-				prColor = cMid
-			} else {
-				appr := "0 reviews"
-				if review.Approvals > 0 {
-					appr = floorApprovals(review.Approvals)
-				}
-				if cm, cc := floorChecksMeta(checks); cm != "" {
-					prMeta = appr + " · " + cm
-					prColor = cc
-				} else {
-					prMeta = appr
-					prColor = cMid
-				}
-			}
-			prs = []prRef{{id, rec.Feature, prMeta, prColor, forge}}
-		}
-
-		d := dispatch{
-			feature:  rec.Feature,
-			repo:     rec.RepoName,
-			product:  floorProduct(rec),
-			forge:    forge,
-			state:    st,
-			age:      age,
-			branch:   rec.Branch,
-			why:      rec.StatusReason,
-			signal:   floorSignal(st, checks, review),
-			urgent:   urgent,
-			plus:     plus,
-			minus:    minus,
-			files:    files,
-			commits:  commits,
-			prompt:   rec.Prompt,
-			activity: acts,
-			agents: []agent{{
-				"", "main", modelForRecord(rec), rec.StatusReason,
-				floorAgentState(st), age + " · " + strconv.Itoa(commits) + " commits",
-			}},
-			prs:   prs,
-			runs:  floorRuns(rec),
-			chain: floorChain(rec, forge, plus, minus, files, checks),
-			ask:   floorAsk(rec, st, commits, age),
-		}
-		s.dispatches = append(s.dispatches, d)
+		rec := r.rec
+		s.dispatches = append(s.dispatches, r.d)
 
 		// Side tables keyed by feature.
 		s.records[rec.Feature] = rec
-		s.saidBy[rec.Feature] = floorSaid(tail)
-		s.tailLines[rec.Feature] = tail
+		s.saidBy[rec.Feature] = r.said
+		s.tailLines[rec.Feature] = r.tail
 		s.diffsBy[rec.Feature] = struct {
 			files []diffFile
 			hunk  []hunkLine
-		}{files: dfs, hunk: []hunkLine{}}
-
-		// Stacks: group a repo's PR-bearing dispatches together.
-		if rec.PRNumber > 0 {
-			s.stacks[rec.RepoName] = append(s.stacks[rec.RepoName],
-				stackItem{rec.Feature, prID(forge, rec.PRNumber), floorStackState(rec, checks, review), prMeta})
-		}
+		}{files: r.dfs, hunk: []hunkLine{}}
 	}
+}
+
+// floorRow is one record's fully-resolved contribution to the floor, built off
+// the assembly loop so the round-trips can overlap.
+type floorRow struct {
+	ok   bool
+	rec  *state.Dispatch
+	d    dispatch
+	said string
+	tail []string
+	dfs  []diffFile
+}
+
+// buildFloorRow resolves one dispatch record into its view row. It is called
+// concurrently, so it touches nothing but its own arguments.
+func buildFloorRow(ctx *collectCtx, rec *state.Dispatch) floorRow {
+	st := floorState(rec)
+	if st == "" {
+		return floorRow{} // exited with no shipped PR — not on the floor
+	}
+	forge := ctx.forge(rec.RepoPath)
+	commits := len(rec.Commits)
+
+	// Diff provenance: what BaseSHA..Branch actually changed.
+	plus, minus, files, dfs := floorNumstat(rec.RepoPath, rec.BaseSHA, rec.Branch)
+
+	// PR review + checks signals (gh only; ado degrades to zero).
+	var checks gh.Checks
+	var review gh.Review
+	if forge == "gh" && rec.PRNumber > 0 {
+		checks = gh.PRChecksFor(rec.RepoPath, rec.PRNumber)
+		review = gh.PRReviewFor(rec.RepoPath, rec.PRNumber)
+	}
+
+	// Transcript preview: one read reused for said/tail/activity.
+	tail := transcript.Tail(rec.TranscriptPath, 8)
+
+	age := floorAge(rec.UpdatedAt)
+	urgent := st == "blocked" || st == "needs"
+
+	// PR reference + its short meta, reused by the stack view.
+	var prs []prRef
+	var prMeta string
+	if rec.PRNumber > 0 {
+		id := prID(forge, rec.PRNumber)
+		var prColor string
+		if rec.PRState == "MERGED" {
+			prMeta = "merged"
+			if rec.PRMergedAt != nil {
+				prMeta = "merged " + floorAge(*rec.PRMergedAt) + " ago"
+			}
+			prColor = cMid
+		} else {
+			appr := "0 reviews"
+			if review.Approvals > 0 {
+				appr = floorApprovals(review.Approvals)
+			}
+			if cm, cc := floorChecksMeta(checks); cm != "" {
+				prMeta = appr + " · " + cm
+				prColor = cc
+			} else {
+				prMeta = appr
+				prColor = cMid
+			}
+		}
+		prs = []prRef{{id, rec.Feature, prMeta, prColor, forge}}
+	}
+
+	d := dispatch{
+		feature: rec.Feature,
+		repo:    rec.RepoName,
+		product: ctx.productFor(rec),
+		forge:   forge,
+		state:   st,
+		age:     age,
+		branch:  rec.Branch,
+		why:     rec.StatusReason,
+		signal:  floorSignal(st, checks, review),
+		urgent:  urgent,
+		plus:    plus,
+		minus:   minus,
+		files:   files,
+		commits: commits,
+		prompt:  rec.Prompt,
+		agents: []agent{{
+			"", "main", modelForRecord(rec), rec.StatusReason,
+			floorAgentState(st), age + " · " + strconv.Itoa(commits) + " commits",
+		}},
+		prs:   prs,
+		runs:  floorRuns(rec),
+		chain: floorChain(rec, forge, plus, minus, files, checks),
+		ask:   floorAsk(rec, st, commits, age),
+	}
+
+	return floorRow{ok: true, rec: rec, d: d, said: floorSaid(tail), tail: tail, dfs: dfs}
 }
 
 // floorState maps a record's Status to the floor's view state, or "" to skip.
@@ -152,14 +172,6 @@ func floorState(rec *state.Dispatch) string {
 		return ""
 	}
 	return "working"
-}
-
-// floorProduct resolves the product for a record, falling back to the repo map.
-func floorProduct(rec *state.Dispatch) string {
-	if rec.Product != "" {
-		return rec.Product
-	}
-	return repoProduct(rec.RepoName)
 }
 
 // modelForRecord reports the model a session runs. No model is recorded yet, so
@@ -310,32 +322,6 @@ func floorChain(rec *state.Dispatch, forge string, plus, minus, files int, check
 	}
 
 	return ch
-}
-
-// floorStackState classifies a PR-bearing dispatch within its repo's stack.
-func floorStackState(rec *state.Dispatch, checks gh.Checks, review gh.Review) string {
-	switch {
-	case rec.PRState == "MERGED":
-		return "merged"
-	case review.ChangesRequested > 0 || checks.Failing > 0:
-		return "blocked"
-	default:
-		return "ready"
-	}
-}
-
-// floorActivity derives a short tool-use list from a transcript tail.
-func floorActivity(tail []string) []activity {
-	var out []activity
-	for _, ln := range tail {
-		if strings.HasPrefix(ln, "⚙ ") {
-			out = append(out, activity{tool: strings.TrimPrefix(ln, "⚙ "), resultColor: cDim})
-			if len(out) >= 4 {
-				break
-			}
-		}
-	}
-	return out
 }
 
 // floorSaid returns the last assistant text line in the tail (skipping tool

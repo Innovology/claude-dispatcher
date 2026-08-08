@@ -179,9 +179,12 @@ func (m model) productsLeft(cw, pc int) []string {
 	}
 
 	out = append(out, "")
+	// "N of M repos" is counted, never quoted: a fixed pair here read as a fact
+	// about the user's portfolio and was wrong for everyone but the mock.
+	staleCount := itoa(len(staleRepos)) + " of " + itoa(m.repoCount()) + " repos"
 	out = append(out, row(cw, "",
 		flexc("stale · nothing dispatched, nothing merged", cDim),
-		cr("6 of 57 repos", 15, cFaint),
+		cr(staleCount, 15, cFaint),
 	))
 	for _, s := range staleRepos {
 		daysColor := cAmber
@@ -198,11 +201,56 @@ func (m model) productsLeft(cw, pc int) []string {
 
 	out = append(out, "")
 	out = append(out, line("where the factory is stuck", cw, cDim, ""))
-	out = append(out, fg(cRed, "■")+fg(cMid, " northwind · nw-billing waiting on a permission approval for 12m — highest-value block"))
-	out = append(out, fg(cBlue, "◇")+fg(cMid, " cortiva · 3 PRs green and unreviewed — merge them and 2 features go live"))
-	out = append(out, fg(cAmber, "◆")+fg(cMid, " kalish · nothing merged in 3 days, 3 dispatchers still working"))
+	if stuck := m.stuckLines(); len(stuck) > 0 {
+		out = append(out, stuck...)
+	} else {
+		out = append(out, fg(cFaint, "nothing blocked"))
+	}
 
 	return out
+}
+
+// stuckLines reports what is actually blocking the factory, worst first: the
+// dispatchers sitting in blocked, then needs-you. Derived from the live floor,
+// so it is empty when nothing is blocked rather than asserting a blockage.
+func (m model) stuckLines() []string {
+	var out []string
+	for _, st := range []string{"blocked", "needs"} {
+		for _, x := range dispatches {
+			if x.state != st {
+				continue
+			}
+			meta := stateMetaBy[x.state]
+			why := x.why
+			if why == "" {
+				why = meta.label
+			}
+			where := x.repo
+			if x.product != "" && x.product != "—" {
+				where = x.product + " · " + x.repo
+			}
+			out = append(out, fg(meta.color, meta.glyph)+fg(cMid, " "+where+" · "+why+" — "+x.age))
+			if len(out) == 3 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+// repoCount is how many repos the portfolio covers, counted from the product
+// map so it always matches what the lens is showing.
+func (m model) repoCount() int {
+	seen := map[string]bool{}
+	for _, rs := range reposByProduct {
+		for _, r := range rs {
+			seen[r.name] = true
+		}
+	}
+	for _, s := range staleRepos {
+		seen[s.repo] = true
+	}
+	return len(seen)
 }
 
 // productsRight builds the focus panel for the product under the cursor.
@@ -254,6 +302,9 @@ func (m model) updateProducts(k string) (model, tea.Cmd) {
 			m.productCursor--
 		}
 	case "enter":
+		if len(products) == 0 {
+			return m, nil // nothing discovered yet — there is no product to open
+		}
 		m.lens = "product"
 		m.shipCursor = 0
 		m.notice = "opened " + products[clampCursor(m.productCursor, len(products))].name
