@@ -538,7 +538,7 @@ func (m model) viewReview(w, h int) string {
 	out = append(out, fg(cRule, strings.Repeat("─", cw)))
 	hunk := diffsByPR[pr]
 	if len(hunk) == 0 {
-		hunk = productDiffFallback
+		out = append(out, fg(cFaint, "no diff loaded for this pr"))
 	}
 	for _, hl := range hunk {
 		col := productHunkColor(hl.sign)
@@ -613,7 +613,7 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 
 	// resume overlay (mirrors handleKey 1223-1230)
 	if m.resumeOpen {
-		next, submit, cancel := applyEdit(m.resumeText, k)
+		next, submit, cancel := applyEdit(m.resumeText, k, m.key)
 		if cancel {
 			m.resumeOpen, m.resumeText = false, ""
 			return m, nil

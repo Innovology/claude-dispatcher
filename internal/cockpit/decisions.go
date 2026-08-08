@@ -19,70 +19,6 @@ type decision struct {
 	id, title, status, at, by, context, decision, consequences string
 }
 
-// decisions mirrors DECISIONS: the records per repo. Repo order is not encoded
-// by a Go map, so decisionRepoOrder preserves the design's key order.
-var decisions = map[string][]decision{
-	"cortiva-api": {
-		{
-			id: "ADR-021", title: "Idempotency keys derive from event id + attempt", status: "proposed", at: "4m ago", by: "stripe webhooks · claude",
-			context:      "Stripe redelivers on timeout. The handler charged twice because nothing distinguished a redelivery from a new event.",
-			decision:     "Claim a key built from (event id, attempt) in Postgres before charging, and treat a claimed key as already-charged.",
-			consequences: "One extra write per webhook. Redeliveries become free. The key table needs a 30 day reaper, which is not written yet.",
-		},
-		{
-			id: "ADR-020", title: "Rate limits are per tenant, not per api key", status: "accepted", at: "9m ago", by: "rate limiter · you accepted",
-			context:      "Tenants issue many keys. Limiting per key let a single tenant multiply their allowance.",
-			decision:     "Token bucket keyed on tenant id, 429 with Retry-After.",
-			consequences: "Key rotation no longer resets the budget. Integrators polling with several keys will see 429s they did not see before.",
-		},
-		{
-			id: "ADR-017", title: "Session replay payloads carry no pii", status: "accepted", at: "6h ago", by: "session replay · you accepted",
-			context:      "Replay is useful for support but the payloads contained email and billing address.",
-			decision:     "Scrub at write time against an allowlist, 30 day ttl.",
-			consequences: "Some support cases become harder to diagnose. Nothing to purge on a deletion request.",
-		},
-	},
-	"nw-billing": {
-		{
-			id: "ADR-009", title: "Tenant tables split per region", status: "proposed", at: "12m ago", by: "tenant migration · claude",
-			context:      "One shared tenant table cannot satisfy the eu data residency commitment.",
-			decision:     "One schema per region, routed at connection time from the tenant record.",
-			consequences: "Cross-region reporting needs a union view. Migrations run per region. The dispatcher is blocked on infra/ write access to finish it.",
-		},
-		{
-			id: "ADR-008", title: "Invoice vat lines computed at render, not at issue", status: "superseded", at: "2d ago", by: "invoice pdf · superseded by ADR-009",
-			context:      "Rates change between issue and payment.",
-			decision:     "Compute at render from the rate table.",
-			consequences: "Historic invoices re-render with current rates — wrong. This is why ADR-009 exists.",
-		},
-	},
-	"cortiva-hq": {
-		{
-			id: "0014", title: "Invite links are signed, not stored", status: "proposed", at: "6m ago", by: "invite flow · claude",
-			context:      "Stored tokens meant a table lookup and a cleanup job.",
-			decision:     "Sign a short-lived payload; verify without a lookup.",
-			consequences: "Revocation before expiry is no longer possible. Legacy /invite/:token links must be handled separately — that question is still open.",
-		},
-		{
-			id: "0013", title: "Audit log filters live in the url", status: "accepted", at: "2h ago", by: "audit log filters · you accepted",
-			context:      "Support wanted to paste a filtered view into a ticket.",
-			decision:     "Filters serialise to query params; the view is shareable.",
-			consequences: "Filter names are now public api and cannot be renamed freely.",
-		},
-	},
-	"claude-dispatcher": {
-		{
-			id: "0007", title: "Repo discovery scans roots, with an explicit list winning", status: "proposed", at: "18m ago", by: "repos · claude",
-			context:      "Scanning the disk is surprising; an explicit list is rigid.",
-			decision:     "Scan the configured roots three levels deep, but let an explicit repos list in config.toml take precedence.",
-			consequences: "Two sources of truth. The scan still runs, so a stale explicit list hides new repos silently.",
-		},
-	},
-}
-
-// decisionRepoOrder preserves the DECISIONS key order (Go maps are unordered).
-var decisionRepoOrder = []string{"cortiva-api", "nw-billing", "cortiva-hq", "claude-dispatcher"}
-
 // decisionStatusMeta mirrors DECISION_STATUS: the colour, glyph and one-line
 // note for each record lifecycle state.
 var decisionStatusMeta = map[string]struct{ color, glyph, note string }{
@@ -95,27 +31,6 @@ var decisionStatusMeta = map[string]struct{ color, glyph, note string }{
 type plugin struct {
 	id, name, host, kind, note string
 	repos                      []string
-}
-
-// plugins mirrors PLUGINS: the tools that can render a repo's decisions. The
-// last entry (builtin) is the fallback used where a repo has no tool of its own.
-var plugins = []plugin{
-	{
-		id: "deciduous", name: "deciduous", host: "deciduous.dev", kind: "decision + attack trees", repos: []string{"cortiva-api", "nw-billing"},
-		note: "renders trees from a yaml file in the repo · the dispatcher writes into it when it makes a security-relevant call",
-	},
-	{
-		id: "adr-tools", name: "adr-tools", host: "github.com/npryce/adr-tools", kind: "numbered markdown records", repos: []string{"cortiva-hq", "claude-dispatcher"},
-		note: "doc/adr/NNNN-*.md · the cockpit reads the folder and writes new records as proposed",
-	},
-	{
-		id: "structurizr", name: "structurizr", host: "structurizr.com", kind: "c4 models", repos: []string{},
-		note: "not enabled anywhere · e enables it on the selected repo",
-	},
-	{
-		id: "builtin", name: "cockpit records", host: "local state", kind: "fallback", repos: []string{"altsports_1", "altsports-web", "cortiva-mobile", "cortiva-infra", "kalish-core", "kalish-ops", "nw-portal"},
-		note: "used where a repo has no decision tool of its own · kept in the state dir, exportable as markdown",
-	},
 }
 
 // pluginForRepo returns the first plugin wired to repo, or the builtin fallback
@@ -361,6 +276,9 @@ func (m model) decBodyBlock(cw int, _ string, list []decision, ci int, decPlugin
 // notice, and →/← toggle the detail pane.
 func (m model) updateDecisions(k string) (model, tea.Cmd) {
 	repos := decisionRepoOrder
+	if len(repos) == 0 {
+		return m, nil // no repo has an ADR directory — there is nothing to move through
+	}
 	repo := repos[clampCursor(m.decRepo, len(repos))]
 	list := decisions[repo]
 	var dd *decision

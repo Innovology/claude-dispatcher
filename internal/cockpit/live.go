@@ -25,14 +25,16 @@ import (
 // map the actions need. Field types mirror the package vars exactly.
 type snapshot struct {
 	dispatches []dispatch
-	stacks     map[string][]stackItem
 	saidBy     map[string]string
-	fromBy     map[string]string
 	tailLines  map[string][]string
 	diffsBy    map[string]struct {
 		files []diffFile
 		hunk  []hunkLine
 	}
+
+	cqItems      []cqItem
+	cqWorking    []cqGroup
+	cqLastOutput string
 
 	products       []product
 	reposByProduct map[string][]repoRef
@@ -86,6 +88,31 @@ type collectCtx struct {
 	repos   []repos.Repo
 }
 
+// productFor maps a record onto the same product key collectProducts uses,
+// folding anything unmapped into "unassigned".
+//
+// It reads the config rather than the package's productOrder/reposByProduct
+// vars on purpose. Collectors run in order and applySnapshot only publishes
+// their results at the end, so on the first load those vars are still empty:
+// every dispatch resolved to "—", matched no product group, and the floor came
+// up empty while work was in flight. A collector must derive from its ctx, not
+// from the state a later collector will produce.
+func (c *collectCtx) productFor(rec *state.Dispatch) string {
+	p := rec.Product
+	if p == "" && c.cfg != nil {
+		p = c.cfg.ProductFor(rec.RepoName)
+	}
+	if p == "" {
+		return "unassigned"
+	}
+	if c.cfg != nil {
+		if _, ok := c.cfg.Products[p]; !ok {
+			return "unassigned"
+		}
+	}
+	return p
+}
+
 // forge reports the forge a repo path belongs to: "ado" for Azure DevOps
 // remotes, else "gh". Detection is by the origin remote URL.
 func (c *collectCtx) forge(repoPath string) string {
@@ -111,6 +138,9 @@ func loadSnapshot(cfg *config.Config) snapshot {
 	var s snapshot
 	s.dataMode = "live"
 	collectFloor(ctx, &s)
+	// collectCQ must follow collectFloor: it reads the forge, diff and
+	// transcript work that load already did rather than paying for it twice.
+	collectCQ(ctx, &s)
 	collectProducts(ctx, &s)
 	collectBacklog(ctx, &s)
 	collectDecisions(ctx, &s)
@@ -127,14 +157,8 @@ func applySnapshot(s snapshot) {
 	if s.dispatches != nil {
 		dispatches = s.dispatches
 	}
-	if s.stacks != nil {
-		stacks = s.stacks
-	}
 	if s.saidBy != nil {
 		saidBy = s.saidBy
-	}
-	if s.fromBy != nil {
-		fromBy = s.fromBy
 	}
 	if s.tailLines != nil {
 		tailLines = s.tailLines
@@ -142,6 +166,16 @@ func applySnapshot(s snapshot) {
 	if s.diffsBy != nil {
 		diffsBy = s.diffsBy
 	}
+	if s.cqItems != nil {
+		cqItems = s.cqItems
+	}
+	if s.cqWorking != nil {
+		cqWorking = s.cqWorking
+	}
+	// Unconditionally, unlike every other field: "" means no running session has
+	// a readable transcript, which is an observation the view must show, and a
+	// stale age left in place would be a lie about liveness.
+	cqLastOutput = s.cqLastOutput
 	if s.products != nil {
 		products = s.products
 	}

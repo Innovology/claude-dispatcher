@@ -9,12 +9,38 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
+// restoreVars puts the data vars back exactly as captureVars found them.
+//
+// It exists because applySnapshot is NOT a restore: it skips nil fields on
+// purpose, so a collector that fetched nothing leaves the last good data on
+// screen. That makes it unable to clear a var — which was invisible while the
+// package shipped seed data (nothing was ever nil) and became a test-pollution
+// bug the moment the vars started out empty. A test that populated cqItems
+// leaked them into every test that ran after it.
+func restoreVars(s snapshot) {
+	dispatches, saidBy, tailLines, diffsBy = s.dispatches, s.saidBy, s.tailLines, s.diffsBy
+	cqItems, cqWorking, cqLastOutput = s.cqItems, s.cqWorking, s.cqLastOutput
+	products, reposByProduct, productOrder = s.products, s.reposByProduct, s.productOrder
+	productNote, staleRepos, working = s.productNote, s.staleRepos, s.working
+	productStats, backlogTickets = s.productStats, s.backlogTickets
+	reviews, team, teamVerdict, shipped = s.reviews, s.team, s.teamVerdict, s.shipped
+	productVelocity, decisions = s.productVelocity, s.decisions
+	decisionRepoOrder, plugins = s.decisionRepoOrder, s.plugins
+	usageWindows, usageModels = s.usageWindows, s.usageModels
+	usageProjection, usageAdvice = s.usageProjection, s.usageAdvice
+	doraOrg, doraFactory, doraSplit, doraWeeks = s.doraOrg, s.doraFactory, s.doraSplit, s.doraWeeks
+	outputWeeks, outputHeadline = s.outputWeeks, s.outputHead
+	outputUnit, outputDelta, outputSpark = s.outputUnit, s.outputDelta, s.outputSpark
+	notVelocity, queueItems, liveRecords = s.notVelocity, s.queueItems, s.records
+}
+
 // captureVars snapshots the current data vars so a test can restore them and
-// not leak real/empty data into the seed-based smoke tests.
+// not leak data into the tests that run after it.
 func captureVars() snapshot {
 	return snapshot{
-		dispatches: dispatches, stacks: stacks, saidBy: saidBy, fromBy: fromBy,
-		tailLines: tailLines, diffsBy: diffsBy, products: products,
+		dispatches: dispatches, saidBy: saidBy, tailLines: tailLines,
+		diffsBy: diffsBy, cqItems: cqItems, cqWorking: cqWorking,
+		cqLastOutput: cqLastOutput, products: products,
 		reposByProduct: reposByProduct, productOrder: productOrder,
 		productNote: productNote, staleRepos: staleRepos, working: working,
 		productStats: productStats, backlogTickets: backlogTickets,
@@ -50,7 +76,7 @@ func TestLiveSnapshotRenders(t *testing.T) {
 	}
 
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 
 	cfg := &config.Config{Products: map[string][]string{"shop": {"shop-api", "shop-web"}}}
 	snap := loadSnapshot(cfg)
@@ -97,7 +123,7 @@ func TestLiveSnapshotEmpty(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
 
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 
 	snap := loadSnapshot(&config.Config{})
 	applySnapshot(snap)

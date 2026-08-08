@@ -48,60 +48,15 @@ type outWeek struct {
 
 // ---- seed data --------------------------------------------------------------
 
-var doraOrg = []doraMetric{
-	{key: "deploy frequency", v: "9.4", unit: "/day", band: "elite", delta: "+18% vs last week", up: true, spark: "▂▃▂▄▅▄▆▅▇▆█▇", note: "47 to production today across 8 repos"},
-	{key: "lead time", v: "3h 40m", unit: "", band: "elite", delta: "−22% vs last week", up: true, spark: "█▇▇▆▆▅▅▄▄▃▃▂", note: "dispatch → live, median"},
-	{key: "change failure", v: "11", unit: "%", band: "high", delta: "+3pt vs last week", up: false, spark: "▂▁▂▂▃▂▃▄▃▄▅▄", note: "2 of 17 deploys rolled back or hotfixed"},
-	{key: "time to restore", v: "41m", unit: "", band: "elite", delta: "−9m vs last week", up: true, spark: "▆▅▆▄▅▃▄▃▂▃▂▂", note: "nw-billing Release-Prod is 11m into the current one"},
-}
-
-var doraFactory = []doraMetric{
-	{key: "first-pass rate", v: "68", unit: "%", band: "high", spark: "▃▄▃▅▄▆▅▆▇▆▇▇", note: "claims accepted without rework"},
-	{key: "waiting on you", v: "1h 12m", unit: "", band: "medium", spark: "▅▆▅▇▆▇▆▅▆▅▆▅", note: "33% of lead time · the bottleneck"},
-	{key: "turns per feature", v: "4.2", unit: "", band: "elite", spark: "█▇▇▆▆▅▅▄▄▄▃▃", note: "down from 6.1 four weeks ago"},
-	{key: "work in progress", v: "27", unit: "", band: "medium", spark: "▃▄▄▅▅▆▆▇▇█▇█", note: "past 24 your reply latency doubles"},
-}
-
-var doraSplit = []splitPart{
-	{label: "agent working", pct: 44, color: cGreen},
-	{label: "waiting on you", pct: 33, color: cAmber},
-	{label: "review", pct: 14, color: cBlue},
-	{label: "ci + deploy", pct: 9, color: cDim},
-}
-
-var doraWeeks = []doraWeek{
-	{w: "this week", deploys: 47, lead: "3h 40m", fail: "11%", restore: "41m", first: "68%", wait: "1h 12m", best: true},
-	{w: "w31", deploys: 41, lead: "4h 42m", fail: "8%", restore: "50m", first: "64%", wait: "1h 31m"},
-	{w: "w30", deploys: 33, lead: "5h 10m", fail: "14%", restore: "1h 02m", first: "58%", wait: "2h 05m"},
-	{w: "w29", deploys: 28, lead: "6h 55m", fail: "12%", restore: "1h 20m", first: "55%", wait: "2h 44m"},
-	{w: "w28", deploys: 19, lead: "9h 10m", fail: "18%", restore: "2h 05m", first: "47%", wait: "4h 12m"},
-	{w: "w27", deploys: 12, lead: "14h 20m", fail: "21%", restore: "3h 30m", first: "41%", wait: "6h 40m"},
-}
-
+// Filled by collectVelocity. See data.go.
 var (
-	outputHeadline = "23"
-	outputUnit     = "features live this week"
-	outputDelta    = "+4 on last week · +17 on six weeks ago"
-	outputSpark    = "▂▃▄▅▆█"
+	outputHeadline string
+	outputUnit     string
+	outputDelta    string
+	outputSpark    string
 )
 
-var outputWeeks = []outWeek{
-	{w: "this week", live: 23, dispatched: 41},
-	{w: "w31", live: 19, dispatched: 38},
-	{w: "w30", live: 15, dispatched: 36},
-	{w: "w29", live: 12, dispatched: 34},
-	{w: "w28", live: 9, dispatched: 31},
-	{w: "w27", live: 6, dispatched: 22},
-}
-
 type notVelocityRow struct{ k, v, why string }
-
-var notVelocity = []notVelocityRow{
-	{"dispatchers out", "27", "a queue, not an output"},
-	{"commits", "47 today", "an agent can write a thousand and ship none"},
-	{"tokens burned", "65% of week", "a cost, and it is on the usage lens"},
-	{"tools called", "1,284", "motion"},
-}
 
 // velCol is one column of the by-week table, with a rank the design uses to
 // pick which columns survive when width is short (lower rank = kept first).

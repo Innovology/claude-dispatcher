@@ -10,9 +10,12 @@ import (
 	"claude-dispatcher/internal/track"
 )
 
-// refreshEvery paces the periodic PR/deploy poll; fsnotify drives faster
-// updates when a record changes on disk.
-const refreshEvery = 15 * time.Second
+// refreshEvery paces the periodic PR/deploy poll; fsnotify drives immediate
+// updates when a record changes on disk, so this only has to catch changes
+// made on the forge. It was 15s, which — before the gh layer was cached —
+// started a fresh portfolio-wide fetch roughly four times a minute, faster
+// than one could finish.
+const refreshEvery = 60 * time.Second
 
 type (
 	// snapshotMsg carries a freshly built snapshot to the UI goroutine.

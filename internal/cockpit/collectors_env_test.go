@@ -220,7 +220,7 @@ func TestLoadSnapshotFullEnvironment(t *testing.T) {
 	env := buildEnvScenario(t)
 
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 
 	snap := loadSnapshot(env.cfg)
 	if snap.dataMode != "live" {
@@ -277,7 +277,7 @@ func TestCollectorsDirect(t *testing.T) {
 	env := buildEnvScenario(t)
 
 	saved := captureVars()
-	defer applySnapshot(saved)
+	defer restoreVars(saved)
 
 	ctx := &collectCtx{
 		cfg:     env.cfg,

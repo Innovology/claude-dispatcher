@@ -154,6 +154,22 @@ func gutter(content string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
+// flG left-pads a single rendered line by the page gutter (gutter() for one line).
+func flG(s string) string { return strings.Repeat(" ", pad) + s }
+
+// flSpread places left and right at the two edges of a w-wide line. Unlike
+// spread() it adds no gutter of its own, so callers can nest it inside flG.
+func flSpread(left, right string, w int) string {
+	lw, rw := dispWidth(left), dispWidth(right)
+	if w <= 0 {
+		return ""
+	}
+	if lw+1+rw > w {
+		return truncateAnsi(left, w)
+	}
+	return left + strings.Repeat(" ", w-lw-rw) + right
+}
+
 // vjoin stacks lines top to bottom.
 func vjoin(lines ...string) string { return strings.Join(lines, "\n") }
 

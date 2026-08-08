@@ -24,12 +24,6 @@ type usageWindow struct {
 	pace  float64
 }
 
-var usageWindows = []usageWindow{
-	{label: "today", used: 18, note: "since 09:00 · 27 sessions", pace: 1.2},
-	{label: "this week", used: 65, note: "resets thu 09:00 · 141 sessions", pace: 1.4},
-	{label: "this month", used: 41, note: "aug · 512 sessions", pace: 0.9},
-}
-
 // usageModels is the week's spend split by model (USAGE.models). share is the
 // percentage of the week's tokens; avg is the per-session token draw.
 type usageModel struct {
@@ -38,24 +32,9 @@ type usageModel struct {
 	avg, note       string
 }
 
-var usageModels = []usageModel{
-	{name: "opus", share: 58, sessions: 9, avg: "4.2M tok/session", note: "blocked, urgent and long-context work"},
-	{name: "sonnet", share: 36, sessions: 15, avg: "1.8M tok/session", note: "the default for feature work"},
-	{name: "haiku", share: 6, sessions: 3, avg: "0.4M tok/session", note: "pr writing, changelogs, contrast passes"},
-}
-
-// usageProjection is the amber forecast line (USAGE.projection).
-var usageProjection = "At 1.4× pace you hit the weekly cap thursday 14:00 — nineteen hours before it resets."
-
 // usageAdvice is the "what would change it" list (USAGE.advice): first line amber
 // (the headline lever), the rest mid.
 type usageAdviceItem struct{ text, color string }
-
-var usageAdvice = []usageAdviceItem{
-	{text: "cortiva is 31% of the week on its own · 9 in flight, 4 of them opus", color: cAmber},
-	{text: "move the 13 working dispatchers to sonnet and the week lands at 48%", color: cMid},
-	{text: "subagents are 41% of all usage — pr-writer and test-runner are cheap on haiku", color: cMid},
-}
 
 // viewUsage renders the usage lens: two panes joined by a vertical rule. On a
 // narrow terminal (no detail tier) only the left pane shows, at full width.

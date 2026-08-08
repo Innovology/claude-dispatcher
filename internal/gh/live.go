@@ -27,6 +27,18 @@ type Issue struct {
 // when gh is unavailable or the call/parse fails; true (with a possibly empty
 // slice) otherwise.
 func Issues(repoPath string) ([]Issue, bool) {
+	type result struct {
+		issues []Issue
+		ok     bool
+	}
+	r := memo("issues:"+repoPath, RepoTTL, func() result {
+		issues, ok := issuesUncached(repoPath)
+		return result{issues, ok}
+	})
+	return r.issues, r.ok
+}
+
+func issuesUncached(repoPath string) ([]Issue, bool) {
 	if !Available() {
 		return nil, false
 	}
@@ -81,6 +93,12 @@ type Checks struct {
 // PRChecksFor counts the check-run states of a PR. Degrades to a zero Checks
 // on any error.
 func PRChecksFor(repoPath string, number int) Checks {
+	return memo("checks:"+repoPath+":"+strconv.Itoa(number), PRTTL, func() Checks {
+		return prChecksUncached(repoPath, number)
+	})
+}
+
+func prChecksUncached(repoPath string, number int) Checks {
 	var c Checks
 	if !Available() {
 		return c
@@ -159,6 +177,12 @@ type Review struct {
 // PRReviewFor counts the latest review state per author and reports the
 // aggregate review decision. Degrades to a zero Review on any error.
 func PRReviewFor(repoPath string, number int) Review {
+	return memo("review:"+repoPath+":"+strconv.Itoa(number), PRTTL, func() Review {
+		return prReviewUncached(repoPath, number)
+	})
+}
+
+func prReviewUncached(repoPath string, number int) Review {
 	var rv Review
 	if !Available() {
 		return rv
@@ -217,6 +241,12 @@ type Run struct {
 
 // RunsForBranch returns up to 10 recent workflow runs for the branch.
 func RunsForBranch(repoPath, branch string) []Run {
+	return memo("runs:"+repoPath+":"+branch, RepoTTL, func() []Run {
+		return runsForBranchUncached(repoPath, branch)
+	})
+}
+
+func runsForBranchUncached(repoPath, branch string) []Run {
 	if !Available() {
 		return nil
 	}
@@ -262,6 +292,12 @@ type OpenPR struct {
 
 // OpenPRsFor returns up to 50 open pull requests for the repo.
 func OpenPRsFor(repoPath string) []OpenPR {
+	return memo("openprs:"+repoPath, RepoTTL, func() []OpenPR {
+		return openPRsForUncached(repoPath)
+	})
+}
+
+func openPRsForUncached(repoPath string) []OpenPR {
 	if !Available() {
 		return nil
 	}

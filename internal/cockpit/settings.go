@@ -135,7 +135,7 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 			return m, nil
 		default:
 			var cmd tea.Cmd
-			st.input, cmd = st.input.Update(keyToMsg(k))
+			st.input, cmd = st.input.Update(m.inputMsg(k))
 			return m, cmd
 		}
 	}

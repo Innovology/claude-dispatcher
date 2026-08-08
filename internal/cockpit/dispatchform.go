@@ -65,6 +65,16 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 	return &dispatchForm{step: dispatchRepo, repos: rs, filter: filter, feature: feature, prompt: prompt}
 }
 
+// newDispatchFormWith opens the overlay with the work already written into the
+// prompt step. The triage lens's draft is the description of the work, so what
+// was typed there survives the hand-off rather than being retyped once a repo
+// is picked.
+func newDispatchFormWith(cfg *config.Config, prompt string) *dispatchForm {
+	df := newDispatchForm(cfg)
+	df.prompt.SetValue(prompt)
+	return df
+}
+
 // filtered returns the repos matching the current filter (by name or product).
 func (df *dispatchForm) filtered() []repos.Repo {
 	q := strings.TrimSpace(strings.ToLower(df.filter.Value()))
@@ -118,7 +128,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 		default:
 			prev := df.filter.Value()
 			var cmd tea.Cmd
-			df.filter, cmd = df.filter.Update(keyToMsg(k))
+			df.filter, cmd = df.filter.Update(m.inputMsg(k))
 			if df.filter.Value() != prev {
 				df.cursor = 0
 			}
@@ -141,7 +151,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			return m, df.prompt.Focus()
 		default:
 			var cmd tea.Cmd
-			df.feature, cmd = df.feature.Update(keyToMsg(k))
+			df.feature, cmd = df.feature.Update(m.inputMsg(k))
 			return m, cmd
 		}
 
@@ -164,7 +174,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			return m, launchCmd(m.cfg, repo, feature, prompt)
 		default:
 			var cmd tea.Cmd
-			df.prompt, cmd = df.prompt.Update(keyToMsg(k))
+			df.prompt, cmd = df.prompt.Update(m.inputMsg(k))
 			return m, cmd
 		}
 	}

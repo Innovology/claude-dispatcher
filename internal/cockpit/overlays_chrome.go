@@ -7,43 +7,41 @@ import "strings"
 // centre their content within a capped max width, mirroring the design's
 // max-width:1000px help sheet and 720px palette box.
 
-// helpSections mirrors HELP: five sections, each a heading and its k/d rows.
-// "every action is one key" — the k column is the chord, the d column what it does.
+// helpSections is the key sheet: each section a heading and its k/d rows.
+// "every action is one key" — the k column is the chord, the d column what it
+// does. The triage section's act keys are the ones cqActs really offers; an act
+// with no command behind it is not listed here either.
 var helpSections = []struct {
 	section string
 	keys    []struct{ k, d string }
 }{
-	{section: "move", keys: []struct{ k, d string }{
-		{"j / k", "up and down the list"},
-		{"→ / ←", "into the detail pane and back"},
-		{"g / G", "top and bottom"},
-		{"tab", "swap panes on a narrow terminal"},
-		{"1…7", "triage · products · product · queue · backlog · usage · decisions"},
+	{section: "triage", keys: []struct{ k, d string }{
+		{"⏎", "attach the session the ask came from"},
+		{"y", "mark it shipped — offered once it has commits"},
+		{"x", "kill it · the branch and any dirty worktree survive"},
+		{"s", "skip · send it to the back of the queue"},
+		{"d", "dispatch · type the next piece of work"},
+		{"w", "what is running unattended"},
+		{"u", "put back the last thing you cleared"},
 	}},
-	{section: "find", keys: []struct{ k, d string }{
-		{"/", "filter the list by feature, repo or product"},
-		{"t", "group by what it wants / product / repo / forge"},
-		{"w", "show the 13 working instead"},
+	{section: "move", keys: []struct{ k, d string }{
+		{"1…8", "triage · products · product · queue · backlog · usage · decisions · velocity"},
+		{"esc", "leave the draft, or the working view"},
+		{":", "command palette"},
 		{"?", "this help"},
 	}},
-	{section: "act", keys: []struct{ k, d string }{
-		{"y", "ship or accept — asks first"},
-		{"n", "reject and reopen"},
-		{"r", "reply without attaching"},
-		{"enter", "attach the tmux session"},
-		{"x", "kill — asks first"},
-		{"u", "undo the last action"},
-	}},
-	{section: "inspect", keys: []struct{ k, d string }{
-		{"D", "diff of everything it changed"},
-		{"F", "follow the live output"},
-		{"M", "change model for the next turn"},
-		{"p", "change permission mode"},
-	}},
-	{section: "batch", keys: []struct{ k, d string }{
-		{"space", "mark a dispatcher"},
+	{section: "the other lenses", keys: []struct{ k, d string }{
+		{"j / k", "up and down the list"},
+		{"→ / ←", "into the detail pane and back"},
+		{"enter", "open what is selected"},
+		{"space", "pick a backlog ticket"},
 		{"ctrl+d", "dispatch every picked ticket"},
-		{":", "command palette"},
+	}},
+	{section: "anywhere", keys: []struct{ k, d string }{
+		{",", "settings"},
+		{"+", "new dispatch, repo first"},
+		{"ctrl+l", "redraw a garbled screen"},
+		{"q", "quit"},
 	}},
 }
 

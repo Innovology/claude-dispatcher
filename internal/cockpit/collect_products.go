@@ -107,6 +107,11 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		ci      string
 		ciColor string
 	}
+	// Open PRs for every repo come from one search rather than one list call
+	// per repo; openPRs is empty when the search fails, which reads as "no
+	// open PRs" only after gh has actually answered.
+	openPRs, _ := gh.OpenPRs()
+
 	ghCache := map[string]repoGHData{}
 	repoGHFor := func(name string) repoGHData {
 		if v, ok := ghCache[name]; ok {
@@ -115,11 +120,15 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		v := repoGHData{ci: "—", ciColor: cDim, checks: map[int]gh.Checks{}}
 		r, ok := discByName[name]
 		if ghUp && ok && r.Path != "" {
-			v.prs = gh.OpenPRsFor(r.Path)
+			v.prs = openPRs[name]
+			// Check runs are per PR and cannot be batched, so fetch them
+			// concurrently and cap the fan-out: a repo with forty open PRs
+			// must not cost forty serial round-trips on every refresh.
+			for num, c := range prChecksFor(r.Path, v.prs, maxCheckedPRs) {
+				v.checks[num] = c
+			}
 			anyFail, anyRun, anyPass := false, false, false
-			for _, pr := range v.prs {
-				c := gh.PRChecksFor(r.Path, pr.Number)
-				v.checks[pr.Number] = c
+			for _, c := range v.checks {
 				switch {
 				case c.Failing > 0:
 					anyFail = true

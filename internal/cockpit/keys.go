@@ -6,9 +6,61 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// typedText returns the literal text a key message types, and whether it types
+// anything at all.
+//
+// Bubbletea coalesces everything readable in one poll into a single message —
+// "a single KeyRunes or KeySpace event" (bubbletea/key.go) — so typing or
+// pasting "count" arrives as ONE message carrying five runes, not five
+// messages. Anything that rebuilds text from a key must take the whole run.
+// alt+x is a chord, not text, and a pasted run keeps its runes even though
+// Key.String() brackets it as "[count]".
+func typedText(raw tea.KeyMsg) (string, bool) {
+	if raw.Alt {
+		return "", false
+	}
+	switch raw.Type {
+	case tea.KeyRunes:
+		return string(raw.Runes), len(raw.Runes) > 0
+	case tea.KeySpace:
+		return " ", true
+	}
+	return "", false
+}
+
+// typedTextFor resolves the text for a key, preferring the untouched message.
+// raw is trusted only when it is the message k was derived from; the key-name
+// fallback keeps the cockpit drivable by name (as the tests do), where a real
+// terminal always supplies raw.
+func typedTextFor(raw tea.KeyMsg, k string) (string, bool) {
+	if s, ok := typedText(raw); ok && raw.String() == k {
+		return s, true
+	}
+	switch {
+	case k == "space":
+		return " ", true
+	case len([]rune(k)) == 1:
+		return k, true
+	}
+	return "", false
+}
+
+// inputMsg is the message to feed a bubbles textinput: the untouched key
+// message when it is the one being handled, else a reconstruction from the key
+// name for name-driven callers. Passing the real message through also restores
+// every editing key keyToMsg never covered — home, end, delete, ctrl+w, ctrl+u
+// and paste all reach the input now.
+func (m model) inputMsg(k string) tea.Msg {
+	if m.key.String() == k {
+		return m.key
+	}
+	return keyToMsg(k)
+}
+
 // applyEdit is the tiny inline editor shared by the filter, reply, palette and
-// resume inputs. It returns the next string plus submit/cancel intents.
-func applyEdit(cur, k string) (next string, submit, cancel bool) {
+// resume inputs. It returns the next string plus submit/cancel intents. raw is
+// the untouched key message — see typedText for why k alone is not enough.
+func applyEdit(cur, k string, raw tea.KeyMsg) (next string, submit, cancel bool) {
 	switch k {
 	case "esc":
 		return cur, false, true
@@ -20,28 +72,32 @@ func applyEdit(cur, k string) (next string, submit, cancel bool) {
 			r = r[:len(r)-1]
 		}
 		return string(r), false, false
-	case "space", " ":
-		return cur + " ", false, false
-	default:
-		if len([]rune(k)) == 1 {
-			return cur + k, false, false
-		}
-		return cur, false, false
 	}
+	if s, ok := typedTextFor(raw, k); ok {
+		return cur + s, false, false
+	}
+	return cur, false, false
 }
 
+// filteredCommands narrows the palette to what matches the typed query, name
+// matches first. Ranking matters: hints mention other lenses by name, so
+// without it typing "product" selected "usage" — whose hint happens to end
+// "…by window, model and product".
 func (m model) filteredCommands() []command {
 	q := strings.TrimSpace(strings.ToLower(m.paletteText))
 	if q == "" {
 		return commands
 	}
-	var out []command
+	var byName, byHint []command
 	for _, c := range commands {
-		if strings.Contains(c.name, q) || strings.Contains(strings.ToLower(c.hint), q) {
-			out = append(out, c)
+		switch {
+		case strings.Contains(c.name, q):
+			byName = append(byName, c)
+		case strings.Contains(strings.ToLower(c.hint), q):
+			byHint = append(byHint, c)
 		}
 	}
-	return out
+	return append(byName, byHint...)
 }
 
 func (m model) runCommand() (model, tea.Cmd) {
@@ -86,6 +142,11 @@ func (m model) runCommand() (model, tea.Cmd) {
 // handleKey is the global router. It resolves overlays and mode-switch keys,
 // then delegates to the active lens's updater.
 func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
+	// Nothing may trap the process: the triage prompt swallows q, so ctrl+c has
+	// to be resolved before any lens or overlay gets a say.
+	if k == "ctrl+c" {
+		return m, tea.Quit
+	}
 	if m.settings != nil {
 		mm, cmd := m.updateSettings(k)
 		return mm, cmd
@@ -111,37 +172,6 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.diffOpen {
-		if k == "esc" || k == "D" || k == "q" {
-			m.diffOpen = false
-		}
-		return m, nil
-	}
-	if m.filterOpen {
-		next, submit, cancel := applyEdit(m.filter, k)
-		if cancel {
-			m.filterOpen, m.filter, m.cursor = false, "", 0
-			return m, nil
-		}
-		if submit {
-			m.filterOpen = false
-			return m, nil
-		}
-		if next != m.filter {
-			m.filter, m.cursor = next, 0
-		}
-		return m, nil
-	}
-	if k == "?" {
-		m.helpOpen = true
-		return m, nil
-	}
-	if k == "u" && m.undo != "" {
-		lbl := m.undo
-		m.undo = ""
-		m.notice = "undone · " + lbl
-		return m, nil
-	}
 	if m.resumeOpen {
 		mm, cmd := m.updateProduct(k)
 		return mm, cmd
@@ -162,26 +192,41 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 			mm, cmd := m.runCommand()
 			return mm, cmd
 		default:
-			next, _, _ := applyEdit(m.paletteText, k)
+			next, _, _ := applyEdit(m.paletteText, k, m.key)
 			if next != m.paletteText {
 				m.paletteText, m.paletteCursor = next, 0
 			}
 		}
 		return m, nil
 	}
-	if m.replyFocused {
-		next, submit, cancel := applyEdit(m.replyText, k)
-		if cancel {
-			m.replyFocused = false
+	// The triage lens sits below every overlay — with the palette open, `:` and
+	// the letters are the palette's — and above '?' and 'u', which are text
+	// while the dispatch prompt has the keyboard.
+	if m.lens == "floor" {
+		mm, cmd, handled := m.updateFloorQueue(k)
+		if handled {
+			return mm, cmd
+		}
+		m = mm
+	}
+	if k == "?" {
+		m.helpOpen = true
+		return m, nil
+	}
+	if k == "u" && (m.cqUndo != nil || m.undo != "") {
+		if cu := m.cqUndo; cu != nil {
+			// Puts the row back at the front. The act's command already ran, so
+			// this un-hides an ask; it does not un-kill a session.
+			m.cqOrder = append([]string{cu.id}, m.cqOrder...)
+			delete(m.cqSuppressed, cu.id)
+			m.cqUndo, m.undo = nil, ""
+			m.cqCleared = maxi(0, m.cqCleared-1)
+			m.notice = "undone · " + cu.label
 			return m, nil
 		}
-		if submit {
-			feat := m.floorSelectedFeature()
-			text := m.replyText
-			m.replyText, m.replyFocused = "", false
-			return m, replyCmd(feat, text)
-		}
-		m.replyText = next
+		lbl := m.undo
+		m.undo = ""
+		m.notice = "undone · " + lbl
 		return m, nil
 	}
 	if k == ":" {
@@ -196,20 +241,15 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.dispatchForm = newDispatchForm(m.cfg)
 		return m, m.dispatchForm.filter.Focus()
 	}
-	if k == "tab" {
-		if m.narrowPane == "list" {
-			m.narrowPane = "detail"
-		} else {
-			m.narrowPane = "list"
-		}
-		return m, nil
-	}
-	if k == "q" || k == "ctrl+c" {
+	if k == "q" {
 		return m, tea.Quit
 	}
-	if len(k) == 1 && k[0] >= '1' && k[0] <= '8' {
+	if isLensDigit(k) {
 		m.lens = lensOrder[k[0]-'1']
 		m.notice = ""
+		// Leaving the lens leaves its modes: coming back to a half-typed draft
+		// or the working view would be a state the human did not ask for.
+		m.cqWork, m.cqDispatch, m.cqDraft = false, false, ""
 		return m, nil
 	}
 
@@ -226,8 +266,6 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd = m.updateProducts(k)
 	case "product":
 		mm, cmd = m.updateProduct(k)
-	case "floor":
-		mm, cmd = m.updateFloor(k)
 	default:
 		mm = m
 	}

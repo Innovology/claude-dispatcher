@@ -39,40 +39,32 @@ type model struct {
 	settings     *settingsState
 	dispatchForm *dispatchForm
 
+	// key is the untouched message for the key being handled. Routing is by
+	// name (handleKey takes a string), but text input must come from the
+	// message itself — see typedText in keys.go.
+	key tea.KeyMsg
+
 	lens          string
-	cursor        int
 	productCursor int
-	workingOpen   bool
 
 	paletteOpen   bool
 	paletteText   string
 	paletteCursor int
 
-	replyText    string
-	replyFocused bool
-
-	notice  string
-	groupBy string
+	notice string
 
 	shipCursor int
 	resumeOpen bool
 	resumeText string
-
-	modelsBy map[string]string // feature → model override
-	modesBy  map[string]string // feature → permission-mode override
 
 	backlogCursor int
 	picked        map[string]bool
 	srcFilter     string
 
 	shipFx     *shipFxState
-	shipped    map[string]bool
 	justLanded string
 
-	narrowPane   string
-	pane         string
-	stackCursor  int
-	ticketCursor int
+	pane string
 
 	decRepo      int
 	decCursor    int
@@ -82,51 +74,56 @@ type model struct {
 	reviewCursor int
 	reviewOpen   bool
 
-	filter     string
-	filterOpen bool
-	marked     map[string]bool
-	helpOpen   bool
-	diffOpen   bool
+	helpOpen bool
 
-	follow   bool
-	tailN    int
-	confirm  *confirmState
-	undo     string
-	undoSeq  int
-	newCount int
+	confirm *confirmState
+	undo    string
+	undoSeq int
+
+	// ---- triage lens: the command queue -------------------------------------
+	// The queue itself is derived from the records on every read (cq.go), so the
+	// model holds only what the user did to it: the order they left it in, what
+	// they have already acted on, and what they are typing.
+	cqOrder      []string        // item ids, front first; `s` rotates, new asks land at the back
+	cqSuppressed map[string]bool // acted on, hidden until the record leaves the queue for real
+	cqCleared    int             // "N things handled" this session
+
+	cqFlash     string // an act's confirmation, held on screen for cqFlashLinger
+	cqFlashKeep bool   // the flashing act did not clear the item (attach)
+	cqFlashID   string // the item it was fired on — flashes clear by id, never by position
+	cqFlashSeq  int    // generation guard: only the newest flash's tick may fire
+
+	cqWork     bool   // the working view (`w`)
+	cqDispatch bool   // draft mode: the prompt is up over a queue that is not empty
+	cqDraft    string // the draft text (runes from the key message, never the key name)
+
+	cqUndo *cqUndoEntry // the last cleared row, restorable with `u`
 }
 
 func newModel() model {
 	return model{
-		lens:       "floor",
-		groupBy:    "product",
-		pane:       "list",
-		narrowPane: "list",
-		rightTab:   "review",
-		srcFilter:  "all",
-		tailN:      3,
-		newCount:   2,
-		modelsBy:   map[string]string{},
-		modesBy:    map[string]string{},
-		picked:     map[string]bool{},
-		shipped:    map[string]bool{},
-		marked:     map[string]bool{},
+		lens:         "floor",
+		pane:         "list",
+		rightTab:     "review",
+		srcFilter:    "all",
+		picked:       map[string]bool{},
+		cqSuppressed: map[string]bool{},
 	}
 }
 
 // ---- responsive fit tiers ---------------------------------------------------
 
 type fitTier struct {
-	listPct                                              int
-	showDetail, showStrip, showAgents, showSummary, tail bool
-	stats, dec, vel, velTilePct, lanePct                 int
-	cols                                                 string
+	showDetail, showSummary bool
+	dec, vel, velTilePct    int
+	lanePct                 int
+	cols                    string
 }
 
 var (
-	fitWide     = fitTier{listPct: 44, showDetail: true, showStrip: true, showAgents: true, showSummary: true, tail: true, stats: 6, dec: 3, vel: 7, velTilePct: 25, lanePct: 25, cols: "≥170 cols"}
-	fitStandard = fitTier{listPct: 40, showDetail: true, showStrip: true, showAgents: false, showSummary: true, tail: false, stats: 3, dec: 2, vel: 5, velTilePct: 50, lanePct: 50, cols: "110–170 cols"}
-	fitNarrow   = fitTier{listPct: 100, showDetail: false, showStrip: false, showAgents: false, showSummary: false, tail: false, stats: 3, dec: 1, vel: 4, velTilePct: 50, lanePct: 100, cols: "<110 cols"}
+	fitWide     = fitTier{showDetail: true, showSummary: true, dec: 3, vel: 7, velTilePct: 25, lanePct: 25, cols: "≥170 cols"}
+	fitStandard = fitTier{showDetail: true, showSummary: true, dec: 2, vel: 5, velTilePct: 50, lanePct: 50, cols: "110–170 cols"}
+	fitNarrow   = fitTier{showDetail: false, showSummary: false, dec: 1, vel: 4, velTilePct: 50, lanePct: 100, cols: "<110 cols"}
 )
 
 // fit picks the tier for the current terminal width.
@@ -141,40 +138,15 @@ func (m model) fit() fitTier {
 	}
 }
 
-func (m model) groupByMode() string {
-	if m.groupBy != "" {
-		return m.groupBy
-	}
-	return "product"
-}
-
-func (m model) modelOf(x dispatch) string {
-	if v := m.modelsBy[x.feature]; v != "" {
-		return v
-	}
-	if len(x.agents) > 0 && x.agents[0].model != "" {
-		return x.agents[0].model
-	}
-	return "sonnet"
-}
-
-func (m model) modeOf(x dispatch) string {
-	if v := m.modesBy[x.feature]; v != "" {
-		return v
-	}
-	if x.mode != "" {
-		return x.mode
-	}
-	return "edits"
-}
-
 // ---- animation messages -----------------------------------------------------
 
 type (
-	followTickMsg struct{}
-	shipTickMsg   struct{}
-	landClearMsg  struct{}
-	undoClearMsg  struct{ seq int }
+	shipTickMsg  struct{}
+	landClearMsg struct{}
+	undoClearMsg struct{ seq int }
+	// cqFlashMsg ends an act's on-screen confirmation. seq identifies the flash
+	// it was scheduled for, so a superseded tick cannot clear a newer one.
+	cqFlashMsg struct{ seq int }
 )
 
 func (m model) Init() tea.Cmd {
@@ -193,7 +165,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case snapshotMsg:
 		applySnapshot(snapshot(msg))
 		m.loading = false
-		return m, nil
+		// The queue is rebuilt from the fresh records; fold the user's ordering
+		// and cleared set back onto it before anything renders.
+		return m.cqReconcile(), nil
 
 	case stateChangedMsg:
 		return m, tea.Batch(loadSnapshotCmd(m.cfg), waitState(m.stateCh))
@@ -221,12 +195,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case followTickMsg:
-		if !m.follow {
+	case cqFlashMsg:
+		// A stale timer must not clear a newer item — same guard as undoSeq.
+		if m.cqFlash == "" || msg.seq != m.cqFlashSeq {
 			return m, nil
 		}
-		m.tailN++
-		return m, followTick()
+		return m.cqFlashDone()
 
 	case shipTickMsg:
 		return m.advanceShip()
@@ -247,6 +221,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+l" {
 			return m, tea.ClearScreen
 		}
+		m.key = msg
 		return m.handleKey(msg.String())
 	}
 	return m, nil
@@ -266,7 +241,6 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		if len(feats) == 0 {
 			feats = []string{c.feature}
 		}
-		m.marked = map[string]bool{}
 		mm, undo := m.offerUndo(c.label)
 		return mm, tea.Batch(killCmd(feats), undo)
 	case "ship":
