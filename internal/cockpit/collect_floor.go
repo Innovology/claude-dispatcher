@@ -88,7 +88,6 @@ func buildFloorRow(ctx *collectCtx, rec *state.Dispatch) floorRow {
 
 	// Transcript preview: one read reused for said/tail/activity.
 	tail := transcript.Tail(rec.TranscriptPath, 8)
-	acts := floorActivity(tail)
 
 	age := floorAge(rec.UpdatedAt)
 	urgent := st == "blocked" || st == "needs"
@@ -122,22 +121,21 @@ func buildFloorRow(ctx *collectCtx, rec *state.Dispatch) floorRow {
 	}
 
 	d := dispatch{
-		feature:  rec.Feature,
-		repo:     rec.RepoName,
-		product:  ctx.productFor(rec),
-		forge:    forge,
-		state:    st,
-		age:      age,
-		branch:   rec.Branch,
-		why:      rec.StatusReason,
-		signal:   floorSignal(st, checks, review),
-		urgent:   urgent,
-		plus:     plus,
-		minus:    minus,
-		files:    files,
-		commits:  commits,
-		prompt:   rec.Prompt,
-		activity: acts,
+		feature: rec.Feature,
+		repo:    rec.RepoName,
+		product: ctx.productFor(rec),
+		forge:   forge,
+		state:   st,
+		age:     age,
+		branch:  rec.Branch,
+		why:     rec.StatusReason,
+		signal:  floorSignal(st, checks, review),
+		urgent:  urgent,
+		plus:    plus,
+		minus:   minus,
+		files:   files,
+		commits: commits,
+		prompt:  rec.Prompt,
 		agents: []agent{{
 			"", "main", modelForRecord(rec), rec.StatusReason,
 			floorAgentState(st), age + " · " + strconv.Itoa(commits) + " commits",
@@ -324,20 +322,6 @@ func floorChain(rec *state.Dispatch, forge string, plus, minus, files int, check
 	}
 
 	return ch
-}
-
-// floorActivity derives a short tool-use list from a transcript tail.
-func floorActivity(tail []string) []activity {
-	var out []activity
-	for _, ln := range tail {
-		if strings.HasPrefix(ln, "⚙ ") {
-			out = append(out, activity{tool: strings.TrimPrefix(ln, "⚙ "), resultColor: cDim})
-			if len(out) >= 4 {
-				break
-			}
-		}
-	}
-	return out
 }
 
 // floorSaid returns the last assistant text line in the tail (skipping tool

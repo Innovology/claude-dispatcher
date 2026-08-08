@@ -180,7 +180,8 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// An empty prompt is not a trap: with nothing typed, the navigation keys
 		// still reach their handlers. The moment there is a draft they are text
 		// again — `w` belongs in a sentence more often than it means "working".
-		if !(m.cqDraft == "" && (isLensDigit(k) || k == ":" || k == "w")) {
+		navKey := isLensDigit(k) || k == ":" || k == "w"
+		if m.cqDraft != "" || !navKey {
 			mm, cmd := m.cqEdit(k)
 			return mm, cmd, true
 		}

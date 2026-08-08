@@ -9,10 +9,6 @@ package cockpit
 
 // ---- shared view-model types ------------------------------------------------
 
-type activity struct {
-	tool, arg, result, resultColor string
-}
-
 // agent is the main session plus any subagents it spawned.
 // state is one of: now | ok | bad | idle (see agentStyle in seed_floor.go).
 type agent struct {
@@ -47,7 +43,6 @@ type dispatch struct {
 	urgent                                            bool
 	plus, minus, files, commits                       int
 	prompt                                            string
-	activity                                          []activity
 	agents                                            []agent
 	prs                                               []prRef
 	runs                                              []runRef

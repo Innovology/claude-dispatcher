@@ -162,10 +162,8 @@ func TestDispatchFormFlow(t *testing.T) {
 		t.Fatal("empty prompt should be rejected and keep the form open")
 	}
 	m = typeStr(m, "do the thing")
-	var cmd interface{}
-	next, c := m.handleKey("enter")
+	next, cmd := m.handleKey("enter")
 	m = next.(model)
-	cmd = c
 	if m.dispatchForm != nil {
 		t.Fatal("submitting the prompt should close the form")
 	}

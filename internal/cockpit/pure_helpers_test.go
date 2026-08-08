@@ -437,23 +437,6 @@ func TestFloorAsk(t *testing.T) {
 	}
 }
 
-func TestFloorActivityAndSaid(t *testing.T) {
-	tail := []string{"said one", "⚙ Bash", "⚙ Read", "said two", "⚙ Grep", "⚙ Edit", "⚙ Write"}
-	acts := floorActivity(tail)
-	if len(acts) != 4 {
-		t.Fatalf("floorActivity len = %d, want capped at 4", len(acts))
-	}
-	if got := floorSaid(tail); got != "said two" {
-		t.Errorf("floorSaid = %q, want %q", got, "said two")
-	}
-	if got := floorSaid([]string{"⚙ Bash"}); got != "" {
-		t.Errorf("floorSaid all-tool = %q, want empty", got)
-	}
-	if got := floorSaid(nil); got != "" {
-		t.Errorf("floorSaid nil = %q, want empty", got)
-	}
-}
-
 func TestFloorNumstat(t *testing.T) {
 	plus, minus, files, dfs := floorNumstat("", "", "")
 	if plus != 0 || minus != 0 || files != 0 || len(dfs) != 0 {

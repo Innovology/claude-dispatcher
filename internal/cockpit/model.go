@@ -24,7 +24,6 @@ type confirmState struct {
 	kind          string // "kill" | "ship"
 	feature, repo string
 	features      []string // kill targets (marked set, or the one selected)
-	count         int      // marked count, for "kill N marked"
 }
 
 // model is the whole cockpit. Every lens reads and writes these fields; each

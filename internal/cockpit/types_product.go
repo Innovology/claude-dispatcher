@@ -9,7 +9,7 @@ package cockpit
 // ---- reviews ----------------------------------------------------------------
 
 // reviewerInfo is the "a reviewer dispatcher looked at this" annotation on a PR.
-type reviewerInfo struct{ state, label, color string }
+type reviewerInfo struct{ label, color string }
 
 type reviewItem struct {
 	pr, title, repo, author, waiting, age, checks, size, summary string
