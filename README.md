@@ -4,6 +4,8 @@
 
 It sits **above** your repos, not inside any one of them. Every dispatcher is a real `claude` session in its own tmux; the cockpit is a fast, keyboard-driven viewer over all of them.
 
+![Triage: one blocker at a time, with the rest of the queue beneath it](docs/triage.svg)
+
 ---
 
 ## Why
@@ -31,26 +33,42 @@ Switch with the number keys. Each lens is a different question about the same fa
 | `7` | **decisions** | ADRs and decision records per repo |
 | `8` | **velocity** | DORA + what actually reached production |
 
-**The triage detail pane** reads the whole story of a dispatcher — what Claude said, the commit → PR → checks → merge → deploy chain, the PR stack, the live output tail — and lets you reply, attach, or ship without leaving it.
+**Triage is a queue, not a list.** It shows you one thing — the most urgent ask, what it wants, and the evidence — with its actions on the same screen. Act on it and the next one takes its place. A list makes you choose what to look at; a queue just hands you the next decision.
 
-**A product** in one view — velocity tiles, in-flight kanban lanes, and review / team / shipped tabs:
+**`w` shows what is running.** Everything working away unattended, grouped by product, with what each one is doing right now and how long since it last said anything. Nothing here needs you — that is the point of keeping it off the queue.
+
+![The working view: what is running, and what it is doing](docs/working.svg)
+
+**With the queue clear, the same screen becomes the prompt.** Type what to build and press enter; `tab` picks the repo.
+
+![Dispatching straight from an empty queue](docs/dispatch.svg)
+
+**A product** is many repos — the portfolio roll-up, what is stale, and where the factory is stuck:
+
+![The products lens](docs/products.svg)
 
 **Velocity** — DORA delivery metrics beside what actually shipped, because a thousand commits that never merge isn't velocity:
 
+![The velocity lens](docs/velocity.svg)
+
 **One backlog** across GitHub Issues, Linear and Azure Boards — pick, then dispatch:
+
+![The backlog lens](docs/backlog.svg)
 
 ## Usage limits, learned
 
 There is no API for a Claude subscription's limits — so the cockpit **learns** them. It measures your 5-hour rolling and weekly consumption from the session transcripts, and treats the usage at each real rate-limit (429) as that window's cap: *assume that's the limit, until we sail past it and it's fine — then raise it.* The estimate persists and sharpens over time.
 
+![The usage lens: 5-hour and weekly windows against learned caps](docs/usage.svg)
+
 ## Actions are real
 
-Everything on the triage lens is wired to the live session, behind a confirm where it matters:
+Every act the queue offers is wired to the live session — the act row shows only what this dispatcher can actually do:
 
 - **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back)
-- **`r`** reply into the session without attaching
-- **`y`** ship — `gh pr merge --squash --auto`, then mark live
-- **`x`** kill the session · **`enter` on a backlog ticket** dispatches it
+- **`y`** on a PR waiting to merge: `gh pr merge --squash --auto`, then mark live. Elsewhere it marks the record shipped, and it is hidden entirely when the dispatcher has produced no commits
+- **`x`** kill the session · **`s`** skip to the back of the queue · **`u`** undo
+- **`d`** open the prompt · **`w`** see what is running · **`enter` on a backlog ticket** dispatches it
 
 ## Install
 
@@ -100,19 +118,28 @@ claude-dispatcher init     # first run: writes config, scans for repos, installs
 claude-dispatcher            # open the cockpit
 ```
 
-Press `1`–`8` to move between lenses, `j`/`k` to move, `→` into the detail, `/` to filter, `:` for the command palette, `?` for all keys, and `,` for settings.
+Press `1`–`8` to move between lenses. On triage, act on what it shows you or `s` to skip; `w` shows what is running, `d` opens the prompt. Elsewhere `j`/`k` move and `enter` opens. `:` is the command palette, `?` lists every key, and `,` opens settings.
 
 ## Settings
 
 Press `,` in the cockpit (or `:settings`) to edit — written straight to `~/.config/claude-dispatcher/config.toml`:
 
 - **scan roots** — the directories scanned (3 levels deep) for git repos
-- **products** — map product names to repos for the roll-up (`[products]` in the file)
 - **Linear API key** — turns on the Linear backlog source (or set `LINEAR_API_KEY`)
 - **Azure org / project** — turns on Azure Boards (needs the `az` CLI; or set `AZURE_DEVOPS_ORG` / `AZURE_DEVOPS_PROJECT`)
 - **weekly token budget** — optional; when set, the usage lens gauges against it, otherwise it shows learned caps and raw tokens
 
 Environment variables override file values, so a secret can stay out of the file.
+
+**Products are file-only.** The settings overlay does not edit them yet — group repos by hand in `~/.config/claude-dispatcher/config.toml`, using the repo's directory name:
+
+```toml
+[products]
+acme    = ["acme-api", "acme-web", "acme-hq"]
+bluefin = ["bluefin-core", "bluefin-web"]
+```
+
+Anything unmapped is grouped under `unassigned`, which is what a fresh install shows.
 
 ## How it works
 
