@@ -40,7 +40,7 @@ const (
 // Stat is one window's consumption and its learned cap.
 type Stat struct {
 	Total     int            // tokens consumed in the window
-	ByModel   map[string]int // bucketed model → tokens (opus/sonnet/haiku/other)
+	ByModel   map[string]int // model family → tokens (see bucket: Families, else the id)
 	Sessions  int            // distinct sessions contributing
 	Cap       int            // learned cap; 0 = still learning
 	CapSource string         // "limit" (from a 429) | "observed" (ratcheted high-water) | ""
@@ -87,19 +87,45 @@ type store struct {
 	LastLimitUnix  int64  `json:"last_limit_unix"`
 }
 
-// bucket maps a raw model id to opus/sonnet/haiku/other.
+// Families are the model families we know by name, most expensive first. The
+// cockpit renders them in this order; anything else keeps its own id (see
+// bucket), so a new model never disappears into an unlabelled "other" row.
+var Families = []string{"fable", "mythos", "opus", "sonnet", "haiku"}
+
+// bucket maps a raw model id to its family. An id from no known family is NOT
+// folded into a catch-all: it keeps its own name (minus the "claude-" prefix
+// and any date suffix), because "other models" tells you nothing when a whole
+// new tier — Fable 5 was 40% of a week — lands in it.
 func bucket(model string) string {
-	m := strings.ToLower(model)
-	switch {
-	case strings.Contains(m, "opus"):
-		return "opus"
-	case strings.Contains(m, "haiku"):
-		return "haiku"
-	case strings.Contains(m, "sonnet"):
-		return "sonnet"
-	default:
-		return "other"
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, f := range Families {
+		if strings.Contains(m, f) {
+			return f
+		}
 	}
+	return trimModelID(m)
+}
+
+// trimModelID shortens a raw id for display: "claude-gizmo-6-20260401" → "gizmo-6".
+func trimModelID(m string) string {
+	if m == "" {
+		return "unknown"
+	}
+	m = strings.TrimPrefix(m, "claude-")
+	// Drop a trailing 8-digit date stamp ("-20251001"), which is noise in a label.
+	if i := strings.LastIndex(m, "-"); i > 0 && len(m)-i == 9 && isDigits(m[i+1:]) {
+		m = m[:i]
+	}
+	return m
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 func claudeDir() string {
