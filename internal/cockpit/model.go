@@ -65,6 +65,19 @@ type model struct {
 
 	pane string
 
+	// ---- products lens: the assignment editor --------------------------------
+	// clMap is the working copy of repo→product; "" means unassigned. It is
+	// seeded from the config and written back on every change, so the file
+	// stays the source of truth.
+	clOpen    bool
+	clPane    string // "repos" | "products"
+	clRepo    int
+	clProd    int
+	clMarked  map[string]bool
+	clNaming  bool
+	clNewName string
+	clMap     map[string]string
+
 	decRepo      int
 	decCursor    int
 	pluginCursor int
@@ -92,9 +105,10 @@ type model struct {
 	cqFlashID   string // the item it was fired on — flashes clear by id, never by position
 	cqFlashSeq  int    // generation guard: only the newest flash's tick may fire
 
-	cqWork     bool   // the working view (`w`)
-	cqDispatch bool   // draft mode: the prompt is up over a queue that is not empty
-	cqDraft    string // the draft text (runes from the key message, never the key name)
+	cqWorkCursor int    // cursor in the working view's flattened rows
+	cqWork       bool   // the working view (`w`)
+	cqDispatch   bool   // draft mode: the prompt is up over a queue that is not empty
+	cqDraft      string // the draft text (runes from the key message, never the key name)
 
 	cqUndo *cqUndoEntry // the last cleared row, restorable with `u`
 }
@@ -106,6 +120,9 @@ func newModel() model {
 		rightTab:     "review",
 		srcFilter:    "all",
 		picked:       map[string]bool{},
+		clPane:       "repos",
+		clMarked:     map[string]bool{},
+		clMap:        map[string]string{},
 		cqSuppressed: map[string]bool{},
 	}
 }

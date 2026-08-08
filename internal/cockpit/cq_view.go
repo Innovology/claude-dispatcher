@@ -446,16 +446,17 @@ func (m model) cqViewWorking(w, h int) string {
 	}
 	tail := []cqRow{
 		cqGap(4),
-		cqFixed(flG(fg(cFaint, "w or esc back to the queue"))),
+		cqFixed(flG(fg(cFaint, "j/k move · enter attach · x kill · w or esc back"))),
 		cqGap(1),
 	}
 	head, tail = cqShedPair(head, tail, maxi(1, h-1))
 	capacity := maxi(0, h-len(head)-len(tail))
 
-	block := cqWorkLines(w, true)
+	sel := clampCursor(m.cqWorkCursor, cqRunningCount())
+	block := cqWorkLines(w, true, sel)
 	if len(block) > capacity {
 		// The per-group spacer is the cheapest thing on this screen.
-		block = cqWorkLines(w, false)
+		block = cqWorkLines(w, false, sel)
 	}
 	if len(block) > capacity {
 		keep := maxi(0, capacity-1)
@@ -482,9 +483,10 @@ func (m model) cqViewWorking(w, h int) string {
 
 // cqWorkLines flattens the product groups into lines. gaps controls the blank
 // row that opens every group, including the first.
-func cqWorkLines(w int, gaps bool) []cqBlockLine {
+func cqWorkLines(w int, gaps bool, sel int) []cqBlockLine {
 	inner := cqInner(w)
 	var out []cqBlockLine
+	i := 0
 	for _, g := range cqWorking {
 		if len(g.rows) == 0 {
 			continue
@@ -496,7 +498,8 @@ func cqWorkLines(w int, gaps bool) []cqBlockLine {
 			fg(cFaint, cqLabel(g.name)),
 			fg(cFaint, itoa(len(g.rows))+" running"), inner))})
 		for _, x := range g.rows {
-			out = append(out, cqBlockLine{s: cqWorkRowLine(w, x), isRow: true})
+			out = append(out, cqBlockLine{s: cqWorkRowLine(w, x, i == sel), isRow: true})
+			i++
 		}
 	}
 	return out
@@ -505,8 +508,14 @@ func cqWorkLines(w int, gaps bool) []cqBlockLine {
 // cqWorkRowLine is one running dispatcher. Same one-flex-column discipline as
 // cqRestRow. Repo is again the column that goes when width runs out: the rows
 // are already grouped by product, and `doing` is the only liveness signal.
-func cqWorkRowLine(w int, x cqWorkRow) string {
+func cqWorkRowLine(w int, x cqWorkRow, on bool) string {
 	inner := cqInner(w)
+	// The selected row carries the cursor and the highlight; the leading pad
+	// column doubles as the marker gutter so nothing else shifts.
+	bg, mark, featColor := cTransparent, " ", cMid
+	if on {
+		bg, mark, featColor = cSel, "▸", cWhite
+	}
 	showRepo := w >= 110
 
 	rem := maxi(0, inner-9)
@@ -519,12 +528,12 @@ func cqWorkRowLine(w int, x cqWorkRow) string {
 	}
 
 	out, outHex := cqOutCell(x.out)
-	segs := []seg{c("", pad, ""), c(truncate(x.feature, featW-1), featW, cMid)}
+	segs := []seg{c(mark, pad, cMid), c(truncate(x.feature, featW-1), featW, featColor)}
 	if showRepo {
 		segs = append(segs, c(truncate(x.repo, repoW-1), repoW, cFaint))
 	}
 	segs = append(segs, flexc(x.doing, cDim), cr(out, 9, outHex), c("", pad, ""))
-	return row(w, "", segs...)
+	return row(w, bg, segs...)
 }
 
 // ---- mode: empty / draft ----------------------------------------------------
@@ -622,7 +631,7 @@ func (m model) cqFooterHelp() string {
 	q := m.cqQueue()
 	switch {
 	case m.cqWork:
-		return "w or esc back · 1…8 sections · : palette"
+		return "j/k move · enter attach · x kill · w or esc back"
 	case m.cqDispatch || len(q) == 0:
 		if m.cqDraft != "" {
 			return "enter dispatch · esc clear"

@@ -1,5 +1,7 @@
 package cockpit
 
+import "claude-dispatcher/internal/repos"
+
 // data.go declares every data var the lenses render. They start empty and are
 // only ever filled by applySnapshot (live.go) from the collectors, so nothing
 // reaches the screen that did not come from the user's own repos, dispatch
@@ -67,6 +69,9 @@ var (
 )
 
 // ---- backlog / queue --------------------------------------------------------
+
+// lastDiscovered is the repo list from the most recent scan.
+var lastDiscovered []repos.Repo
 
 var (
 	backlogTickets []ticket

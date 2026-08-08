@@ -138,3 +138,61 @@ func command(repoPath string, args ...string) *exec.Cmd {
 	cmd.Dir = repoPath
 	return cmd
 }
+
+// DeployPipeline is a repo's deploy workflow and the state of its most recent
+// run. Name is empty when the repo has no deploy workflow at all, which is a
+// real answer — "merge is live" — not a failure to look.
+type DeployPipeline struct {
+	Name       string
+	Status     string // completed | in_progress | queued
+	Conclusion string // success | failure | cancelled | "" while running
+	At         time.Time
+	RunsToday  int
+}
+
+// DeployStatus reports the repo's deploy workflow and its latest run, using the
+// same target selection as DeploySignal so the product lens and the "done means
+// live" tracker can never disagree about which workflow is the deploy.
+func DeployStatus(repoPath, override string) DeployPipeline {
+	return memo("deploy:"+repoPath+":"+override, RepoTTL, func() DeployPipeline {
+		if !Available() {
+			return DeployPipeline{}
+		}
+		target := override
+		if target == "" {
+			for _, name := range workflows(repoPath) {
+				if deployRe.MatchString(name) {
+					target = name
+					break
+				}
+			}
+		}
+		if target == "" {
+			return DeployPipeline{}
+		}
+		out, err := command(repoPath, "run", "list", "--workflow", target,
+			"--json", "conclusion,createdAt,status", "--limit", "20").Output()
+		if err != nil {
+			return DeployPipeline{Name: target}
+		}
+		var rows []struct {
+			Conclusion string    `json:"conclusion"`
+			Status     string    `json:"status"`
+			CreatedAt  time.Time `json:"createdAt"`
+		}
+		if json.Unmarshal(out, &rows) != nil {
+			return DeployPipeline{Name: target}
+		}
+		p := DeployPipeline{Name: target}
+		cutoff := time.Now().Add(-24 * time.Hour)
+		for i, r := range rows {
+			if i == 0 {
+				p.Status, p.Conclusion, p.At = r.Status, r.Conclusion, r.CreatedAt
+			}
+			if r.CreatedAt.After(cutoff) {
+				p.RunsToday++
+			}
+		}
+		return p
+	})
+}

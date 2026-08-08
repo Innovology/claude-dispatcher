@@ -47,6 +47,10 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 ![The products lens](docs/products.svg)
 
+**Press `a` to say which repos make up which product.** Mark repos with `space`, `enter` moves them into the selected product, `n` names a new one. It writes straight to `[products]` in your config, so the grouping every other lens uses is one screen away rather than a file you have to remember the syntax for.
+
+![Assigning repos to products](docs/assign.svg)
+
 **Velocity** — DORA delivery metrics beside what actually shipped, because a thousand commits that never merge isn't velocity:
 
 ![The velocity lens](docs/velocity.svg)
@@ -131,7 +135,7 @@ Press `,` in the cockpit (or `:settings`) to edit — written straight to `~/.co
 
 Environment variables override file values, so a secret can stay out of the file.
 
-**Products are file-only.** The settings overlay does not edit them yet — group repos by hand in `~/.config/claude-dispatcher/config.toml`, using the repo's directory name:
+**Products** are edited on the products lens (`2`, then `a`), which writes the table below for you. You can still group them by hand in `~/.config/claude-dispatcher/config.toml`, using each repo's directory name:
 
 ```toml
 [products]

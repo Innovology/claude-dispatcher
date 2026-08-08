@@ -46,6 +46,7 @@ echo "capturing…"
 shoot triage    "Triage: the command queue"        1
 shoot working   "The working view"                 w
 shoot products  "The products lens"                w 2
+shoot assign    "Assigning repos to products"      a
 shoot backlog   "The backlog lens"                 5
 shoot usage     "The usage lens"                   6
 shoot velocity  "The velocity lens"                8
