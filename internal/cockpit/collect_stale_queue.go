@@ -146,7 +146,7 @@ func stqLoadQueue() []queueItem {
 			prompt:  d.Prompt,
 			status:  "ready",
 			color:   cGreen,
-			edge:    "#2f6b41",
+			edge:    cFillGreen,
 		})
 	}
 	return items

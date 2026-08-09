@@ -110,12 +110,30 @@ type model struct {
 	cqFlashID   string // the item it was fired on — flashes clear by id, never by position
 	cqFlashSeq  int    // generation guard: only the newest flash's tick may fire
 
-	cqWorkCursor int    // cursor in the working view's flattened rows
-	cqWork       bool   // the working view (`w`)
-	cqDispatch   bool   // draft mode: the prompt is up over a queue that is not empty
-	cqDraft      string // the draft text (runes from the key message, never the key name)
+	cqWorkCursor int  // cursor in the working view's flattened rows
+	cqWork       bool // the working view (`w`)
+	cqDispatch   bool // the dispatch form is up over a queue that is not empty
+
+	// The item view's two scroll panes: the evidence excerpt (j/k) over the rest
+	// of the queue (J/K). cqHeadID is the item those offsets belong to — when the
+	// head changes, an offset measured against the previous item's diff is
+	// meaningless, so snapPanes puts both back to the top.
+	cqEvScroll   int
+	cqRestScroll int
+	cqHeadID     string
 
 	cqUndo *cqUndoEntry // the last cleared row, restorable with `u`
+
+	// ---- triage lens: the structured dispatch form -------------------------
+	// The floor's freeform draft became four fields: where it lands, what it
+	// does, when it is done, and whether it needs you between steps. See
+	// dispatchx.go — cqDispatch is what says the form is open.
+	dxField  dxFieldID // which line owns the keyboard
+	dxFilter string    // WHERE: repo filter (runes from the key message)
+	dxRepo   int       // cursor into dxRows(); clamped on read, reset by filtering
+	dxWhat   string    // WHAT: the work, and the feature name
+	dxGoal   string    // DONE WHEN: completion condition, optional
+	dxAuto   bool      // AUTO: unattended (default true)
 }
 
 func newModel() model {
@@ -129,6 +147,9 @@ func newModel() model {
 		clMarked:     map[string]bool{},
 		clMap:        map[string]string{},
 		cqSuppressed: map[string]bool{},
+		// The default dispatch is unattended. Without this the form opens on
+		// "asks after every step", which is not the product's default posture.
+		dxAuto: true,
 	}
 }
 
@@ -189,8 +210,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		applySnapshot(snapshot(msg))
 		m.loading = false
 		// The queue is rebuilt from the fresh records; fold the user's ordering
-		// and cleared set back onto it before anything renders.
-		return m.cqReconcile(), nil
+		// and cleared set back onto it before anything renders. A refresh can
+		// change the head, and the pane offsets belong to the old one.
+		return m.cqReconcile().snapPanes(), nil
 
 	case stateChangedMsg:
 		return m, tea.Batch(loadSnapshotCmd(m.cfg), waitState(m.stateCh))
@@ -232,7 +254,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cqFlash == "" || msg.seq != m.cqFlashSeq {
 			return m, nil
 		}
-		return m.cqFlashDone()
+		mm, cmd := m.cqFlashDone()
+		return mm.snapPanes(), cmd
 
 	case shipTickMsg:
 		return m.advanceShip()

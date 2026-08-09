@@ -203,7 +203,13 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	// the letters are the palette's — and above '?' and 'u', which are text
 	// while the dispatch prompt has the keyboard.
 	if m.lens == "floor" {
+		// Once before, so the offsets belong to the head that is on screen as the
+		// key is pressed — the first key of a session would otherwise land on an
+		// unseeded id and snap the pane the human had just scrolled. Once after,
+		// because an act or a skip can change the head.
+		m = m.snapPanes()
 		mm, cmd, handled := m.updateFloorQueue(k)
+		mm = mm.snapPanes()
 		if handled {
 			return mm, cmd
 		}
@@ -247,9 +253,11 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	if isLensDigit(k) {
 		m.lens = lensOrder[k[0]-'1']
 		m.notice = ""
-		// Leaving the lens leaves its modes: coming back to a half-typed draft
-		// or the working view would be a state the human did not ask for.
-		m.cqWork, m.cqDispatch, m.cqDraft = false, false, ""
+		// Leaving the lens leaves its modes: coming back to a half-filled
+		// dispatch form or the working view would be a state the human did not
+		// ask for. dxReset closes the form and clears all four fields.
+		m = m.dxReset()
+		m.cqWork = false
 		return m, nil
 	}
 

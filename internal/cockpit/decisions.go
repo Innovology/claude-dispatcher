@@ -111,7 +111,10 @@ func (m model) viewDecisions(w, h int) string {
 		if m.pane == "detail" {
 			block = m.decBodyBlock(cw, repo, list, ci, decPlugin)
 		} else {
-			block = m.decMidBlock(cw, repo, list, ci, decPlugin)
+			// The body pane and the left column are both gone here, so the
+			// inline block carries the record's prose as well as the repo tail.
+			block = vjoin(append([]string{m.decMidBlock(cw, repo, list, ci, decPlugin)},
+				decNarrowBlock(cw, list, ci, decPlugin, true)...)...)
 		}
 		return clampLines(gutter(padBlockTo(block, h), pad), h)
 	}
@@ -128,11 +131,76 @@ func (m model) viewDecisions(w, h int) string {
 	} else { // dec == 2: mid + body, left hidden.
 		mw := maxi(w*42/100, 1)
 		bw := maxi(w-1-mw, 1)
-		mid := gutter(padBlockTo(m.decMidBlock(maxi(mw-pad, 1), repo, list, ci, decPlugin), h), pad)
+		mwi := maxi(mw-pad, 1)
+		// Only the left column is hidden at this tier, and the body pane is
+		// still showing the prose — so the inline block re-homes just what the
+		// left column carried, without repeating the record side by side.
+		midBlock := vjoin(append([]string{m.decMidBlock(mwi, repo, list, ci, decPlugin)},
+			decNarrowBlock(mwi, list, ci, decPlugin, false)...)...)
+		mid := gutter(padBlockTo(midBlock, h), pad)
 		body := gutter(padBlockTo(m.decBodyBlock(maxi(bw-pad, 1), repo, list, ci, decPlugin), h), pad)
 		blocks = []string{mid, vrule(h, cRule), body}
 	}
 	return clampLines(hjoin(blocks...), h)
+}
+
+// decRepoCount is a repo's record tally for the "where decisions live" rows:
+// the number still proposed (amber, flagged ◆) when any are, else the total.
+// Shared by the left column and the collapsed layouts' inline tail so the two
+// can never disagree about a repo's count.
+func decRepoCount(repo string) (count, color string) {
+	rl := decisions[repo]
+	open := 0
+	for _, d := range rl {
+		if d.status == "proposed" {
+			open++
+		}
+	}
+	if open > 0 {
+		return itoa(open) + "◆", cAmber
+	}
+	return itoa(len(rl)), cDim
+}
+
+// decNarrowBlock is the design's decNarrow: what the collapsed layouts lose,
+// re-homed under the record list. At two columns only the left column is
+// hidden, so it carries just the repo tail; at one column the body pane is gone
+// too and the selected record's prose comes with it. At three columns nothing
+// is missing and this is not rendered at all.
+func decNarrowBlock(cw int, list []decision, ci int, decPlugin plugin, prose bool) []string {
+	out := []string{"", fg(cRule, strings.Repeat("─", cw))}
+
+	if prose {
+		x := decision{id: "—"}
+		if len(list) > 0 {
+			x = list[ci]
+		}
+		section := func(label, body, hex string) {
+			out = append(out, "")
+			out = append(out, line(label, cw, cDim, ""))
+			for _, l := range decWrap(body, cw) {
+				out = append(out, fg(hex, l))
+			}
+		}
+		section(x.id+" · context", x.context, cMid)
+		section("decision", x.decision, cFg)
+		section("consequences", x.consequences, cMid)
+	}
+
+	out = append(out, "")
+	out = append(out, line(decPlugin.name+" · "+decPlugin.host, cw, cFaint, ""))
+	out = append(out, "")
+	out = append(out, line("where decisions live", cw, cDim, ""))
+	for _, r := range decisionRepoOrder {
+		count, countColor := decRepoCount(r)
+		pl := pluginForRepo(r)
+		out = append(out, row(cw, "",
+			flexc(r, cMid),
+			c(" "+pl.name, dispWidth(pl.name)+1, cFaint),
+			cr(count, 5, countColor),
+		))
+	}
+	return out
 }
 
 // decLeftBlock builds the "where decisions live" column: the repos (with an
@@ -148,17 +216,7 @@ func (m model) decLeftBlock(cw int, selRepo string, _ []decision, _ plugin) stri
 		if on {
 			bg, nameColor, marker = cSel, cWhite, "▸"
 		}
-		rl := decisions[r]
-		open := 0
-		for _, d := range rl {
-			if d.status == "proposed" {
-				open++
-			}
-		}
-		count, countColor := itoa(len(rl)), cDim
-		if open > 0 {
-			count, countColor = itoa(open)+"◆", cAmber
-		}
+		count, countColor := decRepoCount(r)
 		lines = append(lines, row(cw, bg, c(marker, 2, cMid), flexc(r, nameColor), cr(count, 5, countColor)))
 		pl := pluginForRepo(r)
 		plColor := cMid

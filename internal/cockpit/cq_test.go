@@ -44,7 +44,7 @@ func installCQFixture(t *testing.T) {
 		},
 	}
 	cqWorking = []cqGroup{
-		{name: "alpha", rows: []cqWorkRow{{feature: "three", repo: "alpha-web", doing: "writing code", out: "6s"}}},
+		{name: "alpha", rows: []cqWorkRow{{feature: "three", repo: "alpha-web", phase: "act", pass: 2, out: "6s"}}},
 	}
 	cqLastOutput = "6s"
 }
@@ -148,67 +148,80 @@ func TestCQKeepActLeavesTheItem(t *testing.T) {
 	}
 }
 
-// `d` opens the draft over a full queue; the empty draft still navigates, and a
-// non-empty one takes every key as text.
-func TestCQDraftFallThroughAndSubmit(t *testing.T) {
+// `d` opens the dispatch form over a full queue; an untouched form still
+// navigates, and a touched one takes every key as text.
+func TestCQFormFallThrough(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	if !m.cqDispatch || m.cqDraft != "" {
-		t.Fatalf("d should open an empty draft: %v %q", m.cqDispatch, m.cqDraft)
+	if !m.cqDispatch || m.dxTouched() || !m.dxAuto {
+		t.Fatalf("d should open an empty form, auto on: %v %v %v", m.cqDispatch, m.dxTouched(), m.dxAuto)
 	}
 
-	// Empty draft: w reaches the working view, and 1–8 still switch lens.
+	// Untouched: w reaches the working view, and 1–8 still switch lens.
 	m = press(m, "w")
 	if !m.cqWork {
-		t.Fatal("w should fall through an empty draft to the working view")
+		t.Fatal("w should fall through an untouched form to the working view")
 	}
 	m = press(m, "w")
 	if m.cqWork {
 		t.Fatal("w again should come back")
 	}
 
-	// Once there is a draft, those same keys are text.
+	// Once anything is typed, those same keys are letters again. The form opens
+	// on WHERE, so they land in the repo filter.
 	m = press(m, "a")
 	m = press(m, "w")
-	if m.cqDraft != "aw" || m.cqWork {
-		t.Fatalf("a non-empty draft should take w as text: %q work=%v", m.cqDraft, m.cqWork)
+	if m.dxFilter != "aw" || m.cqWork {
+		t.Fatalf("a touched form should take w as text: %q work=%v", m.dxFilter, m.cqWork)
 	}
 	m = press(m, "backspace")
-	if m.cqDraft != "a" {
-		t.Errorf("backspace: %q", m.cqDraft)
-	}
-
-	// Enter hands the work to the dispatch form, which still has a repo to pick.
-	next, cmd := m.handleKey("enter")
-	m = next.(model)
-	if m.dispatchForm == nil || cmd == nil {
-		t.Fatal("enter on a draft should open the dispatch form")
-	}
-	if got := m.dispatchForm.prompt.Value(); got != "a" {
-		t.Errorf("the draft should reach the form's prompt, got %q", got)
-	}
-	if m.cqDispatch || m.cqDraft != "" {
-		t.Error("submitting should close the draft")
+	if m.dxFilter != "a" {
+		t.Errorf("backspace: %q", m.dxFilter)
 	}
 }
 
-func TestCQDraftEscAndEmptySubmit(t *testing.T) {
+// Enter walks the four fields and only submits from the last one; esc abandons
+// the whole form.
+func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	m = press(m, "z")
-	m = press(m, "esc")
-	if m.cqDispatch || m.cqDraft != "" {
-		t.Error("esc should abandon the draft")
+	for _, want := range []dxFieldID{dxWhatF, dxGoalF, dxAutoF} {
+		m = press(m, "enter")
+		if m.dxField != want {
+			t.Fatalf("enter should advance to field %d, got %d", want, m.dxField)
+		}
+	}
+	// On AUTO, space is the switch rather than a character.
+	m = press(m, "space")
+	if m.dxAuto {
+		t.Error("space on AUTO should turn it off")
 	}
 
-	m = press(m, "d")
-	next, cmd := m.handleKey("enter")
-	m = next.(model)
-	if cmd != nil || m.dispatchForm != nil {
-		t.Error("an empty draft should dispatch nothing")
+	m = press(m, "esc")
+	if m.cqDispatch || m.dxTouched() || m.dxField != dxWhereF {
+		t.Error("esc should abandon the form and reset every field")
 	}
-	if m.notice != "nothing to dispatch" {
+}
+
+// Submitting with no repo to land in says so and keeps what was typed: the form
+// is the only copy of the sentence.
+func TestCQFormSubmitWithoutARepo(t *testing.T) {
+	m := cqModel(t)
+	m = press(m, "d")
+	m = press(m, "tab") // → WHAT
+	for _, k := range strings.Split("fix", "") {
+		m = press(m, k)
+	}
+	next, cmd := m.handleKey("ctrl+d")
+	m = next.(model)
+	if cmd != nil {
+		t.Error("nothing should launch when no repo matches")
+	}
+	if m.notice != "nothing matches — widen the filter" {
 		t.Errorf("notice = %q", m.notice)
+	}
+	if !m.cqDispatch || m.dxWhat != "fix" {
+		t.Error("a failed submit must keep the form and what was typed")
 	}
 }
 
@@ -244,21 +257,93 @@ func TestCQLensDigitResetsModes(t *testing.T) {
 		t.Errorf("a digit should leave the working view: lens=%q work=%v", m.lens, m.cqWork)
 	}
 
-	// A draft with text in it keeps the digit — you are writing a sentence.
+	// A form with text in it keeps the digit — you are typing a filter.
 	m = cqModel(t)
 	m = press(m, "d")
 	m = press(m, "x")
 	m = press(m, "2")
-	if m.lens != "floor" || m.cqDraft != "x2" {
-		t.Errorf("a digit in a non-empty draft is text: lens=%q draft=%q", m.lens, m.cqDraft)
+	if m.lens != "floor" || m.dxFilter != "x2" {
+		t.Errorf("a digit in a touched form is text: lens=%q filter=%q", m.lens, m.dxFilter)
 	}
 
-	// An empty one does not trap it.
+	// An untouched one does not trap it, and leaving resets the form.
 	m = press(m, "backspace")
 	m = press(m, "backspace")
 	m = press(m, "3")
-	if m.lens != "product" || m.cqDispatch || m.cqDraft != "" {
-		t.Errorf("an empty draft should let the digit through: lens=%q draft=%q", m.lens, m.cqDraft)
+	if m.lens != "product" || m.cqDispatch || m.dxTouched() {
+		t.Errorf("an untouched form should let the digit through: lens=%q filter=%q", m.lens, m.dxFilter)
+	}
+}
+
+// j/k scroll the evidence excerpt and stop at both ends of what is showable —
+// not at the line count, which would leave the last screenful of k presses
+// doing nothing. J/K do the same for the queue pane.
+func TestCQScrollPanesClamp(t *testing.T) {
+	m := cqModel(t)
+	lines := make([]hunkLine, 0, 60)
+	for i := 0; i < 60; i++ {
+		lines = append(lines, hunkLine{sign: "+", text: "line " + itoa(i)})
+	}
+	cqItems[0].evFile, cqItems[0].evLines = "internal/thing.go", lines
+
+	evMax, _ := m.cqScrollMax()
+	if evMax < 1 {
+		t.Fatalf("a 60-line diff should overflow the evidence pane, evMax = %d", evMax)
+	}
+
+	if m = press(m, "j"); m.cqEvScroll != 1 {
+		t.Fatalf("j = %d, want 1", m.cqEvScroll)
+	}
+	for i := 0; i < 200; i++ {
+		m = press(m, "j")
+	}
+	if m.cqEvScroll != evMax {
+		t.Errorf("j should stop at the last showable line: %d, want %d", m.cqEvScroll, evMax)
+	}
+	// One k off the bottom must move the pane, not just an invisible counter.
+	if m = press(m, "k"); m.cqEvScroll != evMax-1 {
+		t.Errorf("k off the bottom = %d, want %d", m.cqEvScroll, evMax-1)
+	}
+	for i := 0; i < 200; i++ {
+		m = press(m, "k")
+	}
+	if m.cqEvScroll != 0 {
+		t.Errorf("k should stop at the top: %d", m.cqEvScroll)
+	}
+
+	// The queue pane only scrolls when it has more entries than rows, so shrink
+	// the terminal rather than invent entries.
+	m.height = 16
+	if _, restMax := m.cqScrollMax(); restMax < 1 {
+		t.Fatalf("a 16-row terminal should overflow the queue pane, restMax = %d", restMax)
+	}
+	if m = press(m, "J"); m.cqRestScroll != 1 {
+		t.Errorf("J = %d, want 1", m.cqRestScroll)
+	}
+	if m = press(m, "K"); m.cqRestScroll != 0 {
+		t.Errorf("K = %d, want 0", m.cqRestScroll)
+	}
+}
+
+// An offset belongs to the item it was measured against: when the head changes,
+// both panes go back to the top rather than opening part-way down a diff the
+// human has not seen the start of.
+func TestCQSnapPanesOnNewHead(t *testing.T) {
+	m := cqModel(t)
+	lines := make([]hunkLine, 0, 60)
+	for i := 0; i < 60; i++ {
+		lines = append(lines, hunkLine{sign: "+", text: "line " + itoa(i)})
+	}
+	cqItems[0].evFile, cqItems[0].evLines = "internal/thing.go", lines
+
+	m = press(m, "j")
+	m = press(m, "j")
+	if m.cqEvScroll == 0 {
+		t.Fatal("expected the evidence pane to have scrolled")
+	}
+	m = press(m, "s") // skip: a different item is now the head
+	if m.cqEvScroll != 0 || m.cqRestScroll != 0 {
+		t.Errorf("a new head should snap both panes: ev=%d rest=%d", m.cqEvScroll, m.cqRestScroll)
 	}
 }
 
@@ -293,11 +378,15 @@ func TestCQFooterHelpPerMode(t *testing.T) {
 		t.Errorf("working help = %q", got)
 	}
 	md := press(m, "d")
-	if got := md.footerHelp(); !strings.Contains(got, "type the work") {
-		t.Errorf("empty-draft help = %q", got)
+	// An untouched form still advertises the exits it still has.
+	if got := md.footerHelp(); !strings.Contains(got, "w running") || !strings.Contains(got, "1…8 sections") {
+		t.Errorf("untouched-form help = %q", got)
 	}
-	if got := press(md, "a").footerHelp(); got != "enter dispatch · esc clear" {
-		t.Errorf("draft help = %q", got)
+	// A touched one drops them — they are letters now — and offers ctrl+d,
+	// which is the key that actually submits (ctrl+⏎ is not reportable).
+	got := press(md, "a").footerHelp()
+	if !strings.Contains(got, "ctrl+d dispatch") || strings.Contains(got, "1…8") {
+		t.Errorf("touched-form help = %q", got)
 	}
 }
 

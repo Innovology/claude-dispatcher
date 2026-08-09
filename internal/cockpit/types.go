@@ -7,6 +7,8 @@ package cockpit
 // The data is the design's own representative content. Field names track the
 // mock so the mapping stays legible.
 
+import "time"
+
 // ---- shared view-model types ------------------------------------------------
 
 // agent is the main session plus any subagents it spawned.
@@ -55,6 +57,10 @@ type product struct {
 	inflight, needs, review int
 	live                    int
 	spark, lead             string
+	// leadDur is what lead formats. The velocity lens ranks products by lead
+	// time, and ranking on the formatted string silently puts "48m" above
+	// "2d 4h"; the duration is the sortable truth, the string is for the eye.
+	leadDur time.Duration
 }
 
 type repoRef struct {
@@ -149,7 +155,7 @@ var commands = []command{
 // ---- small shared metadata --------------------------------------------------
 
 var sourceMeta = map[string]struct{ label, color string }{
-	"lin": {"linear", "#9a8ce0"},
-	"gh":  {"github", "#a3a3a3"},
-	"ado": {"boards", "#b46cc9"},
+	"lin": {"linear", cViolet},
+	"gh":  {"github", cMid},
+	"ado": {"boards", cBoards},
 }

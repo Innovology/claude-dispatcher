@@ -79,13 +79,27 @@ func TestDispatchFormAcceptsBurstTyping(t *testing.T) {
 	}
 }
 
-// The triage lens's dispatch draft, the command palette and the resume box all
-// share applyEdit and had the same hole.
+// The triage lens's dispatch form, the command palette and the resume box all
+// had the same hole. The form reads its runes through typedTextFor rather than
+// applyEdit, so it is worth asserting separately: a burst into WHERE is what a
+// human filtering repos actually produces.
 func TestOverlayInputsAcceptBurstTyping(t *testing.T) {
 	m := newModel()
-	m.cqDispatch = true // the triage lens's dispatch draft
-	if got := typeBurst(m, "stripe").cqDraft; got != "stripe" {
-		t.Errorf("dispatch draft = %q, want %q", got, "stripe")
+	m.cqDispatch = true // the triage lens's dispatch form, on WHERE
+	if got := typeBurst(m, "stripe").dxFilter; got != "stripe" {
+		t.Errorf("dispatch form filter = %q, want %q", got, "stripe")
+	}
+
+	// …and into each of the other two text fields.
+	m = newModel()
+	m.cqDispatch, m.dxField = true, dxWhatF
+	if got := typeBurst(m, "retry charges").dxWhat; got != "retry charges" {
+		t.Errorf("WHAT = %q, want %q", got, "retry charges")
+	}
+	m = newModel()
+	m.cqDispatch, m.dxField = true, dxGoalF
+	if got := typeBurst(m, "ci is green").dxGoal; got != "ci is green" {
+		t.Errorf("DONE WHEN = %q, want %q", got, "ci is green")
 	}
 
 	m = newModel()

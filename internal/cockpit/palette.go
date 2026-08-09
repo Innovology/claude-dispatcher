@@ -17,19 +17,44 @@ import "github.com/charmbracelet/lipgloss"
 // fg/bg so a lens can use any colour the mock uses without a named constant.
 const (
 	cWhite  = "#ffffff"
-	cFg     = "#e8e8e8"
-	cMid    = "#a3a3a3"
-	cDim    = "#828282"
-	cFaint  = "#6a6a6a"
-	cRule   = "#1e1e1e"
-	cSel    = "#181818"
-	cRed    = "#e0554a"
-	cAmber  = "#e0a33a"
-	cBlue   = "#5a8fd8"
-	cGreen  = "#4fb96a"
-	cViolet = "#a98bd8"
+	cFg     = "#e3e8ee"
+	cMid    = "#a1acb8"
+	cDim    = "#7f8b97"
+	cFaint  = "#737f8b"
+	cRule   = "#1f2630"
+	cSel    = "#171d25"
+	cRed    = "#dd5f5a"
+	cAmber  = "#d9a24e"
+	cBlue   = "#6a9de2"
+	cGreen  = "#4cbb8d"
+	cViolet = "#9c8ee2"
 
 	cTransparent = "" // no colour / default terminal background
+)
+
+// Colours the design spells as literals rather than through its C table. They
+// are still colours the cockpit renders, so they live here and nowhere else.
+const (
+	// cSurface is the design's panel background. The cockpit draws on the
+	// terminal's own background, so this is only needed where a glyph sits ON a
+	// light fill and takes the surface colour as its foreground — the caret.
+	cSurface = "#0f1319"
+
+	// cChainOff is an unreached step of the plan → act → observe → ship chain,
+	// and the arrows between every step. The step in progress is cWhite.
+	cChainOff = "#38424f"
+
+	// Muted fills back text rather than carry it, so they sit far darker than
+	// the C-table hue they echo: product-board lane headers, the queue's ready
+	// left edge and the non-leading velocity bar.
+	cFillGreen  = "#2f6b56"
+	cFillViolet = "#544a7e"
+	cFillBlue   = "#33527e"
+	cFillGrey   = "#48525f"
+
+	// cBoards is azure boards in sourceMeta. Its two siblings there need no
+	// constant of their own: linear is cViolet and github is cMid.
+	cBoards = "#a878cf"
 )
 
 // styleCache memoises foreground/background styles so we build each colour's

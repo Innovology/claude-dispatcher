@@ -7,6 +7,7 @@ package cockpit
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"claude-dispatcher/internal/config"
@@ -200,4 +201,52 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestBacklogCtrlDActuallyDispatches guards a notice that lied. ctrl+d used to
+// announce "dispatched N tickets · one session each" and launch nothing at all,
+// so the user believed work was out when none was. Every ticket it claims must
+// have a command behind it.
+func TestBacklogCtrlDActuallyDispatches(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	backlogTickets = []ticket{
+		{id: "T-1", title: "first", repo: "acme-api", prompt: "do one"},
+		{id: "T-2", title: "second", repo: "acme-web", prompt: "do two"},
+		{id: "T-3", title: "taken", repo: "acme-hq", prompt: "do three", taken: "someone"},
+	}
+
+	m := newModel()
+	m.lens = "backlog"
+	m.picked = map[string]bool{"T-1": true, "T-2": true}
+	mm, cmd := m.updateBacklog("ctrl+d")
+	if cmd == nil {
+		t.Fatal("ctrl+d claimed a dispatch but returned no command")
+	}
+	if !strings.Contains(mm.notice, "2") {
+		t.Errorf("notice should count what it launched, got %q", mm.notice)
+	}
+	if len(mm.picked) != 0 {
+		t.Error("picks should clear once dispatched")
+	}
+
+	// A ticket that already has a dispatcher is skipped, and said so.
+	m2 := newModel()
+	m2.lens = "backlog"
+	m2.picked = map[string]bool{"T-3": true}
+	mm2, cmd2 := m2.updateBacklog("ctrl+d")
+	if cmd2 != nil {
+		t.Error("a ticket that already has a dispatcher must not be launched again")
+	}
+	if !strings.Contains(mm2.notice, "already") {
+		t.Errorf("notice should explain why nothing went out, got %q", mm2.notice)
+	}
+
+	// Nothing picked is not a dispatch either.
+	m3 := newModel()
+	m3.lens = "backlog"
+	mm3, cmd3 := m3.updateBacklog("ctrl+d")
+	if cmd3 != nil || !strings.Contains(mm3.notice, "nothing") {
+		t.Errorf("empty pick set: cmd=%v notice=%q", cmd3 != nil, mm3.notice)
+	}
 }

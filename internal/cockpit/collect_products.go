@@ -236,8 +236,9 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 
 		// ---- product roll-up row -------------------------------------------
 		leadStr := "—"
+		var leadDur time.Duration
 		if med, ok := prodMedian(leads); ok {
-			leadStr = prodDur(med)
+			leadStr, leadDur = prodDur(med), med
 		}
 		s.products = append(s.products, product{
 			name:     p,
@@ -249,6 +250,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			live:     live,
 			spark:    prodSpark(dailyLive),
 			lead:     leadStr,
+			leadDur:  leadDur,
 		})
 
 		// ---- note + stats --------------------------------------------------

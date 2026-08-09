@@ -13,7 +13,6 @@ package cockpit
 // they are typing.
 
 import (
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,10 +61,26 @@ func (m model) cqCurrent() (cqItem, bool) {
 	return q[0], true
 }
 
-// cqPromptOn reports whether the dispatch prompt owns the keyboard — either
+// cqPromptOn reports whether the dispatch form owns the keyboard — either
 // because `d` opened it, or because a clear queue leaves nothing else to do.
 func (m model) cqPromptOn() bool {
 	return m.cqFlash == "" && !m.cqWork && (m.cqDispatch || len(m.cqQueue()) == 0)
+}
+
+// snapPanes returns both scroll panes to the top when the head of the queue has
+// changed. An offset is a position inside one item's diff and one queue tail;
+// carried onto the next ask it would open the pane part-way down a document the
+// human has not seen the start of. Nothing moves while the head is the same, so
+// a poll that changed nothing leaves the reader where they were.
+func (m model) snapPanes() model {
+	id := ""
+	if it, ok := m.cqCurrent(); ok {
+		id = it.id
+	}
+	if id != m.cqHeadID {
+		m.cqHeadID, m.cqEvScroll, m.cqRestScroll = id, 0, 0
+	}
+	return m
 }
 
 // cqReconcile folds a fresh snapshot into the user's ordering: ids that have
@@ -169,7 +184,8 @@ func isLensDigit(k string) bool { return len(k) == 1 && k[0] >= '1' && k[0] <= '
 // updateFloorQueue is the triage lens's whole key surface. handled is false only
 // for the keys allowed to leave this screen (1–8, ':', 'u', '?', 'q'), which
 // handleKey then routes as usual; nothing else escapes, because the v2 list keys
-// (j/k, /, space, F, D, tab, r, t, M, p) went with the list.
+// (/, space, F, D, tab, r, t, M, p) went with the list. j/k survived, but they
+// scroll a pane now rather than move a cursor through rows.
 func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 	// A flash is a promise that something happened. Nothing gets through it.
 	if m.cqFlash != "" {
@@ -177,12 +193,13 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 	}
 
 	if m.cqPromptOn() {
-		// An empty prompt is not a trap: with nothing typed, the navigation keys
-		// still reach their handlers. The moment there is a draft they are text
-		// again — `w` belongs in a sentence more often than it means "working".
+		// An untouched form is not a trap: with nothing typed, the navigation
+		// keys still reach their handlers. The moment there is a filter or a
+		// sentence they are letters again — `w` belongs in a sentence more often
+		// than it means "working".
 		navKey := isLensDigit(k) || k == ":" || k == "w"
-		if m.cqDraft != "" || !navKey {
-			mm, cmd := m.cqEdit(k)
+		if m.dxTouched() || !navKey {
+			mm, cmd := m.dxKey(k)
 			return mm, cmd, true
 		}
 	}
@@ -226,9 +243,34 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		}
 	}
 
+	// The item view's two scroll panes. They sit here — under the working view's
+	// own j/k and over `d` — exactly as the design's handler orders them, so a
+	// key means one thing per mode.
+	//
+	// Both clamp at the bottom of what is actually showable, not at the line
+	// count: a pane runs out of content a screenful before it runs out of lines,
+	// and an offset allowed past that would leave the next several k presses
+	// doing nothing visible.
+	if _, ok := m.cqCurrent(); ok {
+		switch k {
+		case "j", "down", "k", "up", "J", "K":
+			evMax, restMax := m.cqScrollMax()
+			switch k {
+			case "j", "down":
+				m.cqEvScroll = mini(m.cqEvScroll+1, evMax)
+			case "k", "up":
+				m.cqEvScroll = maxi(mini(m.cqEvScroll, evMax)-1, 0)
+			case "J":
+				m.cqRestScroll = mini(m.cqRestScroll+1, restMax)
+			case "K":
+				m.cqRestScroll = maxi(mini(m.cqRestScroll, restMax)-1, 0)
+			}
+			return m, nil, true
+		}
+	}
+
 	if k == "d" {
-		m.cqDispatch, m.cqDraft = true, ""
-		return m, nil, true
+		return m.dxOpen(""), nil, true
 	}
 
 	if it, ok := m.cqCurrent(); ok {
@@ -266,37 +308,4 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 // attach act as ⏎, which arrives as "enter".
 func cqActKeyMatches(actKey, k string) bool {
 	return actKey == k || (actKey == "⏎" && k == "enter")
-}
-
-// cqEdit is the dispatch prompt's editor. Text comes from the key message's
-// runes via applyEdit → typedText, never from the key's name: bubbletea
-// coalesces a fast burst or a paste into ONE message carrying every rune, and
-// rebuilding from the name would keep only the first (or the brackets around
-// it). Reusing applyEdit also gives the draft the same editing keys as every
-// other input in the cockpit.
-func (m model) cqEdit(k string) (model, tea.Cmd) {
-	if k == "tab" {
-		// "tab pick repos": the same work, started from the repo instead.
-		m.dispatchForm = newDispatchFormWith(m.cfg, m.cqDraft)
-		m.cqDispatch, m.cqDraft, m.cqWork = false, "", false
-		return m, m.dispatchForm.filter.Focus()
-	}
-	next, submit, cancel := applyEdit(m.cqDraft, k, m.key)
-	switch {
-	case cancel:
-		m.cqDispatch, m.cqDraft, m.cqWork = false, "", false
-	case submit:
-		d := strings.TrimSpace(m.cqDraft)
-		m.cqDispatch, m.cqDraft, m.cqWork = false, "", false
-		if d == "" {
-			m.notice = "nothing to dispatch"
-			return m, nil
-		}
-		// The prompt says what to build; the repo it lands in is still to pick.
-		m.dispatchForm = newDispatchFormWith(m.cfg, d)
-		return m, m.dispatchForm.filter.Focus()
-	default:
-		m.cqDraft = next
-	}
-	return m, nil
 }

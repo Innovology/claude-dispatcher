@@ -74,6 +74,74 @@ func Tail(path string, n int) []string {
 	return out
 }
 
+// Usage is what the newest assistant turn had in its context window, plus the
+// model that ran it.
+//
+// Tokens deliberately INCLUDES cache reads, which internal/usage deliberately
+// excludes: usage answers "what did this cost against the subscription", where
+// cache reads count for almost nothing, and this answers "how full is the
+// context window", where a cached token occupies a slot like any other.
+//
+// There is no output_tokens term for the same reason: the assistant's reply is
+// not yet in the window it was generated from.
+type Usage struct {
+	Model  string
+	Tokens int
+}
+
+type usageLine struct {
+	Type    string `json:"type"`
+	Message struct {
+		Model string `json:"model"`
+		Usage struct {
+			InputTokens              int `json:"input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+}
+
+// LastUsage reports the newest assistant turn's context occupancy. ok is false
+// when the file is unreadable or carries no assistant turn with usage — an
+// answer of zero tokens would be a claim about the session, not an observation.
+func LastUsage(path string) (Usage, bool) {
+	if path == "" {
+		return Usage{}, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return Usage{}, false
+	}
+	defer func() { _ = f.Close() }()
+	// Same bounded tail as Tail: a long session's transcript is megabytes, and
+	// the newest turn is always at the end of it.
+	if fi, err := f.Stat(); err == nil && fi.Size() > tailBytes {
+		_, _ = f.Seek(fi.Size()-tailBytes, io.SeekStart)
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return Usage{}, false
+	}
+	rows := strings.Split(string(data), "\n")
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := strings.TrimSpace(rows[i])
+		if row == "" || !strings.HasPrefix(row, "{") {
+			continue
+		}
+		var l usageLine
+		if json.Unmarshal([]byte(row), &l) != nil || l.Type != "assistant" {
+			continue
+		}
+		u := l.Message.Usage
+		tok := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+		if tok <= 0 {
+			continue
+		}
+		return Usage{Model: l.Message.Model, Tokens: tok}, true
+	}
+	return Usage{}, false
+}
+
 func renderContent(raw json.RawMessage) []string {
 	var blocks []contentBlock
 	if json.Unmarshal(raw, &blocks) != nil {

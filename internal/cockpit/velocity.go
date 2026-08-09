@@ -116,7 +116,7 @@ func (m model) velLeft(iw int) []string {
 	))
 	for n, wk := range outputWeeks {
 		rate := pct(wk.live, wk.dispatched)
-		rowColor, barColor := cFg, "#2f6b41"
+		rowColor, barColor := cFg, cFillGreen
 		if n == 0 {
 			rowColor, barColor = cWhite, cGreen
 		}
@@ -172,6 +172,8 @@ func (m model) velRight(iw int) []string {
 	out = append(out, "")
 	out = append(out, velTilesBlock(doraOrg, iw, true)...)
 
+	out = append(out, velLaggardBlock(iw)...)
+
 	out = append(out, line("the factory's own metrics", iw, cDim, ""))
 	out = append(out, "")
 	out = append(out, velTilesBlock(doraFactory, iw, false)...)
@@ -201,6 +203,61 @@ func (m model) velRight(iw int) []string {
 		out = append(out, row(iw, "", cells...))
 	}
 	return out
+}
+
+// velLaggardBlock is the "slowest product" read-out: which product is slowest
+// from dispatch to live, named against the fastest so the figure is a
+// comparison rather than a bare number — a ratio against a one-repo product is
+// too fragile to state.
+//
+// Only products that can be ranked take part: one with no repos has no lead
+// time to have, and one where nothing has reached live has none yet. When
+// nothing survives that filter the block says which of the two it is instead of
+// picking a winner out of an empty set.
+func velLaggardBlock(iw int) []string {
+	out := []string{"", fg(cRule, strings.Repeat("─", iw)), ""}
+
+	var ranked []product
+	for _, p := range products {
+		if p.repos == prodRepoCount(0) || p.leadDur <= 0 {
+			continue
+		}
+		ranked = append(ranked, p)
+	}
+
+	if len(ranked) == 0 {
+		out = append(out, line("velocity per product", iw, cDim, ""))
+		msg := "No products yet — assign repos to products on 2 and this measures each one."
+		if len(products) > 0 {
+			msg = "No product has had a feature reach live yet — this measures dispatch → live, per product."
+		}
+		for _, l := range velWrap(msg, iw, 3) {
+			out = append(out, line(l, iw, cFaint, ""))
+		}
+		return append(out, "")
+	}
+
+	worst, best := ranked[0], ranked[0]
+	for _, p := range ranked[1:] {
+		if p.leadDur > worst.leadDur {
+			worst = p
+		}
+		if p.leadDur < best.leadDur {
+			best = p
+		}
+	}
+
+	slow := worst.name + " · lead " + worst.lead
+	if len(ranked) == 1 {
+		// With one product there is nothing to be slowest of; say so rather
+		// than compare it with itself.
+		slow += " · the only product with a lead time yet"
+	} else {
+		slow += " · slowest of " + itoa(len(ranked)) + " products · " + best.name + " ships in " + best.lead
+	}
+	out = append(out, line("slowest product", iw, cDim, ""))
+	out = append(out, line(slow, iw, cAmber, ""))
+	return append(out, "")
 }
 
 // velTilesBlock lays out metric tiles two-across (one-across when the column
