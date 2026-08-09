@@ -16,7 +16,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{.Version}}
+      - -s -w -X claude-dispatcher/internal/version.Version={{.Version}}
 
 archives:
   # Unix stays tar.gz; Windows ships a .zip (native tooling and the
