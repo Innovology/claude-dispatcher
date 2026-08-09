@@ -41,6 +41,11 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 	if err := ensureWorktree(r.Path, worktree, branch); err != nil {
 		return nil, err
 	}
+	// A fresh worktree is a folder Claude Code has never seen, and it blocks on
+	// its trust prompt before reading the prompt we launched it with. Inherit
+	// the repo's own trust decision so an unattended session can actually start.
+	InheritTrust(r.Path, worktree)
+
 	baseSHA := ""
 	if out, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output(); err == nil {
 		baseSHA = strings.TrimSpace(string(out))
