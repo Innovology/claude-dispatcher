@@ -53,6 +53,9 @@
 - `internal/ui` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
+- `internal/version` — the build's version (stamped by goreleaser via
+  `-X claude-dispatcher/internal/version.Version`) and the cached, best-effort
+  check for a newer release that drives the cockpit's upgrade hint.
 
 ## Build
 `make build` / `make vet` / `make install` (binary to ~/.local/bin — the init

@@ -13,10 +13,8 @@ import (
 	"claude-dispatcher/internal/cockpit"
 	"claude-dispatcher/internal/hookcmd"
 	"claude-dispatcher/internal/initcmd"
+	"claude-dispatcher/internal/version"
 )
-
-// version is stamped by the release build via -ldflags.
-var version = "dev"
 
 const usage = `claude-dispatcher — dispatch cockpit for Claude Code sessions
 
@@ -53,7 +51,7 @@ func main() {
 		// Never fail loudly: a hook error must not disturb the Claude session.
 		os.Exit(hookcmd.Run(args[1:]))
 	case "version", "--version", "-v":
-		fmt.Println("claude-dispatcher", version)
+		fmt.Println("claude-dispatcher", version.Display())
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:

@@ -100,7 +100,26 @@ func (m model) footerView() string {
 	if m.undo != "" {
 		notice += "  ·  u to undo"
 	}
-	right := fg(cAmber, notice)
+	right := ""
+	if notice != "" {
+		right = fg(cAmber, notice)
+	}
+
+	// The build version shares the bottom-right corner with the notice. They
+	// compete for the same space, so the version yields first — a notice is
+	// about what just happened, the version is ambient — and yields in stages,
+	// shedding the upgrade command before the version number itself.
+	inner := m.width - 2*pad
+	for _, v := range m.versionForms() {
+		cand := v
+		if right != "" {
+			cand = right + fg(cFaint, "  ·  ") + v
+		}
+		if dispWidth(left)+2+dispWidth(cand) <= inner {
+			right = cand
+			break
+		}
+	}
 	return spread(left, right, m.width)
 }
 

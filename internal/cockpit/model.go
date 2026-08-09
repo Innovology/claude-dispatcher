@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/version"
 )
 
 // lensOrder is the 1..8 lens bar, in order. Digit keys select by index.
@@ -51,6 +52,10 @@ type model struct {
 	paletteCursor int
 
 	notice string
+
+	// upgradeTo is the newest published release tag when this build is behind
+	// it, "" when up to date, unknown, or running unstamped.
+	upgradeTo string
 
 	shipCursor int
 	resumeOpen bool
@@ -166,10 +171,12 @@ type (
 )
 
 func (m model) Init() tea.Cmd {
+	// The upgrade check is about the binary, not the portfolio, so it runs even
+	// on demo data — a config-less cockpit is still a real build.
 	if m.cfg == nil {
-		return nil // no config — run on demo seed data
+		return upgradeCheckCmd() // no config — run on demo seed data
 	}
-	return tea.Batch(loadSnapshotCmd(m.cfg), trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick())
+	return tea.Batch(loadSnapshotCmd(m.cfg), trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), upgradeCheckCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -189,7 +196,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(loadSnapshotCmd(m.cfg), waitState(m.stateCh))
 
 	case refreshTickMsg:
-		return m, tea.Batch(trackRefreshCmd(m.cfg), refreshTick())
+		// Re-checked on the poll so a cockpit left open for days still notices
+		// a release; the version package's own cache decides when that costs a
+		// network call.
+		return m, tea.Batch(trackRefreshCmd(m.cfg), refreshTick(), upgradeCheckCmd())
+
+	case upgradeMsg:
+		if version.IsOutdated(msg.latest) {
+			m.upgradeTo = msg.latest
+		}
+		return m, nil
 
 	case trackedMsg:
 		return m, loadSnapshotCmd(m.cfg)
