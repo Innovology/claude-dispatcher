@@ -21,22 +21,24 @@ func (m model) viewQueue(w, h int) string {
 
 	if narrow {
 		leftW := w
-		left := gutter(vjoin(m.queueLeft(leftW-pad)...), pad)
+		left := gutter(m.queueLeft(leftW-pad, h), pad)
 		return clampLines(left, h)
 	}
 
 	leftW := w * 58 / 100
 	rightW := w - leftW - 1 // 1 col for the vrule
 
-	left := gutter(vjoin(m.queueLeft(leftW-pad)...), pad)
-	right := gutter(vjoin(m.queueRight(rightW-pad)...), pad)
+	left := gutter(m.queueLeft(leftW-pad, h), pad)
+	right := gutter(m.queueRight(rightW-pad, h), pad)
 
 	out := hjoin(padBlockTo(left, h), vrule(h, cRule), padBlockTo(right, h))
 	return clampLines(out, h)
 }
 
-// queueLeft builds the drafted-batch pane content lines to inner width iw.
-func (m model) queueLeft(iw int) []string {
+// queueLeft builds the drafted-batch pane to inner width iw and height h. The
+// two action lines are pinned to the bottom (the design's flex:none footer) so
+// they survive a long batch or a long ready list.
+func (m model) queueLeft(iw, h int) string {
 	var out []string
 
 	// Header: "queue · N drafted" with the batch hint on the right.
@@ -60,17 +62,75 @@ func (m model) queueLeft(iw int) []string {
 		}
 	}
 
+	// What could go out next: open tickets nothing has picked up yet. It is the
+	// backlog the BACKLOG lens already collected, not a second source, so a
+	// ticket cannot appear here and be missing there.
+	out = append(out, "")
+	out = append(out, line("ready to dispatch · from the backlog", iw, cDim, ""))
+	ready := queueReady(9)
+	switch {
+	case len(ready) > 0:
+		for _, t := range ready {
+			// Linear and Azure items carry no repo — the cell names where the
+			// ticket came from rather than inventing a repo for it.
+			where := t.repo
+			if where == "" {
+				where = sourceMeta[t.src].label
+			}
+			out = append(out, row(iw, "",
+				c(queuePriGlyph(t.pri), 2, priColor[t.pri]),
+				c(t.id, 12, cDim),
+				flexc(t.title, cMid),
+				c("  "+where, 18, cFaint),
+			))
+		}
+	case len(backlogTickets) == 0:
+		out = append(out, line("nothing open in github issues, linear or azure boards", iw, cFaint, ""))
+	default:
+		out = append(out, line("every open ticket already has a dispatcher on it", iw, cFaint, ""))
+	}
+
 	// Batch actions and the mechanics footnote.
-	out = append(out, "", "")
-	out = append(out, line("a add · e edit prompt · x drop · ctrl+d dispatch all "+itoa(len(queueItems)), iw, cDim, ""))
-	out = append(out, line("branches feature/<slug> · one tmux session each · hook reports back", iw, cFaint, ""))
+	footer := []string{
+		line("a add · e edit prompt · x drop · ctrl+d dispatch all "+itoa(len(queueItems)), iw, cDim, ""),
+		line("branches feature/<slug> · one tmux session each · hook reports back", iw, cFaint, ""),
+	}
+	body := padBlockTo(vjoin(out...), maxi(h-len(footer)-1, 0))
+	return vjoin(append([]string{body, ""}, footer...)...)
+}
+
+// queueReady returns up to n backlog tickets no dispatcher has taken, in
+// backlog order — the design's BACKLOG.filter(t => !t.taken).slice(0, 9).
+func queueReady(n int) []ticket {
+	out := make([]ticket, 0, n)
+	for _, t := range backlogTickets {
+		if t.taken != "" {
+			continue
+		}
+		out = append(out, t)
+		if len(out) == n {
+			break
+		}
+	}
 	return out
 }
 
-// queueRight builds the capacity pane content lines to inner width iw. Every
+// queuePriGlyph is the one-character priority marker: ■ urgent, ◆ high, · else.
+func queuePriGlyph(pri string) string {
+	switch pri {
+	case "urgent":
+		return "■"
+	case "high":
+		return "◆"
+	}
+	return "·"
+}
+
+// queueRight builds the capacity pane to inner width iw and height h. Every
 // figure is counted from the live floor: how many dispatchers are out now, how
-// many want you, and what the queued batch would add.
-func (m model) queueRight(iw int) []string {
+// many want you, and what the queued batch would add. The clone hint is pinned
+// to the bottom, matching the design's flex:none tail.
+func (m model) queueRight(iw, h int) string {
 	out, want := 0, 0
 	for _, x := range dispatches {
 		if x.state == "live" || x.state == "closed" {
@@ -85,10 +145,16 @@ func (m model) queueRight(iw int) []string {
 	var L []string
 	L = append(L, line("capacity", iw, cDim, ""))
 	L = append(L, line(itoa(out)+" out, "+itoa(want)+" want you", iw, cWhite, ""))
+	// The warning stands whether or not a batch is drafted, so it is always
+	// rendered; the batch arithmetic only leads it when there is a batch. It is
+	// deliberately not phrased as a measurement: nothing here times your reply
+	// latency, and the copy used to claim it did.
+	after := ""
 	if n := len(queueItems); n > 0 {
-		for _, nl := range queueWrap("after this batch: "+itoa(out+n)+" out. Past 24 you stop reading turns — that is measured from your own reply latency, not a guess.", iw, 4) {
-			L = append(L, line(nl, iw, cMid, ""))
-		}
+		after = "after this batch: " + itoa(out+n) + " out. "
+	}
+	for _, nl := range queueWrap(after+"Past a couple of dozen out at once you stop reading turns — a rule of thumb, not a number this cockpit measures.", iw, 4) {
+		L = append(L, line(nl, iw, cMid, ""))
 	}
 
 	L = append(L, "")
@@ -101,9 +167,9 @@ func (m model) queueRight(iw int) []string {
 		L = append(L, line("nothing shipped yet", iw, cFaint, ""))
 	}
 
-	L = append(L, "")
-	L = append(L, line("c clones one into another repo with its prompt", iw, cDim, ""))
-	return L
+	tail := line("c clones one into another repo with its prompt", iw, cDim, "")
+	body := padBlockTo(vjoin(L...), maxi(h-2, 0))
+	return vjoin(body, "", tail)
 }
 
 // recentlyShipped returns up to n features that have reached live, most recent

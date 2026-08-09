@@ -71,46 +71,32 @@ func TestVelLiveTime(t *testing.T) {
 	}
 }
 
-func TestFlCountTickets(t *testing.T) {
-	saved := captureVars()
-	defer restoreVars(saved)
-	backlogTickets = []ticket{
-		{id: "1", taken: ""},
-		{id: "2", taken: "some feature"},
-		{id: "3", taken: ""},
-	}
-	if got := flCountTickets(func(t ticket) bool { return t.taken == "" }); got != 2 {
-		t.Errorf("untaken tickets = %d, want 2", got)
-	}
-	if got := flCountTickets(func(ticket) bool { return false }); got != 0 {
-		t.Errorf("a predicate matching nothing should count 0, got %d", got)
-	}
-}
-
-// The working view says what each dispatcher is doing right now, read from the
-// last tool in its transcript. An unrecognised tool is reported by name rather
-// than guessed at.
-func TestCQDoingFromTranscript(t *testing.T) {
+// The chain segment is inferred from the last tool in the transcript. A tool we
+// cannot place lights nothing rather than being filed under the nearest guess,
+// and a session we have read nothing from lights nothing either.
+func TestCQPhaseFromTranscript(t *testing.T) {
 	cases := []struct {
 		tail []string
 		want string
 	}{
-		{[]string{"⚙ Read", "⚙ Edit"}, "writing code"},
-		{[]string{"⚙ Bash"}, "running a command"},
-		{[]string{"⚙ Grep"}, "reading the repo"},
-		{[]string{"⚙ Task"}, "running a subagent"},
-		{[]string{"⚙ WebSearch"}, "searching the web"},
-		{[]string{"⚙ TodoWrite"}, "planning"},
-		{[]string{"⚙ SomeNewTool"}, "somenewtool"},
+		{[]string{"⚙ Read", "⚙ Edit"}, "act"},
+		{[]string{"⚙ Bash"}, "observe"},
+		{[]string{"⚙ Grep"}, "plan"},
+		{[]string{"⚙ Task"}, "plan"},
+		{[]string{"⚙ TodoWrite"}, "plan"},
+		{[]string{"⚙ SomeNewTool"}, ""},
+		{nil, ""},
 	}
 	for _, c := range cases {
-		if got := cqDoing(c.tail, &state.Dispatch{}); got != c.want {
-			t.Errorf("cqDoing(%v) = %q, want %q", c.tail, got, c.want)
+		if got := cqPhase(c.tail, &state.Dispatch{}); got != c.want {
+			t.Errorf("cqPhase(%v) = %q, want %q", c.tail, got, c.want)
 		}
 	}
-	// With no tool line at all it falls back to the recorded status reason.
-	if got := cqDoing(nil, &state.Dispatch{StatusReason: "waiting on ci"}); got != "waiting on ci" {
-		t.Errorf("fallback to status reason = %q", got)
+	// An open PR is not an inference: the work has left the dispatcher and is
+	// waiting on the forge, whatever tool it last touched.
+	shipped := &state.Dispatch{PRNumber: 7, PRState: "OPEN"}
+	if got := cqPhase([]string{"⚙ Edit"}, shipped); got != "ship" {
+		t.Errorf("an open pr should read as ship, got %q", got)
 	}
 }
 

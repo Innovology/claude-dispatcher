@@ -103,10 +103,10 @@ func (m model) productLanes() []lane {
 	}
 
 	return []lane{
-		{name: "working", color: "#2f6b41", items: work},
-		{name: "claims done", color: "#5a4a7a", items: claims},
-		{name: "in review", color: "#33507e", items: review},
-		{name: "shipped today", color: "#4a4a4a", items: shippedToday},
+		{name: "working", color: cFillGreen, items: work},
+		{name: "claims done", color: cFillViolet, items: claims},
+		{name: "in review", color: cFillBlue, items: review},
+		{name: "shipped today", color: cFillGrey, items: shippedToday},
 	}
 }
 

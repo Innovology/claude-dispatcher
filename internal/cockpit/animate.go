@@ -40,7 +40,11 @@ func (m model) advanceShip() (model, tea.Cmd) {
 		feature := f.feature
 		m.shipFx = nil
 		m.justLanded = feature
-		m.notice = "✓ " + feature + " is live · 6m 14s from approve to production"
+		// The design prints "6m 14s from approve to production" here. Nothing
+		// measures approve→production, so saying it would be a fabricated
+		// figure on every ship. The real merge/deploy notice arrives from
+		// shipCmd's actionMsg moments later and replaces this.
+		m.notice = "✓ " + feature + " is live"
 		return m, tea.Tick(landLinger, func(time.Time) tea.Msg { return landClearMsg{} })
 	}
 	return m, shipTick()

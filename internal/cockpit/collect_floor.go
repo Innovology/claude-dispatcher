@@ -174,9 +174,17 @@ func floorState(rec *state.Dispatch) string {
 	return "working"
 }
 
-// modelForRecord reports the model a session runs. No model is recorded yet, so
-// this is the design default; kept as a seam for when it is captured.
-func modelForRecord(_ *state.Dispatch) string { return "sonnet" }
+// modelForRecord reports the model a session actually ran, read from the last
+// assistant turn in its transcript. Nothing in the record says which model was
+// used, so an unreadable transcript answers "" — the previous constant "sonnet"
+// was a fabrication printed for every dispatcher regardless of what ran.
+func modelForRecord(rec *state.Dispatch) string {
+	u, ok := transcript.LastUsage(rec.TranscriptPath)
+	if !ok {
+		return ""
+	}
+	return cqShortModel(u.Model)
+}
 
 // floorAgentState maps a view state to the main agent's status glyph state.
 func floorAgentState(st string) string {

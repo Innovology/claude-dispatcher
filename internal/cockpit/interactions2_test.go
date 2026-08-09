@@ -209,17 +209,17 @@ func TestHandleKeyOverlayVariants(t *testing.T) {
 }
 
 // ctrl+c is resolved before every overlay and lens, so no mode can trap the
-// process — including the triage draft, which otherwise swallows q.
+// process — including the triage dispatch form, which otherwise swallows q.
 func TestCtrlCAlwaysQuits(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 190, 44
 	m.cqDispatch = true
-	m = press(m, "x") // typed into the dispatch draft
-	if m.cqDraft != "x" {
-		t.Fatalf("cqDraft = %q, want the key typed into the draft", m.cqDraft)
+	m = press(m, "x") // typed into the form's repo filter
+	if m.dxFilter != "x" {
+		t.Fatalf("dxFilter = %q, want the key typed into the form", m.dxFilter)
 	}
 	if _, cmd := m.handleKey("ctrl+c"); cmd == nil {
-		t.Error("ctrl+c should quit from the dispatch draft")
+		t.Error("ctrl+c should quit from the dispatch form")
 	}
 	m.settings = newSettings(nil)
 	if _, cmd := m.handleKey("ctrl+c"); cmd == nil {
@@ -295,12 +295,19 @@ func TestBacklogDispatchAndPickAll(t *testing.T) {
 	m = press(m, "space")
 	m.backlogCursor = 0
 	m = press(m, "space")
-	m = press(m, "ctrl+d")
+	next3, batch := m.handleKey("ctrl+d")
+	m = next3.(model)
 	if len(m.picked) != 0 {
 		t.Error("ctrl+d should clear the picked set")
 	}
-	if !strings.Contains(m.notice, "dispatched") {
+	// The notice is present tense — the launches are in flight, not finished —
+	// and there must be a real command behind it. It used to say "dispatched"
+	// and return nothing at all.
+	if !strings.Contains(m.notice, "dispatching") {
 		t.Errorf("ctrl+d notice = %q", m.notice)
+	}
+	if batch == nil {
+		t.Error("ctrl+d announced a dispatch but returned no command")
 	}
 
 	// Cycle the source filter all the way around (all → gh → lin → ado → all).

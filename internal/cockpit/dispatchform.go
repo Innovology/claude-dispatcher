@@ -65,16 +65,6 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 	return &dispatchForm{step: dispatchRepo, repos: rs, filter: filter, feature: feature, prompt: prompt}
 }
 
-// newDispatchFormWith opens the overlay with the work already written into the
-// prompt step. The triage lens's draft is the description of the work, so what
-// was typed there survives the hand-off rather than being retyped once a repo
-// is picked.
-func newDispatchFormWith(cfg *config.Config, prompt string) *dispatchForm {
-	df := newDispatchForm(cfg)
-	df.prompt.SetValue(prompt)
-	return df
-}
-
 // filtered returns the repos matching the current filter (by name or product).
 func (df *dispatchForm) filtered() []repos.Repo {
 	q := strings.TrimSpace(strings.ToLower(df.filter.Value()))

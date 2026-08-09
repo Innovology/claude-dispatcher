@@ -26,15 +26,7 @@ func (m model) View() string {
 	header := m.headerView()
 	bars := m.barsView()
 	footer := m.footerView()
-
-	used := lipgloss.Height(header) + lipgloss.Height(footer)
-	if bars != "" {
-		used += lipgloss.Height(bars)
-	}
-	bodyH := m.height - used
-	if bodyH < 1 {
-		bodyH = 1
-	}
+	bodyH := m.bodyHeight()
 
 	body, isOverlay := m.overlayView(m.width, bodyH)
 	if !isOverlay {
@@ -48,6 +40,18 @@ func (m model) View() string {
 	}
 	parts = append(parts, footer)
 	return strings.Join(parts, "\n")
+}
+
+// bodyHeight is the height a lens is rendered into: the terminal less the
+// chrome. It is a method rather than a local in View because a key handler
+// sometimes has to size what the view is about to lay out — the triage lens's
+// scroll panes clamp against it (see cqScrollMax).
+func (m model) bodyHeight() int {
+	used := lipgloss.Height(m.headerView()) + lipgloss.Height(m.footerView())
+	if bars := m.barsView(); bars != "" {
+		used += lipgloss.Height(bars)
+	}
+	return maxi(1, m.height-used)
 }
 
 // headerView is the top lens bar plus, on wide-enough terminals, the summary.

@@ -14,18 +14,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// flCountTickets counts the tickets matching pred. The triage lens uses it to
-// offer the backlog only when there is really something untaken in it.
-func flCountTickets(pred func(ticket) bool) int {
-	n := 0
-	for _, t := range backlogTickets {
-		if pred(t) {
-			n++
-		}
-	}
-	return n
-}
-
 // backlogList filters the tickets by the active source filter. "all" is
 // everything; otherwise src must equal the filter (gh | lin | ado).
 func (m model) backlogList() []ticket {
@@ -263,14 +251,6 @@ func (m model) backlogRight(pickedCount, rightW, h int) string {
 	blank := wrapL("")
 
 	branch := "feature/" + backlogSlug(t.id)
-	modelName := "sonnet"
-	if t.pri == "urgent" {
-		modelName = "opus"
-	}
-	mode := "edits, asks to ship"
-	if strings.Contains(t.labels, "decision") {
-		mode = "plan only"
-	}
 	takenLine := fg(cDim, "✓ no dispatcher on this yet")
 	if t.taken != "" {
 		takenLine = fg(cAmber, "◆ already dispatched as \""+t.taken+"\" — enter would double up")
@@ -292,19 +272,14 @@ func (m model) backlogRight(pickedCount, rightW, h int) string {
 	top = append(top, wrapL(takenLine))
 	top = append(top, blank)
 	top = append(top, wrapL(fg(cRule, strings.Repeat("─", innerW))))
-	top = append(top, backlogSpread(
-		fg(cDim, "dispatch as"),
-		fg(cFaint, "e edit · M model · p mode"),
-		rightW,
-	))
+	top = append(top, wrapL(fg(cDim, "dispatch as")))
 	for _, ln := range backlogWrap(t.prompt, innerW) {
 		top = append(top, wrapL(fg(cFg, ln)))
 	}
-	top = append(top, wrapL(
-		fg(cFaint, "branch ")+fg(cMid, branch)+
-			fg(cFaint, "   model ")+fg(cMid, modelName)+
-			fg(cFaint, "   mode ")+fg(cMid, mode),
-	))
+	// Only the branch is stated, because only the branch is known. The model
+	// and permission mode were printed here as fact and chosen by nothing —
+	// no config, no state and no argument to launchCmd selects either.
+	top = append(top, wrapL(fg(cFaint, "branch ")+fg(cMid, branch)))
 
 	// picked list, pinned to the bottom (design's margin-top:auto).
 	var picked []string
@@ -359,8 +334,38 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 			return m, launchCmd(m.cfg, t.repo, feature, t.prompt)
 		}
 	case "ctrl+d":
-		m.notice = "dispatched " + itoa(len(m.picked)) + " tickets · one session each"
+		// This used to announce a dispatch and launch nothing — the worst kind
+		// of notice, because the user believes the work is out. It now launches
+		// one dispatcher per picked ticket, skipping any that already has one.
+		var cmds []tea.Cmd
+		var skipped int
+		for _, bt := range backlogTickets {
+			if !m.picked[bt.id] {
+				continue
+			}
+			if bt.taken != "" {
+				skipped++
+				continue
+			}
+			feature := bt.title
+			if feature == "" {
+				feature = bt.id
+			}
+			cmds = append(cmds, launchCmd(m.cfg, bt.repo, feature, bt.prompt))
+		}
 		m.picked = map[string]bool{}
+		if len(cmds) == 0 {
+			m.notice = "nothing to dispatch"
+			if skipped > 0 {
+				m.notice = itoa(skipped) + " already had a dispatcher"
+			}
+			return m, nil
+		}
+		m.notice = "dispatching " + itoa(len(cmds)) + " " + plural(len(cmds), "ticket", "tickets") + " · one session each"
+		if skipped > 0 {
+			m.notice += " · " + itoa(skipped) + " already taken"
+		}
+		return m, tea.Batch(cmds...)
 	case "s":
 		order := []string{"all", "gh", "lin", "ado"}
 		idx := 0

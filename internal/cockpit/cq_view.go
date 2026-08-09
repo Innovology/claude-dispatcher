@@ -9,11 +9,12 @@ package cockpit
 //	working  `w` — every running dispatcher, grouped by product
 //	empty    the queue is empty, or `d` opened a draft — the dispatch prompt
 //
-// The design is a flexbox column: fixed pixel spacers rounded to rows, then one
-// `flex:1` gap that pins the closing line to the bottom. Every spacer carries a
-// shed order, so a short terminal loses whitespace before it loses a sentence
-// (cqShed), and the queue list shrinks before any spacer does — whitespace is
-// only the shape of the pane, a hidden ask is something the human never sees.
+// The design is a flexbox column: fixed pixel spacers rounded to rows, then —
+// in the item mode — two proportional scroll panes, evidence over queue at 3:1,
+// which between them absorb whatever height is left. Every spacer carries a shed
+// order, so a short terminal loses whitespace before it loses a sentence
+// (cqShed), and the panes shrink before any spacer does — whitespace is only the
+// shape of the pane, a hidden ask is something the human never sees.
 //
 // All content comes from cq.go: the collector composes the sentences from real
 // records and leaves out any clause it has no source for. Nothing is invented
@@ -200,15 +201,36 @@ func cqRunningCount() int {
 	return n
 }
 
+// cqStalledCount is how many running dispatchers are sitting on a green PR
+// nobody has merged.
+func cqStalledCount() int {
+	n := 0
+	for _, g := range cqWorking {
+		for _, x := range g.rows {
+			if x.stalled {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // cqWorkTotalLine heads the working view. "none of them need you" is true by
 // construction rather than by assertion: anything that needs you is in the
 // queue, not here.
+//
+// The design's headline counts the ones "not converging, or green and not
+// merging". Only the second half is countable — non-convergence needs a check
+// result sampled over time — so the line says the half that is measured.
 func cqWorkTotalLine() string {
 	n := cqRunningCount()
 	if n == 0 {
 		return "nothing running · anything that wants you is in the queue"
 	}
 	s := itoa(n) + " running · none of them need you"
+	if k := cqStalledCount(); k > 0 {
+		s = itoa(n) + " running · " + itoa(k) + " green and not merging"
+	}
 	if cqLastOutput != "" {
 		s += " · last output " + cqLastOutput + " ago"
 	}
@@ -229,6 +251,233 @@ func cqUnattendedLine() string {
 	}
 	return s + " · w to see them"
 }
+
+// ---- the chain and the status strip -----------------------------------------
+
+// cqChainCell renders plan → act → observe → ship with `phase` lit and every
+// other segment — and all three arrows — inert.
+//
+// An empty phase lights nothing, which is the honest picture of a dispatcher we
+// have read no transcript for: the chain is our inference (cqPhase), not a state
+// Claude Code reports, so it must be able to say "we do not know".
+func cqChainCell(phase string) string {
+	s := ""
+	for _, sg := range cqChainSegs(phase) {
+		s += fg(sg.hex, sg.text)
+	}
+	return s
+}
+
+// cqChainSegs is the same chain as row() cells, for the working rows — where the
+// selection highlight runs under it. A pre-coloured string cannot be nested
+// inside a background cell (its own resets would punch holes in the highlight),
+// so each segment is its own cell and row() paints both layers in one pass.
+func cqChainSegs(phase string) []seg {
+	arrow := dispWidth("→")
+	col := func(name string) string {
+		if name == phase {
+			return cWhite
+		}
+		return cChainOff
+	}
+	return []seg{
+		c("plan", 4, col("plan")), c("→", arrow, cChainOff),
+		c("act", 3, col("act")), c("→", arrow, cChainOff),
+		c("observe", 7, col("observe")), c("→", arrow, cChainOff),
+		c("ship", 4, col("ship")),
+	}
+}
+
+// cqChainWidth is the chain's rendered width. The arrows are measured, not
+// counted: "→" is East-Asian ambiguous, so whether it costs one cell or two is
+// the terminal's business, not ours.
+func cqChainWidth() int { return 18 + 3*dispWidth("→") }
+
+// cqPhaseWord is the chain reduced to the segment that is lit, for rows too
+// narrow to carry the whole thing. A dash, not a guess, when nothing is lit.
+func cqPhaseWord(phase string) string {
+	if phase == "" {
+		return "—"
+	}
+	return phase
+}
+
+// cqPassLine counts the prompts submitted to a dispatcher.
+//
+// It says "turn", not "pass": the design's number is repair rounds, and nothing
+// in this repo records those. An advertised meaning the number does not have is
+// the same bug as an advertised key that does nothing.
+func cqPassLine(pass int) string {
+	if pass <= 0 {
+		return ""
+	}
+	return "turn " + itoa(pass)
+}
+
+// cqCtxLine is how full the context window was on the last assistant turn, and
+// which model was in it.
+//
+// No percentage is printed. The occupancy is real (transcript usage), but the
+// denominator is not knowable from a model id — the same id runs with a 200k or
+// a 1M window depending on how the session was started — so a percentage would
+// be a claim about a window nobody measured. The count alone is true.
+func cqCtxLine(it cqItem) string {
+	if !it.ctxKnown || it.ctxTokens <= 0 {
+		return ""
+	}
+	s := cqTokens(it.ctxTokens) + " context"
+	if it.model != "" {
+		s += " · " + it.model
+	}
+	return s
+}
+
+func cqTokens(n int) string {
+	if n >= 1000 {
+		return itoa(n/1000) + "k"
+	}
+	return itoa(n)
+}
+
+// cqStatusStrip is the chain, the turn count and the context line on one row.
+// The chain and the count are fixed; the context line is the tail that gives way
+// when the terminal is narrow. Each clause is dropped whole — leading separator
+// included — when its source said nothing.
+func cqStatusStrip(it cqItem, inner int) string {
+	s := cqChainCell(it.phase)
+	for _, part := range []string{cqPassLine(it.pass), cqCtxLine(it)} {
+		if part == "" {
+			continue
+		}
+		rest := inner - dispWidth(s) - 4
+		if rest <= 0 {
+			break
+		}
+		s += "  " + fg(cDim, "· "+truncate(part, rest))
+	}
+	return truncateAnsi(s, inner)
+}
+
+// cqGoalLabelW is the goal row's label column: the widest label it uses
+// ("prompt") plus the design's two-column gap.
+const cqGoalLabelW = 8
+
+// cqGoalRow is what the dispatcher is working towards. The label names what the
+// text actually is (see cqGoal), so a prompt is never presented as a
+// completion criterion; with neither recorded the row says so plainly.
+func cqGoalRow(w int, it cqItem) string {
+	label, text, color := it.goalLabel, it.goal, cMid
+	if text == "" {
+		label, text, color = "goal", "no goal set", cFaint
+	}
+	return row(w, "",
+		c("", pad, ""),
+		c(label, cqGoalLabelW, cFaint),
+		flexc(text, color),
+		c("", pad, ""))
+}
+
+// cqEvSignColor colours a diff line by its sign. A hunk header is structure
+// rather than content, so it is faint and keeps its whole "@@ … @@" text.
+func cqEvSignColor(sign string) (mark, hex string) {
+	switch sign {
+	case "+":
+		return "+", cGreen
+	case "-":
+		return "-", cRed
+	case "@":
+		return " ", cFaint
+	}
+	return " ", cMid
+}
+
+// cqEvLine is one line of the evidence excerpt.
+func cqEvLine(w int, e hunkLine) string {
+	mark, hex := cqEvSignColor(e.sign)
+	return row(w, "", c("", pad, ""), c(mark, 3, hex), flexc(e.text, hex), c("", pad, ""))
+}
+
+// cqEvPaneLines is the whole evidence excerpt: the file (or the label standing
+// in for one), the note, then the lines. Every part is dropped when the
+// collector had no source for it, so a dispatcher we can show nothing about
+// gets an empty pane rather than a padded-out placeholder.
+func cqEvPaneLines(w int, it cqItem) []string {
+	inner := cqInner(w) - pad // the design's padding-right:2ch on this pane
+	var out []string
+	if it.evFile != "" {
+		out = append(out, flG(fg(cFaint, truncate(it.evFile, inner))))
+	}
+	if it.evNote != "" {
+		out = append(out, flG(fg(cMid, truncate(it.evNote, inner))))
+	}
+	if len(out) > 0 && len(it.evLines) > 0 {
+		out = append(out, "")
+	}
+	for _, e := range it.evLines {
+		out = append(out, cqEvLine(w, e))
+	}
+	return out
+}
+
+// cqPaneWindow clips lines to an h-row window starting at off, padding a short
+// pane out so whatever sits under it keeps its place.
+//
+// Neither pane has a scrollbar, so an overflow in either direction is stated in
+// words on the row it displaces. That costs a line of content, which is the
+// right trade: a pane that silently hides half a diff is worse than one that
+// says how much it is hiding.
+func cqPaneWindow(lines []string, off, h int) []string {
+	if h <= 0 {
+		return nil
+	}
+	off = mini(maxi(0, off), maxi(0, len(lines)-h))
+	if len(lines) <= h {
+		return cqPadLines(lines, h)
+	}
+	win := append([]string(nil), lines[off:off+h]...)
+	if off > 0 {
+		win[0] = flG(fg(cFaint, "↑ "+itoa(off)+" more"))
+	}
+	if rest := len(lines) - off - h; rest > 0 {
+		win[h-1] = flG(fg(cFaint, "↓ "+itoa(rest)+" more"))
+	}
+	return win
+}
+
+func cqPadLines(lines []string, h int) []string {
+	out := make([]string, 0, h)
+	out = append(out, lines...)
+	for len(out) < h {
+		out = append(out, "")
+	}
+	return out
+}
+
+// cqSplitPanes divides the leftover height between the evidence pane and the
+// queue pane at the design's 3:1.
+//
+// The evidence pane never takes more rows than it has lines. The design lets a
+// short pane sit half empty because it is scrolling pixels inside a fixed box;
+// in a terminal those rows are simply black, and the queue behind the ask is a
+// better use for them.
+func cqSplitPanes(budget, evContent int) (evH, qH int) {
+	if budget <= 0 {
+		return 0, 0
+	}
+	evH = (budget*3 + 2) / 4
+	if evContent < evH {
+		evH = evContent
+	}
+	return evH, budget - evH
+}
+
+// cqMinPanes is the height the two panes are guaranteed before any spacer
+// sheds — three rows of evidence and one of queue.
+//
+// This inverts cqShed's usual contract on purpose. Everywhere else the flex gap
+// is only whitespace and collapses first; here it is the evidence, and a pane
+// squeezed to nothing so a blank row can survive would be exactly backwards.
+const cqMinPanes = 4
 
 // cqOutCell renders a working row's last-output age. Sub-minute is the healthy
 // case for a live session so it stays dim; minutes or longer means it has gone
@@ -286,73 +535,196 @@ func (m model) viewCQ(w, h int) string {
 
 // ---- mode: one item ---------------------------------------------------------
 
-// cqViewItem is the head of the queue in full — what it wants, the evidence,
-// and the acts that answer it — with the remainder listed under a rule so the
-// depth behind the current ask is visible without leaving it.
-func (m model) cqViewItem(w, h int) string {
+// cqItemLayout is the item mode's whole layout decision: the fixed rows, the
+// two panes' contents, and how many rows each pane gets.
+//
+// It is separate from the render because the key handler needs the same answer.
+// A scroll offset is only meaningful against the height it will be shown at —
+// clamping j/k to the number of lines instead would leave the last screenful of
+// them dead, pressing k several times before the pane moved — so the keys size
+// the panes exactly as the view is about to.
+type cqItemLayout struct {
+	rows     []cqRow
+	evLines  []string
+	restRows []cqRestEntry
+	evH, qH  int
+}
+
+func (m model) cqItemLayout(w, h int) cqItemLayout {
 	q := m.cqQueue()
 	if len(q) == 0 {
-		return m.cqViewEmpty(w, h)
+		return cqItemLayout{}
 	}
 	inner := cqInner(w)
 	cur := q[0]
 
-	head := []cqRow{cqGap(2), cqGap(2)}
-	head = append(head, cqFixed(flG(flSpread(
-		fg(cDim, cqLabel(cur.product)),
-		fg(cFaint, cqPosition(q)), inner))))
-	head = append(head, cqGap(6))
-	head = append(head, cqFixed(flG(flSpread(
-		fg(cFg, cur.title),
-		fg(cFaint, cqWhere(cur)), inner))))
-	head = append(head, cqGap(4))
-	head = append(head, cqFixed(flG(fg(cqLeadColor(cur.tone), truncate(cqLeadText(cur), inner)))))
+	// Everything above the evidence pane: who is asking, what they want, and the
+	// two lines of context that frame it.
+	head := []cqRow{
+		cqFixed(flG(flSpread(
+			fg(cDim, cqLabel(cur.product)),
+			fg(cFaint, cqPosition(q)), inner))),
+		cqGap(6),
+		cqFixed(flG(flSpread(
+			fg(cFg, cur.title),
+			fg(cFaint, cqWhere(cur)), inner))),
+		cqFixed(flG(fg(cqLeadColor(cur.tone), truncate(cqLeadText(cur), inner)))),
+		cqFixed(cqGoalRow(w, cur)),
+	}
 	// The collector drops any evidence clause it has no source for, so an empty
 	// detail means there was nothing true to say — printing a blank row instead
 	// would read as "nothing to say about it", which is a different claim.
-	for _, d := range []string{cur.detail, cur.detail2} {
-		if d != "" {
-			head = append(head, cqFixed(flG(fg(cDim, truncate(d, inner)))))
+	if cur.detail != "" {
+		head = append(head, cqFixed(flG(fg(cDim, truncate(cur.detail, inner)))))
+	}
+	head = append(head, cqGap(1))
+
+	// Between the panes: where the work stands, and the acts that answer it.
+	mid := []cqRow{cqGap(2), cqFixed(flG(cqStatusStrip(cur, inner))), cqGap(5)}
+	for _, ln := range m.cqActionRows(cur, inner) {
+		mid = append(mid, cqFixed(flG(ln)))
+	}
+	mid = append(mid,
+		cqGap(3),
+		cqFixed(flG(fg(cRule, strings.Repeat("─", inner)))),
+		cqGap(4))
+
+	tail := []cqRow{cqFixed(flG(truncateAnsi(
+		fg(cFg, "w")+" "+fg(cDim, "everything in flight")+
+			" "+fg(cFaint, "· "+cqUnattendedLine()), inner)))}
+
+	evLines := cqEvPaneLines(w, cur)
+	restRows := cqRestEntries(q)
+
+	// The panes are the flex, so they are laid out as fill rows and sized from
+	// whatever the spacers leave — but shedding stops short of cqMinPanes, so a
+	// short terminal gives up whitespace before it gives up evidence.
+	rows := make([]cqRow, 0, len(head)+len(mid)+len(tail)+2)
+	rows = append(rows, head...)
+	rows = append(rows, cqFill())
+	rows = append(rows, mid...)
+	rows = append(rows, cqFill())
+	rows = append(rows, tail...)
+	rows = cqShed(rows, maxi(1, h-cqMinPanes))
+
+	evH, qH := cqSplitPanes(maxi(0, h-cqSolid(rows)), len(evLines))
+	return cqItemLayout{rows: rows, evLines: evLines, restRows: restRows, evH: evH, qH: qH}
+}
+
+// cqViewItem is the head of the queue in full — what it wants, the evidence,
+// and the acts that answer it — with the remainder listed under a rule so the
+// depth behind the current ask is visible without leaving it.
+func (m model) cqViewItem(w, h int) string {
+	if len(m.cqQueue()) == 0 {
+		return m.cqViewEmpty(w, h)
+	}
+	L := m.cqItemLayout(w, h)
+
+	// The two fill rows are the panes, in order: evidence, then the queue. Both
+	// pane functions clamp the model's offset against their own content, so a
+	// queue that shrank under the reader lands at the bottom, never past it.
+	out := make([]cqRow, 0, len(L.rows)+L.evH+L.qH)
+	pane := 0
+	for _, r := range L.rows {
+		if !r.fill {
+			out = append(out, r)
+			continue
+		}
+		pane++
+		lines := cqPaneWindow(L.evLines, m.cqEvScroll, L.evH)
+		if pane == 2 {
+			lines = cqRestPane(w, L.restRows, m.cqRestScroll, L.qH)
+		}
+		for _, ln := range lines {
+			out = append(out, cqFixed(ln))
 		}
 	}
-	head = append(head, cqGap(3))
-	for _, ln := range m.cqActionRows(cur, inner) {
-		head = append(head, cqFixed(flG(ln)))
-	}
-	head = append(head, cqGap(1), cqGap(1))
-	head = append(head, cqFixed(flG(fg(cRule, strings.Repeat("─", inner)))))
-	head = append(head, cqGap(5))
+	return cqRender(out, h)
+}
 
-	tail := []cqRow{
-		cqFixed(flG(fg(cFaint, truncate(cqUnattendedLine(), inner)))),
-		cqGap(7),
-	}
+// cqScrollMax is how far each pane can be scrolled at the current terminal
+// size: the lines it holds less the rows it will be given. Both are 0 when the
+// content fits, which is what makes j and k inert rather than merely invisible.
+func (m model) cqScrollMax() (ev, rest int) {
+	L := m.cqItemLayout(m.width, m.bodyHeight())
+	return maxi(0, len(L.evLines)-L.evH), maxi(0, len(L.restRows)-L.qH)
+}
 
-	// The rest list shrinks before any spacer sheds.
-	rest := q[1:]
-	hidden := 0
-	if room := maxi(0, h-len(head)-len(tail)); len(rest) > room {
-		hidden = len(rest) - room
-		rest = rest[:room]
-	}
+// cqRestEntry is one line of the queue pane: an ask still waiting, or a
+// dispatcher getting on with it.
+type cqRestEntry struct {
+	lead, product, title, repo, want, age string
+	titleColor, wantColor                 string
+}
 
-	rows := make([]cqRow, 0, len(head)+len(rest)+len(tail)+1)
-	rows = append(rows, head...)
-	for i, r := range rest {
-		// The 7ch lead column is blank on all but the first row, so the count of
-		// what did not fit rides there instead of costing a row of its own.
+// cqRestEntries is the queue behind the head, then everything running.
+//
+// The running rows are not filler: a tall terminal that would otherwise end in
+// black instead shows what is in flight, and they are written in faint so the
+// eye still separates "waiting on you" from "getting on with it".
+func cqRestEntries(q []cqItem) []cqRestEntry {
+	out := make([]cqRestEntry, 0, len(q))
+	for i, r := range q[1:] {
 		lead := ""
 		if i == 0 {
 			lead = "then"
 		}
-		if hidden > 0 && i == len(rest)-1 {
-			lead = "+" + itoa(hidden)
-		}
-		rows = append(rows, cqFixed(cqRestRow(w, r, lead)))
+		out = append(out, cqRestEntry{
+			lead: lead, product: r.product, title: r.title, repo: r.repo,
+			want: r.want, age: r.age, titleColor: cMid, wantColor: cDim,
+		})
 	}
-	rows = append(rows, cqFill())
-	rows = append(rows, tail...)
-	return cqRender(rows, h)
+	n := 0
+	for _, g := range cqWorking {
+		for _, x := range g.rows {
+			lead := ""
+			if n == 0 {
+				lead = "running"
+			}
+			out = append(out, cqRestEntry{
+				lead: lead, product: g.name, title: x.feature, repo: x.repo,
+				want: cqRunWant(x), age: x.out, titleColor: cFaint, wantColor: cFaint,
+			})
+			n++
+		}
+	}
+	return out
+}
+
+// cqRunWant says what a running dispatcher is up to, from the clauses that have
+// a source: the inferred phase, the turn count, and where its PR's checks
+// stand. All three can be absent, and then the column is simply empty.
+func cqRunWant(x cqWorkRow) string {
+	parts := make([]string, 0, 3)
+	for _, p := range []string{x.phase, cqPassLine(x.pass), x.detail} {
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// cqRestPane is the queue pane's window over the entries.
+//
+// Unlike the evidence pane, an overflow costs no row here: the lead column is
+// blank on every row but the first, so "+N" and the scroll position ride there.
+func cqRestPane(w int, entries []cqRestEntry, off, h int) []string {
+	if h <= 0 {
+		return nil
+	}
+	off = mini(maxi(0, off), maxi(0, len(entries)-h))
+	vis := entries[off:mini(len(entries), off+h)]
+	lines := make([]string, 0, h)
+	for i, e := range vis {
+		if off > 0 && i == 0 {
+			e.lead = "↑" + itoa(off)
+		}
+		if hidden := len(entries) - off - len(vis); hidden > 0 && i == len(vis)-1 {
+			e.lead = "+" + itoa(hidden)
+		}
+		lines = append(lines, cqRestRow(w, e))
+	}
+	return cqPadLines(lines, h)
 }
 
 // cqActionRows is the acts line, or the flash that replaces it for the 850ms
@@ -373,10 +745,16 @@ func (m model) cqActionRows(it cqItem, inner int) []string {
 		// the collector could offer no acts for still shows a way onward.
 		acts = []cqAct{{k: "s", d: "skip"}}
 	}
-	chips := make([]string, 0, len(acts))
+	chips := make([]string, 0, len(acts)+2)
 	for _, a := range acts {
 		chips = append(chips, fg(cFg, a.k)+" "+fg(cDim, a.d))
 	}
+	// The two panes have no scrollbar, so the only thing that says they scroll
+	// is this line. Both keys are bound unconditionally in item mode (see
+	// updateFloorQueue), so both chips are always true.
+	chips = append(chips,
+		fg(cFg, "j k")+" "+fg(cDim, "evidence"),
+		fg(cFg, "J K")+" "+fg(cDim, "queue"))
 	return cqChipRows(chips, inner)
 }
 
@@ -390,33 +768,32 @@ func (m model) cqActionRows(it cqItem, inner int) []string {
 //
 // Columns shed by width, repo first: product is the key the human scans by and
 // want is the reason the row exists, so the repo name is the one to lose.
-func cqRestRow(w int, r cqItem, lead string) string {
+func cqRestRow(w int, r cqRestEntry) string {
 	inner := cqInner(w)
 	showRepo := w >= 110
 	showProduct := w >= 70
 
-	fixed := 7 + 6
+	// lead + age, then the two columns that shed, leaving title and want to
+	// share the remainder at the design's 1 : 1.2.
+	fixed := 9 + 6
 	if showProduct {
 		fixed += 13
 	}
-	rem := maxi(0, inner-fixed)
-	var titleW, repoW int
 	if showRepo {
-		titleW = rem * 11 / 33
-		repoW = rem * 10 / 33
-	} else {
-		titleW = rem * 11 / 23
+		fixed += 14
 	}
+	rem := maxi(0, inner-fixed)
+	titleW := rem * 10 / 22
 
-	segs := []seg{c("", pad, ""), c(lead, 7, cFaint)}
+	segs := []seg{c("", pad, ""), c(r.lead, 9, cFaint)}
 	if showProduct {
 		segs = append(segs, c(truncate(cqLabel(r.product), 12), 13, cFaint))
 	}
-	segs = append(segs, c(truncate(r.title, titleW-1), titleW, cMid))
+	segs = append(segs, c(truncate(r.title, titleW-2), titleW, r.titleColor))
 	if showRepo {
-		segs = append(segs, c(truncate(r.repo, repoW-1), repoW, cFaint))
+		segs = append(segs, c(truncate(r.repo, 12), 14, cFaint))
 	}
-	segs = append(segs, flexc(r.want, cDim), cr(r.age, 6, cFaint), c("", pad, ""))
+	segs = append(segs, flexc(r.want, r.wantColor), cr(r.age, 6, cFaint), c("", pad, ""))
 	return row(w, "", segs...)
 }
 
@@ -442,13 +819,8 @@ func (m model) cqViewWorking(w, h int) string {
 	head := []cqRow{
 		cqGap(2),
 		cqFixed(flG(fg(cDim, truncate(cqWorkTotalLine(), inner)))),
-		cqGap(3),
 	}
-	tail := []cqRow{
-		cqGap(4),
-		cqFixed(flG(fg(cFaint, "j/k move · enter attach · x kill · w or esc back"))),
-		cqGap(1),
-	}
+	tail := []cqRow{cqFixed(flG(cqWorkFooter(inner)))}
 	head, tail = cqShedPair(head, tail, maxi(1, h-1))
 	capacity := maxi(0, h-len(head)-len(tail))
 
@@ -505,68 +877,101 @@ func cqWorkLines(w int, gaps bool, sel int) []cqBlockLine {
 	return out
 }
 
-// cqWorkRowLine is one running dispatcher. Same one-flex-column discipline as
-// cqRestRow. Repo is again the column that goes when width runs out: the rows
-// are already grouped by product, and `doing` is the only liveness signal.
+// cqWorkFooter is the working view's own footer: the keys that work, and a
+// legend for the two columns whose meaning is not self-evident.
+//
+// The design offers "F follow" and a legend reading "pass = repair rounds".
+// Neither survives contact with this repo: nothing here follows a session, and
+// the number counts prompts, not repair rounds. Both are stated as they are.
+func cqWorkFooter(inner int) string {
+	left := "j k or ↑ ↓ move · ⏎ attach · x kill · w or esc back"
+	right := "turn = prompts sent · then the pr's own checks"
+	if dispWidth(left)+3+dispWidth(right) > inner {
+		return fg(cFaint, truncate(left, inner))
+	}
+	return flSpread(fg(cFaint, left), fg(cFaint, right), inner)
+}
+
+// cqWorkRowLine is one running dispatcher: where it is in the loop, how many
+// turns it has taken, and where its PR stands.
+//
+// The design has no responsive story for this row — at 81 columns of fixed
+// cells there would be nothing left for the feature name on a standard
+// terminal — so the columns shed in reverse order of how much they say about a
+// dispatcher nobody is watching. The chain degrades to the lit segment alone
+// before it disappears: one word is still true, and it is the only liveness
+// signal a narrow row has left.
 func cqWorkRowLine(w int, x cqWorkRow, on bool) string {
-	inner := cqInner(w)
-	// The selected row carries the cursor and the highlight; the leading pad
-	// column doubles as the marker gutter so nothing else shifts.
+	// The selected row carries the cursor and the highlight; the leading mark
+	// column doubles as the page gutter so nothing else shifts.
 	bg, mark, featColor := cTransparent, " ", cMid
 	if on {
 		bg, mark, featColor = cSel, "▸", cWhite
 	}
-	showRepo := w >= 110
 
-	rem := maxi(0, inner-9)
-	var featW, repoW int
-	if showRepo {
-		featW = rem * 11 / 31
-		repoW = rem * 10 / 31
-	} else {
-		featW = rem * 11 / 21
+	var chain []seg
+	chainW := 0
+	switch {
+	case w >= 140:
+		// The design's 2ch either side; the left one comes from the feature
+		// cell's own right padding, so only the trailing gap is a cell.
+		chain, chainW = append(cqChainSegs(x.phase), c("", 2, "")), cqChainWidth()+2
+	case w >= 90:
+		hex := cChainOff
+		if x.phase != "" {
+			hex = cWhite
+		}
+		chain, chainW = []seg{c(cqPhaseWord(x.phase), 9, hex)}, 9
+	}
+	repoW, passW, detailW := 0, 0, 0
+	if w >= 110 {
+		repoW, passW = 12, 8
+	}
+	if w >= 170 {
+		detailW = 21
 	}
 
+	featW := maxi(1, w-(3+repoW+chainW+passW+detailW+8+pad))
 	out, outHex := cqOutCell(x.out)
-	segs := []seg{c(mark, pad, cMid), c(truncate(x.feature, featW-1), featW, featColor)}
-	if showRepo {
-		segs = append(segs, c(truncate(x.repo, repoW-1), repoW, cFaint))
+
+	segs := []seg{
+		c(mark, 3, cFg),
+		c(truncate(x.feature, featW-2), featW, featColor),
 	}
-	segs = append(segs, flexc(x.doing, cDim), cr(out, 9, outHex), c("", pad, ""))
+	if repoW > 0 {
+		segs = append(segs, c(truncate(x.repo, repoW-2), repoW, cFaint))
+	}
+	segs = append(segs, chain...)
+	if passW > 0 {
+		segs = append(segs, cr(cqPassLine(x.pass), passW, cFaint))
+	}
+	if detailW > 0 {
+		segs = append(segs, cr(x.detail, detailW, cqTrendColor(x)))
+	}
+	segs = append(segs, cr(out, 8, outHex), c("", pad, ""))
 	return row(w, bg, segs...)
 }
 
-// ---- mode: empty / draft ----------------------------------------------------
-
-// cqViewEmpty is the dispatch prompt: what you see when the queue is clear, and
-// what `d` opens over a queue that is not.
-func (m model) cqViewEmpty(w, h int) string {
-	inner := cqInner(w)
-
-	head := []cqRow{
-		cqGap(3), cqGap(3),
-		cqFixed(flG(fg(cDim, truncate(m.cqPromptLead(), inner)))),
-		cqGap(1), cqGap(1),
-		cqFixed(flG(fg(cFaint, "what should we build?"))),
-		cqGap(4),
-		cqFixed(flG(cqDraftLine(m.cqDraft, inner))),
-		cqGap(2), cqGap(2),
+// cqTrendColor lifts the one dispatcher that wants a look: green checks on a PR
+// nobody has merged. The design's other amber trigger is thrash, which needs a
+// check result sampled twice over time — until something samples it, no row is
+// ambered for a trend nobody measured.
+func cqTrendColor(x cqWorkRow) string {
+	switch {
+	case x.stalled:
+		return cAmber
+	case x.detail == "":
+		return cFaint
 	}
-	for _, ln := range cqChipRows(cqPromptChips(), inner) {
-		head = append(head, cqFixed(flG(ln)))
-	}
-
-	tail := []cqRow{
-		cqFixed(flG(fg(cFaint, truncate(cqUnattendedLine(), inner)))),
-		cqGap(5),
-	}
-
-	rows := make([]cqRow, 0, len(head)+len(tail)+1)
-	rows = append(rows, head...)
-	rows = append(rows, cqFill())
-	rows = append(rows, tail...)
-	return cqRender(rows, h)
+	return cDim
 }
+
+// ---- mode: empty / dispatch form --------------------------------------------
+
+// cqViewEmpty is the dispatch form: what you see when the queue is clear, and
+// what `d` opens over a queue that is not. The form itself lives in
+// dispatchx.go, which replaced the freeform draft this mode used to render.
+func (m model) cqViewEmpty(w, h int) string { return m.dxView(w, h) }
 
 // cqPromptLead states where the queue stands, so the prompt never implies the
 // queue is clear when `d` was pressed over a full one — and never claims it is
@@ -594,35 +999,6 @@ func (m model) cqPromptLead() string {
 	return "queue clear"
 }
 
-// cqDraftLine is the typed draft with the block caret after it.
-//
-// The caret is steady. The design blinks it, but the cockpit has no blink tick
-// and adding one would cost a full redraw twice a second for a cursor the
-// terminal already draws. When the draft outgrows the line it scrolls left,
-// keeping the caret — the point of interest — on screen.
-func cqDraftLine(draft string, inner int) string {
-	caret := paint("#0a0a0a", cWhite, " ") // the design's caret: dark glyph on white
-	r := []rune(draft)
-	for len(r) > 0 && dispWidth(string(r))+1 > inner {
-		r = r[1:]
-	}
-	return fg(cFg, string(r)) + caret
-}
-
-// cqPromptChips are the prompt's affordances. The backlog chip appears only
-// when the backlog collector actually found untaken tickets: the design's count
-// is mock, and "0 ready to go" would be a claim about a backlog nobody read.
-func cqPromptChips() []string {
-	chips := []string{
-		fg(cFg, "⏎") + " " + fg(cDim, "dispatch"),
-		fg(cFg, "tab") + " " + fg(cDim, "pick repos"),
-	}
-	if n := flCountTickets(func(t ticket) bool { return t.taken == "" }); n > 0 {
-		chips = append(chips, fg(cFg, "5")+" "+fg(cDim, "backlog · "+itoa(n)+" ready to go"))
-	}
-	return chips
-}
-
 // ---- footer -----------------------------------------------------------------
 
 // cqFooterHelp is the one chrome row this lens drives: the keys that work right
@@ -633,10 +1009,7 @@ func (m model) cqFooterHelp() string {
 	case m.cqWork:
 		return "j/k move · enter attach · x kill · w or esc back"
 	case m.cqDispatch || len(q) == 0:
-		if m.cqDraft != "" {
-			return "enter dispatch · esc clear"
-		}
-		return "type the work · enter dispatch · w running · esc clear · 1…8 sections"
+		return m.dxFooterHelp()
 	}
 	parts := make([]string, 0, len(q[0].acts)+4)
 	for _, a := range q[0].acts {
