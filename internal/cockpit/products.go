@@ -8,6 +8,7 @@ package cockpit
 // Faithful port of v2_template.html lines 316-386 and renderVals `products`.
 
 import (
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,9 +90,28 @@ func productsPane(lines []string, w int) string {
 	return strings.Join(out, "\n")
 }
 
+// portfolioHasProducts reports whether anything in the portfolio actually
+// belongs to a product. "unassigned" is a bucket, not a product, so a portfolio
+// made only of it is an empty one — which is the state the onboarding answers.
+func portfolioHasProducts() bool {
+	for _, p := range products {
+		if p.name != "unassigned" {
+			return true
+		}
+	}
+	return false
+}
+
 func (m model) viewProducts(w, h int) string {
 	fitv := m.fit()
 	pc := clampCursor(m.productCursor, len(products))
+
+	// Nothing is assigned yet: the table would be a single "unassigned" row over
+	// a stale list nobody can act on. Show what a product is and how to make one
+	// instead — full width, because there is no product to focus on the right.
+	if !portfolioHasProducts() {
+		return clampLines(productsPane(m.productsOnboarding(maxi(1, w-2*pad), h), w), h)
+	}
 
 	// Pane geometry: right focus panel is flex:0 0 30%; the left table fills the
 	// rest with a one-column rule between them. Narrow terminals show the table
@@ -130,11 +150,130 @@ func (m model) viewProducts(w, h int) string {
 	return clampLines(out, h)
 }
 
+// productsOnboarding is the "no products yet" screen: what a product is, the
+// two keys that make one, a guess at which repos belong together, and the repos
+// themselves so the offer is about something the user recognises.
+func (m model) productsOnboarding(cw, h int) []string {
+	out := []string{line("portfolio · a product is many repos", cw, cDim, ""), ""}
+
+	if len(repoInventory) == 0 {
+		if m.loading {
+			return append(out, fg(cFaint, "scanning your roots for repositories…"))
+		}
+		out = append(out, fg(cFg, "no repos found"))
+		for _, ln := range productsWrap("Nothing under your scan roots looks like a git repository, so there is nothing to group yet.", mini(cw, 86)) {
+			out = append(out, fg(cMid, ln))
+		}
+		out = append(out, "", fg(cFg, ",")+fg(cDim, "  edit the directories scanned for repos"))
+		return out
+	}
+
+	out = append(out, fg(cFg, "no products yet"))
+	for _, ln := range productsWrap("A product is the thing you ship — usually several repos. This cockpit groups everything by it: which blockers come first, what shipped, whether you are going fast.", mini(cw, 86)) {
+		out = append(out, fg(cMid, ln))
+	}
+	out = append(out, fg(cDim, "All "+itoa(len(repoInventory))+" "+plural(len(repoInventory), "repo is", "repos are")+
+		" tracked · every screen groups them as unassigned until you assign them."))
+	out = append(out, "")
+	out = append(out, fg(cFg, "n")+fg(cDim, "  name a product, then move repos in")+
+		"     "+fg(cFg, "a")+fg(cDim, "  open the repo list and assign"))
+	out = append(out, "")
+	for _, ln := range productsWrap(productsSuggestion(repoInventory), mini(cw, 86)) {
+		out = append(out, fg(cFaint, ln))
+	}
+
+	// The table is the offer's evidence, not the screen's subject — capped to a
+	// readable measure rather than stretched across a wide terminal.
+	tw := mini(cw, 72)
+	out = append(out, "")
+	out = append(out, row(tw, "",
+		flexc("REPO", cFaint),
+		c("FORGE", 8, cFaint),
+		cr("OUT", 6, cFaint),
+		cr("LAST COMMIT", 14, cFaint),
+	))
+	room := maxi(1, h-len(out)-1)
+	for i, r := range repoInventory {
+		if i >= room {
+			out = append(out, fg(cFaint, "+"+itoa(len(repoInventory)-i)+" more · a lists them all"))
+			break
+		}
+		outLabel := ""
+		if r.out > 0 {
+			outLabel = itoa(r.out)
+		}
+		out = append(out, row(tw, "",
+			flexc(r.name, cMid),
+			c(r.forge, 8, cFaint),
+			cr(outLabel, 6, cDim),
+			cr(orDash(r.last), 14, cFaint),
+		))
+	}
+	return out
+}
+
+// productsSuggestion guesses which repos ship together from their names — the
+// common prefix before the first - or _ is how repos in one product are almost
+// always named. It is a starting point offered, never an assignment made.
+func productsSuggestion(rows []repoRow) string {
+	groups := map[string][]string{}
+	for _, r := range rows {
+		stem := r.name
+		if i := strings.IndexAny(stem, "-_"); i > 0 {
+			stem = stem[:i]
+		}
+		groups[stem] = append(groups[stem], r.name)
+	}
+	best, bestN := "", 0
+	for _, stem := range sortedKeys(groups) { // sorted: the guess must not shuffle
+		if n := len(groups[stem]); n > bestN {
+			best, bestN = stem, n
+		}
+	}
+	if bestN < 2 {
+		return "Start with whichever repos ship together."
+	}
+	names := groups[best]
+	if len(names) > 3 {
+		names = names[:3]
+	}
+	return "Start with one: " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] +
+		" look like they belong together."
+}
+
+// sortedKeys returns a map's keys in sorted order.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // productsLeft builds the portfolio table, the stale list and the stuck lines.
 func (m model) productsLeft(cw, pc int) []string {
 	var out []string
 
-	out = append(out, line("portfolio · a product is many repos", cw, cDim, ""))
+	// The loose count is the one thing that decays: repos appear under new scan
+	// roots and land in no product. It sits in the header, amber, until it is 0.
+	loose := 0
+	for _, r := range repoInventory {
+		if r.product == "" {
+			loose++
+		}
+	}
+	looseLine, looseColor := "every repo belongs to a product", cFaint
+	if loose > 0 {
+		looseLine, looseColor = itoa(loose)+" "+plural(loose, "repo is", "repos are")+" in no product · a to assign", cAmber
+	}
+	out = append(out, row(cw, "",
+		flexc("portfolio · a product is many repos", cDim),
+		cr(looseLine, 48, looseColor),
+	))
+	out = append(out, fg(cFg, "a")+fg(cDim, " assign repos to products")+
+		"    "+fg(cFg, "n")+fg(cDim, " new product"))
+	out = append(out, "")
 	out = append(out, row(cw, "",
 		c("", 2, ""),
 		flexc("PRODUCT", cFaint),
@@ -238,9 +377,14 @@ func (m model) stuckLines() []string {
 	return out
 }
 
-// repoCount is how many repos the portfolio covers, counted from the product
-// map so it always matches what the lens is showing.
+// repoCount is how many repos the portfolio covers. The discovered inventory is
+// the truthful answer — it includes the repos in no product, which the product
+// map by construction cannot — and the product map is the fallback for before
+// the first scan has landed.
 func (m model) repoCount() int {
+	if len(repoInventory) > 0 {
+		return len(repoInventory)
+	}
 	seen := map[string]bool{}
 	for _, rs := range reposByProduct {
 		for _, r := range rs {
@@ -293,6 +437,16 @@ func (m model) productsRight(cw, pc int) []string {
 
 func (m model) updateProducts(k string) (model, tea.Cmd) {
 	switch k {
+	case "a", "n":
+		// Both keys open one overlay: `n` with the name prompt already up. A
+		// product named but not filled is a row the portfolio cannot draw, so
+		// creating one and choosing its repos is a single act.
+		if len(repoInventory) == 0 {
+			m.notice = "no repos found · , edits the scan roots"
+			return m, nil
+		}
+		m.assign = newAssign(k == "n")
+		return m, nil
 	case "j", "down":
 		if m.productCursor < len(products)-1 {
 			m.productCursor++
@@ -304,6 +458,14 @@ func (m model) updateProducts(k string) (model, tea.Cmd) {
 	case "enter":
 		if len(products) == 0 {
 			return m, nil // nothing discovered yet — there is no product to open
+		}
+		if !portfolioHasProducts() {
+			// The onboarding is on screen: the only row is the unassigned bucket,
+			// and opening it would be opening nothing. Enter is the offer it makes.
+			if len(repoInventory) > 0 {
+				m.assign = newAssign(true)
+			}
+			return m, nil
 		}
 		m.lens = "product"
 		m.shipCursor = 0

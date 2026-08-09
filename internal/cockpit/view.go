@@ -10,7 +10,7 @@ import (
 const pad = 2 // left/right page gutter, in columns (the design's 24px)
 
 var footerByLens = map[string]string{
-	"products":  "j/k move · enter open product · : palette · 1 triage",
+	"products":  "j/k move · enter open product · a assign repos · n new product · 1 triage",
 	"product":   "R review · T team · S shipped · j/k move · enter open · d dispatch a reviewer · 1 triage",
 	"queue":     "a add · e edit · x drop · ctrl+d dispatch all · 1 triage",
 	"backlog":   "j/k move · space pick · enter dispatch · ctrl+d dispatch picked · s source · 1 triage",
@@ -105,6 +105,12 @@ func (m model) footerView() string {
 }
 
 func (m model) footerHelp() string {
+	if m.assign != nil {
+		if m.assign.naming {
+			return "type the name · enter creates it and moves the marked repos in · esc cancels"
+		}
+		return "space mark · tab panes · enter assign · n new product · u unassign · U unassign all · esc done"
+	}
 	// The triage lens's keys change with its mode, so it writes its own.
 	if m.lens == "floor" {
 		return m.cqFooterHelp()
@@ -155,6 +161,8 @@ func (m model) overlayView(w, h int) (string, bool) {
 		return m.viewSettings(w, h), true
 	case m.dispatchForm != nil:
 		return m.viewDispatchForm(w, h), true
+	case m.assign != nil:
+		return m.viewAssign(w, h), true
 	case m.helpOpen:
 		return m.viewHelp(w, h), true
 	case m.reviewOpen:
@@ -198,8 +206,16 @@ func (m model) portfolioLine() string {
 	if out > 0 {
 		parts = append(parts, itoa(out)+" out")
 	}
-	if n := len(products); n > 0 {
-		parts = append(parts, itoa(n)+" "+plural(n, "product", "products"))
+	// "unassigned" is the bucket every unmapped repo falls into, not a product;
+	// counting it made a portfolio with nothing assigned claim "1 product".
+	prods := 0
+	for _, p := range products {
+		if p.name != "unassigned" {
+			prods++
+		}
+	}
+	if prods > 0 {
+		parts = append(parts, itoa(prods)+" "+plural(prods, "product", "products"))
 	}
 	if n := m.repoCount(); n > 0 {
 		parts = append(parts, itoa(n)+" "+plural(n, "repo", "repos"))

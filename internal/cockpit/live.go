@@ -43,6 +43,7 @@ type snapshot struct {
 	staleRepos     []staleRepo
 	working        []workingItem
 	productStats   map[string]productStat
+	repoInventory  []repoRow
 
 	backlogTickets []ticket
 
@@ -106,7 +107,10 @@ func (c *collectCtx) productFor(rec *state.Dispatch) string {
 		return "unassigned"
 	}
 	if c.cfg != nil {
-		if _, ok := c.cfg.Products[p]; !ok {
+		// A configured-but-empty product rolls up nothing and is not drawn, so a
+		// record still claiming it reads as unassigned — same rule as
+		// collectProducts.
+		if names, ok := c.cfg.Products[p]; !ok || len(names) == 0 {
 			return "unassigned"
 		}
 	}
@@ -196,6 +200,9 @@ func applySnapshot(s snapshot) {
 	}
 	if s.productStats != nil {
 		productStats = s.productStats
+	}
+	if s.repoInventory != nil {
+		repoInventory = s.repoInventory
 	}
 	if s.backlogTickets != nil {
 		backlogTickets = s.backlogTickets

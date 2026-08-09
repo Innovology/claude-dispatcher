@@ -1,10 +1,10 @@
 package cockpit
 
-// collect_stale_queue.go fills three product-lens fields: s.staleRepos (repos
-// with no active dispatch whose last commit is old), s.working (dispatches
-// currently in flight) and s.queueItems (drafted dispatches read from the
-// state dir's queue.json). Every git/exec/parse is guarded; missing inputs
-// degrade to honest empty states.
+// collect_stale_queue.go fills four product-lens fields: s.repoInventory (every
+// discovered repo, product or not), s.staleRepos (repos with no active dispatch
+// whose last commit is old), s.working (dispatches currently in flight) and
+// s.queueItems (drafted dispatches read from the state dir's queue.json). Every
+// git/exec/parse is guarded; missing inputs degrade to honest empty states.
 
 import (
 	"encoding/json"
@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 )
 
@@ -41,15 +42,46 @@ func collectStaleQueue(ctx *collectCtx, s *snapshot) {
 		}
 	}
 
+	// How many dispatchers are still out on each repo — the "OUT" column of the
+	// inventory. Counted over every record, not just the active ones, so a repo
+	// whose only dispatcher is blocked still reads as busy.
+	openByRepo := map[string]int{}
+	for _, d := range ctx.records {
+		if d.Status != state.StatusDone && d.Status != state.StatusExited {
+			openByRepo[d.RepoName]++
+		}
+	}
+
+	// repoInventory: one row per discovered repo. The two git calls per repo
+	// (origin remote, last commit) run with the shared bounded fan-out — serially
+	// they were the slowest thing in this collector on a large portfolio.
+	inv := make([]repoRow, len(ctx.repos))
+	forEach(ctx.repos, func(i int, r repos.Repo) {
+		row := repoRow{
+			name:    r.Name,
+			product: r.Product,
+			forge:   ctx.forge(r.Path),
+			out:     openByRepo[r.Name],
+			days:    -1,
+		}
+		if t, ok := stqLastCommit(r.Path); ok {
+			row.last = stqAge(t)
+			row.days = stqWholeDays(t)
+		}
+		inv[i] = row
+	})
+	s.repoInventory = inv
+
 	// staleRepos: repos with no active dispatch and a last commit older than
-	// the threshold, most-stale first.
+	// the threshold, most-stale first. inv is index-aligned with ctx.repos, so
+	// the commit age is already paid for.
 	stale := []staleRepo{}
-	for _, r := range ctx.repos {
+	for i, r := range ctx.repos {
 		if activePaths[r.Path] || activeNames[r.Name] {
 			continue
 		}
-		days, ok := stqDaysSinceCommit(r.Path)
-		if !ok || days <= stqStaleDays {
+		days := inv[i].days
+		if days <= stqStaleDays { // -1 (git said nothing) falls out here too
 			continue
 		}
 		stale = append(stale, staleRepo{
@@ -92,22 +124,37 @@ func stqActive(st state.Status) bool {
 	return false
 }
 
-// stqDaysSinceCommit returns whole days since the repo's last commit. The bool
-// is false when git is unavailable or the output cannot be parsed.
-func stqDaysSinceCommit(repoPath string) (int, bool) {
+// stqLastCommit returns the time of the repo's last commit. The bool is false
+// when git is unavailable or the output cannot be parsed.
+func stqLastCommit(repoPath string) (time.Time, bool) {
 	out, err := exec.Command("git", "-C", repoPath, "log", "-1", "--format=%ct").Output()
 	if err != nil {
-		return 0, false
+		return time.Time{}, false
 	}
 	secs, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
 	if err != nil || secs <= 0 {
-		return 0, false
+		return time.Time{}, false
 	}
-	d := time.Since(time.Unix(secs, 0))
+	return time.Unix(secs, 0), true
+}
+
+// stqWholeDays is whole days between t and now, floored at 0.
+func stqWholeDays(t time.Time) int {
+	d := time.Since(t)
 	if d < 0 {
 		d = 0
 	}
-	return int(d / (24 * time.Hour)), true
+	return int(d / (24 * time.Hour))
+}
+
+// stqDaysSinceCommit returns whole days since the repo's last commit. The bool
+// is false when git is unavailable or the output cannot be parsed.
+func stqDaysSinceCommit(repoPath string) (int, bool) {
+	t, ok := stqLastCommit(repoPath)
+	if !ok {
+		return 0, false
+	}
+	return stqWholeDays(t), true
 }
 
 // stqStartOf picks the best "since" timestamp for a working item: its creation

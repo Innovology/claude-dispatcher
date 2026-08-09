@@ -46,6 +46,10 @@ var (
 	staleRepos     []staleRepo
 	working        []workingItem
 	productStats   = map[string]productStat{}
+	// repoInventory is every discovered repo, product or not. The assign
+	// overlay writes config.toml and then updates it in place, so the flow
+	// stays responsive while the next full snapshot is still loading.
+	repoInventory []repoRow
 )
 
 // ---- product detail ---------------------------------------------------------

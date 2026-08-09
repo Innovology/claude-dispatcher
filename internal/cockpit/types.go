@@ -69,6 +69,21 @@ type staleRepo struct {
 	note          string
 }
 
+// repoRow is one discovered repository in the portfolio inventory: every repo
+// the scan roots turned up, whether or not it belongs to a product. The
+// products lens's empty state and the assign overlay both work off it, because
+// both are about the repos that have *no* product yet — which reposByProduct,
+// keyed by product, cannot describe.
+//
+// days is whole days since the last commit, or -1 when git could not answer;
+// last is the same figure rendered ("3d", "18m"), or "" when unknown.
+type repoRow struct {
+	name, forge, product string
+	out                  int // dispatchers still out on this repo
+	last                 string
+	days                 int
+}
+
 type workingItem struct {
 	feature, repo, product, age string
 }

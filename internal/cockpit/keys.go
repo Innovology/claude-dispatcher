@@ -155,6 +155,15 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateDispatchForm(k)
 		return mm, cmd
 	}
+	// The assign overlay swallows everything except the lens digits, which close
+	// it and then mean what they always mean.
+	if m.assign != nil {
+		mm, cmd, handled := m.updateAssign(k)
+		if handled {
+			return mm, cmd
+		}
+		m = mm
+	}
 	if m.confirm != nil {
 		switch k {
 		case "y", "enter":

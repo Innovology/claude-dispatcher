@@ -38,10 +38,14 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		}
 	}
 
-	// Known product keys from config.
+	// Known product keys from config. An empty product is not one: it rolls up
+	// nothing, so a record still claiming it belongs under "unassigned" rather
+	// than under a row the portfolio does not draw.
 	known := map[string]bool{}
-	for p := range cfg.Products {
-		known[p] = true
+	for p, names := range cfg.Products {
+		if len(names) > 0 {
+			known[p] = true
+		}
 	}
 
 	// prodOf maps a record onto a product key, folding anything unmapped into
@@ -76,8 +80,17 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 
 	// Stable product order: sorted config keys, then unassigned if it has any
 	// repos or records.
+	//
+	// A configured product with no repos is skipped. Unassigning a product's
+	// last repo leaves its key behind in config.toml (so the name survives to be
+	// filled again), and a "0 repos" row would otherwise keep the portfolio
+	// looking populated — hiding the "no products yet" onboarding from exactly
+	// the person who needs it.
 	order := make([]string, 0, len(cfg.Products)+1)
-	for p := range cfg.Products {
+	for p, names := range cfg.Products {
+		if len(names) == 0 {
+			continue
+		}
 		order = append(order, p)
 	}
 	sort.Strings(order)

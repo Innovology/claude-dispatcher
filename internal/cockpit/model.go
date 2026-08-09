@@ -37,6 +37,10 @@ type model struct {
 	loading      bool
 	settings     *settingsState
 	dispatchForm *dispatchForm
+	// assign is the products lens's repo→product overlay (`a` / `n`), the one
+	// place a product gets created. Pointer for the same reason as the forms:
+	// what is half-typed must survive a value-receiver Update.
+	assign *assignState
 
 	// key is the untouched message for the key being handled. Routing is by
 	// name (handleKey takes a string), but text input must come from the
