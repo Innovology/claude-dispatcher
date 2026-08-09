@@ -14,14 +14,21 @@ func (m model) viewCluster(w, h int) string {
 	leftInner := maxi(leftW-2*pad, 1)
 	rightInner := maxi(rightW-2*pad, 1)
 
-	left := productsPane(m.clLeft(leftInner), leftW)
+	left := productsPane(m.clLeft(leftInner, h), leftW)
 	right := productsPane(m.clRight(rightInner, h), rightW)
 	hh := mini(maxi(strings.Count(left, "\n"), strings.Count(right, "\n"))+1, maxi(h, 1))
 	return clampLines(hjoin(padBlockTo(left, hh), vrule(hh, cRule), padBlockTo(right, hh)), h)
 }
 
 // clLeft is the repo table: mark, name, forge, current product, out, last.
-func (m model) clLeft(cw int) []string {
+//
+// h is the body height, and the rows scroll within it. The list used to render
+// every repo and let clampLines cut the overflow, which meant that on any
+// portfolio taller than the terminal the cursor walked off the bottom and
+// stayed there: j kept working, the selection kept moving, and none of it was
+// visible. A repo list you cannot see the cursor in is not one you can assign
+// from.
+func (m model) clLeft(cw, h int) []string {
 	rows := m.clRepos()
 	sel := clampCursor(m.clRepo, len(rows))
 
@@ -55,7 +62,11 @@ func (m model) clLeft(cw int) []string {
 	if len(rows) == 0 {
 		return append(out, "", fg(cFaint, "no repos found — check your scan roots with ,"))
 	}
-	for i, r := range rows {
+	// Leave a line for the "showing x of y" footer so it cannot itself be the
+	// row that gets clipped.
+	start, end := window(sel, len(rows), maxi(h-len(out)-1, 1))
+	for i := start; i < end; i++ {
+		r := rows[i]
 		bg, mark, nameColor := cTransparent, " ", cFg
 		if m.clMarked[r.name] {
 			mark = "◆"
@@ -78,6 +89,11 @@ func (m model) clLeft(cw int) []string {
 			cr(itoa(r.out), 8, cFaint),
 			cr(r.last, 8, cFaint),
 		))
+	}
+	// Only when the list is actually scrolling: on a portfolio that fits, a
+	// position counter is noise.
+	if end-start < len(rows) {
+		out = append(out, fg(cFaint, itoa(sel+1)+" of "+itoa(len(rows))))
 	}
 	return out
 }

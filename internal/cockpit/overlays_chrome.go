@@ -30,6 +30,13 @@ var helpSections = []struct {
 		{":", "command palette"},
 		{"?", "this help"},
 	}},
+	{section: "products · lens 2", keys: []struct{ k, d string }{
+		{"a", "assign repos to products"},
+		{"n", "new product — names it and moves the marked repos in"},
+		{"space", "mark a repo · enter moves every marked one"},
+		{"tab", "between the repo list and the products"},
+		{"u / U", "take repos back out of a product · start over"},
+	}},
 	{section: "the other lenses", keys: []struct{ k, d string }{
 		{"j / k", "up and down the list"},
 		{"→ / ←", "into the detail pane and back"},
