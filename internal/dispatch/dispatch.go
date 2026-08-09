@@ -4,6 +4,7 @@
 package dispatch
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,6 +36,10 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 	slug := Slugify(feature)
 	if slug == "" {
 		return nil, fmt.Errorf("feature name %q produces an empty slug", feature)
+	}
+	if live := liveDispatch(slug); live != nil {
+		return nil, fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
+			live.Feature, live.RepoName, live.TmuxSession)
 	}
 	branch := "feature/" + slug
 	worktree := filepath.Join(state.WorktreesDir(), r.Name, slug)
@@ -78,8 +83,76 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 	return d, nil
 }
 
+// liveDispatch returns a dispatch of the same slug whose session is still
+// running, or nil.
+//
+// The feature name is the key throughout: the worktree path is
+// worktrees/<repo>/<slug>, and the cockpit maps a feature name to one record.
+// So a second concurrent dispatch of a name already in flight would put two
+// claude sessions in a single checkout — the exact collision per-dispatch
+// worktrees exist to prevent — and shadow one record with the other in the
+// cockpit. Re-dispatching a feature whose session has ended is still fine, and
+// deliberately reuses the worktree left behind.
+//
+// The live tmux session, not the record's status, is the test: a record can be
+// left stale by a crash, but a running session is ground truth.
+func liveDispatch(slug string) *state.Dispatch {
+	for _, d := range state.LoadAll() {
+		if d.Slug == slug && d.TmuxSession != "" && sessionAlive(d.TmuxSession) {
+			return d
+		}
+	}
+	return nil
+}
+
+// sessionAlive is a seam: tests swap it rather than stand up real sessions.
+var sessionAlive = supervisor.HasSession
+
+// fetchTimeout bounds the pre-dispatch fetch. Refreshing the base is a
+// courtesy; a slow or unreachable remote must never stall a launch.
+const fetchTimeout = 20 * time.Second
+
+// baseRef resolves the start point for a new feature branch: the repo's
+// default branch, as the remote sees it.
+//
+// Letting git default the start point to the repo's HEAD — what `worktree add
+// -b` does with no explicit base — silently cuts the branch from whatever the
+// human left checked out, so a dispatch starts on top of an unrelated unmerged
+// feature and its PR carries that work onto main. Naming origin/<default>
+// rather than the local branch also keeps a stale local main out of the base.
+func baseRef(repoPath string) string {
+	// Best effort: a fresh origin/<default> beats a stale one, but offline is
+	// not a launch failure. GIT_TERMINAL_PROMPT=0 stops a credential prompt
+	// from holding the fetch open until the timeout expires.
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	fetch := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "--quiet", "origin")
+	fetch.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	_ = fetch.Run()
+
+	// origin/HEAD names the remote's default branch, but it is absent from
+	// --single-branch clones and from repos cloned before git recorded it, so
+	// fall through the conventional names — and finally to the local checkout,
+	// for a repo with no remote at all.
+	if out, err := exec.Command("git", "-C", repoPath, "symbolic-ref", "--short", "--quiet",
+		"refs/remotes/origin/HEAD").Output(); err == nil {
+		if ref := strings.TrimSpace(string(out)); ref != "" {
+			return ref
+		}
+	}
+	for _, cand := range []string{
+		"refs/remotes/origin/main", "refs/remotes/origin/master",
+		"refs/heads/main", "refs/heads/master",
+	} {
+		if exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", cand).Run() == nil {
+			return cand
+		}
+	}
+	return "HEAD"
+}
+
 // ensureWorktree adds a worktree for the branch at path, creating the branch
-// from the repo's current HEAD when it doesn't exist yet, and reusing a
+// from the repo's default branch when it doesn't exist yet, and reusing a
 // worktree left behind by an earlier dispatch of the same feature.
 func ensureWorktree(repoPath, path, branch string) error {
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
@@ -94,11 +167,17 @@ func ensureWorktree(repoPath, path, branch string) error {
 		return err
 	}
 	branchExists := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
-	args := []string{"-C", repoPath, "worktree", "add", path, branch}
 	if !branchExists {
-		args = []string{"-C", repoPath, "worktree", "add", "-b", branch, path}
+		// Created as its own step so the base is explicit. --no-track because
+		// the base is normally a remote-tracking ref, and inheriting it as
+		// upstream would make a later plain `git push` refuse: push.default
+		// simple rejects a branch whose upstream carries a different name.
+		base := baseRef(repoPath)
+		if out, err := exec.Command("git", "-C", repoPath, "branch", "--no-track", branch, base).CombinedOutput(); err != nil {
+			return fmt.Errorf("git branch %s from %s: %s", branch, base, strings.TrimSpace(string(out)))
+		}
 	}
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", repoPath, "worktree", "add", path, branch).CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree add %s: %s", branch, strings.TrimSpace(string(out)))
 	}
 	return nil

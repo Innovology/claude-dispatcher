@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"claude-dispatcher/internal/repos"
+	"claude-dispatcher/internal/state"
 )
 
 func initRepo(t *testing.T) string {
@@ -69,6 +72,76 @@ func TestEnsureWorktree(t *testing.T) {
 	}
 }
 
+// A dispatch must start from the repo's default branch, never from whatever
+// the human happens to have checked out — otherwise it inherits an unrelated
+// unmerged feature and carries it into its own PR.
+func TestEnsureWorktreeBranchesFromDefaultNotHEAD(t *testing.T) {
+	repo := initRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		full := append([]string{"-C", repo, "-c", "user.email=t@t", "-c", "user.name=t"}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	// The human is mid-feature in the repo's own checkout.
+	git("checkout", "-b", "feature/human-wip")
+	git("commit", "--allow-empty", "-m", "human WIP")
+
+	wt := filepath.Join(t.TempDir(), "feat")
+	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "-C", wt, "log", "--format=%s", "main..HEAD").Output()
+	if err != nil {
+		t.Fatalf("log in worktree: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "" {
+		t.Errorf("dispatch branch carries commits not on main: %q", got)
+	}
+	// The human's checkout is left exactly where they had it.
+	if got := worktreeBranch(t, repo); got != "feature/human-wip" {
+		t.Errorf("repo checkout moved to %q", got)
+	}
+}
+
+// baseRef prefers the remote's view of the default branch, so a local main
+// that has fallen behind origin is not used as the base.
+func TestBaseRefPrefersRemoteDefault(t *testing.T) {
+	repo := initRepo(t)
+	// No remote at all: fall back to the local default branch.
+	if got := baseRef(repo); got != "refs/heads/main" {
+		t.Errorf("baseRef with no remote = %q, want refs/heads/main", got)
+	}
+	// With a remote-tracking ref present, prefer it over the local branch.
+	if out, err := exec.Command("git", "-C", repo, "update-ref",
+		"refs/remotes/origin/main", "refs/heads/main").CombinedOutput(); err != nil {
+		t.Fatalf("update-ref: %s", out)
+	}
+	if got := baseRef(repo); got != "refs/remotes/origin/main" {
+		t.Errorf("baseRef = %q, want refs/remotes/origin/main", got)
+	}
+}
+
+// A new feature branch must not inherit the base as its upstream: with a
+// remote-tracking base, push.default=simple would refuse to push it.
+func TestEnsureWorktreeLeavesBranchUntracked(t *testing.T) {
+	repo := initRepo(t)
+	if out, err := exec.Command("git", "-C", repo, "update-ref",
+		"refs/remotes/origin/main", "refs/heads/main").CombinedOutput(); err != nil {
+		t.Fatalf("update-ref: %s", out)
+	}
+	wt := filepath.Join(t.TempDir(), "feat")
+	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
+		t.Fatal(err)
+	}
+	err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet",
+		"feature/feat@{upstream}").Run()
+	if err == nil {
+		t.Error("feature branch inherited an upstream from its base")
+	}
+}
+
 func TestCleanupWorktree(t *testing.T) {
 	repo := initRepo(t)
 	wt := filepath.Join(t.TempDir(), "feat")
@@ -102,6 +175,43 @@ func TestCleanupWorktree(t *testing.T) {
 	}
 	if !CleanupWorktree(repo, "") {
 		t.Error("a dispatch with no worktree should report gone")
+	}
+}
+
+// Two live dispatches of one feature would share worktrees/<repo>/<slug> —
+// two claude sessions in a single checkout, the collision worktrees exist to
+// prevent — so the second is refused while the first is still running.
+func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+
+	rec := &state.Dispatch{
+		ID: state.NewID(), Feature: "Payment Retry", Slug: "payment-retry",
+		RepoPath: repo, RepoName: "acme", Branch: "feature/payment-retry",
+		TmuxSession: "disp-payment-retry", Status: state.StatusWorking,
+	}
+	if err := state.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	alive := map[string]bool{"disp-payment-retry": true}
+	restore := sessionAlive
+	sessionAlive = func(name string) bool { return alive[name] }
+	defer func() { sessionAlive = restore }()
+
+	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go")
+	if err == nil {
+		t.Fatal("expected a duplicate of a live feature to be refused")
+	}
+	if !strings.Contains(err.Error(), "already live") {
+		t.Errorf("unhelpful error: %v", err)
+	}
+
+	// Once the session has ended, the feature can be dispatched again — that
+	// path deliberately reuses the worktree left behind.
+	alive["disp-payment-retry"] = false
+	if got := liveDispatch("payment-retry"); got != nil {
+		t.Errorf("dead session still reported live: %#v", got)
 	}
 }
 
