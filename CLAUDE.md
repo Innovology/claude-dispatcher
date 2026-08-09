@@ -18,6 +18,18 @@
     original "multi-repo, not multi-worktree" call, reversed the next day
     after two sessions collided in one working copy and a commit landed on
     the wrong branch.)
+    - The feature branch is cut from the repo's **default branch as the
+      remote sees it** (`origin/HEAD`, falling back to origin/main, then
+      local), after a best-effort fetch — never from the repo's HEAD. Git's
+      default would inherit whatever branch the human left checked out, so a
+      dispatch would silently start on top of an unmerged feature and carry
+      it into its own PR. Created `--no-track`, or `git push` would refuse a
+      branch whose upstream has a different name.
+    - **One live dispatch per feature name.** The name is the key: the
+      worktree path and the cockpit's record map are both keyed by it, so a
+      second concurrent dispatch of a live name would put two sessions in one
+      checkout. Launch refuses it; re-dispatching a *finished* feature is
+      still fine and reuses the worktree left behind.
   - *Product* is the grouping lens: the cockpit list and the dispatch form's
     repo picker group by the `[products]` config, most urgent group first;
     unmapped repos fall under "other". No separate group concept.
