@@ -3,3 +3,7 @@ claude-dispatcher
 dist/
 coverage.out
 coverage.xml
+
+# Python bytecode from the screenshot tooling.
+__pycache__/
+*.pyc

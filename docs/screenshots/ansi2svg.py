@@ -11,7 +11,25 @@ Usage: ansi2svg.py TITLE < capture.ansi > out.svg
 """
 import re, sys, html
 
-FG, BG = "#e8e8e8", "#0a0a0a"
+def _palette():
+    """Read the page colours from palette.go, so a re-theme can never leave the
+    screenshots a shade behind the product. Falls back only if the constants
+    move or are renamed."""
+    import os, re
+    src = os.path.join(os.path.dirname(__file__), "..", "..",
+                       "internal", "cockpit", "palette.go")
+    fg, bg = "#e3e8ee", "#0f1319"
+    try:
+        text = open(src, encoding="utf-8").read()
+        if m := re.search(r'cFg\s*=\s*"(#[0-9a-fA-F]{6})"', text):
+            fg = m.group(1)
+        if m := re.search(r'cSurface\s*=\s*"(#[0-9a-fA-F]{6})"', text):
+            bg = m.group(1)
+    except OSError:
+        pass
+    return fg, bg
+
+FG, BG = _palette()
 FONT = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
 SIZE, LH, ADV = 13.0, 20.0, 7.82   # px: font size, line height, character advance
 PADX, PADY = 16.0, 14.0
@@ -129,7 +147,8 @@ def main():
                 spans.append(f'<tspan{attrs}>{html.escape(text)}</tspan>')
                 x += len(text)
         if spans:
-            out.append(f'<text y="{y:.2f}" fill="{FG}">' + "".join(spans) + "</text>")
+            out.append(f'<text xml:space="preserve" y="{y:.2f}" fill="{FG}">'
+                       + "".join(spans) + "</text>")
 
     out.append("</g></svg>")
     sys.stdout.write("\n".join(out) + "\n")
