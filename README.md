@@ -90,6 +90,45 @@ Or from source (needs Go):
 make install               # builds to ~/.local/bin/claude-dispatcher
 ```
 
+Via Nix — try it, or install it into your profile:
+
+```sh
+nix run github:Innovology/claude-dispatcher            # no install
+nix profile install github:Innovology/claude-dispatcher
+```
+
+Declaratively, the way you would pin any other flake-packaged tool. Add the
+input:
+
+```nix
+inputs.claude-dispatcher.url = "github:Innovology/claude-dispatcher";
+```
+
+then take the package in a NixOS module:
+
+```nix
+{ pkgs, inputs, ... }:
+{
+  environment.systemPackages = [
+    inputs.claude-dispatcher.packages.${pkgs.stdenv.hostPlatform.system}.default
+  ];
+}
+```
+
+or in home-manager (`home.packages`), or apply `overlays.default` and use
+`pkgs.claude-dispatcher`. `inputs.nixpkgs.follows` is safe but not required:
+`go.mod` asks for Go 1.26.5, so a nixpkgs older than that would fail to build.
+
+The binary is wrapped with `git` and `tmux` on its PATH — as a fallback, so
+your own copies still win — which leaves `claude` and `gh` yours to provide.
+`init` records the profile path it was invoked through (`~/.nix-profile/bin/…`,
+`/run/current-system/sw/bin/…`), not the `/nix/store` path behind it, so the
+hook survives upgrades and you do not have to re-run it after every rebuild.
+
+`nix develop` gives the full toolchain — Go, `golangci-lint`, `goreleaser`,
+`tmux` — for working on the dispatcher itself; `nix flake check` runs the test
+suite and the `gofmt` gate.
+
 `~/.local/bin` must be on your PATH ahead of Homebrew's, or a `brew`-installed copy keeps winning:
 
 ```sh
