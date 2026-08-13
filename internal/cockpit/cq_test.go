@@ -458,3 +458,42 @@ func TestCQIncludesReviewItems(t *testing.T) {
 		t.Errorf("review item offers no merge act: keys %v", keys)
 	}
 }
+
+// TestDispatchKeyIsIdempotent guards the key the footer advertises as "d
+// dispatch". The form's untouched-fall-through set left `d` out, so pressing it
+// while the form was already up typed a letter into the repo filter. With a
+// clear queue the form is up by default, which made `d` look broken outright:
+// the repo list narrowed to the repos containing "d" and nothing else happened.
+func TestDispatchKeyIsIdempotent(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	cqItems = nil // a clear queue: the form owns the keyboard from the start
+
+	m := newModel()
+	m.lens = "floor"
+	if !m.cqPromptOn() {
+		t.Fatal("precondition: a clear queue should leave the prompt up")
+	}
+
+	mm, _, handled := m.updateFloorQueue("d")
+	if !handled {
+		t.Fatal("d should be handled on the triage lens")
+	}
+	if mm.dxFilter != "" {
+		t.Errorf("d typed itself into the repo filter: dxFilter = %q", mm.dxFilter)
+	}
+	if !mm.cqDispatch {
+		t.Error("d should leave the dispatch form open")
+	}
+
+	// Once something IS typed, d is a letter again — you must be able to filter
+	// for a repo whose name contains one.
+	m2 := newModel()
+	m2.lens = "floor"
+	m2.cqDispatch, m2.dxFilter = true, "clau"
+	m2.key = runes("d")
+	mm2, _, _ := m2.updateFloorQueue(runes("d").String())
+	if mm2.dxFilter != "claud" {
+		t.Errorf("a touched form should take d as text, got %q", mm2.dxFilter)
+	}
+}
