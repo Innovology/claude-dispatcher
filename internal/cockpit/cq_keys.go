@@ -197,7 +197,14 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// keys still reach their handlers. The moment there is a filter or a
 		// sentence they are letters again — `w` belongs in a sentence more often
 		// than it means "working".
-		navKey := isLensDigit(k) || k == ":" || k == "w"
+		//
+		// `d` is in that set because it is the key that OPENS this form, and the
+		// footer advertises it. Swallowing it typed a letter into the repo
+		// filter instead: press d twice, or press it at all with a clear queue
+		// (where the form is already up), and the repo list silently narrowed to
+		// the repos containing "d" while nothing appeared to happen. Falling
+		// through re-opens the form, which on an untouched one is a no-op.
+		navKey := isLensDigit(k) || k == ":" || k == "w" || k == "d"
 		if m.dxTouched() || !navKey {
 			mm, cmd := m.dxKey(k)
 			return mm, cmd, true
