@@ -10,13 +10,16 @@ import (
 const pad = 2 // left/right page gutter, in columns (the design's 24px)
 
 var footerByLens = map[string]string{
-	"products":  "j/k move · enter open product · a assign repos · n new product · 1 triage",
-	"product":   "R review · T team · S shipped · j/k move · enter open · d dispatch a reviewer · 1 triage",
-	"queue":     "a add · e edit · x drop · ctrl+d dispatch all · 1 triage",
+	"products": "j/k move · enter opens the product panel · a assign · n new product · : palette",
+	// The design also offers J/K scroll and q close. Neither is wired — the
+	// panel does not scroll, and q is quit everywhere — so neither is offered.
+	"product":   "O overview · R review · T team · S shipped · esc close · 1 triage",
 	"backlog":   "j/k move · space pick · enter dispatch · ctrl+d dispatch picked · s source · 1 triage",
-	"usage":     "budget by window, model and product · 8 velocity · 1 triage",
+	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
 	"decisions": "j/k records · J/K repo · → body · a accept · s supersede · e tool · o open",
-	"velocity":  "velocity is what reached production, not what you set in motion · 3 product · 1 triage",
+	// v4 moved the product view off the digits, so the clause that named one is
+	// gone rather than renumbered: 3 is the backlog now.
+	"velocity": "velocity is what reached production, not what you set in motion · 1 triage",
 }
 
 func (m model) View() string {
@@ -64,21 +67,23 @@ func (m model) headerView() string {
 		}
 		return fg(c, label)
 	}
-	productLabel := "product"
-	if len(products) > 0 {
-		productLabel = products[clampCursor(m.productCursor, len(products))].name
+	// The product view lost its digit in v4: it is a panel inside lens 2, so it
+	// hangs off the "products" entry as a suffix rather than owning an entry of
+	// its own. "products" itself goes dim while the panel is open — the white
+	// word is the one naming what is on screen.
+	products2 := dq("2") + lensLabel("products", "products")
+	if m.lens == "product" && len(products) > 0 {
+		products2 += fg(cWhite, " · "+products[clampCursor(m.productCursor, len(products))].name)
 	}
 
 	left := strings.Join([]string{
 		fg(cMid, "⚡ dispatch"),
 		dq("1") + lensLabel("floor", "triage"),
-		dq("2") + lensLabel("products", "products"),
-		dq("3") + lensLabel("product", productLabel),
-		dq("4") + lensLabel("queue", "queue"),
-		dq("5") + lensLabel("backlog", "backlog"),
-		dq("6") + lensLabel("usage", "usage"),
-		dq("7") + lensLabel("decisions", "decisions"),
-		dq("8") + lensLabel("velocity", "velocity"),
+		products2,
+		dq("3") + lensLabel("backlog", "backlog"),
+		dq("4") + lensLabel("usage", "usage"),
+		dq("5") + lensLabel("decisions", "decisions"),
+		dq("6") + lensLabel("velocity", "velocity"),
 	}, "  ")
 
 	fitv := m.fit()
@@ -159,12 +164,10 @@ func (m model) lensBody(w, h int) string {
 	switch m.lens {
 	case "floor":
 		return m.viewCQ(w, h)
-	case "products":
+	// One body for both: "product" is the products lens with its panel open, so
+	// viewProducts renders the table and decides what sits beside it.
+	case "products", "product":
 		return m.viewProducts(w, h)
-	case "product":
-		return m.viewProduct(w, h)
-	case "queue":
-		return m.viewQueue(w, h)
 	case "backlog":
 		return m.viewBacklog(w, h)
 	case "usage":

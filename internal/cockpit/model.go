@@ -9,8 +9,12 @@ import (
 	"claude-dispatcher/internal/version"
 )
 
-// lensOrder is the 1..8 lens bar, in order. Digit keys select by index.
-var lensOrder = []string{"floor", "products", "product", "queue", "backlog", "usage", "decisions", "velocity"}
+// lensOrder is the 1..6 lens bar, in order. Digit keys select by index.
+//
+// "product" is deliberately absent: it is still a legal m.lens value, but in v4
+// the single-product view is a panel inside the products lens, opened with
+// enter and closed with esc, so it has no digit of its own.
+var lensOrder = []string{"floor", "products", "backlog", "usage", "decisions", "velocity"}
 
 // shipFxState animates a feature merging and sliding off the floor list.
 type shipFxState struct {
@@ -110,17 +114,14 @@ type model struct {
 	cqFlashID   string // the item it was fired on — flashes clear by id, never by position
 	cqFlashSeq  int    // generation guard: only the newest flash's tick may fire
 
-	cqWorkCursor int  // cursor in the working view's flattened rows
-	cqWork       bool // the working view (`w`)
-	cqDispatch   bool // the dispatch form is up over a queue that is not empty
+	cqDispatch bool // the dispatch form is up over a fleet that is not empty
 
-	// The item view's two scroll panes: the evidence excerpt (j/k) over the rest
-	// of the queue (J/K). cqHeadID is the item those offsets belong to — when the
-	// head changes, an offset measured against the previous item's diff is
-	// meaningless, so snapPanes puts both back to the top.
-	cqEvScroll   int
-	cqRestScroll int
-	cqHeadID     string
+	// The table's cursor. fleetSelID is the id of the row it is on: the fleet is
+	// rebuilt on every poll, so an index alone would move the selection under
+	// the reader's hands whenever a rank changed (see fleetSync).
+	cqFilter    string // "" (all) | "wants you" | "needs a look" | "running"
+	fleetCursor int
+	fleetSelID  string
 
 	cqUndo *cqUndoEntry // the last cleared row, restorable with `u`
 
@@ -140,7 +141,7 @@ func newModel() model {
 	return model{
 		lens:         "floor",
 		pane:         "list",
-		rightTab:     "review",
+		rightTab:     "overview",
 		srcFilter:    "all",
 		picked:       map[string]bool{},
 		clPane:       "repos",
@@ -157,15 +158,14 @@ func newModel() model {
 
 type fitTier struct {
 	showDetail, showSummary bool
-	dec, vel, velTilePct    int
-	lanePct                 int
+	dec, vel                int
 	cols                    string
 }
 
 var (
-	fitWide     = fitTier{showDetail: true, showSummary: true, dec: 3, vel: 7, velTilePct: 25, lanePct: 25, cols: "≥170 cols"}
-	fitStandard = fitTier{showDetail: true, showSummary: true, dec: 2, vel: 5, velTilePct: 50, lanePct: 50, cols: "110–170 cols"}
-	fitNarrow   = fitTier{showDetail: false, showSummary: false, dec: 1, vel: 4, velTilePct: 50, lanePct: 100, cols: "<110 cols"}
+	fitWide     = fitTier{showDetail: true, showSummary: true, dec: 3, vel: 7, cols: "≥170 cols"}
+	fitStandard = fitTier{showDetail: true, showSummary: true, dec: 2, vel: 5, cols: "110–170 cols"}
+	fitNarrow   = fitTier{showDetail: false, showSummary: false, dec: 1, vel: 4, cols: "<110 cols"}
 )
 
 // fit picks the tier for the current terminal width.
@@ -209,10 +209,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case snapshotMsg:
 		applySnapshot(snapshot(msg))
 		m.loading = false
-		// The queue is rebuilt from the fresh records; fold the user's ordering
-		// and cleared set back onto it before anything renders. A refresh can
-		// change the head, and the pane offsets belong to the old one.
-		return m.cqReconcile().snapPanes(), nil
+		// The fleet is rebuilt from the fresh records; fold the user's ordering
+		// and cleared set back onto it before anything renders, then re-key the
+		// cursor onto the row it was on — a rank that changed in this refresh
+		// would otherwise move the selection under the reader's hands.
+		return m.cqReconcile().fleetSync(), nil
 
 	case stateChangedMsg:
 		return m, tea.Batch(loadSnapshotCmd(m.cfg), waitState(m.stateCh))
@@ -254,8 +255,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cqFlash == "" || msg.seq != m.cqFlashSeq {
 			return m, nil
 		}
+		// cqFlashDone re-syncs the cursor itself: the row it just cleared has
+		// gone, so the selection has to move rather than follow the departed id.
 		mm, cmd := m.cqFlashDone()
-		return mm.snapPanes(), cmd
+		return mm, cmd
 
 	case shipTickMsg:
 		return m.advanceShip()

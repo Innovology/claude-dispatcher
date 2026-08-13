@@ -164,7 +164,7 @@ func (m model) clPersist() tea.Cmd {
 // ---- keys -------------------------------------------------------------------
 
 // updateCluster handles the editor's keys. handled is false only for the keys
-// allowed to leave it (1–8 and ':'), which handleKey routes as usual.
+// allowed to leave it (1–6 and ':'), which handleKey routes as usual.
 func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 	rows := m.clRepos()
 	prods := m.clProducts()

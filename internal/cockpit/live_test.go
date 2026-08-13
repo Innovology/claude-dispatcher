@@ -15,11 +15,11 @@ import (
 // purpose, so a collector that fetched nothing leaves the last good data on
 // screen. That makes it unable to clear a var — which was invisible while the
 // package shipped seed data (nothing was ever nil) and became a test-pollution
-// bug the moment the vars started out empty. A test that populated cqItems
-// leaked them into every test that ran after it.
+// bug the moment the vars started out empty. A test that populated the fleet
+// leaked it into every test that ran after it.
 func restoreVars(s snapshot) {
 	dispatches, saidBy, tailLines, diffsBy = s.dispatches, s.saidBy, s.tailLines, s.diffsBy
-	cqItems, cqWorking, cqLastOutput = s.cqItems, s.cqWorking, s.cqLastOutput
+	fleet, cqLastOutput = s.fleet, s.cqLastOutput
 	products, reposByProduct, productOrder = s.products, s.reposByProduct, s.productOrder
 	productNote, staleRepos, working = s.productNote, s.staleRepos, s.working
 	productStats, backlogTickets = s.productStats, s.backlogTickets
@@ -31,7 +31,7 @@ func restoreVars(s snapshot) {
 	doraOrg, doraFactory, doraSplit, doraWeeks = s.doraOrg, s.doraFactory, s.doraSplit, s.doraWeeks
 	outputWeeks, outputHeadline = s.outputWeeks, s.outputHead
 	outputUnit, outputDelta, outputSpark = s.outputUnit, s.outputDelta, s.outputSpark
-	notVelocity, queueItems, liveRecords = s.notVelocity, s.queueItems, s.records
+	notVelocity, liveRecords = s.notVelocity, s.records
 }
 
 // captureVars snapshots the current data vars so a test can restore them and
@@ -39,7 +39,7 @@ func restoreVars(s snapshot) {
 func captureVars() snapshot {
 	return snapshot{
 		dispatches: dispatches, saidBy: saidBy, tailLines: tailLines,
-		diffsBy: diffsBy, cqItems: cqItems, cqWorking: cqWorking,
+		diffsBy: diffsBy, fleet: fleet,
 		cqLastOutput: cqLastOutput, products: products,
 		reposByProduct: reposByProduct, productOrder: productOrder,
 		productNote: productNote, staleRepos: staleRepos, working: working,
@@ -52,7 +52,7 @@ func captureVars() snapshot {
 		doraOrg: doraOrg, doraFactory: doraFactory, doraSplit: doraSplit,
 		doraWeeks: doraWeeks, outputWeeks: outputWeeks, outputHead: outputHeadline,
 		outputUnit: outputUnit, outputDelta: outputDelta, outputSpark: outputSpark,
-		notVelocity: notVelocity, queueItems: queueItems, records: liveRecords,
+		notVelocity: notVelocity, records: liveRecords,
 	}
 }
 
@@ -102,7 +102,7 @@ func TestLiveSnapshotRenders(t *testing.T) {
 	}
 
 	// Every lens renders against live data without panic or overflow.
-	for i := 1; i <= 8; i++ {
+	for i := 1; i <= 6; i++ {
 		m := newModel()
 		m.width, m.height = 190, 44
 		m = press(m, itoa(i))
@@ -128,7 +128,7 @@ func TestLiveSnapshotEmpty(t *testing.T) {
 	snap := loadSnapshot(&config.Config{})
 	applySnapshot(snap)
 
-	for i := 1; i <= 8; i++ {
+	for i := 1; i <= 6; i++ {
 		m := newModel()
 		m.width, m.height = 130, 40
 		m = press(m, itoa(i))

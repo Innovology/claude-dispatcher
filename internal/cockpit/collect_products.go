@@ -1,6 +1,7 @@
 package cockpit
 
-// collect_products.go builds the product lens (lens 3) from real data: the
+// collect_products.go builds the products area (lens 2 and its panel) from
+// real data: the
 // portfolio roll-up (one product per config mapping plus a synthetic
 // "unassigned"), the per-product repo grid, the review queue (from gh open PRs),
 // the shipped history (done records grouped by ship day) and the per-product

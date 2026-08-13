@@ -1,0 +1,483 @@
+package cockpit
+
+// fleet.go is the v4 triage lens's data layer. The v3 command queue showed one
+// ask at a time with everything else summarised beneath it; the fleet is one
+// flat table of everything in flight — the dispatchers that want you ranked
+// above the ones getting on with it — plus the detail panel for whichever row
+// the cursor is on. fleet_view.go draws it; cq.go composes the sentences it
+// carries.
+//
+// It derives from the snapshot collectFloor has already assembled (per-record
+// forge, diff totals, per-file diffs, transcript tails) and from gh reads still
+// warm in gh's memo cache, so the table costs no extra round-trips. That
+// ordering is a requirement, not an optimisation: collectFleet must run AFTER
+// collectFloor in loadSnapshot. It reads ctx and the snapshot only — never the
+// package data vars, which applySnapshot has not published yet on the first
+// load (see the comment on collectCtx.productFor).
+//
+// Like every collector it is best-effort and never fatal. A signal that cannot
+// be read is left out rather than guessed at: a cell with no source behind it
+// is empty, and a table that invents a column is worse than one that says less.
+
+import (
+	"sort"
+	"strings"
+	"time"
+
+	"claude-dispatcher/internal/gh"
+	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/transcript"
+)
+
+// ---- view-model ---------------------------------------------------------------
+
+// fleetRow is one line of the table, and 1:1 with a dispatch record: a row
+// always names a real dispatcher you can act on, so there is no synthetic "two
+// dispatchers, one branch" row — a collision is carried as tone plus the
+// sentence on the record it actually affects.
+//
+// Presentation is the view's job. This type holds the facts (product key, PR
+// ref, tone name, timestamps); fleet_view.go composes them into cells, labels
+// and colours.
+type fleetRow struct {
+	// id is the record's own key. The cursor, the skip order, the suppressed set
+	// and undo are all keyed by it rather than by feature: the table is rebuilt
+	// from the records on every poll and every fsnotify event, and that UI state
+	// has to survive the rebuild.
+	id string
+	// kind is "queue" — it is waiting on you — or "run", it is getting on with
+	// it. rank orders the table and picks the glyph; see fleetRank.
+	kind string
+	rank int
+	// ask classifies what a queue row wants: permission | review | turn-done |
+	// idle | needs. Empty on a running row, which is not asking for anything.
+	ask string
+
+	// product is the raw product key, the same one collectProducts groups by.
+	product string
+	feature string
+	repo    string
+	// ref is the PR id when there is one, else the branch, else "" — a dispatch
+	// that failed before branching has neither and says so by omission.
+	ref string
+
+	// stage is the plan | act | observe | ship segment the chain lights, or ""
+	// when there is nothing to infer it from. It is our inference from the last
+	// tool used, not a state Claude Code reports — see cqPhase.
+	stage string
+	// pass counts the prompts submitted to this dispatcher (events.jsonl), 0
+	// when the log has nothing attributed to it.
+	pass int
+	// signal is the SIGNAL cell: what a queue row wants, or where a running
+	// row's PR stands. Empty when a running row has no PR — there is nothing
+	// true to put there.
+	signal string
+	// tone is normal | red | amber and drives the detail panel's colour.
+	tone string
+	// why is the one sentence the detail panel leads with.
+	why string
+	// goal is what the dispatcher is working towards, and goalLabel names what
+	// that text actually is — see cqGoal. Empty goal means nothing was recorded.
+	goal      string
+	goalLabel string
+
+	// ctxTokens is what the last assistant turn had in its context window and
+	// model is what ran it, both from the transcript; ctxKnown is false when the
+	// transcript could not be read.
+	ctxTokens int
+	model     string
+	ctxKnown  bool
+
+	acts []cqAct
+
+	// moved is the freshest of the transcript's mtime and the record's
+	// UpdatedAt: how long since ANYTHING happened, which is the one question the
+	// AGE column asks of every row. See fleetMoved.
+	moved time.Time
+	// waited is the record's UpdatedAt, kept as the queue rows' tie-break sort
+	// key so the ask that has waited longest surfaces first.
+	waited time.Time
+}
+
+// ---- collector ------------------------------------------------------------------
+
+// collectFleet fills the triage table.
+//
+// The integration step must add these fields to snapshot (live.go), the
+// matching package vars to data.go, the nil/"" guards to applySnapshot, and
+// register collectFleet in loadSnapshot after collectFloor:
+//
+//	fleet        []fleetRow
+//	cqLastOutput string
+func collectFleet(ctx *collectCtx, s *snapshot) {
+	// Floor rows keyed by feature. collectFloor resolved the forge for every
+	// record in this same load; re-deriving it here would mean a second
+	// `git remote get-url` per dispatcher.
+	floorBy := make(map[string]dispatch, len(s.dispatches))
+	for _, d := range s.dispatches {
+		floorBy[d.feature] = d
+	}
+
+	touched := cqTouchedPaths(ctx, s)
+	passes := cqPassCounts()
+
+	rows := []fleetRow{}
+	var lastOut time.Time // freshest transcript write across everything running
+
+	for _, rec := range ctx.records {
+		switch floorState(rec) {
+		// "review" belongs in the table's top half, not outside it: a finished
+		// turn with a green unreviewed PR is the single most actionable thing the
+		// cockpit can show. Omitting it made those dispatchers vanish from triage
+		// entirely — neither queued nor running — with a merge sitting there
+		// waiting.
+		case "blocked", "needs", "review":
+			rows = append(rows, fleetQueueRow(ctx, s, floorBy, touched, passes, rec))
+		case "working":
+			r, mt := fleetRunRow(ctx, s, floorBy, passes, rec)
+			rows = append(rows, r)
+			if mt.After(lastOut) {
+				lastOut = mt
+			}
+		}
+	}
+
+	fleetSort(rows)
+	s.fleet = rows
+	if !lastOut.IsZero() {
+		s.cqLastOutput = cqAge(lastOut)
+	}
+}
+
+// ---- rank and order -------------------------------------------------------------
+
+// fleetRank is the table's whole priority scheme, and the glyph legend in the
+// help sheet is written against it:
+//
+//	0  it wants you and something is wrong  ●  failing checks, changes
+//	                                           requested, or a file two
+//	                                           dispatchers are both editing
+//	1  it wants you                         ○
+//	2  it is drifting                       ◆  green checks on a PR nobody
+//	                                           has merged
+//	3  it is running clean                  ·
+//
+// The design's other rank-2 trigger, thrash, is not implemented and must not
+// be: it needs a check result sampled twice over time, and gh.Checks is a point
+// sample. See cqShipDetail.
+func fleetRank(kind, tone string, stalled bool) int {
+	if kind == "queue" {
+		if tone == "red" {
+			return 0
+		}
+		return 1
+	}
+	if stalled {
+		return 2
+	}
+	return 3
+}
+
+// fleetSort orders the table: rank first, then — within a rank — the tie-break
+// that suits the rows in it. Queue rows keep the v3 queue's order (a permission
+// prompt over a finished turn, then tone, then the longest wait), running rows
+// lead with the one that has been quiet longest.
+//
+// Every comparison ends on the record id. Determinism is a correctness
+// requirement here, not tidiness: the cursor is a position in this slice, and a
+// pair of rows that swapped between two identical polls would move the
+// selection under the reader's hands.
+func fleetSort(rows []fleetRow) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if a.rank != b.rank {
+			return a.rank < b.rank
+		}
+		if a.kind == "queue" {
+			if ua, ub := cqUrgency(a), cqUrgency(b); ua != ub {
+				return ua < ub
+			}
+			if ta, tb := cqToneRank(a.tone), cqToneRank(b.tone); ta != tb {
+				return ta < tb
+			}
+			if !a.waited.Equal(b.waited) {
+				return a.waited.Before(b.waited)
+			}
+			return a.id < b.id
+		}
+		if !a.moved.Equal(b.moved) {
+			return a.moved.Before(b.moved)
+		}
+		return a.id < b.id
+	})
+}
+
+// cqUrgency mirrors state.Status.Priority across the two asks the top of the
+// table admits: a permission prompt (blocked) outranks a finished turn, because
+// nothing moves at all until it is answered.
+func cqUrgency(r fleetRow) int {
+	if r.ask == "permission" {
+		return 0
+	}
+	return 1
+}
+
+func cqToneRank(tone string) int {
+	switch tone {
+	case "red":
+		return 0
+	case "amber":
+		return 1
+	}
+	return 2
+}
+
+// ---- one row --------------------------------------------------------------------
+
+// fleetQueueRow builds a row for a dispatcher that is waiting on you.
+func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
+	touched map[string][]cqTouch, passes map[string]int, rec *state.Dispatch) fleetRow {
+
+	st := floorState(rec)
+	fr, onFloor := floorBy[rec.Feature]
+	forge := fr.forge
+	if !onFloor {
+		forge = ctx.forge(rec.RepoPath)
+	}
+
+	// PR signals. buildFloorRow fetched these moments ago in this same load, so
+	// gh's memo cache serves them without another request.
+	var checks gh.Checks
+	var review gh.Review
+	if forge == "gh" && rec.PRNumber > 0 {
+		checks = gh.PRChecksFor(rec.RepoPath, rec.PRNumber)
+		review = gh.PRReviewFor(rec.RepoPath, rec.PRNumber)
+	}
+
+	clash := cqCollision(touched, rec)
+	ask := cqKind(rec, st)
+	tone := cqToneOf(st, checks, review, clash)
+	goal, goalLabel := cqGoal(rec)
+	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
+
+	return fleetRow{
+		id:        rec.ID,
+		kind:      "queue",
+		rank:      fleetRank("queue", tone, false),
+		ask:       ask,
+		product:   ctx.productFor(rec),
+		feature:   rec.Feature,
+		repo:      rec.RepoName,
+		ref:       cqRef(forge, rec),
+		stage:     cqPhase(s.tailLines[rec.Feature], rec),
+		pass:      passes[rec.ID],
+		signal:    cqWant(ask),
+		tone:      tone,
+		why:       cqWhy(s, rec, ask, tone, clash),
+		goal:      goal,
+		goalLabel: goalLabel,
+		ctxTokens: u.Tokens,
+		model:     cqShortModel(u.Model),
+		ctxKnown:  ctxKnown,
+		acts:      cqActs(rec, ask),
+		moved:     fleetMoved(rec),
+		waited:    rec.UpdatedAt,
+	}
+}
+
+// fleetRunRow builds a row for a dispatcher that is getting on with it, and
+// returns its transcript's last-write time so the caller can report the
+// freshest output across the fleet.
+//
+// A running row is not asking for anything, so most of the queue row's
+// composition has nothing to say here: there is no want, no tone beyond the one
+// drift we can demonstrate, and no lead sentence unless the session actually
+// said something. The design fills those gaps with prose ("Working through its
+// loop", "Worth a look before it burns more context"); none of it has a source,
+// so none of it is written.
+func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
+	passes map[string]int, rec *state.Dispatch) (fleetRow, time.Time) {
+
+	mt := cqLastWrite(rec.TranscriptPath)
+	// The forge comes from the floor row rather than a second `git remote
+	// get-url`: collectFloor resolved it for this record moments ago.
+	forge := floorBy[rec.Feature].forge
+	signal, stalled := cqShipDetail(forge, rec)
+
+	tone, why := "normal", s.saidBy[rec.Feature]
+	if stalled {
+		// The one sentence a running row earns: a restatement of gh.Checks and
+		// rec.PRState, not a reading of them.
+		tone, why = "amber", "Its checks are green and the PR is not merged."
+	}
+	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
+
+	moved := rec.UpdatedAt
+	if mt.After(moved) {
+		moved = mt
+	}
+	return fleetRow{
+		id:        rec.ID,
+		kind:      "run",
+		rank:      fleetRank("run", tone, stalled),
+		product:   ctx.productFor(rec),
+		feature:   rec.Feature,
+		repo:      rec.RepoName,
+		ref:       cqRef(forge, rec),
+		stage:     cqPhase(s.tailLines[rec.Feature], rec),
+		pass:      passes[rec.ID],
+		signal:    signal,
+		tone:      tone,
+		why:       why,
+		ctxTokens: u.Tokens,
+		model:     cqShortModel(u.Model),
+		ctxKnown:  ctxKnown,
+		acts:      cqActs(rec, "running"),
+		moved:     moved,
+		waited:    rec.UpdatedAt,
+	}, mt
+}
+
+// fleetMoved is how long since anything happened to a dispatcher: the freshest
+// of what it last wrote and when the hook last saved it.
+//
+// The AGE column asks one question of every row, so it must have one answer.
+// The design asks two — the record's age for a queue row, the transcript's for
+// a running one — which would put two different measurements in one column. The
+// max is right for both: for a blocked or turn-done dispatcher the transcript
+// stops moving at the same instant UpdatedAt does, so they agree; for a working
+// one the transcript is the only honest liveness signal (see cqLastWrite); and
+// it degrades to UpdatedAt when the transcript cannot be read at all.
+func fleetMoved(rec *state.Dispatch) time.Time {
+	t := rec.UpdatedAt
+	if mt := cqLastWrite(rec.TranscriptPath); mt.After(t) {
+		return mt
+	}
+	return t
+}
+
+// fleetRepo strips a product prefix off a repo name — "cortiva-api" under
+// product "cortiva" is "api" — because the PRODUCT column two cells to the left
+// already said it. It is a display transform on a real name, never a rename:
+// with no prefix to strip, or nothing left after stripping, the name stands.
+func fleetRepo(repo, product string) string {
+	p := strings.ToLower(product) + "-"
+	if r := strings.ToLower(repo); strings.HasPrefix(r, p) && len(repo) > len(p) {
+		return repo[len(p):]
+	}
+	return repo
+}
+
+// ---- the derived table ------------------------------------------------------------
+
+// fleetFilters is the cycle `f` walks. "all" is the resting state; the other
+// three each narrow to a question the human might be asking.
+var fleetFilters = []string{"all", "wants you", "needs a look", "running"}
+
+// fleetKeep reports whether a row survives a filter.
+//
+// "wants you" is every queue row rather than the design's `rank === 0 ||
+// kind === 'queue'`: rank 0 is a queue row by construction, so the first half
+// of that test never decided anything.
+func fleetKeep(filter string, r fleetRow) bool {
+	switch filter {
+	case "wants you":
+		return r.kind == "queue"
+	case "needs a look":
+		return r.rank <= 2
+	case "running":
+		return r.kind == "run"
+	}
+	return true
+}
+
+// fleetFilter is the active filter, defaulting to "all" so a zero model reads
+// as "showing everything" rather than as "showing nothing".
+func (m model) fleetFilter() string {
+	if m.cqFilter == "" {
+		return fleetFilters[0]
+	}
+	return m.cqFilter
+}
+
+// fleetAll is the whole table in display order: the ids the user has arranged
+// first, then anything that has arrived since, in the collector's rank order.
+// Rows acted on this session are suppressed until their record actually leaves
+// the fleet — the kill or the merge takes a moment to land, and without this the
+// row the user just cleared would reappear on the next 5s refresh.
+func (m model) fleetAll() []fleetRow {
+	byID := make(map[string]fleetRow, len(fleet))
+	for _, r := range fleet {
+		byID[r.id] = r
+	}
+	out := make([]fleetRow, 0, len(fleet))
+	placed := make(map[string]bool, len(fleet))
+	for _, id := range m.cqOrder {
+		if r, ok := byID[id]; ok && !placed[id] && !m.cqSuppressed[id] {
+			out = append(out, r)
+			placed[id] = true
+		}
+	}
+	for _, r := range fleet {
+		if !placed[r.id] && !m.cqSuppressed[r.id] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// fleetRows is what the table actually draws: fleetAll narrowed by `f`.
+func (m model) fleetRows() []fleetRow {
+	f := m.fleetFilter()
+	all := m.fleetAll()
+	if f == fleetFilters[0] {
+		return all
+	}
+	out := make([]fleetRow, 0, len(all))
+	for _, r := range all {
+		if fleetKeep(f, r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// fleetSel is the row under the cursor, or false when the filter matches
+// nothing.
+func (m model) fleetSel() (fleetRow, bool) {
+	rows := m.fleetRows()
+	if len(rows) == 0 {
+		return fleetRow{}, false
+	}
+	return rows[clampCursor(m.fleetCursor, len(rows))], true
+}
+
+// fleetCount tallies the three headline numbers over the rows on screen: what
+// wants you, what is drifting, and what is simply running. They count the
+// FILTERED set on purpose — the line sits above the table and describes it.
+func fleetCount(rows []fleetRow) (wants, warn, clean int) {
+	for _, r := range rows {
+		switch {
+		case r.kind == "queue":
+			wants++
+		case r.rank == 2:
+			warn++
+		default:
+			clean++
+		}
+	}
+	return wants, warn, clean
+}
+
+// fleetRunning is how many dispatchers are getting on with it, across the whole
+// fleet rather than the filtered view — the unattended line is about the
+// portfolio, not about what `f` happens to be showing.
+func fleetRunning() int {
+	n := 0
+	for _, r := range fleet {
+		if r.kind == "run" {
+			n++
+		}
+	}
+	return n
+}

@@ -9,6 +9,7 @@ package cockpit
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -167,4 +168,32 @@ func firstLine(s string) string {
 		}
 	}
 	return s
+}
+
+// openPRCmd opens a pull request in the browser via gh. The lens used to print
+// "opening #144" and open nothing — a notice describing an action that never
+// happened, the same defect the backlog's ctrl+d had.
+func openPRCmd(repoName, pr string) tea.Cmd {
+	return func() tea.Msg {
+		num := strings.TrimLeft(pr, "#!")
+		if num == "" {
+			return actionMsg{notice: "no pull request to open"}
+		}
+		var repoPath string
+		for _, r := range lastDiscovered {
+			if r.Name == repoName {
+				repoPath = r.Path
+				break
+			}
+		}
+		if repoPath == "" {
+			return actionMsg{notice: "cannot find " + repoName + " to open " + pr}
+		}
+		cmd := exec.Command("gh", "pr", "view", num, "--web")
+		cmd.Dir = repoPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return actionMsg{notice: "could not open " + pr + ": " + firstLine(string(out))}
+		}
+		return actionMsg{notice: "opened " + pr + " in the browser"}
+	}
 }

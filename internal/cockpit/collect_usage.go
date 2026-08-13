@@ -54,7 +54,11 @@ func usgWindow(label string, s usage.Stat) usageWindow {
 	if s.Sessions > 0 {
 		note = fmt.Sprintf("%d sessions · %s", s.Sessions, note)
 	}
-	return usageWindow{label: label, used: used, note: note, pace: 1.0}
+	// pace is left at 0 — "not measured". Both windows are trailing, so there
+	// is no elapsed share of a window to weigh the spent share against. It used
+	// to be pinned at 1.0, which is a claim ("exactly on budget") and rendered
+	// as one, on every window, on every install.
+	return usageWindow{label: label, used: used, note: note}
 }
 
 func collectUsage(ctx *collectCtx, s *snapshot) {
@@ -86,11 +90,10 @@ func collectUsage(ctx *collectCtx, s *snapshot) {
 			share = 100 * tok / wk.Total
 		}
 		models = append(models, usageModel{
-			name:     name,
-			share:    share,
-			sessions: 0,
-			avg:      usgTokens(tok) + " this week",
-			note:     notes[name],
+			name:  name,
+			share: share,
+			avg:   usgTokens(tok) + " this week",
+			note:  notes[name],
 		})
 	}
 	s.usageModels = models

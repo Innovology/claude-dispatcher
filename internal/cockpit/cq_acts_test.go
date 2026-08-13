@@ -1,6 +1,6 @@
 package cockpit
 
-// cq_acts_test.go covers the two places the command queue can do real damage or
+// cq_acts_test.go covers the two places the triage lens can do real damage or
 // quietly mislead: cqRun, which turns a keypress into a merge or a kill, and the
 // row-shedding that decides what survives on a short terminal.
 
@@ -11,22 +11,24 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
-// Every act the queue advertises must reach a real command. An act shown in the
+// Every act the table advertises must reach a real command. An act shown in the
 // footer that fires nothing is worse than no act at all — the user believes the
 // dispatcher was handled.
 func TestCQRunReachesACommandForEveryAdvertisedAct(t *testing.T) {
+	q := func(ask string) fleetRow { return fleetRow{feature: "one", kind: "queue", ask: ask} }
 	cases := []struct {
 		name string
-		it   cqItem
+		it   fleetRow
 		key  string
 		want bool // a command is expected
 	}{
-		{"attach", cqItem{title: "one", kind: "needs"}, "⏎", false}, // no live session in a test
-		{"merge on review", cqItem{title: "one", kind: "review"}, "y", true},
-		{"mark shipped otherwise", cqItem{title: "one", kind: "turn-done"}, "y", true},
-		{"kill", cqItem{title: "one", kind: "needs"}, "x", true},
-		{"skip fires nothing", cqItem{title: "one", kind: "needs"}, "s", false},
-		{"unknown key fires nothing", cqItem{title: "one", kind: "needs"}, "z", false},
+		{"attach", q("needs"), "⏎", false}, // no live session in a test
+		{"merge on review", q("review"), "y", true},
+		{"mark shipped otherwise", q("turn-done"), "y", true},
+		{"kill", q("needs"), "x", true},
+		{"kill a running row", fleetRow{feature: "one", kind: "run"}, "x", true},
+		{"skip fires nothing", q("needs"), "s", false},
+		{"unknown key fires nothing", q("needs"), "z", false},
 	}
 	for _, c := range cases {
 		_, cmd := newModel().cqRun(c.it, cqAct{k: c.key})
@@ -36,7 +38,7 @@ func TestCQRunReachesACommandForEveryAdvertisedAct(t *testing.T) {
 	}
 }
 
-// y is overloaded on purpose: on a review item it squash-merges for real, and
+// y is overloaded on purpose: on a review row it squash-merges for real, and
 // anywhere else it only marks the record done. Getting this backwards would
 // either merge something nobody asked to merge, or silently not merge at all.
 func TestCQRunYIsMergeOnlyForReview(t *testing.T) {
@@ -75,30 +77,41 @@ func TestCQActsHidesShipWithNoCommits(t *testing.T) {
 	}
 }
 
-// When the pane is too short, rows are dropped cheapest-first and the ones
-// marked fixed always survive — the ask itself must never be shed to fit.
-func TestCQShedPairDropsCheapestFirst(t *testing.T) {
-	head := []cqRow{cqFixed("ask"), {s: "spacer", shed: 1}, {s: "detail", shed: 3}}
-	tail := []cqRow{cqFixed("footer"), {s: "rest", shed: 2}}
-
-	gotHead, gotTail := cqShedPair(head, tail, 3)
-	kept := rowText(gotHead) + "|" + rowText(gotTail)
-	if !strings.Contains(kept, "ask") || !strings.Contains(kept, "footer") {
-		t.Fatalf("fixed rows must survive shedding, got %q", kept)
+// When the column is too short, rows are dropped cheapest-first and the ones
+// marked fixed always survive — the table itself must never be shed to fit.
+func TestCQShedDropsCheapestFirst(t *testing.T) {
+	rows := []cqRow{
+		cqFixed("table"), {s: "spacer", shed: 1}, cqFixed("footer"), {s: "detail", shed: 3},
 	}
-	if strings.Contains(kept, "spacer") {
-		t.Errorf("the cheapest row should be shed first, got %q", kept)
+	got := rowText(cqShed(rows, 3))
+	if !strings.Contains(got, "table") || !strings.Contains(got, "footer") {
+		t.Fatalf("fixed rows must survive shedding, got %q", got)
 	}
-	if n := len(gotHead) + len(gotTail); n > 3 {
+	if strings.Contains(got, "spacer") {
+		t.Errorf("the cheapest row should be shed first, got %q", got)
+	}
+	if n := len(cqShed(rows, 3)); n > 3 {
 		t.Errorf("shed to %d rows, want at most 3", n)
 	}
 
 	// A budget that cannot be met even by shedding everything sheddable stops
 	// rather than looping forever.
 	onlyFixed := []cqRow{cqFixed("a"), cqFixed("b")}
-	h, tl := cqShedPair(onlyFixed, nil, 1)
-	if len(h)+len(tl) != 2 {
-		t.Errorf("unsheddable rows should be returned intact, got %d", len(h)+len(tl))
+	if n := len(cqShed(onlyFixed, 1)); n != 2 {
+		t.Errorf("unsheddable rows should be returned intact, got %d", n)
+	}
+}
+
+// A running dispatcher is not asking for anything: it can be watched or
+// stopped, and nothing else. Offering "approve merge" or "skip" there would
+// advertise an answer to a question nobody asked.
+func TestCQActsForARunningRow(t *testing.T) {
+	var keys []string
+	for _, a := range cqActs(testRec("one", 4), "running") {
+		keys = append(keys, a.k)
+	}
+	if strings.Join(keys, " ") != "⏎ x" {
+		t.Errorf("running acts = %v, want [⏎ x]", keys)
 	}
 }
 

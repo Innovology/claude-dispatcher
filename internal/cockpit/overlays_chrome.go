@@ -15,24 +15,35 @@ var helpSections = []struct {
 	section string
 	keys    []struct{ k, d string }
 }{
-	{section: "triage", keys: []struct{ k, d string }{
-		{"⏎", "attach the session the ask came from"},
-		{"y", "mark it shipped — offered once it has commits"},
+	{section: "the fleet · lens 1", keys: []struct{ k, d string }{
+		{"●", "blocking — it cannot move until you answer"},
+		{"○", "waiting on you, not blocking anything else"},
+		{"◆", "green in ci and still not merged"},
+		{"·", "running clean · nothing there needs you"},
+		{"", "sorted by what needs you, not by product — the top row is next"},
+	}},
+	{section: "work the fleet", keys: []struct{ k, d string }{
+		{"j / k", "move the cursor — the panel and the key hints follow it"},
+		{"g / G", "first row · last row"},
+		{"f", "filter: all → wants you → needs a look → running"},
+		{"w", "running only, and back"},
+		{"⏎", "attach the session"},
+		{"y", "approve the merge, or mark it shipped once it has commits"},
 		{"x", "kill it · the branch and any dirty worktree survive"},
-		{"s", "skip · send it to the back of the queue"},
+		{"s", "skip · send it to the back, it comes round again"},
 		{"d", "dispatch · pick a repo, say what it does"},
-		{"j / k", "scroll the evidence excerpt"},
-		{"J / K", "scroll the rest of the queue"},
-		{"w", "what is running unattended"},
 		{"u", "put back the last thing you cleared"},
 	}},
 	{section: "move", keys: []struct{ k, d string }{
-		{"1…8", "triage · products · product · queue · backlog · usage · decisions · velocity"},
-		{"esc", "leave the dispatch form, or the working view"},
+		{"1…6", "triage · products · backlog · usage · decisions · velocity"},
+		{"esc", "leave the dispatch form"},
 		{":", "command palette"},
 		{"?", "this help"},
 	}},
 	{section: "products · lens 2", keys: []struct{ k, d string }{
+		{"⏎", "open the product panel beside the table"},
+		{"O R T S", "in the panel: overview · review · team · shipped"},
+		{"esc", "close the panel"},
 		{"a", "assign repos to products"},
 		{"n", "new product — names it and moves the marked repos in"},
 		{"space", "mark a repo · enter moves every marked one"},
@@ -41,7 +52,7 @@ var helpSections = []struct {
 	}},
 	{section: "the other lenses", keys: []struct{ k, d string }{
 		{"j / k", "up and down the list"},
-		{"→ / ←", "into the detail pane and back"},
+		{"→ / ←", "into an ADR's body and back (decisions)"},
 		{"enter", "open what is selected"},
 		{"space", "pick a backlog ticket"},
 		{"ctrl+d", "dispatch every picked ticket"},

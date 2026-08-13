@@ -26,15 +26,16 @@ var (
 	}{}
 )
 
-// ---- command queue (the triage lens's own view model) -----------------------
+// ---- the fleet (the triage lens's own view model) ----------------------------
+//
+// fleet is every dispatcher in flight, ranked: the ones that want you first.
 //
 // cqLastOutput is a bare age ("6s"), or "" when no running session has a
 // transcript we could read — the view drops the clause rather than printing a
 // zero, so an unreadable transcript never reads as "silent for 0s".
 
 var (
-	cqItems      []cqItem
-	cqWorking    []cqGroup
+	fleet        []fleetRow
 	cqLastOutput string
 )
 
@@ -68,15 +69,12 @@ var (
 	findings  = map[string][]struct{ sev, text, color string }{}
 )
 
-// ---- backlog / queue --------------------------------------------------------
+// ---- backlog ----------------------------------------------------------------
 
 // lastDiscovered is the repo list from the most recent scan.
 var lastDiscovered []repos.Repo
 
-var (
-	backlogTickets []ticket
-	queueItems     []queueItem
-)
+var backlogTickets []ticket
 
 // ---- decisions --------------------------------------------------------------
 

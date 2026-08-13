@@ -1,12 +1,16 @@
 package cockpit
 
-// product.go is lens 3: a single product's detail view. Three panes —
-//   left:   the product's repos + CI, its deploy block, and its stale repos.
-//   middle: velocity tiles and the in-flight kanban lanes.
-//   right:  a tabbed panel over review / team / shipped.
+// product.go is a single product's detail PANEL — the right-hand 46% of the
+// products area once enter opens a product. It is one column: a title, a
+// four-tab strip, and the body of the tab that is up —
+//   O overview: velocity, repos + CI, what is in flight, the deploy, stale repos.
+//   R review / T team / S shipped: as before.
 // Plus two overlays: the review overlay (a PR's findings + hunk) and the resume
-// overlay (enhance a shipped feature). A faithful port of the design's product
-// lens (renderVals 1821-1900) and its key handling (handleKey 1285-1316).
+// overlay (enhance a shipped feature).
+//
+// It was three full-width panes and a kanban of its own until the lens bar lost
+// two digits; the lanes went with them — the panel is too narrow for four
+// columns of cards, and "in flight" says the same thing in a list.
 
 import (
 	"strings"
@@ -17,14 +21,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// ---- lane types -------------------------------------------------------------
-
-type laneCard struct{ feature, repo, meta, metaColor string }
-
-type lane struct {
-	name, color string
-	items       []laneCard
-}
+// The two empty states, shared with the products lens's summary panel so the
+// same product reads the same either side of enter. The way out of an empty
+// product is `a`, which the open panel does not own — hence the two hints.
+const (
+	productNoRepos  = "no repos in this product yet"
+	productNoFlight = "nothing in flight"
+)
 
 // ---- selection helpers ------------------------------------------------------
 
@@ -60,54 +63,6 @@ func (m model) productSelectedReview() (reviewItem, bool) {
 		return reviewItem{}, false
 	}
 	return rv[clampCursor(m.reviewCursor, len(rv))], true
-}
-
-// productLanes derives the in-flight kanban lanes for the selected product from
-// the live working/dispatches/shipped data (renderVals 1827-1832).
-func (m model) productLanes() []lane {
-	name := m.productFocusName()
-
-	var work []laneCard
-	for _, w := range working {
-		if repoProduct(w.repo) == name {
-			work = append(work, laneCard{feature: w.feature, repo: w.repo, meta: w.age, metaColor: cDim})
-		}
-	}
-
-	var claims, review []laneCard
-	for _, x := range dispatches {
-		if x.product != name {
-			continue
-		}
-		switch x.state {
-		case "claimed":
-			claims = append(claims, laneCard{feature: x.feature, repo: x.repo, meta: "accept to close · " + x.age, metaColor: cViolet})
-		case "review", "blocked":
-			meta := x.signal
-			if len(x.prs) > 0 && x.prs[0].id != "" {
-				meta = x.prs[0].id + " · " + x.signal
-			}
-			mc := cMid
-			if x.urgent {
-				mc = cRed
-			}
-			review = append(review, laneCard{feature: x.feature, repo: x.repo, meta: meta, metaColor: mc})
-		}
-	}
-
-	var shippedToday []laneCard
-	if days := shipped[name]; len(days) > 0 {
-		for _, f := range days[0].items {
-			shippedToday = append(shippedToday, laneCard{feature: f.feature, repo: f.repo, meta: f.at, metaColor: cDim})
-		}
-	}
-
-	return []lane{
-		{name: "working", color: cFillGreen, items: work},
-		{name: "claims done", color: cFillViolet, items: claims},
-		{name: "in review", color: cFillBlue, items: review},
-		{name: "shipped today", color: cFillGrey, items: shippedToday},
-	}
 }
 
 // ---- small render helpers ---------------------------------------------------
@@ -171,52 +126,131 @@ func productHunkColor(sign string) string {
 	}
 }
 
-// productChunkBlocks lays a list of equal-width column blocks into rows of n, hjoining
-// each row and stacking the rows with a blank line between them.
-func productChunkBlocks(blocks []string, n int) string {
-	if n < 1 {
-		n = 1
-	}
-	var rows []string
-	for i := 0; i < len(blocks); i += n {
-		end := mini(i+n, len(blocks))
-		rows = append(rows, hjoin(blocks[i:end]...))
-	}
-	return strings.Join(rows, "\n")
-}
+// ---- the panel --------------------------------------------------------------
 
-// ---- panes ------------------------------------------------------------------
-
-// leftPane: repos + CI, the product deploy block, and stale repos.
-func (m model) productLeftPane(cw int) []string {
+// productPanel is the whole panel: the product's name and one-line summary, the
+// tab strip, then the body of the tab that is up. It renders into whatever width
+// the products lens hands it — 46% of the terminal, or all of it when the
+// terminal is too narrow to hold both.
+func (m model) productPanel(cw int) []string {
 	name := m.productFocusName()
-	p := productByName(name)
 	var out []string
 
-	out = append(out, line(name, cw, cWhite, ""))
-	summary := itoa(len(reposByProduct[name])) + " repos · " + itoa(p.inflight) + " in flight · " + itoa(p.live) + " live today"
-	out = append(out, line(summary, cw, cMid, ""))
+	out = append(out, row(cw, "", flexc(name, cWhite), cr("esc close", 10, cFaint)))
+	out = append(out, line(productSummaryLine(name), cw, cMid, ""))
+	out = append(out, "")
+	out = append(out, m.productTabStrip(name))
+	out = append(out, fg(cRule, strings.Repeat("─", cw)))
+
+	switch m.rightTab {
+	case "overview":
+		out = append(out, m.productOverviewBody(cw, name)...)
+	case "team":
+		out = append(out, m.productTeamBody(cw, name)...)
+	case "shipped":
+		out = append(out, m.productShippedBody(cw)...)
+	default:
+		out = append(out, m.productReviewBody(cw, name)...)
+	}
+	return out
+}
+
+// productSummaryLine is the line under the title: how much of the factory this
+// product is, in the three numbers the portfolio table ranks products by.
+func productSummaryLine(name string) string {
+	p := productByName(name)
+	n := len(reposByProduct[name])
+	return itoa(n) + " " + plural(n, "repo", "repos") + " · " + itoa(p.inflight) + " in flight · " + itoa(p.live) + " live today"
+}
+
+// productTabStrip is the O/R/T/S strip. The counts are on the tabs because they
+// are the reason to switch to one: nothing waiting is worth a keypress to see.
+func (m model) productTabStrip(name string) string {
+	waiting := 0
+	for _, r := range reviews[name] {
+		if r.waiting == "you" {
+			waiting++
+		}
+	}
+	tab := func(id, label string) string {
+		if m.rightTab == id {
+			return fg(cWhite, label)
+		}
+		return fg(cDim, label)
+	}
+	return strings.Join([]string{
+		tab("overview", "O overview"),
+		tab("review", "R review "+itoa(waiting)),
+		tab("team", "T team"),
+		tab("shipped", "S shipped "+itoa(len(m.shippedFlat()))),
+	}, "  ")
+}
+
+// productOverviewBody is the O tab: the product's velocity, its repos and their
+// CI, what is in flight in it, its deploy and its stale repos — the four panes
+// the product lens used to spread across the whole screen, in one column.
+func (m model) productOverviewBody(cw int, name string) []string {
+	var out []string
+
+	out = append(out, line("velocity", cw, cDim, ""))
+	tiles := productVelocity[name]
+	if len(tiles) == 0 {
+		// No fallback to another product's figures: an unmeasured product says so.
+		out = append(out, fg(cFaint, "nothing measured for this product yet"))
+	}
+	for _, t := range tiles {
+		band := bandColor[t.band]
+		// The design bands each metric with a coloured left edge rather than a
+		// tile, which is what buys the row its width back.
+		out = append(out, fg(band, "▎")+" "+row(maxi(cw-2, 1), "",
+			flexc(t.k, cDim),
+			cr(t.v, 10, cWhite),
+			cr(t.spark, 15, band)))
+	}
+
 	out = append(out, "")
 	out = append(out, line("repos", cw, cDim, ""))
 	if len(reposByProduct[name]) == 0 {
-		out = append(out, fg(cFaint, "no repos in this product yet — 2, then a to assign some"))
+		out = append(out, fg(cFaint, productNoRepos+" — esc, then a to assign some"))
 	}
 	for _, r := range reposByProduct[name] {
-		out = append(out, row(cw, "", flexc(r.name, cFg), cr(itoa(r.out)+" out", 8, cDim)))
-		out = append(out, line(r.ci, cw, r.ciColor, ""))
+		out = append(out, row(cw, "",
+			flexc(r.name, cMid),
+			cr(itoa(r.out)+" out", 9, cDim),
+			cr(r.ci, 21, r.ciColor)))
 	}
+
+	out = append(out, "")
+	out = append(out, line("in flight · working → claims done → review → live", cw, cDim, ""))
+	feats := productsFocusFeatures(name)
+	if len(feats) == 0 {
+		out = append(out, fg(cFaint, productNoFlight))
+	}
+	for _, f := range feats {
+		out = append(out, row(cw, "",
+			c(f.glyph, 2, f.color),
+			flexc(f.feature, cMid),
+			c(f.repo, 17, cFaint),
+			cr(f.age, 5, cDim)))
+	}
+
 	out = append(out, "")
 	out = append(out, line("product deploy", cw, cDim, ""))
 	// Read from the repo's actual deploy workflow. This block used to assert
 	// "Deploy production · gh actions ✓ last green 41m ago · 6 runs today" for
 	// every product on every machine — the design's mock, transcribed.
 	pipeline, glyph, status, statusColor := m.deployLine(name)
-	out = append(out, line(pipeline, cw, cMid, ""))
-	if status != "" {
-		out = append(out, fg(statusColor, glyph)+fg(cMid, " "+status))
+	if status == "" {
+		out = append(out, line(pipeline, cw, cFaint, ""))
+	} else {
+		out = append(out, row(cw, "",
+			c(glyph, 2, statusColor),
+			flexc(status, cMid),
+			cr(pipeline, mini(dispWidth(pipeline)+1, cw/2), cFaint)))
 	}
+
 	out = append(out, "")
-	out = append(out, line("stale repos in "+name, cw, cDim, ""))
+	out = append(out, line("stale in "+name, cw, cDim, ""))
 	if !productHasStale(name) {
 		out = append(out, fg(cFaint, "nothing stale"))
 	}
@@ -229,106 +263,6 @@ func (m model) productLeftPane(cw int) []string {
 			col = cRed
 		}
 		out = append(out, row(cw, "", flexc(s.repo, cMid), cr(itoa(s.days)+"d", 5, col)))
-	}
-	return out
-}
-
-// midPane: velocity tiles row then the in-flight lanes.
-func (m model) productMidPane(cw int, tilesPerRow, lanesPerRow int) []string {
-	name := m.productFocusName()
-	var out []string
-
-	// velocity tiles
-	tiles := productVelocity[name]
-	if len(tiles) == 0 {
-		tiles = productVelocity["unassigned"]
-	}
-	tw := cw / tilesPerRow
-	if tw < 8 {
-		tw = cw
-		tilesPerRow = 1
-	}
-	tileBlocks := make([]string, 0, len(tiles))
-	for _, t := range tiles {
-		band := bandColor[t.band]
-		inner := tw - 2
-		if inner < 4 {
-			inner = tw
-		}
-		l1 := padTo(fg(band, strings.Repeat("─", inner)), tw, alignLeft)
-		l2 := padTo(fg(cFaint, truncate(t.k, inner)), tw, alignLeft)
-		l3 := padTo(row(inner, "", flexc(t.v, cWhite), cr(t.spark, dispWidth(t.spark), band)), tw, alignLeft)
-		tileBlocks = append(tileBlocks, strings.Join([]string{l1, l2, l3}, "\n"))
-	}
-	out = append(out, productChunkBlocks(tileBlocks, tilesPerRow))
-	out = append(out, "")
-
-	// in-flight header
-	out = append(out, row(cw, "",
-		c("in flight", dispWidth("in flight")+1, cDim),
-		flexc("", ""),
-		cr("working → claims done → review → live", dispWidth("working → claims done → review → live"), cFaint)))
-	out = append(out, "")
-
-	// lanes
-	lanes := m.productLanes()
-	lw := cw / lanesPerRow
-	if lw < 12 {
-		lw = cw
-		lanesPerRow = 1
-	}
-	laneBlocks := make([]string, 0, len(lanes))
-	for _, l := range lanes {
-		inner := lw - 2
-		if inner < 6 {
-			inner = lw
-		}
-		var lines []string
-		lines = append(lines, padTo(fg(l.color, strings.Repeat("─", inner)), lw, alignLeft))
-		lines = append(lines, row(lw, "", flexc(l.name, cMid), cr(itoa(len(l.items)), 4, cFaint)))
-		for _, cd := range l.items {
-			lines = append(lines, line(cd.feature, lw, cFg, ""))
-			lines = append(lines, line(cd.repo, lw, cDim, ""))
-			lines = append(lines, line(cd.meta, lw, cd.metaColor, ""))
-		}
-		laneBlocks = append(laneBlocks, strings.Join(lines, "\n"))
-	}
-	out = append(out, productChunkBlocks(laneBlocks, lanesPerRow))
-	return out
-}
-
-// rightPane: the R review / T team / S shipped tabbed panel.
-func (m model) productRightPane(cw int) []string {
-	name := m.productFocusName()
-	var out []string
-
-	// tab bar
-	waitingCount := 0
-	for _, r := range reviews[name] {
-		if r.waiting == "you" {
-			waitingCount++
-		}
-	}
-	shipCount := len(m.shippedFlat())
-	tabColor := func(id string) string {
-		if m.rightTab == id {
-			return cWhite
-		}
-		return cDim
-	}
-	tabs := fg(tabColor("review"), "R review "+itoa(waitingCount)) + "  " +
-		fg(tabColor("team"), "T team") + "  " +
-		fg(tabColor("shipped"), "S shipped "+itoa(shipCount))
-	out = append(out, tabs)
-	out = append(out, "")
-
-	switch m.rightTab {
-	case "team":
-		out = append(out, m.productTeamBody(cw, name)...)
-	case "shipped":
-		out = append(out, m.productShippedBody(cw)...)
-	default:
-		out = append(out, m.productReviewBody(cw, name)...)
 	}
 	return out
 }
@@ -447,56 +381,10 @@ func (m model) productShippedBody(cw int) []string {
 	for _, ln := range productWrap(s.prompt, cw) {
 		out = append(out, fg(cMid, ln))
 	}
-	out = append(out, fg(cDim, "enter enhance · c clone to another repo · o open pr"))
+	// `c clone to another repo` is not offered: nothing implements it, and a key
+	// the footer names that does nothing is worse than an absent one.
+	out = append(out, fg(cDim, "enter dispatch again · o open pr"))
 	return out
-}
-
-// ---- viewProduct ------------------------------------------------------------
-
-func (m model) viewProduct(w, h int) string {
-	f := m.fit()
-	tilesPerRow := 100 / f.velTilePct
-	lanesPerRow := 100 / f.lanePct
-	if tilesPerRow < 1 {
-		tilesPerRow = 1
-	}
-	if lanesPerRow < 1 {
-		lanesPerRow = 1
-	}
-
-	joinPane := func(lines []string, inset int) string {
-		block := gutter(strings.Join(lines, "\n"), inset)
-		return padBlockTo(clampLines(block, h), h)
-	}
-
-	var body string
-	switch {
-	case m.width >= 170:
-		// three panes
-		avail := w - 2 // two vrules
-		leftW := maxi(avail*24/100, 22)
-		rightW := maxi(avail*30/100, 34)
-		midW := avail - leftW - rightW
-		if midW < 30 {
-			midW = 30
-		}
-		left := joinPane(m.productLeftPane(leftW-pad), pad)
-		mid := joinPane(m.productMidPane(midW-1, tilesPerRow, lanesPerRow), 1)
-		right := joinPane(m.productRightPane(rightW-1), 1)
-		body = hjoin(left, vrule(h, cRule), mid, vrule(h, cRule), right)
-	case m.width >= 110:
-		// two panes: middle + right
-		avail := w - 1
-		rightW := maxi(avail*36/100, 34)
-		midW := avail - rightW
-		mid := joinPane(m.productMidPane(midW-pad, tilesPerRow, lanesPerRow), pad)
-		right := joinPane(m.productRightPane(rightW-1), 1)
-		body = hjoin(mid, vrule(h, cRule), right)
-	default:
-		// narrow: middle only
-		body = joinPane(m.productMidPane(w-pad, tilesPerRow, lanesPerRow), pad)
-	}
-	return clampLines(body, h)
 }
 
 // ---- review overlay ---------------------------------------------------------
@@ -635,16 +523,35 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		}
 		if submit {
 			sel := m.shipSelected()
+			text := strings.TrimSpace(m.resumeText)
 			m.resumeOpen, m.resumeText = false, ""
-			m.notice = "resumed session " + sel.session + " · \"" + sel.feature + "\" dispatched again"
-			return m, nil
+			if text == "" {
+				m.notice = "nothing to dispatch — type what to change"
+				return m, nil
+			}
+			// This used to set a notice saying the feature had been "dispatched
+			// again" and launch nothing. It re-dispatches the same feature, which
+			// reuses its branch and worktree, with the typed text as the prompt.
+			m.notice = "dispatching \"" + sel.feature + "\" again…"
+			return m, launchCmd(m.cfg, sel.repo, sel.feature, text)
 		}
 		m.resumeText = next
 		return m, nil
 	}
 
+	// esc closes the panel and hands the portfolio back. It is not a lens change
+	// in the human's terms — the products lens was never left. q stays quit
+	// everywhere, so the panel does not claim it and the footer does not offer it.
+	if k == "esc" {
+		m.lens = "products"
+		return m, nil
+	}
+
 	// tab switches
 	switch k {
+	case "O":
+		m.rightTab = "overview"
+		return m, nil
 	case "R":
 		m.rightTab, m.reviewCursor = "review", 0
 		return m, nil
@@ -687,7 +594,9 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case "team":
+	case "team", "overview":
+		// Neither tab has a cursor. Without this the fall-through below would
+		// move the shipped cursor from a tab that cannot show it moving.
 		return m, nil
 	}
 
@@ -704,10 +613,13 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		if n > 0 {
 			m.resumeOpen, m.resumeText = true, ""
 		}
-	case "c":
-		m.notice = "clone \"" + m.shipSelected().feature + "\" into which repo?"
 	case "o":
-		m.notice = "opening " + m.shipSelected().pr
+		sel := m.shipSelected()
+		if sel.pr == "" || sel.pr == "—" {
+			m.notice = "\"" + sel.feature + "\" has no pull request"
+			return m, nil
+		}
+		return m, openPRCmd(sel.repo, sel.pr)
 	}
 	return m, nil
 }

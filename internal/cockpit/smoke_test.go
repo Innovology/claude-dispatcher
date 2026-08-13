@@ -30,11 +30,12 @@ func renderClean(t *testing.T, m model, ctx string) {
 	}
 }
 
-// TestEveryLensRenders switches through all eight lenses at every width tier and
-// checks each renders within bounds.
+// TestEveryLensRenders switches through all six lenses at every width tier and
+// checks each renders within bounds. The product panel is not on a digit any
+// more, so it gets its own sweep below.
 func TestEveryLensRenders(t *testing.T) {
 	for _, w := range smokeWidths {
-		for i := 1; i <= 8; i++ {
+		for i := 1; i <= 6; i++ {
 			m := newModel()
 			m.width, m.height = w, 44
 			m = press(m, itoa(i))
@@ -47,7 +48,7 @@ func TestEveryLensRenders(t *testing.T) {
 // lens. Its own keys are covered in cq_test.go; what matters here is that the
 // palette and the help sheet still open over it and render.
 func TestChromeOverlaysFromTriage(t *testing.T) {
-	installCQFixture(t) // a non-empty queue, so the prompt does not eat the keys
+	installFleetFixture(t) // a non-empty fleet, so the prompt does not eat the keys
 	m := newModel()
 	m.width, m.height = 190, 44
 
@@ -61,8 +62,8 @@ func TestChromeOverlaysFromTriage(t *testing.T) {
 	m = press(m, "esc")
 
 	m = press(m, "w")
-	renderClean(t, m, "working view")
-	m = press(m, "esc")
+	renderClean(t, m, "running only")
+	m = press(m, "w")
 }
 
 // TestShipConfirmAndMergeAnimation walks the ship confirmation and the merge
@@ -99,9 +100,18 @@ func TestProductTabs(t *testing.T) {
 	if m.lens != "product" {
 		t.Fatalf("enter on products did not open the product lens")
 	}
-	for _, tab := range []string{"R", "T", "S"} {
+	if m.rightTab != "overview" {
+		t.Errorf("enter should open the panel on overview, got %q", m.rightTab)
+	}
+	for _, tab := range []string{"R", "T", "S", "O"} {
 		m = press(m, tab)
 		renderClean(t, m, "product tab "+tab)
+	}
+	// j on the overview tab is a no-op, not a hidden walk of the shipped cursor.
+	before := m.shipCursor
+	m = press(m, "j")
+	if m.shipCursor != before {
+		t.Errorf("j on overview moved shipCursor to %d", m.shipCursor)
 	}
 	// review overlay
 	m = press(m, "R")
@@ -113,6 +123,28 @@ func TestProductTabs(t *testing.T) {
 	m = press(m, "enter")
 	renderClean(t, m, "resume or list")
 	m = press(m, "esc")
+	// esc with no overlay up closes the panel and leaves the products lens
+	// showing, which is the only way back out — q is quit, not close.
+	m = press(m, "esc")
+	if m.lens != "products" {
+		t.Errorf("esc should close the panel, lens = %q", m.lens)
+	}
+}
+
+// TestProductPanelRendersAtEveryWidth covers the panel itself: it is off the
+// digits, so the lens sweep above never reaches it.
+func TestProductPanelRendersAtEveryWidth(t *testing.T) {
+	installFixture(t)
+	for _, w := range smokeWidths {
+		for _, tab := range []string{"O", "R", "T", "S"} {
+			m := newModel()
+			m.width, m.height = w, 44
+			m = press(m, "2")
+			m = press(m, "enter")
+			m = press(m, tab)
+			renderClean(t, m, "product panel "+tab+" @"+itoa(w))
+		}
+	}
 }
 
 // TestBacklogAndDecisions covers the remaining interactive lenses.
@@ -121,13 +153,13 @@ func TestBacklogAndDecisions(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 190, 44
 
-	m = press(m, "5") // backlog
+	m = press(m, "3") // backlog
 	for _, k := range []string{"j", "space", "j", "s", "s"} {
 		m = press(m, k)
 		renderClean(t, m, "backlog "+k)
 	}
 
-	m = press(m, "7") // decisions
+	m = press(m, "5") // decisions
 	for _, k := range []string{"j", "J", "l", "a", "s", "e", "h", "K"} {
 		m = press(m, k)
 		renderClean(t, m, "decisions "+k)

@@ -3,7 +3,7 @@ package cockpit
 // collectors_env_test.go builds a realistic on-disk portfolio — real git
 // repos with a base commit and a feature-branch commit, dispatch records
 // spanning every status, a transcript with real token usage plus a 429 rate
-// limit line, ADR markdown files, and a queue.json draft — and then runs the
+// limit line and ADR markdown files — and then runs the
 // real collectors (loadSnapshot and each collectX) against it. This is the
 // closest thing to an end-to-end test the package has: it proves the
 // record→collector→snapshot→lens pipeline produces real, renderable data
@@ -42,9 +42,8 @@ type envScenario struct {
 // buildEnvScenario wires up the whole fixture: HOME and CLAUDE_DISPATCHER_STATE
 // point at fresh temp dirs, three real git repos exist with a base commit plus
 // a feature-branch commit each, dispatch records span blocked/needs-input/
-// working/done/exited, one repo carries ADR markdown, the state dir carries a
-// queue.json draft, and ~/.claude/projects carries a transcript with real
-// usage tokens and a 429 rate-limit hit.
+// working/done/exited, one repo carries ADR markdown, and ~/.claude/projects
+// carries a transcript with real usage tokens and a 429 rate-limit hit.
 func buildEnvScenario(t *testing.T) envScenario {
 	t.Helper()
 
@@ -178,12 +177,6 @@ func buildEnvScenario(t *testing.T) envScenario {
 		}
 	}
 
-	// A queued draft.
-	queue := `[{"feature":"new draft","repo":"shop-api","prompt":"do the next thing"}]`
-	if err := os.WriteFile(filepath.Join(state.Dir(), "queue.json"), []byte(queue), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := &config.Config{
 		Roots:    []string{root},
 		Products: map[string][]string{"shop": {"shop-api", "shop-web"}},
@@ -235,8 +228,8 @@ func TestLoadSnapshotFullEnvironment(t *testing.T) {
 	if len(snap.decisions["shop-api"]) == 0 {
 		t.Error("expected the shop-api ADR to be picked up")
 	}
-	if len(snap.queueItems) != 1 || snap.queueItems[0].feature != "new draft" {
-		t.Errorf("queueItems = %+v", snap.queueItems)
+	if snap.fleet == nil {
+		t.Error("expected a fleet table from the real records")
 	}
 	if snap.usageWindows == nil {
 		t.Error("expected usage windows to be populated")
@@ -245,7 +238,7 @@ func TestLoadSnapshotFullEnvironment(t *testing.T) {
 	applySnapshot(snap)
 
 	for _, w := range []int{80, 130, 190} {
-		for i := 1; i <= 8; i++ {
+		for i := 1; i <= 6; i++ {
 			m := newModel()
 			m.width, m.height = w, 46
 			m = press(m, itoa(i))
@@ -371,10 +364,7 @@ func TestCollectorsDirect(t *testing.T) {
 	}
 
 	var s7 snapshot
-	collectStaleQueue(ctx, &s7)
-	if s7.queueItems == nil || len(s7.queueItems) != 1 {
-		t.Errorf("collectStaleQueue queueItems = %+v, want 1 drafted item", s7.queueItems)
-	}
+	collectStale(ctx, &s7)
 	// billing-core has both an exited AND a working record; the working one
 	// keeps it out of the stale list even though it is old.
 	for _, sr := range s7.staleRepos {

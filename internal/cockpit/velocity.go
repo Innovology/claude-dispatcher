@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// velocity.go is lens 8: the velocity lens. It answers one question — what
+// velocity.go is lens 6: the velocity lens. It answers one question — what
 // actually reached production — beside the DORA and factory metrics that
 // explain why. Display-only, no key handling. Mirrors the design's OUTPUT,
 // DORA and NOT_VELOCITY blocks and the isVelocity template.
@@ -135,19 +135,37 @@ func (m model) velLeft(iw int) []string {
 	}
 	out = append(out, "")
 
-	// where a feature's time actually goes.
-	out = append(out, line("where a feature's time actually goes", iw, cDim, ""))
-	for _, sp := range doraSplit {
-		out = append(out, row(iw, "",
-			c(sp.label, 16, cMid),
-			flexc("  "+bar(sp.pct*2, 18), sp.color),
-			cr(itoa(sp.pct)+"%", 5, sp.color),
-		))
+	// Where the time goes. The design titles this "where a feature's time
+	// actually goes", but what is measurable is a dispatcher's session — the
+	// lifecycle log knows who was holding the work, not what a feature's
+	// calendar life looked like — so the title says the thing being counted.
+	// With no lifecycle events there is no split, and the section is omitted
+	// rather than drawn empty.
+	if len(doraSplit) > 0 {
+		out = append(out, line("where a dispatcher's time actually goes", iw, cDim, ""))
+		labelW := 16
+		for _, sp := range doraSplit {
+			labelW = maxi(labelW, dispWidth(sp.label)+1)
+		}
+		for _, sp := range doraSplit {
+			out = append(out, row(iw, "",
+				c(sp.label, labelW, cMid),
+				flexc("  "+bar(sp.pct*2, 18), sp.color),
+				cr(itoa(sp.pct)+"%", 5, sp.color),
+			))
+		}
+		// The design states the waiting share as prose. It used to state the
+		// mock's third; it now states what was counted, and says nothing when
+		// nothing was spent waiting.
+		if wp := velSplitPct("waiting on you"); wp > 0 {
+			msg := itoa(wp) + "% of every dispatcher's life is spent waiting for you. " +
+				"Nothing you change about the dispatchers moves that number."
+			for _, l := range velWrap(msg, iw, 3) {
+				out = append(out, line(l, iw, cAmber, ""))
+			}
+		}
+		out = append(out, "")
 	}
-	for _, l := range velWrap("A third of every feature's life is spent waiting for you. Nothing you change about the agents moves that number.", iw, 3) {
-		out = append(out, line(l, iw, cAmber, ""))
-	}
-	out = append(out, "")
 
 	// busy, not velocity.
 	out = append(out, line("busy, not velocity", iw, cDim, ""))
@@ -165,9 +183,17 @@ func (m model) velLeft(iw int) []string {
 func (m model) velRight(iw int) []string {
 	var out []string
 
+	// The design says "twelve weeks"; the collector buckets six. The label
+	// states the window actually measured, and says nothing before the first
+	// snapshot lands — a header that misdescribes the window makes every figure
+	// under it unreadable.
+	window := ""
+	if n := velWeeksShown(); n > 0 {
+		window = itoa(n) + " weeks"
+	}
 	out = append(out, row(iw, "",
 		flexc("delivery · dora", cDim),
-		cr("twelve weeks", 12, cFaint),
+		cr(window, 12, cFaint),
 	))
 	out = append(out, "")
 	out = append(out, velTilesBlock(doraOrg, iw, true)...)
@@ -359,6 +385,26 @@ func velColumns(iw, velFit int) []velCol {
 	}
 	sort.SliceStable(pick, func(i, j int) bool { return order[pick[i].key] < order[pick[j].key] })
 	return pick
+}
+
+// velSplitPct is the share of the measured split that went to label, or 0 when
+// the split has no such part (nothing waited, or nothing was measured at all).
+func velSplitPct(label string) int {
+	for _, sp := range doraSplit {
+		if sp.label == label {
+			return sp.pct
+		}
+	}
+	return 0
+}
+
+// velWeeksShown is how many weeks the by-week table actually covers, so the
+// pane header can name its own window instead of asserting one.
+func velWeeksShown() int {
+	if n := len(doraWeeks); n > 0 {
+		return n
+	}
+	return len(outputWeeks)
 }
 
 // velCellValue reads the by-week cell for column key from a week row.

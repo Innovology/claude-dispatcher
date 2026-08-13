@@ -32,8 +32,7 @@ type snapshot struct {
 		hunk  []hunkLine
 	}
 
-	cqItems      []cqItem
-	cqWorking    []cqGroup
+	fleet        []fleetRow
 	cqLastOutput string
 
 	products       []product
@@ -75,8 +74,6 @@ type snapshot struct {
 	outputDelta string
 	outputSpark string
 	notVelocity []notVelocityRow
-
-	queueItems []queueItem
 
 	// records maps a view dispatch's feature to its live record, so an action
 	// on the selected row reaches the real tmux session / branch / PR.
@@ -143,15 +140,15 @@ func loadSnapshot(cfg *config.Config) snapshot {
 	s.dataMode = "live"
 	s.discovered = ctx.repos
 	collectFloor(ctx, &s)
-	// collectCQ must follow collectFloor: it reads the forge, diff and
+	// collectFleet must follow collectFloor: it reads the forge, diff and
 	// transcript work that load already did rather than paying for it twice.
-	collectCQ(ctx, &s)
+	collectFleet(ctx, &s)
 	collectProducts(ctx, &s)
 	collectBacklog(ctx, &s)
 	collectDecisions(ctx, &s)
 	collectUsage(ctx, &s)
 	collectVelocity(ctx, &s)
-	collectStaleQueue(ctx, &s)
+	collectStale(ctx, &s)
 	return s
 }
 
@@ -171,11 +168,8 @@ func applySnapshot(s snapshot) {
 	if s.diffsBy != nil {
 		diffsBy = s.diffsBy
 	}
-	if s.cqItems != nil {
-		cqItems = s.cqItems
-	}
-	if s.cqWorking != nil {
-		cqWorking = s.cqWorking
+	if s.fleet != nil {
+		fleet = s.fleet
 	}
 	// Unconditionally, unlike every other field: "" means no running session has
 	// a readable transcript, which is an observation the view must show, and a
@@ -273,9 +267,6 @@ func applySnapshot(s snapshot) {
 	}
 	if s.notVelocity != nil {
 		notVelocity = s.notVelocity
-	}
-	if s.queueItems != nil {
-		queueItems = s.queueItems
 	}
 	if s.records != nil {
 		liveRecords = s.records

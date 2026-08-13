@@ -1,11 +1,14 @@
 package cockpit
 
-// products.go is the PRODUCTS portfolio lens (lens 2). A product is many repos;
-// the left pane is the portfolio table (one row per product) plus the stale list
-// and the "where the factory is stuck" call-outs, and the right pane focuses the
-// product under the cursor — its note, its repos, and its in-flight features.
+// products.go is the PRODUCTS area (lens 2). A product is many repos; the left
+// pane is the portfolio table (one row per product) plus the stale list and the
+// "where the factory is stuck" call-outs.
 //
-// Faithful port of v2_template.html lines 316-386 and renderVals `products`.
+// To its right sits one of two panels, never both: the focus summary for the
+// product under the cursor (the design's prodSummaryShown), or — once enter has
+// opened a product — the full product panel from product.go. That panel used to
+// be a lens of its own; lens "product" now means "products with the panel open",
+// which is why both ids render through here.
 
 import (
 	"strings"
@@ -95,36 +98,48 @@ func (m model) viewProducts(w, h int) string {
 	}
 	fitv := m.fit()
 	pc := clampCursor(m.productCursor, len(products))
+	panelOpen := m.lens == "product"
 
-	// Pane geometry: right focus panel is flex:0 0 30%; the left table fills the
-	// rest with a one-column rule between them. Narrow terminals show the table
-	// only (fitNarrow disables the detail pane).
-	// With nothing grouped there is no product to focus, so the onboarding gets
-	// the full width instead of sitting beside a panel about "unassigned".
-	twoPane := fitv.showDetail && m.hasRealProducts()
+	// A narrow terminal has no room for two panes at all (fitNarrow), and an open
+	// panel is the thing the human just asked for: it takes the whole width and
+	// the portfolio table waits behind esc.
+	if panelOpen && !fitv.showDetail {
+		return clampLines(productsPane(m.productPanel(maxi(w-2*pad, 1)), w), h)
+	}
+
+	// Pane geometry: the open product panel is flex:0 0 46%, the focus summary
+	// flex:0 0 30%, and the left table fills the rest with a one-column rule
+	// between them. With nothing grouped there is no product to focus, so the
+	// onboarding gets the full width instead of sitting beside a panel about
+	// "unassigned" — but an explicitly opened panel is shown regardless.
 	leftW := w
 	rightW := 0
-	if twoPane {
+	switch {
+	case panelOpen:
+		rightW = w * 46 / 100
+	case fitv.showDetail && m.hasRealProducts():
 		rightW = w * 30 / 100
+	}
+	if rightW > 0 {
 		leftW = w - rightW - 1 // 1 col for the vrule
 	}
-	leftInner := leftW - 2*pad
-	if leftInner < 1 {
-		leftInner = 1
-	}
+	leftInner := maxi(leftW-2*pad, 1)
 
-	left := m.productsLeft(leftInner, pc)
+	// The panel eats nearly half the width; forge and the 7d sparkline are the
+	// two columns the eye can spare, so they fold away (the design's tblWide) to
+	// keep the name, the flight count and the lead time legible.
+	left := m.productsLeft(leftInner, pc, !panelOpen)
 	leftBlock := productsPane(left, leftW)
 
-	if !twoPane {
+	if rightW == 0 {
 		return clampLines(leftBlock, h)
 	}
 
-	rightInner := rightW - 2*pad
-	if rightInner < 1 {
-		rightInner = 1
-	}
+	rightInner := maxi(rightW-2*pad, 1)
 	right := m.productsRight(rightInner, pc)
+	if panelOpen {
+		right = m.productPanel(rightInner)
+	}
 	rightBlock := productsPane(right, rightW)
 
 	hh := maxi(strings.Count(leftBlock, "\n"), strings.Count(rightBlock, "\n")) + 1
@@ -136,7 +151,9 @@ func (m model) viewProducts(w, h int) string {
 }
 
 // productsLeft builds the portfolio table, the stale list and the stuck lines.
-func (m model) productsLeft(cw, pc int) []string {
+// wide keeps the two optional columns (forge, the 7d sparkline); it is false
+// while the product panel is open and the table has half the width.
+func (m model) productsLeft(cw, pc int, wide bool) []string {
 	var out []string
 
 	loose, looseColor := m.looseLine()
@@ -153,17 +170,24 @@ func (m model) productsLeft(cw, pc int) []string {
 		c("n", 2, cFg), flexc("new product", cDim),
 	))
 	out = append(out, "")
-	out = append(out, row(cw, "",
+	head := []seg{
 		c("", 2, ""),
 		flexc("PRODUCT", cFaint),
 		c("REPOS", 10, cFaint),
-		c("FORGE", 7, cFaint),
+	}
+	if wide {
+		head = append(head, c("FORGE", 7, cFaint))
+	}
+	head = append(head,
 		cr("IN FLIGHT", 11, cFaint),
 		cr("WANTS YOU", 12, cFaint),
 		cr("LIVE TODAY", 12, cFaint),
-		cr("7d SHIPPED", 16, cFaint),
-		cr("LEAD TIME", 12, cFaint),
-	))
+	)
+	if wide {
+		head = append(head, cr("7d SHIPPED", 16, cFaint))
+	}
+	head = append(head, cr("LEAD TIME", 12, cFaint))
+	out = append(out, row(cw, "", head...))
 
 	for n, p := range products {
 		on := n == pc
@@ -183,17 +207,24 @@ func (m model) productsLeft(cw, pc int) []string {
 		if p.needs > 0 {
 			needsColor = cAmber
 		}
-		out = append(out, row(cw, bg,
+		cells := []seg{
 			c(marker, 2, cMid),
 			flexc(p.name, nameColor),
 			c(p.repos, 10, cDim),
-			c(p.forge, 7, cDim),
+		}
+		if wide {
+			cells = append(cells, c(p.forge, 7, cDim))
+		}
+		cells = append(cells,
 			cr(itoa(p.inflight), 11, cMid),
 			cr(needsLabel, 12, needsColor),
 			cr(itoa(p.live), 12, cWhite),
-			cr(p.spark, 16, cGreen),
-			cr(p.lead, 12, cMid),
-		))
+		)
+		if wide {
+			cells = append(cells, cr(p.spark, 16, cGreen))
+		}
+		cells = append(cells, cr(p.lead, 12, cMid))
+		out = append(out, row(cw, bg, cells...))
 	}
 
 	out = append(out, "")
@@ -286,6 +317,9 @@ func (m model) productsRight(cw, pc int) []string {
 
 	out = append(out, "")
 	out = append(out, line("repos", cw, cDim, ""))
+	if len(reposByProduct[name]) == 0 {
+		out = append(out, fg(cFaint, productNoRepos+" — a to assign some"))
+	}
 	for _, r := range reposByProduct[name] {
 		out = append(out, row(cw, "",
 			flexc(r.name, cFg),
@@ -297,7 +331,11 @@ func (m model) productsRight(cw, pc int) []string {
 
 	out = append(out, "")
 	out = append(out, line("in flight", cw, cDim, ""))
-	for _, f := range productsFocusFeatures(name) {
+	feats := productsFocusFeatures(name)
+	if len(feats) == 0 {
+		out = append(out, fg(cFaint, productNoFlight))
+	}
+	for _, f := range feats {
 		out = append(out, row(cw, "",
 			c(f.glyph, 2, f.color),
 			flexc(f.feature, cMid),
@@ -333,7 +371,12 @@ func (m model) updateProducts(k string) (model, tea.Cmd) {
 		if len(products) == 0 {
 			return m, nil // nothing discovered yet — there is no product to open
 		}
+		// Opening a product opens the panel over this lens — lens "product" is
+		// "products with the panel open", not a lens of its own. It always opens
+		// on overview: the tab you last read for another product is not where you
+		// meant to land, and the shipped cursor belongs to the product it counted.
 		m.lens = "product"
+		m.rightTab = "overview"
 		m.shipCursor = 0
 		m.notice = "opened " + products[clampCursor(m.productCursor, len(products))].name
 	}
