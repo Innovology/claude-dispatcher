@@ -208,7 +208,7 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// flight (where the form is already up), and the repo list silently
 		// narrowed to the repos containing "d" while nothing appeared to happen.
 		// Falling through re-opens the form, which on an untouched one is a no-op.
-		navKey := isLensDigit(k) || k == ":" || k == "w" || k == "d"
+		navKey := isLensDigit(k) || k == ":" || k == "d"
 		if m.dxTouched() || !navKey {
 			mm, cmd := m.dxKey(k)
 			return mm, cmd, true
@@ -226,16 +226,6 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		return m.fleetTo(len(m.fleetRows()) - 1), nil, true
 	case "f":
 		return m.fleetSetFilter(fleetNextFilter(m.fleetFilter())), nil, true
-	case "w":
-		// `w` is the shortcut to the filter people actually reach for, and the
-		// way back out of the dispatch form — which is what the form's own
-		// footer advertises. The form is only ever untouched here (see the
-		// navKey set above), so closing it discards nothing typed.
-		m = m.dxReset()
-		if m.fleetFilter() == "running" {
-			return m.fleetSetFilter(fleetFilters[0]), nil, true
-		}
-		return m.fleetSetFilter("running"), nil, true
 	case "d":
 		return m.dxOpen(""), nil, true
 	}

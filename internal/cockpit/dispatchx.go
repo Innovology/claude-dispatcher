@@ -469,7 +469,7 @@ func (m model) dxFooterHelp() string {
 	if m.dxTouched() {
 		return "enter next field · tab moves · ctrl+d dispatch · esc cancel"
 	}
-	return "dispatch · enter next field · tab moves · w running · esc cancel · 1…6 sections"
+	return "dispatch · enter next field · tab moves · esc cancel · 1…6 sections"
 }
 
 // ---- view ---------------------------------------------------------------------
@@ -513,8 +513,7 @@ func (m model) dxView(w, h int) string {
 	}
 
 	tail := []cqRow{
-		cqFixed(flG(fg(cFg, "w") + " " + fg(cDim, "everything in flight") + " " +
-			fg(cFaint, truncate("· "+cqUnattendedLine(), maxi(1, inner-24))))),
+		cqFixed(flG(fg(cFaint, truncate(cqUnattendedLine(), maxi(1, inner))))),
 		cqGap(9),
 	}
 

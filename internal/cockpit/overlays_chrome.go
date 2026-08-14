@@ -26,7 +26,6 @@ var helpSections = []struct {
 		{"j / k", "move the cursor — the panel and the key hints follow it"},
 		{"g / G", "first row · last row"},
 		{"f", "filter: all → wants you → needs a look → running"},
-		{"w", "running only, and back"},
 		{"⏎", "attach the session"},
 		{"y", "approve the merge, or mark it shipped once it has commits"},
 		{"x", "kill it · the branch and any dirty worktree survive"},
