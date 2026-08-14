@@ -254,30 +254,13 @@ func TestFleetFilterCycles(t *testing.T) {
 	}
 }
 
-// `w` is the shortcut to the running rows and back — it no longer opens a view
-// of its own, which is why cqUnattendedLine says "shows only those".
-func TestFleetWTogglesTheRunningFilter(t *testing.T) {
-	m := cqModel(t)
-	m = press(m, "w")
-	if m.fleetFilter() != "running" || fleetFeatures(m) != "three" {
-		t.Fatalf("w = %q / %s", m.fleetFilter(), fleetFeatures(m))
-	}
-	m = press(m, "w")
-	if m.fleetFilter() != "all" {
-		t.Errorf("w again should come back, got %q", m.fleetFilter())
-	}
-	if !strings.Contains(cqUnattendedLine(), "w shows only those") {
-		t.Errorf("the unattended line advertises a key that no longer does that: %q", cqUnattendedLine())
-	}
-}
-
 // A filter that matches nothing must show the table saying so. Gating the empty
 // state on the filtered count — as the design does — dropped the human into the
 // dispatch form instead, where that line can never appear.
 func TestFleetEmptyFilterStaysOnTheTable(t *testing.T) {
 	m := cqModel(t)
 	fleet = fleet[:2] // queue rows only
-	m = press(m, "w") // …filtered to running
+	m = m.fleetSetFilter("running")
 	if len(m.fleetRows()) != 0 {
 		t.Fatalf("precondition: %d rows match", len(m.fleetRows()))
 	}
@@ -299,11 +282,10 @@ func TestCQFormFallThrough(t *testing.T) {
 		t.Fatalf("d should open an empty form, auto on: %v %v %v", m.cqDispatch, m.dxTouched(), m.dxAuto)
 	}
 
-	// Untouched: w leaves the form for the running rows, which is what the
-	// form's own footer advertises.
-	m = press(m, "w")
-	if m.cqDispatch || m.fleetFilter() != "running" {
-		t.Fatalf("w should leave an untouched form for the running rows: %v %q", m.cqDispatch, m.fleetFilter())
+	// Untouched: a lens digit still navigates rather than typing itself.
+	m2 := press(m, "3")
+	if m2.lens != "backlog" {
+		t.Fatalf("a digit should leave an untouched form, lens = %q", m2.lens)
 	}
 
 	// Once anything is typed, those same keys are letters again. The form opens
@@ -427,9 +409,14 @@ func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 	}
 
 	md := press(m, "d")
-	// An untouched form still advertises the exits it still has.
-	if got := md.footerHelp(); !strings.Contains(got, "w running") {
-		t.Errorf("untouched-form help = %q", got)
+	// An untouched form advertises the exits it still has. `w` used to be one
+	// of them; it is gone, so the footer must not name it.
+	formHelp := md.footerHelp()
+	if !strings.Contains(formHelp, "esc cancel") || !strings.Contains(formHelp, "1…6 sections") {
+		t.Errorf("untouched-form help = %q", formHelp)
+	}
+	if strings.Contains(formHelp, "w running") {
+		t.Errorf("footer still advertises the removed w key: %q", formHelp)
 	}
 	// A touched one drops them — they are letters now — and offers ctrl+d,
 	// which is the key that actually submits (ctrl+⏎ is not reportable).

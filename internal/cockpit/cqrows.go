@@ -248,7 +248,9 @@ func cqUnattendedLine() string {
 	}
 	// `w` no longer opens a view of its own — it narrows the table to the
 	// running rows — so the sentence advertises what the key now does.
-	return s + " · w shows only those"
+	// `f` reaches the running filter; `w` used to be a shortcut to it and is
+	// gone, so this no longer names a key that does nothing.
+	return s + " · f filters to them"
 }
 
 // cqViewEmpty is the dispatch form: what you see when nothing is in flight, and
