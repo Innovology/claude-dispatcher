@@ -23,7 +23,43 @@ var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 // Slugify turns a feature name into a branch/session-safe slug.
 func Slugify(feature string) string {
 	s := slugRe.ReplaceAllString(strings.ToLower(feature), "-")
-	return strings.Trim(s, "-")
+	return capSlug(strings.Trim(s, "-"))
+}
+
+// SlugWords is how many words a slug keeps. The slug names three things at
+// once — the branch, the worktree directory and the tmux session — so an
+// uncapped one produced `feature/several-improvements-here-use-the-claude-
+// design-mcp-https-api-anthropic-com` and a 96-character session name, because
+// whatever was typed as the feature name went in whole.
+//
+// Five words is enough to tell two features apart at a glance and short enough
+// to type. The full name still lives on the record and is what every screen
+// shows; only the slug is abbreviated.
+const SlugWords = 5
+
+// slugMaxLen bounds the result even when five words are each very long, so a
+// path component stays comfortably inside what every filesystem accepts.
+const slugMaxLen = 60
+
+// capSlug keeps at most SlugWords words and slugMaxLen characters, never
+// splitting a word unless a single word exceeds the limit on its own.
+func capSlug(s string) string {
+	if s == "" {
+		return ""
+	}
+	words := strings.Split(s, "-")
+	if len(words) > SlugWords {
+		words = words[:SlugWords]
+	}
+	out := strings.Join(words, "-")
+	for len(out) > slugMaxLen && len(words) > 1 {
+		words = words[:len(words)-1]
+		out = strings.Join(words, "-")
+	}
+	if len(out) > slugMaxLen {
+		out = strings.Trim(out[:slugMaxLen], "-")
+	}
+	return out
 }
 
 // Launch materialises feature/<slug> in its own git worktree under the state

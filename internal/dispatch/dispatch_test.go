@@ -253,3 +253,45 @@ func TestSlugifyStripsNonASCII(t *testing.T) {
 		t.Errorf("expected non-ascii stripped, got %q", got)
 	}
 }
+
+// TestSlugifyCaps guards the names a dispatch creates. The slug names three
+// things at once — the branch, the worktree directory and the tmux session —
+// and it used to take whatever was typed as the feature name whole. Real
+// records ended up with 91-character slugs and 96-character session names,
+// because the dispatch prompt fed the entire typed sentence in as the name.
+func TestSlugifyCaps(t *testing.T) {
+	long := "several improvements here: Use the claude_design MCP (https://api.anthropic.com/v1/design/mcp, auth via /design-login) to import this project"
+	got := Slugify(long)
+
+	if n := len(strings.Split(got, "-")); n > SlugWords {
+		t.Errorf("slug kept %d words, want at most %d: %q", n, SlugWords, got)
+	}
+	if len(got) > 60 {
+		t.Errorf("slug is %d chars, too long for a path component: %q", len(got), got)
+	}
+	if strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
+		t.Errorf("slug has a dangling separator: %q", got)
+	}
+
+	// Short names are untouched — the cap must not mangle the ordinary case.
+	for _, s := range []string{"retry backoff", "csv export", "seat limits"} {
+		if got := Slugify(s); got != strings.ReplaceAll(s, " ", "-") {
+			t.Errorf("Slugify(%q) = %q, want it unchanged", s, got)
+		}
+	}
+
+	// A single enormous word still has to fit.
+	if got := Slugify(strings.Repeat("x", 200)); len(got) > 60 {
+		t.Errorf("one long word not bounded: %d chars", len(got))
+	}
+
+	// Slugifying twice is the same as once — the cockpit names the feature from
+	// the slug, and Launch slugifies that name again.
+	if a, b := Slugify(long), Slugify(strings.ReplaceAll(Slugify(long), "-", " ")); a != b {
+		t.Errorf("not idempotent: %q vs %q", a, b)
+	}
+
+	if Slugify("") != "" || Slugify("!!!") != "" {
+		t.Error("an unnameable feature should still produce an empty slug")
+	}
+}

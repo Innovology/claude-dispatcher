@@ -172,16 +172,14 @@ func (m model) dxPicked() (dxRepoRow, bool) {
 
 // ---- the branch --------------------------------------------------------------
 
-// dxBranchWords caps how many slug words the branch keeps, so a whole sentence
-// of a feature name still produces a branch a human can type. 0 means no cap.
+// dxBranchWords caps how many slug words the branch preview keeps.
 //
-// It is 0, not the design's 5. The preview is only true if Launch applies the
-// same cap, and Launch's slug also names the worktree directory and the tmux
-// session — capping it here alone would mislabel three things at once, and
-// capping it in internal/dispatch would rename branches for every dispatch path
-// in the product, which is a change this design does not ask for. A truthful
-// long branch beats a tidy wrong one; raise this the day Launch caps too.
-const dxBranchWords = 0
+// It tracks dispatch.SlugWords deliberately: the preview is only true if Launch
+// applies the same cap, and Launch's slug also names the worktree directory and
+// the tmux session. It used to be 0 — an uncapped, truthful-but-unusable branch
+// — because capping here alone would have mislabelled three things at once.
+// Launch caps now, so this can.
+const dxBranchWords = dispatchpkg.SlugWords
 
 // dxSlugWords slugifies s and keeps at most max slug words.
 //
@@ -365,7 +363,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		m.notice = "nothing matches — widen the filter"
 		return m, nil
 	}
-	feature := strings.TrimSpace(m.dxWhat)
+	feature := dxFeatureName(m.dxWhat)
 	if feature == "" {
 		m.dxField = dxWhatF
 		m.notice = "say what it should do"
@@ -655,4 +653,20 @@ func dxRepoLine(inner int, r dxRepoRow, on bool) string {
 		segs = append(segs, c("", dxGapW, ""), cr(r.last, 10, cFaint))
 	}
 	return flG(blank(indent) + row(width, bg, segs...))
+}
+
+// dxFeatureName is the name the dispatch is filed under: the branch's own words,
+// read back as a phrase.
+//
+// WHAT used to become the feature name whole, so a pasted paragraph produced a
+// 75-word name, a 91-character slug and a 96-character tmux session. Naming the
+// feature from the same capped slug the branch uses keeps all four in agreement
+// — name, branch, worktree and session — and nothing is lost: the full sentence
+// is the first line of the prompt (see dxPrompt).
+func dxFeatureName(what string) string {
+	slug := dispatchpkg.Slugify(strings.TrimSpace(what))
+	if slug == "" {
+		return ""
+	}
+	return strings.ReplaceAll(slug, "-", " ")
 }
