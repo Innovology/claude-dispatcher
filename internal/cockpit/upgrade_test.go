@@ -31,7 +31,7 @@ func footerOf(m model) string {
 func TestFooterCarriesTheVersion(t *testing.T) {
 	stampVersion(t, "2.1.1")
 	for _, w := range smokeWidths {
-		for i := 1; i <= 8; i++ {
+		for i := 1; i <= 6; i++ {
 			m := newModel()
 			m.width, m.height = w, 44
 			m = press(m, itoa(i))

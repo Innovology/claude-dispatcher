@@ -1,6 +1,6 @@
 package cockpit
 
-// backlog.go is lens 5 — the BACKLOG: open tickets pulled from GitHub Issues,
+// backlog.go is lens 3 — the BACKLOG: open tickets pulled from GitHub Issues,
 // Linear and Azure Boards into one dispatch queue. The left pane is the ticket
 // table (pick with space, dispatch with enter); the right pane is the selected
 // ticket's detail plus the "dispatch as" preview and the picked list.
@@ -117,6 +117,26 @@ func backlogWrap(s string, w int) []string {
 	return lines
 }
 
+// backlogWhere is the ticket's "product / repo · labels" line, with the clauses
+// it does not have left out. Only GitHub issues resolve to a repo (they are
+// found per repo); a Linear or Azure ticket has neither product nor repo, and
+// the line used to render as " / · In Progress".
+func backlogWhere(t ticket) string {
+	var parts []string
+	switch {
+	case t.product != "" && t.repo != "":
+		parts = append(parts, t.product+" / "+t.repo)
+	case t.repo != "":
+		parts = append(parts, t.repo)
+	case t.product != "":
+		parts = append(parts, t.product)
+	}
+	if t.labels != "" {
+		parts = append(parts, t.labels)
+	}
+	return strings.Join(parts, " · ")
+}
+
 // viewBacklog renders the backlog table (left) and the selected-ticket detail
 // (right). Narrow terminals collapse to the table only.
 func (m model) viewBacklog(w, h int) string {
@@ -201,7 +221,12 @@ func (m model) backlogLeft(list []ticket, pickedCount, leftW, h int) string {
 		if cursor {
 			idColor = cWhite
 		}
-		state := t.age + " old"
+		// Azure work items carry no updated-at, so the age is blank; print
+		// nothing rather than a bare " old".
+		state := ""
+		if t.age != "" {
+			state = t.age + " old"
+		}
 		stateColor := cDim
 		if t.taken != "" {
 			state = "dispatched"
@@ -229,7 +254,9 @@ func (m model) backlogLeft(list []ticket, pickedCount, leftW, h int) string {
 	footer := []string{
 		"  " + fg(cRule, strings.Repeat("─", innerW)) + "  ",
 		backlogSpread(
-			fg(cDim, "space pick · enter dispatch now · ctrl+d dispatch "+itoa(pickedCount)+" picked · s source · 1 floor"),
+			// "triage", not the design's "1 floor": "floor" is the internal lens
+			// id, and the lens bar two rows up calls it triage.
+			fg(cDim, "space pick · enter dispatch now · ctrl+d dispatch "+itoa(pickedCount)+" picked · s source · 1 triage"),
 			"",
 			leftW,
 		),
@@ -256,14 +283,19 @@ func (m model) backlogRight(pickedCount, rightW, h int) string {
 		takenLine = fg(cAmber, "◆ already dispatched as \""+t.taken+"\" — enter would double up")
 	}
 
+	pri := t.pri
+	if t.age != "" {
+		pri += " · " + t.age + " old"
+	}
+
 	var top []string
 	top = append(top, backlogSpread(
 		fg(cDim, t.id+" · "+sourceMeta[t.src].label),
-		fg(priColor[t.pri], t.pri+" · "+t.age+" old"),
+		fg(priColor[t.pri], pri),
 		rightW,
 	))
 	top = append(top, wrapL(fg(cWhite, t.title)))
-	top = append(top, wrapL(fg(cDim, t.product+" / "+t.repo+" · "+t.labels)))
+	top = append(top, wrapL(fg(cDim, backlogWhere(t))))
 	top = append(top, blank)
 	for _, ln := range backlogWrap(t.body, innerW) {
 		top = append(top, wrapL(fg(cMid, ln)))
@@ -280,6 +312,11 @@ func (m model) backlogRight(pickedCount, rightW, h int) string {
 	// and permission mode were printed here as fact and chosen by nothing —
 	// no config, no state and no argument to launchCmd selects either.
 	top = append(top, wrapL(fg(cFaint, "branch ")+fg(cMid, branch)))
+	// A ticket from Linear or Azure names no repo, and a dispatch needs one.
+	// Say so here rather than let enter fail with "repo not found: ".
+	if t.repo == "" {
+		top = append(top, wrapL(fg(cAmber, "◆ no repo on this ticket — dispatch it from the form instead")))
+	}
 
 	// picked list, pinned to the bottom (design's margin-top:auto).
 	var picked []string
@@ -304,8 +341,17 @@ func (m model) backlogRight(pickedCount, rightW, h int) string {
 	return vjoin(append([]string{body}, picked...)...)
 }
 
-// updateBacklog mirrors handleKey('backlog'). All actions are UI-only: they set
-// notices exactly as the mock does.
+// backlogFeature names the feature a ticket would be dispatched as: its title,
+// falling back to the ticket id when the source gave it none.
+func backlogFeature(t ticket) string {
+	if t.title != "" {
+		return t.title
+	}
+	return t.id
+}
+
+// updateBacklog mirrors handleKey('backlog'), with the dispatching keys wired
+// to real launches.
 func (m model) updateBacklog(k string) (model, tea.Cmd) {
 	l := m.backlogList()
 	t := m.ticketSelected()
@@ -324,21 +370,24 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 			m.picked[t.id] = true
 		}
 	case "enter":
-		if t.taken != "" {
+		switch {
+		case t.taken != "":
 			m.notice = t.id + " already has a dispatcher — \"" + t.taken + "\""
-		} else {
-			feature := t.title
-			if feature == "" {
-				feature = t.id
-			}
-			return m, launchCmd(m.cfg, t.repo, feature, t.prompt)
+		case t.repo == "":
+			// Linear and Azure tickets carry no repo. launchCmd would look one
+			// up by an empty name and report "repo not found: ", which reads as
+			// a broken cockpit rather than a ticket the backlog cannot place.
+			m.notice = t.id + " names no repo — dispatch it from the form"
+		default:
+			m.notice = ""
+			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt)
 		}
 	case "ctrl+d":
 		// This used to announce a dispatch and launch nothing — the worst kind
 		// of notice, because the user believes the work is out. It now launches
 		// one dispatcher per picked ticket, skipping any that already has one.
 		var cmds []tea.Cmd
-		var skipped int
+		var skipped, noRepo int
 		for _, bt := range backlogTickets {
 			if !m.picked[bt.id] {
 				continue
@@ -347,23 +396,30 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 				skipped++
 				continue
 			}
-			feature := bt.title
-			if feature == "" {
-				feature = bt.id
+			if bt.repo == "" {
+				noRepo++
+				continue
 			}
-			cmds = append(cmds, launchCmd(m.cfg, bt.repo, feature, bt.prompt))
+			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt))
 		}
 		m.picked = map[string]bool{}
+		var why []string
+		if skipped > 0 {
+			why = append(why, itoa(skipped)+" already taken")
+		}
+		if noRepo > 0 {
+			why = append(why, itoa(noRepo)+" name no repo")
+		}
 		if len(cmds) == 0 {
 			m.notice = "nothing to dispatch"
-			if skipped > 0 {
-				m.notice = itoa(skipped) + " already had a dispatcher"
+			if len(why) > 0 {
+				m.notice = strings.Join(why, " · ")
 			}
 			return m, nil
 		}
 		m.notice = "dispatching " + itoa(len(cmds)) + " " + plural(len(cmds), "ticket", "tickets") + " · one session each"
-		if skipped > 0 {
-			m.notice += " · " + itoa(skipped) + " already taken"
+		if len(why) > 0 {
+			m.notice += " · " + strings.Join(why, " · ")
 		}
 		return m, tea.Batch(cmds...)
 	case "s":

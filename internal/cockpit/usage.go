@@ -1,6 +1,6 @@
 package cockpit
 
-// usage.go is lens 6 — subscription budget by window, model and product. It is a
+// usage.go is lens 4 — subscription budget by window, model and product. It is a
 // display-only lens (no key handler): a faithful port of the design's USAGE
 // panel. The user is on a Claude subscription, so everything here speaks in
 // tokens and effort, never dollars.
@@ -15,8 +15,16 @@ import (
 )
 
 // usageWindows are the rolling budget windows (USAGE.windows). used is the
-// percentage of the window's cap consumed; pace is the burn rate versus a flat
-// draw-down (1.0 = on track).
+// percentage of the window's cap consumed.
+//
+// pace is the burn rate versus a flat draw-down (1.0 = on track) — and is 0,
+// meaning "not measured", for every window the cockpit can see today. Both
+// windows internal/usage computes are *trailing* (the last 5 hours, the last 7
+// days), so there is no elapsed fraction of a window to compare a spend
+// fraction against; a pace only exists once we can see a window's reset. The
+// field stays because 0 is the honest answer and the header reads it: the
+// alternative was the constant 1.0 this used to store, which drew every weekly
+// figure amber and told the user their burn was exactly on budget, always.
 type usageWindow struct {
 	label string
 	used  int
@@ -25,11 +33,13 @@ type usageWindow struct {
 }
 
 // usageModels is the week's spend split by model (USAGE.models). share is the
-// percentage of the week's tokens; avg is the per-session token draw.
+// percentage of the week's tokens; avg is the week's token draw for that model.
+// The design puts a session count on each row; internal/usage counts distinct
+// sessions per window, not per model, so there is nothing to put there.
 type usageModel struct {
-	name            string
-	share, sessions int
-	avg, note       string
+	name      string
+	share     int
+	avg, note string
 }
 
 // usageAdvice is the "what would change it" list (USAGE.advice): first line amber
@@ -67,14 +77,19 @@ func (m model) usageLeft(w int) []string {
 		if win.used > 60 {
 			col = cAmber
 		}
-		paceCol := cMid
-		if win.pace > 1.25 {
-			paceCol = cRed
-		}
 		lead := fg(cMid, padTo(win.label, 12, alignLeft)) + "  " +
 			fg(col, bar(win.used, 18)) + "  " +
 			fg(col, itoa(win.used)+"%")
-		pace := fg(paceCol, usagePace(win.pace)+" pace")
+		// The pace column only appears once a pace has been measured; see
+		// usageWindow. A trailing window has none, so today it never appears.
+		pace := ""
+		if win.pace > 0 {
+			paceCol := cMid
+			if win.pace > 1.25 {
+				paceCol = cRed
+			}
+			pace = fg(paceCol, usagePace(win.pace)+" pace")
+		}
 		out = append(out, usageFill(w, lead, pace))
 		out = append(out, strings.Repeat(" ", 12)+fg(cFaint, truncatePlain(win.note, w-12)))
 	}
@@ -106,9 +121,13 @@ func (m model) usageRight(w int) []string {
 	}
 	ind := func(s string) string { return " " + s }
 
-	out := []string{ind(usageFill(cw,
-		fg(cDim, "by model · this week"),
-		fg(cFaint, "M changes the selected dispatcher")))}
+	// The design's kicker here is "M changes model". No key handler binds M, so
+	// it is not offered: a hint for a key that does nothing is worse than no
+	// hint, because the user tries it.
+	out := []string{ind(fg(cDim, "by model · this week"))}
+	if len(usageModels) == 0 {
+		out = append(out, "", ind(fg(cFaint, "no tokens drawn this week")))
+	}
 
 	for _, md := range usageModels {
 		out = append(out, "")
@@ -116,35 +135,45 @@ func (m model) usageRight(w int) []string {
 		if usgIsPremium(md.name) {
 			col = cAmber
 		}
-		lead := fg(cWhite, padTo(md.name, 9, alignLeft)) + "  " +
-			fg(col, bar(md.share, 16)) + "  " +
-			fg(cWhite, itoa(md.share)+"%")
-		right := fg(cFaint, itoa(md.sessions)+" sessions")
-		out = append(out, ind(usageFill(cw, lead, right)))
+		// The design's per-model session count has no source; see usageModel.
+		out = append(out, ind(fg(cWhite, padTo(md.name, 9, alignLeft))+"  "+
+			fg(col, bar(md.share, 16))+"  "+
+			fg(cWhite, itoa(md.share)+"%")))
 		sub := strings.Repeat(" ", 9) + fg(cFaint, md.avg) + "  " + fg(cFaint, md.note)
 		out = append(out, ind(truncateAnsi(sub, cw)))
 	}
 
 	out = append(out, "")
 	out = append(out, ind(fg(cDim, "by product · this week")))
+	shown := 0
 	for _, name := range productOrder {
 		st := productStats[name]
 		if st.budget <= 0 {
 			continue
 		}
+		shown++
 		col := cGreen
 		if st.budget > 25 {
 			col = cAmber
 		}
-		paceCol := cFaint
-		if st.pace > 1.25 {
-			paceCol = cRed
-		}
 		lead := fg(cMid, padTo(name, 12, alignLeft)) + "  " +
 			fg(col, bar(int(float64(st.budget)*2.5), 14)) + "  " +
 			fg(cMid, padTo(itoa(st.budget)+"%", 5, alignRight))
-		pace := fg(paceCol, usagePaceShort(st.pace))
+		pace := ""
+		if st.pace > 0 {
+			paceCol := cFaint
+			if st.pace > 1.25 {
+				paceCol = cRed
+			}
+			pace = fg(paceCol, usagePaceShort(st.pace))
+		}
 		out = append(out, ind(usageFill(cw, lead, pace)))
+	}
+	// Consumption is measured per session transcript, which carries a model and
+	// a token count but no repo — so there is nothing to attribute to a product
+	// yet. Say that, rather than leave a heading over blank space.
+	if shown == 0 {
+		out = append(out, ind(fg(cFaint, "not attributed to products yet — usage is measured per session, not per repo")))
 	}
 	return out
 }

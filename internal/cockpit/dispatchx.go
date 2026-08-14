@@ -77,14 +77,14 @@ func (m model) dxReset() model {
 // it again.
 func (m model) dxOpen(filter string) model {
 	m = m.dxReset()
-	m.cqDispatch, m.cqWork = true, false
+	m.cqDispatch = true
 	m.dxFilter = filter
 	return m
 }
 
 // dxTouched reports whether anything has been typed into the three text fields.
 // It is what decides whether a navigation key is navigation or text: an
-// untouched form is not a trap, so 1–8, ':' and 'w' still leave it, but the
+// untouched form is not a trap, so 1–6, ':' and 'w' still leave it, but the
 // moment there is a filter or a sentence they are letters again. dxAuto and
 // dxField deliberately do not count — toggling auto or tabbing about is not
 // typing, and must not strand the human on this screen.
@@ -471,7 +471,7 @@ func (m model) dxFooterHelp() string {
 	if m.dxTouched() {
 		return "enter next field · tab moves · ctrl+d dispatch · esc cancel"
 	}
-	return "dispatch · enter next field · tab moves · w running · esc cancel · 1…8 sections"
+	return "dispatch · enter next field · tab moves · w running · esc cancel · 1…6 sections"
 }
 
 // ---- view ---------------------------------------------------------------------

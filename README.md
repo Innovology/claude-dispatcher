@@ -4,7 +4,7 @@
 
 It sits **above** your repos, not inside any one of them. Every dispatcher is a real `claude` session in its own tmux; the cockpit is a fast, keyboard-driven viewer over all of them.
 
-![Triage: one blocker at a time, with the rest of the queue beneath it](docs/triage.svg)
+![Triage: the whole fleet ranked, with a detail panel for the selected row](docs/triage.svg)
 
 ---
 
@@ -14,34 +14,32 @@ You can run ten Claude Code sessions. You can't watch ten terminals. The cockpit
 
 - **One screen, the whole factory** — dispatchers, PRs, deploys, backlog, usage and velocity across every repo and product.
 - **Real data, live** — dispatch records + `git` + `gh` + Linear + Azure Boards, refreshed on an fsnotify watch and a poll. Nothing is mocked.
-- **Keyboard-first** — eight lenses on the number keys, one key per action, a `:` command palette, and `?` for the map.
+- **Keyboard-first** — six lenses on the number keys, one key per action, a `:` command palette, and `?` for the map.
 - **Done means live** — a feature stays open until it's actually deployed, not merely merged.
 - **Tokens, not dollars** — built for a Claude subscription; usage speaks in tokens and effort.
 
-## Eight lenses
+## Six lenses
 
 Switch with the number keys. Each lens is a different question about the same factory.
 
 | | lens | the question it answers |
 |---|---|---|
 | `1` | **triage** | what is blocked, claims done, or waiting on me right now? |
-| `2` | **products** | how is each product (many repos) doing? |
-| `3` | **product** | inside one product: velocity, in-flight lanes, review / team / shipped |
-| `4` | **queue** | what's drafted and ready to dispatch as a batch? |
-| `5` | **backlog** | GitHub Issues · Linear · Azure Boards, in one list |
-| `6` | **usage** | 5-hour and weekly consumption vs my learned limits |
-| `7` | **decisions** | ADRs and decision records per repo |
-| `8` | **velocity** | DORA + what actually reached production |
+| `2` | **products** | how is each product (many repos) doing? `enter` opens one |
+| `3` | **backlog** | GitHub Issues · Linear · Azure Boards, in one list |
+| `4` | **usage** | 5-hour and weekly consumption vs my learned limits |
+| `5` | **decisions** | ADRs and decision records per repo |
+| `6` | **velocity** | DORA + what actually reached production |
 
-**Triage is a queue, not a list.** It shows you one thing — the most urgent ask, what it wants, and the evidence — with its actions on the same screen. Act on it and the next one takes its place. A list makes you choose what to look at; a queue just hands you the next decision.
+**Triage is the whole fleet, ranked.** One table of everything in flight — the dispatchers that want you above the ones getting on with it — and a detail panel for the row under the cursor: what it wants, where it stands, and the keys that answer it. The cursor holds its row across refreshes, so nothing moves under your hands.
 
-**`w` shows what is running.** Everything working away unattended, grouped by product, with what each one is doing right now and how long since it last said anything. Nothing here needs you — that is the point of keeping it off the queue.
+**`w` narrows to what is running.** Everything working away unattended, with how long since each one last said anything. Nothing there needs you — which is why it sorts below what does. `f` cycles the other filters.
 
-![The working view: what is running, and what it is doing](docs/working.svg)
+![The fleet filtered to what is running](docs/working.svg)
 
-**With the queue clear, the same screen becomes the prompt.** Type what to build and press enter; `tab` picks the repo.
+**With the fleet clear, the same screen becomes the prompt.** Type what to build and press enter; `tab` picks the repo.
 
-![Dispatching straight from an empty queue](docs/dispatch.svg)
+![Dispatching straight from an empty fleet](docs/dispatch.svg)
 
 **A product** is many repos — the portfolio roll-up, what is stale, and where the factory is stuck:
 
@@ -67,12 +65,12 @@ There is no API for a Claude subscription's limits — so the cockpit **learns**
 
 ## Actions are real
 
-Every act the queue offers is wired to the live session — the act row shows only what this dispatcher can actually do:
+Every act the table offers is wired to the live session — the key hints show only what the selected dispatcher can actually do:
 
 - **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back)
 - **`y`** on a PR waiting to merge: `gh pr merge --squash --auto`, then mark live. Elsewhere it marks the record shipped, and it is hidden entirely when the dispatcher has produced no commits
-- **`x`** kill the session · **`s`** skip to the back of the queue · **`u`** undo
-- **`d`** open the prompt · **`w`** see what is running · **`enter` on a backlog ticket** dispatches it
+- **`x`** kill the session · **`s`** skip to the back of the table · **`u`** undo
+- **`d`** open the prompt · **`f`** / **`w`** filter the table · **`enter` on a backlog ticket** dispatches it
 
 ## Install
 
@@ -161,7 +159,7 @@ claude-dispatcher init     # first run: writes config, scans for repos, installs
 claude-dispatcher            # open the cockpit
 ```
 
-Press `1`–`8` to move between lenses. On triage, act on what it shows you or `s` to skip; `w` shows what is running, `d` opens the prompt. Elsewhere `j`/`k` move and `enter` opens. `:` is the command palette, `?` lists every key, and `,` opens settings.
+Press `1`–`6` to move between lenses. On triage, `j`/`k` move down the fleet, act on the selected row or `s` to skip it; `f` and `w` filter, `d` opens the prompt. Elsewhere `j`/`k` move and `enter` opens. `:` is the command palette, `?` lists every key, and `,` opens settings.
 
 ## Settings
 
@@ -196,13 +194,13 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 
 | key | action |
 |---|---|
-| `1`–`8` | switch lens (triage · products · product · queue · backlog · usage · decisions · velocity) |
+| `1`–`6` | switch lens (triage · products · backlog · usage · decisions · velocity) |
 | `+` | dispatch new work — repo → feature → prompt |
-| `j` / `k` · `→` / `←` | move · into the detail pane and back |
-| `/` · `t` · `w` | filter · change grouping · show the working ones |
-| `enter` / `a` | attach the selected dispatcher's tmux session |
-| `r` · `y` · `x` | reply · ship (squash-merge) · kill — the last two ask first |
-| `D` · `F` | diff of everything it changed · follow the live output |
+| `j` / `k` · `g` / `G` | move · first row · last row |
+| `f` · `w` | cycle the triage filter · running only, and back |
+| `enter` | attach the selected dispatcher's tmux session · open what is selected |
+| `y` · `x` · `s` | ship (squash-merge) · kill · skip to the back |
+| `d` · `u` | dispatch · put back the last thing you cleared |
 | `,` · `:` · `?` | settings · command palette · all keys |
 | `q` | quit |
 

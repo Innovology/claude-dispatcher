@@ -44,7 +44,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 				age:     blkAge(is.UpdatedAt),
 				labels:  strings.Join(is.Labels, " · "),
 				body:    is.Body,
-				prompt:  "",
+				prompt:  blkPrompt("GitHub issue", id, is.Title, is.Body),
 				taken:   blkTakenBy(ctx.records, id, is.Title),
 			})
 		}
@@ -62,6 +62,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 					age:    blkAge(is.UpdatedAt),
 					labels: is.State,
 					body:   is.Description,
+					prompt: blkPrompt("Linear issue", is.Identifier, is.Title, is.Description),
 					taken:  blkTakenBy(ctx.records, is.Identifier, is.Title),
 				})
 			}
@@ -80,6 +81,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 					pri:    blkNormalizePri(w.Priority),
 					labels: w.State,
 					body:   "",
+					prompt: blkPrompt("Azure Boards work item", id, w.Title, ""),
 					taken:  blkTakenBy(ctx.records, id, w.Title),
 				})
 			}
@@ -87,6 +89,29 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	}
 
 	s.backlogTickets = tickets
+}
+
+// blkPrompt composes what the dispatcher is actually sent when a ticket is
+// dispatched: the ticket's own words and nothing else.
+//
+// Every ticket used to carry an empty prompt. The lens still drew a "dispatch
+// as" section over it, and enter launched a session with no instruction at all
+// — the dispatcher opened on an empty prompt and waited. The body is clipped
+// because a long issue thread is a conversation, not a brief; the dispatcher
+// can read the rest from the ticket itself.
+func blkPrompt(kind, id, title, body string) string {
+	head := kind + " " + id + ": " + title
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return head
+	}
+	const maxBody = 1200
+	if len(body) > maxBody {
+		// Cut on a rune boundary; a half-written rune reaches the shell as a
+		// replacement character.
+		body = strings.ToValidUTF8(body[:maxBody], "") + "\n\n(…truncated — read the rest on the ticket.)"
+	}
+	return head + "\n\n" + body
 }
 
 // blkPriFromLabels maps a GitHub issue's labels onto a cockpit priority band.

@@ -18,7 +18,7 @@ def _palette():
     import os, re
     src = os.path.join(os.path.dirname(__file__), "..", "..",
                        "internal", "cockpit", "palette.go")
-    fg, bg = "#e3e8ee", "#0f1319"
+    fg, bg = "#e2e8f0", "#060b14"
     try:
         text = open(src, encoding="utf-8").read()
         if m := re.search(r'cFg\s*=\s*"(#[0-9a-fA-F]{6})"', text):

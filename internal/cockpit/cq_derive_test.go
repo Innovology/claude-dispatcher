@@ -1,7 +1,7 @@
 package cockpit
 
-// cq_derive_test.go covers the command queue's derivation helpers — the pure
-// functions that decide what each row claims and in what order the queue puts
+// cq_derive_test.go covers the triage lens's derivation helpers — the pure
+// functions that decide what each row claims and in what order the table puts
 // it. They are the difference between an honest screen and a confident wrong
 // one, so every branch is pinned here rather than reached incidentally through
 // a render test.
@@ -71,28 +71,89 @@ func TestCQToneOfPrioritisesFailure(t *testing.T) {
 	}
 }
 
-// The queue's order is the whole point of the lens: a permission ask outranks
-// everything, then severity, then whoever has waited longest.
-func TestCQSortOrder(t *testing.T) {
+// The table's order is the whole point of the lens: what wants you sorts above
+// what does not, then a permission ask outranks everything, then severity, then
+// whoever has waited longest.
+func TestFleetSortOrder(t *testing.T) {
 	now := time.Now()
-	items := []cqItem{
-		{title: "normal-new", kind: "needs", tone: "normal", waited: now.Add(-time.Minute)},
-		{title: "red-old", kind: "needs", tone: "red", waited: now.Add(-2 * time.Hour)},
-		{title: "permission", kind: "permission", tone: "normal", waited: now},
-		{title: "normal-old", kind: "needs", tone: "normal", waited: now.Add(-3 * time.Hour)},
-		{title: "amber", kind: "needs", tone: "amber", waited: now.Add(-time.Minute)},
+	q := func(feature, ask, tone string, waited time.Time) fleetRow {
+		return fleetRow{
+			id: feature, kind: "queue", ask: ask, tone: tone, waited: waited,
+			rank: fleetRank("queue", tone, false),
+		}
 	}
-	cqSort(items)
+	rows := []fleetRow{
+		{id: "clean", kind: "run", rank: fleetRank("run", "normal", false), moved: now},
+		q("normal-new", "needs", "normal", now.Add(-time.Minute)),
+		{id: "stalled", kind: "run", rank: fleetRank("run", "amber", true), moved: now.Add(-time.Hour)},
+		q("red-old", "needs", "red", now.Add(-2*time.Hour)),
+		q("permission", "permission", "normal", now),
+		q("normal-old", "needs", "normal", now.Add(-3*time.Hour)),
+		q("amber", "needs", "amber", now.Add(-time.Minute)),
+	}
+	fleetSort(rows)
 
 	var order []string
-	for _, it := range items {
-		order = append(order, it.title)
+	for _, r := range rows {
+		order = append(order, r.id)
 	}
-	want := []string{"permission", "red-old", "amber", "normal-old", "normal-new"}
+	want := []string{"red-old", "permission", "amber", "normal-old", "normal-new", "stalled", "clean"}
 	for i := range want {
 		if order[i] != want[i] {
-			t.Fatalf("cqSort order = %v, want %v", order, want)
+			t.Fatalf("fleetSort order = %v, want %v", order, want)
 		}
+	}
+}
+
+// Two identical polls must produce the same table. The cursor is a position in
+// this slice, so a pair of rows that swapped between them would move the
+// selection under the reader's hands — straight onto a row `x` would kill.
+func TestFleetSortIsTotal(t *testing.T) {
+	at := time.Now().Add(-time.Hour)
+	rows := []fleetRow{
+		{id: "c", kind: "queue", ask: "needs", tone: "normal", rank: 1, waited: at},
+		{id: "a", kind: "queue", ask: "needs", tone: "normal", rank: 1, waited: at},
+		{id: "b", kind: "run", rank: 3, moved: at},
+		{id: "d", kind: "run", rank: 3, moved: at},
+	}
+	rev := []fleetRow{rows[3], rows[2], rows[1], rows[0]}
+	fleetSort(rows)
+	fleetSort(rev)
+	for i := range rows {
+		if rows[i].id != rev[i].id {
+			t.Fatalf("two orderings of the same rows disagree: %v vs %v", rows, rev)
+		}
+	}
+	if rows[0].id != "a" || rows[1].id != "c" {
+		t.Errorf("an exact tie should break on id, got %v", rows)
+	}
+}
+
+// The glyph legend in the help sheet is written against these four ranks.
+func TestFleetRankNamesTheFourStates(t *testing.T) {
+	cases := []struct {
+		name, kind, tone string
+		stalled          bool
+		want             int
+	}{
+		{"blocking", "queue", "red", false, 0},
+		{"waiting", "queue", "amber", false, 1},
+		{"green and unmerged", "run", "amber", true, 2},
+		{"running clean", "run", "normal", false, 3},
+	}
+	for _, c := range cases {
+		if got := fleetRank(c.kind, c.tone, c.stalled); got != c.want {
+			t.Errorf("%s: fleetRank = %d, want %d", c.name, got, c.want)
+		}
+	}
+	// The glyph and its colour are read off the rank, never off the record's
+	// status, so the two can never disagree with the legend.
+	if fleetGlyph(0) != "●" || fleetGlyph(1) != "○" || fleetGlyph(2) != "◆" || fleetGlyph(3) != "·" {
+		t.Error("the rank glyphs do not match the help sheet's legend")
+	}
+	if fleetRankColor(0) != cRed || fleetRankColor(1) != cRed ||
+		fleetRankColor(2) != cAmber || fleetRankColor(3) != cFaint {
+		t.Error("rank colours: tone picks the glyph, rank picks the colour")
 	}
 }
 
@@ -103,7 +164,7 @@ func TestCQToneRankAndUrgency(t *testing.T) {
 	if cqToneRank("nonsense") != cqToneRank("normal") {
 		t.Errorf("an unknown tone should rank as normal")
 	}
-	if cqUrgency(cqItem{kind: "permission"}) >= cqUrgency(cqItem{kind: "needs"}) {
+	if cqUrgency(fleetRow{ask: "permission"}) >= cqUrgency(fleetRow{ask: "needs"}) {
 		t.Errorf("a permission ask must outrank everything else")
 	}
 }
@@ -128,27 +189,6 @@ func TestCQAgeUnits(t *testing.T) {
 	}
 }
 
-func TestCQCommitsReadsHonestly(t *testing.T) {
-	cases := map[int]string{0: "no commits yet", 1: "1 commit", 4: "4 commits"}
-	for n, want := range cases {
-		if got := cqCommits(n); got != want {
-			t.Errorf("cqCommits(%d) = %q, want %q", n, got, want)
-		}
-	}
-}
-
-func TestCQLeadTextFallsBackHonestly(t *testing.T) {
-	if got := cqLeadText(cqItem{lead: "It wants to merge."}); got != "It wants to merge." {
-		t.Errorf("a real lead should win: %q", got)
-	}
-	if got := cqLeadText(cqItem{want: "approve a merge"}); got != "approve a merge" {
-		t.Errorf("want is the first fallback: %q", got)
-	}
-	if got := cqLeadText(cqItem{}); got != "It stopped and is waiting on you." {
-		t.Errorf("empty item should still say something true: %q", got)
-	}
-}
-
 func TestCQLeadColorByTone(t *testing.T) {
 	cases := map[string]string{"red": cRed, "amber": cAmber, "normal": cDim, "": cDim}
 	for tone, want := range cases {
@@ -164,21 +204,6 @@ func TestCQLabelUppercasesAndNamesTheUnmapped(t *testing.T) {
 	}
 	if got := cqLabel(""); got != "OTHER" {
 		t.Errorf("an unmapped product should read OTHER, got %q", got)
-	}
-}
-
-// "—" rather than "0s ago": a dispatcher whose transcript we cannot read has an
-// unknown last-output time, which is not the same as a silent one.
-func TestCQOutCellDistinguishesUnknownFromSilent(t *testing.T) {
-	text, hex := cqOutCell("")
-	if text != "—" || hex != cFaint {
-		t.Errorf("unknown output = (%q,%q), want (—, faint)", text, hex)
-	}
-	if text, _ = cqOutCell("6s"); text != "6s ago" {
-		t.Errorf("seconds = %q", text)
-	}
-	if _, hex = cqOutCell("4m"); hex != cMid {
-		t.Errorf("a minutes-old write should not read as fresh")
 	}
 }
 
@@ -213,14 +238,14 @@ func TestCQPassLineOmitsAnUncountedTurn(t *testing.T) {
 // Context occupancy is real; the window it fills is not knowable from a model
 // id, so no percentage is ever printed and an unread transcript says nothing.
 func TestCQCtxLineStatesTheCountAndNeverAPercentage(t *testing.T) {
-	got := cqCtxLine(cqItem{ctxKnown: true, ctxTokens: 118_400, model: "opus-5"})
+	got := cqCtxLine(fleetRow{ctxKnown: true, ctxTokens: 118_400, model: "opus-5"})
 	if got != "118k context · opus-5" {
 		t.Errorf("ctx line = %q", got)
 	}
 	if strings.Contains(got, "%") {
 		t.Error("a percentage claims a denominator nobody measured")
 	}
-	if got := cqCtxLine(cqItem{ctxTokens: 5000}); got != "" {
+	if got := cqCtxLine(fleetRow{ctxTokens: 5000}); got != "" {
 		t.Errorf("an unread transcript = %q, want it omitted", got)
 	}
 }
@@ -234,83 +259,60 @@ func TestCQShortModelTrimsTheDateStamp(t *testing.T) {
 	}
 }
 
-// A dispatcher we have read nothing from lights no segment at all, and the
-// strip is then only the chain — every other clause omits itself.
-func TestCQStatusStripSaysNothingItCannotSource(t *testing.T) {
-	bare := cqStatusStrip(cqItem{}, 80)
-	if dispWidth(bare) != cqChainWidth() {
-		t.Errorf("bare strip is %d wide, want just the chain (%d)", dispWidth(bare), cqChainWidth())
+// A dispatcher we have read nothing from says nothing: the panel's status tail
+// drops each clause whole when its source is unavailable, rather than printing
+// a zero turn count or a context window nobody measured.
+func TestFleetMetaSaysNothingItCannotSource(t *testing.T) {
+	if got := fleetMeta(fleetRow{}); got != "" {
+		t.Errorf("bare meta = %q, want every clause omitted", got)
 	}
-	full := cqStatusStrip(cqItem{phase: "act", pass: 2, ctxKnown: true, ctxTokens: 9000}, 80)
-	for _, want := range []string{"turn 2", "9k context"} {
-		if !strings.Contains(full, want) {
-			t.Errorf("strip %q is missing %q", full, want)
+	full := fleetMeta(fleetRow{pass: 2, ctxKnown: true, ctxTokens: 9000, model: "opus-5"})
+	if full != "turn 2 · 9k context · opus-5" {
+		t.Errorf("meta = %q", full)
+	}
+	for _, never := range []string{"%", "of 200k", "auto"} {
+		if strings.Contains(full, never) {
+			t.Errorf("meta %q claims %q, which nothing measures", full, never)
 		}
 	}
 }
 
-// The evidence pane takes no more rows than it has lines: in a terminal the
-// surplus is black, and the queue behind the ask is a better use for it.
-func TestCQSplitPanesDonatesUnusedEvidenceRows(t *testing.T) {
-	if ev, q := cqSplitPanes(20, 40); ev != 15 || q != 5 {
-		t.Errorf("long evidence split = (%d,%d), want the design's 3:1", ev, q)
+// The chain is our inference from the last tool used, so it must be able to say
+// "we do not know" — an empty phase lights no segment at all.
+func TestCQChainLightsOnlyWhatIsKnown(t *testing.T) {
+	lit := func(phase string) int {
+		n := 0
+		for _, sg := range cqChainSegs(phase) {
+			if sg.hex == cWhite {
+				n++
+			}
+		}
+		return n
 	}
-	if ev, q := cqSplitPanes(20, 3); ev != 3 || q != 17 {
-		t.Errorf("short evidence split = (%d,%d), want the surplus donated", ev, q)
+	if lit("") != 0 {
+		t.Error("an unknown phase must light nothing")
 	}
-	if ev, q := cqSplitPanes(0, 10); ev != 0 || q != 0 {
-		t.Errorf("no budget = (%d,%d)", ev, q)
+	if lit("act") != 1 {
+		t.Error("a known phase lights exactly its own segment")
+	}
+	if got := cqPhaseWord(""); got != "—" {
+		t.Errorf("the STAGE cell for an unknown phase = %q, want a dash", got)
 	}
 }
 
-// The excerpt is a real `git diff` over the dispatch's own provenance range,
-// with the headers nobody reads dropped and the signs kept for colouring.
-func TestCQDiffLinesReadsTheRealDiff(t *testing.T) {
-	repo := newTestGitRepo(t, "evidence")
-	writeAndCommit(t, repo, "retry.go", "package retry\n\nconst window = 7\n", "base")
-	base := gitOutput(t, repo, "rev-parse", "HEAD")
-	if out, err := gitCmd(t, repo, "checkout", "-q", "-b", "feature/retries").CombinedOutput(); err != nil {
-		t.Fatalf("git checkout: %v\n%s", err, out)
+// The repo cell drops a product prefix the PRODUCT column two cells to the left
+// already said — but only when there is something left afterwards.
+func TestFleetRepoStemsOnlyTheProductPrefix(t *testing.T) {
+	cases := []struct{ repo, product, want string }{
+		{"cortiva-api", "cortiva", "api"},
+		{"CORTIVA-api", "cortiva", "api"},
+		{"cortiva", "cortiva", "cortiva"},
+		{"shop-api", "cortiva", "shop-api"},
+		{"api", "", "api"},
 	}
-	writeAndCommit(t, repo, "retry.go", "package retry\n\nconst window = 14\n", "widen")
-
-	rec := &state.Dispatch{RepoPath: repo, BaseSHA: base, Branch: "feature/retries"}
-	lines := cqDiffLines(rec, "retry.go")
-	if len(lines) == 0 {
-		t.Fatal("expected hunk lines from a real diff")
-	}
-	var added, removed bool
-	for _, l := range lines {
-		if strings.HasPrefix(l.text, "diff --git") || strings.HasPrefix(l.text, "index ") {
-			t.Errorf("header line survived: %q", l.text)
-		}
-		if l.sign == "+" && strings.Contains(l.text, "window = 14") {
-			added = true
-		}
-		if l.sign == "-" && strings.Contains(l.text, "window = 7") {
-			removed = true
-		}
-	}
-	if !added || !removed {
-		t.Errorf("diff lines = %+v, want the change both ways round", lines)
-	}
-	// A record that never branched has no range to diff, and says so by
-	// producing nothing rather than by diffing the working tree.
-	if got := cqDiffLines(&state.Dispatch{RepoPath: repo}, "retry.go"); got != nil {
-		t.Errorf("no base sha should yield no evidence, got %+v", got)
-	}
-}
-
-// Tool markers are not something a dispatcher told you, so they never reach the
-// pane as its "last output".
-func TestCQSaidLinesDropsToolMarkers(t *testing.T) {
-	got := cqSaidLines([]string{"⚙ Bash", "Ran the suite.", "  ", "⚙ Edit", "Two tests fail."})
-	if len(got) != 2 || got[0].text != "Ran the suite." || got[1].text != "Two tests fail." {
-		t.Errorf("said lines = %+v", got)
-	}
-	for _, l := range got {
-		if l.sign != " " {
-			t.Errorf("a spoken line has no diff sign, got %q", l.sign)
+	for _, c := range cases {
+		if got := fleetRepo(c.repo, c.product); got != c.want {
+			t.Errorf("fleetRepo(%q,%q) = %q, want %q", c.repo, c.product, got, c.want)
 		}
 	}
 }

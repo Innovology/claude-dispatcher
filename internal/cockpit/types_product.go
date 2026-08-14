@@ -1,6 +1,7 @@
 package cockpit
 
-// seed_product.go holds the data owned by the product lens (lens 3): the review
+// types_product.go holds the data owned by the product panel (inside lens 2,
+// the products area): the review
 // queue, the team scoreboard, the shipped history, per-PR diffs and findings,
 // and the per-product velocity tiles. It is a faithful transcription of the
 // design's REVIEWS / TEAM / TEAM_VERDICT / SHIPPED / DIFFS_BY_PR / FINDINGS /

@@ -19,7 +19,7 @@ import (
 const usage = `claude-dispatcher — dispatch cockpit for Claude Code sessions
 
 Usage:
-  claude-dispatcher            open the cockpit (eight lenses)
+  claude-dispatcher            open the cockpit (six lenses)
   claude-dispatcher init       write config, discover repos, install the status hook
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version

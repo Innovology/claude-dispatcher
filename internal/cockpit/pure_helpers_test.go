@@ -283,38 +283,6 @@ func TestStqStartOf(t *testing.T) {
 	}
 }
 
-func TestStqLoadQueue(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
-
-	// Missing file degrades to an empty, non-nil slice.
-	if got := stqLoadQueue(); got == nil || len(got) != 0 {
-		t.Errorf("missing queue.json: got %v, want empty non-nil", got)
-	}
-
-	// Malformed JSON degrades the same way.
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	qpath := filepath.Join(dir, "queue.json")
-	if err := os.WriteFile(qpath, []byte("not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := stqLoadQueue(); got == nil || len(got) != 0 {
-		t.Errorf("malformed queue.json: got %v, want empty non-nil", got)
-	}
-
-	// Valid JSON parses into items.
-	valid := `[{"feature":"csv export","repo":"shop-web","prompt":"export a csv"}]`
-	if err := os.WriteFile(qpath, []byte(valid), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got := stqLoadQueue()
-	if len(got) != 1 || got[0].feature != "csv export" || got[0].repo != "shop-web" {
-		t.Errorf("stqLoadQueue = %+v", got)
-	}
-}
-
 func TestStqAge(t *testing.T) {
 	if got := stqAge(time.Time{}); got != "" {
 		t.Errorf("zero time: got %q", got)

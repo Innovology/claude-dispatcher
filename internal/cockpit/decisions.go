@@ -1,6 +1,6 @@
 package cockpit
 
-// decisions.go is the DECISIONS lens (lens 7): a per-repo view of the
+// decisions.go is the DECISIONS lens (lens 5): a per-repo view of the
 // architecture decision records — ADRs and decision trees — that each repo's
 // plugin renders. The left column is "where decisions live" (the repos plus the
 // installed plugins), the middle is the selected repo's records, and the right
@@ -33,8 +33,14 @@ type plugin struct {
 	repos                      []string
 }
 
-// pluginForRepo returns the first plugin wired to repo, or the builtin fallback
-// (plugins[3]) when none is. Mirrors PLUGINS.filter(...)[0] || PLUGINS[3].
+// pluginForRepo returns the first plugin wired to repo, else the builtin
+// fallback ("cockpit records"), else the zero plugin.
+//
+// The design's fallback is PLUGINS[3] — its mock ships exactly four. The
+// collector ships one or two, so the literal port indexed past the end of the
+// slice; it only ever survived because collectDecisions puts every repo without
+// an ADR directory in the builtin's repo list, so the search never actually
+// missed. Look the fallback up by id instead of by position.
 func pluginForRepo(repo string) plugin {
 	for _, p := range plugins {
 		for _, r := range p.repos {
@@ -43,7 +49,12 @@ func pluginForRepo(repo string) plugin {
 			}
 		}
 	}
-	return plugins[3]
+	for _, p := range plugins {
+		if p.id == "builtin" {
+			return p
+		}
+	}
+	return plugin{}
 }
 
 // pluginHasRepo reports whether p is wired to repo.
@@ -360,28 +371,38 @@ func (m model) updateDecisions(k string) (model, tea.Cmd) {
 	case "K":
 		m.decRepo = maxi(m.decRepo-1, 0)
 		m.decCursor = 0
+	// a/s/o report what the cockpit can actually do, which is read. The lens
+	// scans each repo's ADR folder; nothing here writes a record, opens an
+	// editor or calls a plugin, and the notices used to say otherwise —
+	// "accepted N · recorded in <repo>" for a key that touched no file.
 	case "a":
 		if dd != nil {
-			m.notice = "accepted " + dd.id + " · recorded in " + repo
+			m.notice = dd.id + " is " + dd.status + " in " + repo + " · the cockpit reads these records, it does not write them"
 		} else {
 			m.notice = ""
 		}
 	case "s":
 		if dd != nil {
-			m.notice = dd.id + " superseded — write the replacement"
+			m.notice = "supersede " + dd.id + " by writing the replacement in " + repo + " · the cockpit picks it up on the next scan"
 		} else {
 			m.notice = ""
 		}
 	case "e":
+		if len(plugins) == 0 {
+			m.notice = ""
+			break
+		}
 		next := (m.pluginCursor + 1) % len(plugins)
 		m.pluginCursor = next
-		m.notice = "decisions for " + repo + " → " + plugins[next].name
+		// The cursor picks which tool the pane describes. It does not rewire the
+		// repo — which tool renders a repo is decided by what is on disk.
+		m.notice = "showing " + plugins[next].name
 	case "o":
-		id := ""
 		if dd != nil {
-			id = dd.id
+			m.notice = dd.id + " lives in " + repo + " · no opener wired yet"
+		} else {
+			m.notice = ""
 		}
-		m.notice = "opening " + id + " in " + plugins[clampCursor(m.pluginCursor, len(plugins))].host
 	case "right", "l":
 		m.pane = "detail"
 	case "left", "h", "esc":

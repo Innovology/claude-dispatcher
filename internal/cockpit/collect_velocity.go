@@ -1,12 +1,17 @@
 package cockpit
 
 // collect_velocity.go fills the VELOCITY lens (velocity.go) from the dispatch
-// record history alone — no external service. "Output" is what actually reached
-// production: a feature is live when it has a DeployedAt (or, lacking a deploy
-// workflow, a merge that flipped it to done). Everything is bucketed by ISO
-// week. DORA metrics we can honestly derive (deploy frequency, lead time, work
-// in progress) are computed; the rest render as "—" with a neutral band rather
-// than a fabricated number.
+// record history and the lifecycle event log — no external service. "Output" is
+// what actually reached production: a feature is live when it has a DeployedAt
+// (or, lacking a deploy workflow, a merge that flipped it to done). Everything
+// is bucketed by ISO week. DORA metrics we can honestly derive (deploy
+// frequency, lead time, work in progress) are computed; the rest render as "—"
+// with a neutral band rather than a fabricated number.
+//
+// "Where the time goes" used to be four hardcoded percentages — the design's
+// mock, shipped as if measured. It is now summed from events.jsonl, which is
+// the only record of who was holding a session and for how long, and it renders
+// nothing at all on a portfolio that has not logged an event yet.
 
 import (
 	"fmt"
@@ -89,6 +94,110 @@ func velLiveTime(r *state.Dispatch) (time.Time, bool) {
 		return r.UpdatedAt, true
 	}
 	return time.Time{}, false
+}
+
+// velDwellState buckets a lifecycle event by the state it leaves a dispatcher
+// in, so the interval that follows can be billed to someone. "" means the event
+// says nothing about who is holding the work (SessionEnd, or anything the hook
+// grows later), and the interval after it is billed to nobody.
+func velDwellState(event string) string {
+	switch event {
+	case "SessionStart", "UserPromptSubmit":
+		return "working"
+	case "Stop", "Notification:idle_prompt":
+		return "waiting"
+	case "Notification:permission_prompt":
+		return "blocked"
+	}
+	return ""
+}
+
+// velDwell is measured time, per state, across every dispatcher in the window.
+// waits keeps each individual hand-back to the human so the factory metric can
+// quote a median rather than only the total.
+type velDwell struct {
+	working, waiting, blocked time.Duration
+	waits                     []time.Duration
+}
+
+// velDwellSince walks the lifecycle log and sums how long dispatchers spent
+// working, waiting on the human, and stopped on a permission prompt.
+//
+// The gap between two consecutive events belongs to the state the earlier one
+// left the dispatcher in — that is the only thing the log can tell us, and it
+// is enough for the split the lens draws. Events are grouped per dispatcher (by
+// session id when the dispatcher id is missing, which is how a session started
+// outside the cockpit is logged) because two dispatchers running side by side
+// interleave in one file and the gaps between their events are not intervals.
+//
+// Nothing is billed after the last event of a dispatcher: a session that has
+// gone quiet is not thereby "waiting on you" forever.
+func velDwellSince(cut time.Time) velDwell {
+	byKey := map[string][]state.Event{}
+	for _, ev := range state.LoadEvents() {
+		key := ev.DispatcherID
+		if key == "" {
+			key = ev.SessionID
+		}
+		if key == "" || ev.Time.Before(cut) {
+			continue
+		}
+		byKey[key] = append(byKey[key], ev)
+	}
+
+	var d velDwell
+	for _, list := range byKey {
+		// The log is append-only and therefore already chronological, but it is
+		// written by a process per hook invocation — sort rather than trust the
+		// interleaving of two hooks that fired in the same instant.
+		sort.Slice(list, func(i, j int) bool { return list[i].Time.Before(list[j].Time) })
+		for i := 0; i+1 < len(list); i++ {
+			span := list[i+1].Time.Sub(list[i].Time)
+			if span <= 0 {
+				continue
+			}
+			switch velDwellState(list[i].Event) {
+			case "working":
+				d.working += span
+			case "waiting":
+				d.waiting += span
+				d.waits = append(d.waits, span)
+			case "blocked":
+				d.blocked += span
+			}
+		}
+	}
+	return d
+}
+
+// velSplitFrom turns measured dwell into the lens's percentage split. A state
+// with no time in it is dropped rather than drawn as a 0% bar, and a window
+// with no events at all returns an empty (non-nil) split so the lens omits the
+// section instead of showing a shape with nothing in it.
+func velSplitFrom(d velDwell) []splitPart {
+	total := d.working + d.waiting + d.blocked
+	out := []splitPart{}
+	if total <= 0 {
+		return out
+	}
+	for _, p := range []struct {
+		label string
+		d     time.Duration
+		color string
+	}{
+		{"dispatcher working", d.working, cGreen},
+		{"waiting on you", d.waiting, cAmber},
+		{"blocked on approval", d.blocked, cRed},
+	} {
+		if p.d <= 0 {
+			continue
+		}
+		// Seconds, not raw nanoseconds: a busy portfolio's totals overflow an
+		// int64 once multiplied by 100.
+		pct := int(p.d.Seconds()/total.Seconds()*100 + 0.5)
+		out = append(out, splitPart{label: p.label, pct: pct, color: p.color})
+	}
+	return out
 }
 
 // velFreqBand grades a deploys-per-day rate onto DORA bands.
@@ -233,20 +342,23 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 		{key: "time to restore", v: "—", unit: "", band: "high", note: "no incident data"},
 	}
 
+	// ---- dwell, from the lifecycle log --------------------------------------
+	// The one place the cockpit can see inside a session: who was holding the
+	// work, and for how long. Same window as everything else on the lens.
+	dwell := velDwellSince(now.AddDate(0, 0, -7*nWeeks))
+	s.doraSplit = velSplitFrom(dwell)
+
 	// ---- factory metrics ----------------------------------------------------
+	waitV, waitNote := "—", "median hand-back to you · no lifecycle events yet"
+	if med := velMedianDur(dwell.waits); med > 0 {
+		waitV = velHumanDur(med)
+		waitNote = fmt.Sprintf("median of %d hand-backs to you", len(dwell.waits))
+	}
 	s.doraFactory = []doraMetric{
 		{key: "first-pass rate", v: "—", unit: "", band: "medium", note: "claims accepted without rework"},
-		{key: "waiting on you", v: "—", unit: "", band: "medium", note: "needs-input dwell · no event data"},
+		{key: "waiting on you", v: waitV, unit: "", band: "medium", note: waitNote},
 		{key: "turns per feature", v: "—", unit: "", band: "medium", note: "no turn data"},
 		{key: "work in progress", v: itoa(inFlight), unit: "", band: "medium", spark: velSpark(sparkVals), note: "dispatchers not yet live"},
-	}
-
-	// ---- where a feature's time goes (rough, honest split) ------------------
-	s.doraSplit = []splitPart{
-		{label: "agent working", pct: 44, color: cGreen},
-		{label: "waiting on you", pct: 33, color: cAmber},
-		{label: "review", pct: 14, color: cBlue},
-		{label: "ci + deploy", pct: 9, color: cDim},
 	}
 
 	// ---- by-week DORA table -------------------------------------------------
@@ -270,10 +382,11 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 	s.doraWeeks = dweeks
 
 	// ---- busy, not velocity -------------------------------------------------
+	// The design's fourth row ("tools · — · motion") is dropped: nothing counts
+	// tool calls, so it was a label with a dash where a figure should be.
 	s.notVelocity = []notVelocityRow{
 		{"dispatchers out", itoa(inFlight), "a queue, not an output"},
-		{"commits", itoa(weekCommits) + " this week", "an agent can write a thousand and ship none"},
+		{"commits", itoa(weekCommits) + " this week", "a dispatcher can write a thousand and ship none"},
 		{"tokens", "see usage", "a cost, and it is on the usage lens"},
-		{"tools", "—", "motion"},
 	}
 }

@@ -1,16 +1,15 @@
 package cockpit
 
-// collect_stale_queue.go fills three product-lens fields: s.staleRepos (repos
-// with no active dispatch whose last commit is old), s.working (dispatches
-// currently in flight) and s.queueItems (drafted dispatches read from the
-// state dir's queue.json). Every git/exec/parse is guarded; missing inputs
-// degrade to honest empty states.
+// collect_stale.go fills two fields the products lens and its product panel
+// read: s.staleRepos (repos with no active dispatch whose last commit is old)
+// and s.working (dispatches currently in flight). Every git/exec/parse is
+// guarded; missing inputs degrade to honest empty states.
+//
+// It used to fill a third, s.queueItems, from the state dir's queue.json for
+// the queue lens; that lens is gone in v4 and nothing reads queue.json now.
 
 import (
-	"encoding/json"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,9 +22,8 @@ import (
 // surfaced as stale.
 const stqStaleDays = 14
 
-// collectStaleQueue fills the stale-repo list, the working list and the draft
-// queue.
-func collectStaleQueue(ctx *collectCtx, s *snapshot) {
+// collectStale fills the stale-repo list and the working list.
+func collectStale(ctx *collectCtx, s *snapshot) {
 	// Which repos have an active dispatch on them (by path or name).
 	activePaths := map[string]bool{}
 	activeNames := map[string]bool{}
@@ -76,9 +74,6 @@ func collectStaleQueue(ctx *collectCtx, s *snapshot) {
 		})
 	}
 	s.working = work
-
-	// queueItems: drafts from <state dir>/queue.json, if present.
-	s.queueItems = stqLoadQueue()
 }
 
 // stqActive reports whether a dispatch status counts as still in flight, for
@@ -117,39 +112,6 @@ func stqStartOf(d *state.Dispatch) time.Time {
 		return d.CreatedAt
 	}
 	return d.UpdatedAt
-}
-
-// stqQueueDraft is one row of queue.json.
-type stqQueueDraft struct {
-	Feature string `json:"feature"`
-	Repo    string `json:"repo"`
-	Prompt  string `json:"prompt"`
-}
-
-// stqLoadQueue reads the drafted batch from <state dir>/queue.json. A missing
-// or unreadable/unparsable file yields an empty (non-nil) slice.
-func stqLoadQueue() []queueItem {
-	items := []queueItem{}
-	path := filepath.Join(state.Dir(), "queue.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return items
-	}
-	var drafts []stqQueueDraft
-	if json.Unmarshal(raw, &drafts) != nil {
-		return items
-	}
-	for _, d := range drafts {
-		items = append(items, queueItem{
-			feature: d.Feature,
-			repo:    d.Repo,
-			prompt:  d.Prompt,
-			status:  "ready",
-			color:   cGreen,
-			edge:    cFillGreen,
-		})
-	}
-	return items
 }
 
 // stqAge renders a timestamp as a short relative age like "4m", "2h", "3d".

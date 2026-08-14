@@ -111,3 +111,30 @@ func TestClLeftKeepsTheCursorOnScreen(t *testing.T) {
 		t.Errorf("a list that fits should not count itself:\n%s", got)
 	}
 }
+
+// A lens digit is a "take me somewhere else" key, so it must not leave the
+// assignment editor open behind it. The editor lets digits through to the
+// router (that is how you leave), but until v4 it stayed open, and coming back
+// to lens 2 dropped you into a half-marked editor you did not ask for.
+func TestALensDigitClosesTheAssignmentEditor(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	installFixture(t)
+
+	m := newModel()
+	m.width, m.height = 190, 44
+	m = press(m, "2")
+	m = press(m, "a")
+	if !m.clOpen {
+		t.Fatal("a should open the assignment editor")
+	}
+	m = press(m, "space") // mark whatever is under the cursor
+	m = press(m, "3")
+	if m.lens != "backlog" {
+		t.Errorf("3 from the editor should reach the backlog, lens = %q", m.lens)
+	}
+	if m.clOpen || m.clNaming || len(m.clMarked) != 0 {
+		t.Errorf("the editor survived the digit: open=%v naming=%v marked=%d",
+			m.clOpen, m.clNaming, len(m.clMarked))
+	}
+}

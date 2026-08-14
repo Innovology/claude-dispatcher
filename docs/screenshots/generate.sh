@@ -43,13 +43,13 @@ shoot() { # name  title  key...
 }
 
 echo "capturing…"
-shoot triage    "Triage: the command queue"        1
-shoot working   "The working view"                 w
+shoot triage    "Triage: the fleet, ranked"        1
+shoot working   "The running filter"               w
 shoot products  "The products lens"                w 2
 shoot assign    "Assigning repos to products"      a
-shoot backlog   "The backlog lens"                 5
-shoot usage     "The usage lens"                   6
-shoot velocity  "The velocity lens"                8
-shoot dispatch  "Dispatching from the queue"       1 d
+shoot backlog   "The backlog lens"                 3
+shoot usage     "The usage lens"                   4
+shoot velocity  "The velocity lens"                6
+shoot dispatch  "Dispatching from the fleet"       1 d
 
 echo "done."

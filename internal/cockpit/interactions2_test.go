@@ -113,12 +113,18 @@ func TestRunCommandBranches(t *testing.T) {
 		t.Errorf("runCommand('usage') lens = %q", mm.lens)
 	}
 
-	// A "product X" command opens the product lens.
+	// A "product X" command opens the product panel — and has to seed it the
+	// same way enter on the products list does, or the panel comes up on
+	// whichever tab and shipped row the last visit left behind.
 	m = newModel()
+	m.rightTab, m.shipCursor = "shipped", 4
 	m.paletteOpen, m.paletteText = true, "product"
 	mm, _ = m.runCommand()
 	if mm.lens != "product" {
 		t.Errorf("runCommand('product') lens = %q", mm.lens)
+	}
+	if mm.rightTab != "overview" || mm.shipCursor != 0 {
+		t.Errorf("runCommand('product') left a stale panel: tab=%q shipCursor=%d", mm.rightTab, mm.shipCursor)
 	}
 
 	// A command outside the direct map / product prefix leaves the lens
@@ -270,7 +276,7 @@ func TestBacklogDispatchAndPickAll(t *testing.T) {
 	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "5") // backlog lens, cursor 0: an untaken ticket
+	m = press(m, "3") // backlog lens, cursor 0: an untaken ticket
 
 	// Untaken ticket: enter returns a launchCmd (m.cfg is nil, so the cmd
 	// itself degrades harmlessly if ever invoked — see actions_test.go).
@@ -324,7 +330,7 @@ func TestBacklogDispatchAndPickAll(t *testing.T) {
 func TestDecisionsRemainingKeys(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "7")
+	m = press(m, "5")
 	for _, k := range []string{"down", "up", "o", "right", "esc"} {
 		m = press(m, k)
 		renderClean(t, m, "decisions "+k)
@@ -336,9 +342,8 @@ func TestDecisionsEmptyRepoBranch(t *testing.T) {
 	defer restoreVars(saved)
 	decisions = map[string][]decision{"empty-repo": {}}
 	decisionRepoOrder = []string{"empty-repo"}
-	// pluginForRepo falls back to plugins[3] by convention (mirrors the
-	// design's PLUGINS[3] builtin fallback), so the slice must carry at
-	// least 4 entries even in this synthetic scenario.
+	// pluginForRepo falls back to the plugin whose id is "builtin", so the
+	// slice must carry one even in this synthetic scenario.
 	plugins = []plugin{
 		{id: "p0", name: "p0"}, {id: "p1", name: "p1"}, {id: "p2", name: "p2"},
 		{id: "builtin", name: "cockpit records"},
@@ -346,7 +351,7 @@ func TestDecisionsEmptyRepoBranch(t *testing.T) {
 
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "7")
+	m = press(m, "5")
 	m = press(m, "a")
 	if m.notice != "" {
 		t.Errorf("accept on an empty record list should leave no notice, got %q", m.notice)
@@ -386,7 +391,10 @@ func TestProductReviewTabFull(t *testing.T) {
 	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "3") // product lens, first product in the fixture
+	// The product view is a panel inside lens 2 now: 2 selects the products
+	// lens, enter opens the panel on the product under the cursor.
+	m = press(m, "2")
+	m = press(m, "enter")
 	m = press(m, "R")
 
 	// cursor 0 is a "mine" review: approving your own PR is refused.
@@ -439,9 +447,13 @@ func TestProductReviewTabFull(t *testing.T) {
 }
 
 func TestProductTeamTabNoop(t *testing.T) {
+	// The fixture matters: with no products, enter opens nothing and the test
+	// would silently stop exercising the team tab.
+	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "3")
+	m = press(m, "2")
+	m = press(m, "enter")
 	m = press(m, "T")
 	m = press(m, "j") // team tab has no key handling: should just no-op
 	renderClean(t, m, "team tab j")
@@ -451,17 +463,15 @@ func TestProductShippedTabFull(t *testing.T) {
 	installFixture(t)
 	m := newModel()
 	m.width, m.height = 190, 44
-	m = press(m, "3")
+	m = press(m, "2")
+	m = press(m, "enter")
 	m = press(m, "S")
 	m = press(m, "j")
 	m = press(m, "k")
-	m = press(m, "c")
-	if !strings.Contains(m.notice, "clone") {
-		t.Errorf("clone notice = %q", m.notice)
-	}
-	m = press(m, "o")
-	if !strings.Contains(m.notice, "opening") {
-		t.Errorf("open notice = %q", m.notice)
+	// `o` returns a command that really opens the PR; it used to print
+	// "opening #144" and open nothing. `c` is gone — nothing implemented it.
+	if _, cmd := m.updateProduct("o"); cmd == nil {
+		t.Error("o should return a command that opens the pull request")
 	}
 	m = press(m, "enter")
 	if !m.resumeOpen {
@@ -481,8 +491,10 @@ func TestProductShippedTabFull(t *testing.T) {
 	if m.resumeOpen {
 		t.Error("submitting resume should close the overlay")
 	}
-	if !strings.Contains(m.notice, "resumed session") {
-		t.Errorf("resume notice = %q", m.notice)
+	// An empty prompt launches nothing and must not claim otherwise. It used to
+	// announce "dispatched again" while returning no command at all.
+	if !strings.Contains(m.notice, "nothing to dispatch") {
+		t.Errorf("empty resume notice = %q", m.notice)
 	}
 }
 
@@ -666,10 +678,10 @@ func TestCtxForgeBranches(t *testing.T) {
 	}
 }
 
-// ---- default-branch lenses: queue/usage/velocity accept unhandled keys -------
+// ---- default-branch lenses: usage/velocity accept unhandled keys ------------
 
 func TestPassthroughLensesIgnoreKeys(t *testing.T) {
-	for _, lens := range []string{"4", "6", "8"} {
+	for _, lens := range []string{"4", "6"} {
 		m := newModel()
 		m.width, m.height = 190, 44
 		m = press(m, lens)

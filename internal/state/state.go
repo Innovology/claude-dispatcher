@@ -11,6 +11,7 @@
 package state
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -185,4 +186,37 @@ func AppendEvent(ev Event) {
 	}
 	defer func() { _ = f.Close() }()
 	_, _ = f.Write(append(b, '\n'))
+}
+
+// LoadEvents reads events.jsonl, oldest first (the order it was appended in).
+// A missing log and a malformed line are both non-events: the writer swallows
+// its own failures so it can never disturb a session, which means a truncated
+// last line is normal and must not cost the reader the rest of the log.
+//
+// Callers that need the log grouped or ordered per dispatcher should do that
+// themselves — this returns the file as written, one Event per line.
+func LoadEvents() []Event {
+	f, err := os.Open(filepath.Join(Dir(), "events.jsonl"))
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+
+	var out []Event
+	sc := bufio.NewScanner(f)
+	// Lines carry a cwd, so the default 64K token limit is generous already;
+	// raise the cap anyway rather than have one long path end the scan.
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var ev Event
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }

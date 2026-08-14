@@ -128,7 +128,11 @@ func (m model) runCommand() (model, tea.Cmd) {
 	}
 	lens := m.lens
 	if strings.HasPrefix(c.name, "product") {
+		// The product panel is not a lens the palette can just name: opening it
+		// has to seed the same state `enter` on the products list does, or the
+		// panel comes up on whichever tab and shipped row the last visit left.
 		lens = "product"
+		m.rightTab, m.shipCursor = "overview", 0
 	} else if d, ok := direct[c.name]; ok {
 		lens = d
 	}
@@ -203,18 +207,28 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	// the letters are the palette's — and above '?' and 'u', which are text
 	// while the dispatch prompt has the keyboard.
 	if m.lens == "floor" {
-		// Once before, so the offsets belong to the head that is on screen as the
-		// key is pressed — the first key of a session would otherwise land on an
-		// unseeded id and snap the pane the human had just scrolled. Once after,
-		// because an act or a skip can change the head.
-		m = m.snapPanes()
+		// Once before, so the cursor is keyed to the row that is on screen as the
+		// key is pressed — the first key of a session would otherwise act on an
+		// unseeded id. Once after, because an act or a skip can move the table
+		// out from under it.
+		m = m.fleetSync()
 		mm, cmd, handled := m.updateFloorQueue(k)
-		mm = mm.snapPanes()
+		mm = mm.fleetSync()
 		if handled {
 			return mm, cmd
 		}
 		m = mm
 	}
+	// Naming a product is text entry, so it belongs with the other modes that
+	// own the keyboard — settings, the dispatch form, the palette. Without this
+	// guard the global keys resolved first: `q` killed the cockpit mid-name and
+	// a digit switched lens, both discarding what had been typed, and the footer
+	// promised only "esc cancels".
+	if m.clNaming {
+		mm, cmd := m.updateProducts(k)
+		return mm, cmd
+	}
+
 	if k == "?" {
 		m.helpOpen = true
 		return m, nil
@@ -254,10 +268,12 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.lens = lensOrder[k[0]-'1']
 		m.notice = ""
 		// Leaving the lens leaves its modes: coming back to a half-filled
-		// dispatch form or the working view would be a state the human did not
-		// ask for. dxReset closes the form and clears all four fields.
+		// dispatch form, or to the products lens still holding an assignment
+		// editor the human walked away from, is a state they did not ask for.
+		// dxReset closes the form and clears all four fields.
 		m = m.dxReset()
-		m.cqWork = false
+		m.clOpen, m.clNaming, m.clNewName = false, false, ""
+		m.clMarked = map[string]bool{}
 		return m, nil
 	}
 

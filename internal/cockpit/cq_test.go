@@ -1,6 +1,6 @@
 package cockpit
 
-// cq_test.go covers the triage lens's key state machine and its three render
+// cq_test.go covers the triage lens's key state machine and its two render
 // modes. Like fixtures_test.go it installs its own data and restores it, so
 // nothing here depends on what another test left in the package vars.
 
@@ -13,76 +13,95 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
-// installCQFixture puts two asks and two running dispatchers on the triage lens.
-func installCQFixture(t *testing.T) {
+// installFleetFixture puts two asks and one running dispatcher on the triage
+// lens, already in the collector's rank order.
+func installFleetFixture(t *testing.T) {
 	t.Helper()
-	prevItems, prevWorking, prevOut := cqItems, cqWorking, cqLastOutput
-	t.Cleanup(func() { cqItems, cqWorking, cqLastOutput = prevItems, prevWorking, prevOut })
+	prevFleet, prevOut := fleet, cqLastOutput
+	t.Cleanup(func() { fleet, cqLastOutput = prevFleet, prevOut })
 
-	cqItems = []cqItem{
+	now := time.Now()
+	fleet = []fleetRow{
 		{
-			id: "id-one", kind: "permission", product: "alpha", title: "one",
-			repo: "alpha-api", ref: "#1", age: "4m", want: "approve a permission",
-			tone: "amber", lead: "It is blocked and waiting on you.",
-			detail: "2 commits",
+			id: "id-one", kind: "queue", rank: 1, ask: "permission", product: "alpha",
+			feature: "one", repo: "alpha-api", ref: "#1", stage: "act", pass: 2,
+			signal: "approve a permission", tone: "amber",
+			why: "It is blocked and waiting on you.",
 			acts: []cqAct{
 				{k: "⏎", d: "attach", ok: "attaching to alpha-api session…", keep: true},
 				{k: "x", d: "kill", ok: "killed \"one\""},
 				{k: "s", d: "skip"},
 			},
+			moved: now.Add(-4 * time.Minute), waited: now.Add(-4 * time.Minute),
 		},
 		{
-			id: "id-two", kind: "turn-done", product: "beta", title: "two",
-			repo: "beta-svc", ref: "feature/two", age: "1h", want: "it finished a turn",
-			tone: "normal", lead: "Done — want me to open a PR?",
-			detail: "1 commit",
+			id: "id-two", kind: "queue", rank: 1, ask: "turn-done", product: "beta",
+			feature: "two", repo: "beta-svc", ref: "feature/two", stage: "ship", pass: 1,
+			signal: "it finished a turn", tone: "normal",
+			why: "Done — want me to open a PR?",
 			acts: []cqAct{
 				{k: "⏎", d: "attach", ok: "attaching to beta-svc session…", keep: true},
 				{k: "y", d: "mark shipped", ok: "\"two\" marked shipped"},
 				{k: "s", d: "skip"},
 			},
+			moved: now.Add(-time.Hour), waited: now.Add(-time.Hour),
 		},
-	}
-	cqWorking = []cqGroup{
-		{name: "alpha", rows: []cqWorkRow{{feature: "three", repo: "alpha-web", phase: "act", pass: 2, out: "6s"}}},
+		{
+			id: "id-three", kind: "run", rank: 3, product: "alpha",
+			feature: "three", repo: "alpha-web", stage: "observe", pass: 2,
+			tone: "normal",
+			acts: []cqAct{
+				{k: "⏎", d: "attach", ok: "attaching to alpha-web session…", keep: true},
+				{k: "x", d: "kill", ok: "killed \"three\""},
+			},
+			moved: now.Add(-6 * time.Second), waited: now.Add(-6 * time.Second),
+		},
 	}
 	cqLastOutput = "6s"
 }
 
 func cqModel(t *testing.T) model {
 	t.Helper()
-	installCQFixture(t)
+	installFleetFixture(t)
 	m := newModel()
 	m.width, m.height = 130, 40
 	return m
 }
 
-func cqTitles(m model) string {
+func fleetFeatures(m model) string {
 	var out []string
-	for _, it := range m.cqQueue() {
-		out = append(out, it.title)
+	for _, r := range m.fleetRows() {
+		out = append(out, r.feature)
 	}
 	return strings.Join(out, ",")
 }
 
-// The head is the only thing you act on; `s` sends it to the back.
+// `s` sends the row under the cursor to the back and brings the next one up
+// under it. A running dispatcher is not asking for anything, so there is
+// nothing to skip past.
 func TestCQSkipRotates(t *testing.T) {
 	m := cqModel(t)
-	if got := cqTitles(m); got != "one,two" {
-		t.Fatalf("queue = %s", got)
+	if got := fleetFeatures(m); got != "one,two,three" {
+		t.Fatalf("fleet = %s", got)
 	}
 	m = press(m, "s")
-	if got := cqTitles(m); got != "two,one" {
-		t.Errorf("after skip queue = %s, want two,one", got)
+	if got := fleetFeatures(m); got != "two,three,one" {
+		t.Errorf("after skip fleet = %s, want two,three,one", got)
 	}
+	if r, _ := m.fleetSel(); r.feature != "two" {
+		t.Errorf("the cursor should stay put and take the next row, got %q", r.feature)
+	}
+	// Down onto the running row: skip is not offered there and must not reorder.
+	m = press(m, "k") // already at the top
+	m = press(m, "j")
 	m = press(m, "s")
-	if got := cqTitles(m); got != "one,two" {
-		t.Errorf("after two skips queue = %s, want one,two", got)
+	if got := fleetFeatures(m); got != "two,three,one" {
+		t.Errorf("skipping a running row reordered the table: %s", got)
 	}
 }
 
 // An act flashes for cqFlashLinger, swallows every key while it does, then
-// clears the item it was fired on and leaves an undo behind.
+// clears the row it was fired on and leaves an undo behind.
 func TestCQActFlashClearsAndUndoes(t *testing.T) {
 	m := cqModel(t)
 
@@ -96,9 +115,9 @@ func TestCQActFlashClearsAndUndoes(t *testing.T) {
 	}
 
 	// Everything is swallowed mid-flash, including the escape keys.
-	for _, k := range []string{"s", "d", "w", "2", "?"} {
+	for _, k := range []string{"s", "d", "w", "f", "2", "?"} {
 		mm := press(m, k)
-		if mm.cqFlash == "" || mm.lens != "floor" || mm.cqWork || mm.cqDispatch {
+		if mm.cqFlash == "" || mm.lens != "floor" || mm.cqDispatch || mm.cqFilter != "" {
 			t.Fatalf("%q was not swallowed during the flash", k)
 		}
 	}
@@ -114,15 +133,15 @@ func TestCQActFlashClearsAndUndoes(t *testing.T) {
 	if m.cqFlash != "" {
 		t.Error("the flash should end on its own tick")
 	}
-	if got := cqTitles(m); got != "two" {
-		t.Errorf("queue after the act = %s, want two", got)
+	if got := fleetFeatures(m); got != "two,three" {
+		t.Errorf("fleet after the act = %s, want two,three", got)
 	}
 	if m.cqCleared != 1 || m.cqUndo == nil {
 		t.Fatalf("cleared=%d undo=%+v", m.cqCleared, m.cqUndo)
 	}
 
 	m = press(m, "u")
-	if got := cqTitles(m); got != "one,two" {
+	if got := fleetFeatures(m); got != "one,two,three" {
 		t.Errorf("undo should put the row back at the front, got %s", got)
 	}
 	if m.cqCleared != 0 || m.cqUndo != nil {
@@ -140,15 +159,138 @@ func TestCQKeepActLeavesTheItem(t *testing.T) {
 	}
 	done, _ := m.Update(cqFlashMsg{seq: m.cqFlashSeq})
 	m = done.(model)
-	if got := cqTitles(m); got != "one,two" {
-		t.Errorf("a keep act must not clear the item, got %s", got)
+	if got := fleetFeatures(m); got != "one,two,three" {
+		t.Errorf("a keep act must not clear the row, got %s", got)
 	}
 	if m.cqCleared != 0 || m.cqUndo != nil {
 		t.Error("a keep act should not record an undo")
 	}
 }
 
-// `d` opens the dispatch form over a full queue; an untouched form still
+// j/k walk the table and stop at both ends; g/G jump to them. The cursor is
+// re-keyed to the row it lands on, so a rebuild cannot slide it elsewhere.
+func TestFleetCursorMoves(t *testing.T) {
+	m := cqModel(t)
+	m = press(m, "j")
+	if r, _ := m.fleetSel(); r.feature != "two" || m.fleetSelID != "id-two" {
+		t.Fatalf("j = %+v / %q", r.feature, m.fleetSelID)
+	}
+	for i := 0; i < 10; i++ {
+		m = press(m, "j")
+	}
+	if r, _ := m.fleetSel(); r.feature != "three" {
+		t.Errorf("j should stop on the last row, got %q", r.feature)
+	}
+	for i := 0; i < 10; i++ {
+		m = press(m, "k")
+	}
+	if r, _ := m.fleetSel(); r.feature != "one" {
+		t.Errorf("k should stop on the first row, got %q", r.feature)
+	}
+	if r, _ := press(m, "G").fleetSel(); r.feature != "three" {
+		t.Errorf("G = %q, want the last row", r.feature)
+	}
+	if r, _ := press(press(m, "G"), "g").fleetSel(); r.feature != "one" {
+		t.Errorf("g = %q, want the first row", r.feature)
+	}
+}
+
+// The design never reloads; this cockpit rebuilds the table on every poll. The
+// cursor follows its row by id, because holding it by index would move the
+// selection under the reader's hands the moment a rank changed — onto a row `x`
+// would kill.
+func TestFleetCursorFollowsItsRowAcrossARebuild(t *testing.T) {
+	m := cqModel(t)
+	m = press(m, "j")
+	m = press(m, "j") // on "three", index 2
+	if m.fleetSelID != "id-three" {
+		t.Fatalf("precondition: selected %q", m.fleetSelID)
+	}
+
+	// A new blocker arrives and ranks above everything.
+	fleet = append([]fleetRow{{
+		id: "id-zero", kind: "queue", rank: 0, ask: "permission",
+		feature: "zero", repo: "alpha-api", tone: "red",
+	}}, fleet...)
+
+	m = m.fleetSync()
+	if m.fleetCursor != 3 {
+		t.Errorf("cursor = %d, want it to have followed its row to index 3", m.fleetCursor)
+	}
+	if r, _ := m.fleetSel(); r.feature != "three" {
+		t.Errorf("the selection moved to %q", r.feature)
+	}
+
+	// When the row genuinely leaves, the index is the fallback and it clamps.
+	fleet = fleet[:2]
+	m = m.fleetSync()
+	if m.fleetCursor != 1 || m.fleetSelID != "id-one" {
+		t.Errorf("a departed row should clamp to the end: cursor=%d id=%q", m.fleetCursor, m.fleetSelID)
+	}
+}
+
+// `f` walks the four filters and comes back round; each one narrows to a real
+// question, and the cursor starts again at the top of what is left.
+func TestFleetFilterCycles(t *testing.T) {
+	m := cqModel(t)
+	want := []struct{ filter, rows string }{
+		{"wants you", "one,two"},
+		{"needs a look", "one,two"},
+		{"running", "three"},
+		{"all", "one,two,three"},
+	}
+	m = press(m, "j") // move off the top so the reset is visible
+	for _, c := range want {
+		m = press(m, "f")
+		if m.fleetFilter() != c.filter {
+			t.Fatalf("f = %q, want %q", m.fleetFilter(), c.filter)
+		}
+		if got := fleetFeatures(m); got != c.rows {
+			t.Errorf("%s shows %s, want %s", c.filter, got, c.rows)
+		}
+		if m.fleetCursor != 0 {
+			t.Errorf("%s should start again at the top, cursor = %d", c.filter, m.fleetCursor)
+		}
+	}
+}
+
+// `w` is the shortcut to the running rows and back — it no longer opens a view
+// of its own, which is why cqUnattendedLine says "shows only those".
+func TestFleetWTogglesTheRunningFilter(t *testing.T) {
+	m := cqModel(t)
+	m = press(m, "w")
+	if m.fleetFilter() != "running" || fleetFeatures(m) != "three" {
+		t.Fatalf("w = %q / %s", m.fleetFilter(), fleetFeatures(m))
+	}
+	m = press(m, "w")
+	if m.fleetFilter() != "all" {
+		t.Errorf("w again should come back, got %q", m.fleetFilter())
+	}
+	if !strings.Contains(cqUnattendedLine(), "w shows only those") {
+		t.Errorf("the unattended line advertises a key that no longer does that: %q", cqUnattendedLine())
+	}
+}
+
+// A filter that matches nothing must show the table saying so. Gating the empty
+// state on the filtered count — as the design does — dropped the human into the
+// dispatch form instead, where that line can never appear.
+func TestFleetEmptyFilterStaysOnTheTable(t *testing.T) {
+	m := cqModel(t)
+	fleet = fleet[:2] // queue rows only
+	m = press(m, "w") // …filtered to running
+	if len(m.fleetRows()) != 0 {
+		t.Fatalf("precondition: %d rows match", len(m.fleetRows()))
+	}
+	out := m.viewCQ(m.width, 30)
+	if !strings.Contains(out, "nothing matches this filter") {
+		t.Errorf("an empty filter should say so on the table, got:\n%s", out)
+	}
+	if strings.Contains(out, "WHERE") {
+		t.Error("an empty filter must not drop the human into the dispatch form")
+	}
+}
+
+// `d` opens the dispatch form over a full table; an untouched form still
 // navigates, and a touched one takes every key as text.
 func TestCQFormFallThrough(t *testing.T) {
 	m := cqModel(t)
@@ -157,22 +299,20 @@ func TestCQFormFallThrough(t *testing.T) {
 		t.Fatalf("d should open an empty form, auto on: %v %v %v", m.cqDispatch, m.dxTouched(), m.dxAuto)
 	}
 
-	// Untouched: w reaches the working view, and 1–8 still switch lens.
+	// Untouched: w leaves the form for the running rows, which is what the
+	// form's own footer advertises.
 	m = press(m, "w")
-	if !m.cqWork {
-		t.Fatal("w should fall through an untouched form to the working view")
-	}
-	m = press(m, "w")
-	if m.cqWork {
-		t.Fatal("w again should come back")
+	if m.cqDispatch || m.fleetFilter() != "running" {
+		t.Fatalf("w should leave an untouched form for the running rows: %v %q", m.cqDispatch, m.fleetFilter())
 	}
 
 	// Once anything is typed, those same keys are letters again. The form opens
 	// on WHERE, so they land in the repo filter.
+	m = press(m, "d")
 	m = press(m, "a")
 	m = press(m, "w")
-	if m.dxFilter != "aw" || m.cqWork {
-		t.Fatalf("a touched form should take w as text: %q work=%v", m.dxFilter, m.cqWork)
+	if m.dxFilter != "aw" || !m.cqDispatch {
+		t.Fatalf("a touched form should take w as text: %q open=%v", m.dxFilter, m.cqDispatch)
 	}
 	m = press(m, "backspace")
 	if m.dxFilter != "a" {
@@ -225,40 +365,10 @@ func TestCQFormSubmitWithoutARepo(t *testing.T) {
 	}
 }
 
-// In the working view only the lens digits, the palette and the way back do
-// anything at all.
-func TestCQWorkingViewSwallows(t *testing.T) {
-	m := cqModel(t)
-	m = press(m, "w")
-	if !m.cqWork {
-		t.Fatal("w should open the working view")
-	}
-	for _, k := range []string{"s", "x", "j", "enter", "?"} {
-		mm := press(m, k)
-		if !mm.cqWork || mm.cqFlash != "" || mm.helpOpen {
-			t.Fatalf("%q should be swallowed by the working view", k)
-		}
-	}
-	if got := cqTitles(press(m, "s")); got != "one,two" {
-		t.Errorf("skip must not reorder from the working view, got %s", got)
-	}
-	m = press(m, "esc")
-	if m.cqWork {
-		t.Error("esc should leave the working view")
-	}
-}
-
 // Switching lens leaves the lens's modes behind.
 func TestCQLensDigitResetsModes(t *testing.T) {
-	m := cqModel(t)
-	m = press(m, "w")
-	m = press(m, "2")
-	if m.lens != "products" || m.cqWork {
-		t.Errorf("a digit should leave the working view: lens=%q work=%v", m.lens, m.cqWork)
-	}
-
 	// A form with text in it keeps the digit — you are typing a filter.
-	m = cqModel(t)
+	m := cqModel(t)
 	m = press(m, "d")
 	m = press(m, "x")
 	m = press(m, "2")
@@ -270,95 +380,23 @@ func TestCQLensDigitResetsModes(t *testing.T) {
 	m = press(m, "backspace")
 	m = press(m, "backspace")
 	m = press(m, "3")
-	if m.lens != "product" || m.cqDispatch || m.dxTouched() {
+	if m.lens != "backlog" || m.cqDispatch || m.dxTouched() {
 		t.Errorf("an untouched form should let the digit through: lens=%q filter=%q", m.lens, m.dxFilter)
 	}
 }
 
-// j/k scroll the evidence excerpt and stop at both ends of what is showable —
-// not at the line count, which would leave the last screenful of k presses
-// doing nothing. J/K do the same for the queue pane.
-func TestCQScrollPanesClamp(t *testing.T) {
-	m := cqModel(t)
-	lines := make([]hunkLine, 0, 60)
-	for i := 0; i < 60; i++ {
-		lines = append(lines, hunkLine{sign: "+", text: "line " + itoa(i)})
-	}
-	cqItems[0].evFile, cqItems[0].evLines = "internal/thing.go", lines
-
-	evMax, _ := m.cqScrollMax()
-	if evMax < 1 {
-		t.Fatalf("a 60-line diff should overflow the evidence pane, evMax = %d", evMax)
-	}
-
-	if m = press(m, "j"); m.cqEvScroll != 1 {
-		t.Fatalf("j = %d, want 1", m.cqEvScroll)
-	}
-	for i := 0; i < 200; i++ {
-		m = press(m, "j")
-	}
-	if m.cqEvScroll != evMax {
-		t.Errorf("j should stop at the last showable line: %d, want %d", m.cqEvScroll, evMax)
-	}
-	// One k off the bottom must move the pane, not just an invisible counter.
-	if m = press(m, "k"); m.cqEvScroll != evMax-1 {
-		t.Errorf("k off the bottom = %d, want %d", m.cqEvScroll, evMax-1)
-	}
-	for i := 0; i < 200; i++ {
-		m = press(m, "k")
-	}
-	if m.cqEvScroll != 0 {
-		t.Errorf("k should stop at the top: %d", m.cqEvScroll)
-	}
-
-	// The queue pane only scrolls when it has more entries than rows, so shrink
-	// the terminal rather than invent entries.
-	m.height = 16
-	if _, restMax := m.cqScrollMax(); restMax < 1 {
-		t.Fatalf("a 16-row terminal should overflow the queue pane, restMax = %d", restMax)
-	}
-	if m = press(m, "J"); m.cqRestScroll != 1 {
-		t.Errorf("J = %d, want 1", m.cqRestScroll)
-	}
-	if m = press(m, "K"); m.cqRestScroll != 0 {
-		t.Errorf("K = %d, want 0", m.cqRestScroll)
-	}
-}
-
-// An offset belongs to the item it was measured against: when the head changes,
-// both panes go back to the top rather than opening part-way down a diff the
-// human has not seen the start of.
-func TestCQSnapPanesOnNewHead(t *testing.T) {
-	m := cqModel(t)
-	lines := make([]hunkLine, 0, 60)
-	for i := 0; i < 60; i++ {
-		lines = append(lines, hunkLine{sign: "+", text: "line " + itoa(i)})
-	}
-	cqItems[0].evFile, cqItems[0].evLines = "internal/thing.go", lines
-
-	m = press(m, "j")
-	m = press(m, "j")
-	if m.cqEvScroll == 0 {
-		t.Fatal("expected the evidence pane to have scrolled")
-	}
-	m = press(m, "s") // skip: a different item is now the head
-	if m.cqEvScroll != 0 || m.cqRestScroll != 0 {
-		t.Errorf("a new head should snap both panes: ev=%d rest=%d", m.cqEvScroll, m.cqRestScroll)
-	}
-}
-
-// A refresh that drops an ask must drop it from the order, the suppressed set
+// A refresh that drops a row must drop it from the order, the suppressed set
 // and the undo — otherwise cqSuppressed grows without bound.
 func TestCQReconcileForgetsDepartedItems(t *testing.T) {
 	m := cqModel(t)
-	m = press(m, "s") // seeds the order with both ids
+	m = press(m, "s") // seeds the order with every id
 	m.cqSuppressed["id-one"] = true
 	m.cqUndo = &cqUndoEntry{id: "id-one", label: "killed \"one\""}
 
-	cqItems = cqItems[1:] // id-one's record left the queue for real
+	fleet = fleet[1:] // id-one's record left the fleet for real
 	m = m.cqReconcile()
 
-	if len(m.cqOrder) != 1 || m.cqOrder[0] != "id-two" {
+	if len(m.cqOrder) != 2 || m.cqOrder[0] != "id-two" {
 		t.Errorf("cqOrder = %v", m.cqOrder)
 	}
 	if m.cqSuppressed["id-one"] {
@@ -369,38 +407,76 @@ func TestCQReconcileForgetsDepartedItems(t *testing.T) {
 	}
 }
 
-func TestCQFooterHelpPerMode(t *testing.T) {
+// The footer's row verbs come from the row under the cursor, so they change
+// with it — and it never advertises a key the handler does not have.
+func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 	m := cqModel(t)
-	if got := m.footerHelp(); !strings.Contains(got, "x kill") || !strings.Contains(got, "d dispatch") {
-		t.Errorf("item help = %q", got)
+	got := m.footerHelp()
+	if !strings.Contains(got, "x kill") || !strings.Contains(got, "d dispatch") ||
+		!strings.Contains(got, "f filter") {
+		t.Errorf("fleet help = %q", got)
 	}
-	if got := press(m, "w").footerHelp(); !strings.Contains(got, "back") {
-		t.Errorf("working help = %q", got)
+	if strings.Contains(got, "F follow") {
+		t.Error("nothing here follows a session without attaching")
 	}
+
+	// On the running row there is nothing to skip and nothing to approve.
+	onRun := press(press(m, "j"), "j").footerHelp()
+	if strings.Contains(onRun, "s skip") || strings.Contains(onRun, "y ") {
+		t.Errorf("a running row's verbs = %q", onRun)
+	}
+
 	md := press(m, "d")
 	// An untouched form still advertises the exits it still has.
-	if got := md.footerHelp(); !strings.Contains(got, "w running") || !strings.Contains(got, "1…8 sections") {
+	if got := md.footerHelp(); !strings.Contains(got, "w running") {
 		t.Errorf("untouched-form help = %q", got)
 	}
 	// A touched one drops them — they are letters now — and offers ctrl+d,
 	// which is the key that actually submits (ctrl+⏎ is not reportable).
-	got := press(md, "a").footerHelp()
-	if !strings.Contains(got, "ctrl+d dispatch") || strings.Contains(got, "1…8") {
+	if got := press(md, "a").footerHelp(); !strings.Contains(got, "ctrl+d dispatch") {
 		t.Errorf("touched-form help = %q", got)
 	}
 }
 
-// Every mode renders inside its box at every width tier, including mid-flash.
+// Four columns never shed: how bad, what, why and how long. Everything else
+// gives way as the terminal narrows, in the order the fit() tiers set.
+func TestFleetColumnsShedByWidth(t *testing.T) {
+	for _, w := range []int{60, 80, 110, 176} {
+		cols := fleetColumns(w)
+		if cols.glyph == 0 || cols.feature < 1 || cols.age == 0 {
+			t.Errorf("@%d: a load-bearing column was shed: %+v", w, cols)
+		}
+		if (w >= 70) != (cols.product > 0) {
+			t.Errorf("@%d: product = %d", w, cols.product)
+		}
+		if (w >= 110) != (cols.repo > 0) || (w >= 110) != (cols.stage > 0) {
+			t.Errorf("@%d: repo = %d stage = %d", w, cols.repo, cols.stage)
+		}
+		// The signal cell is the flex, so it takes whatever the fixed cells
+		// leave — the row must still be exactly w columns wide.
+		line := fleetLine(w, cols, cTransparent, [flCells]string{}, [flCells]string{})
+		if dispWidth(line) != w {
+			t.Errorf("@%d: a table line is %d columns wide", w, dispWidth(line))
+		}
+	}
+}
+
+// Every mode renders inside its box at every width tier, including mid-flash
+// and under each filter.
 func TestCQRendersInEveryMode(t *testing.T) {
-	installCQFixture(t)
+	installFleetFixture(t)
 	for _, w := range smokeWidths {
 		for _, h := range []int{44, 20, 10} {
 			base := newModel()
 			base.width, base.height = w, h
 			cases := map[string]model{
-				"item":    base,
-				"working": press(base, "w"),
-				"draft":   press(press(base, "d"), "a"),
+				"fleet": base,
+				"draft": press(press(base, "d"), "a"),
+			}
+			for _, f := range fleetFilters {
+				fm := base
+				fm.cqFilter = f
+				cases["filter "+f] = fm
 			}
 			flashing := base
 			flashing.cqFlash = "killed \"one\""
@@ -414,9 +490,9 @@ func TestCQRendersInEveryMode(t *testing.T) {
 
 // TestCQIncludesReviewItems guards the design's headline ask. A finished turn
 // with an open, undeployed PR is floorState "review" — "it wants to squash-merge
-// into main". collectCQ's switch once handled only blocked/needs/working, so
-// those dispatchers appeared in neither the queue nor the working view and
-// dropped off the lens with a merge sitting there waiting.
+// into main". The collector's switch once handled only blocked/needs/working, so
+// those dispatchers appeared nowhere on the lens with a merge sitting there
+// waiting.
 func TestCQIncludesReviewItems(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
@@ -438,41 +514,42 @@ func TestCQIncludesReviewItems(t *testing.T) {
 	defer restoreVars(saved)
 	s := loadSnapshot(&config.Config{})
 
-	var found *cqItem
-	for i := range s.cqItems {
-		if s.cqItems[i].title == "seat limits" {
-			found = &s.cqItems[i]
+	var found *fleetRow
+	for i := range s.fleet {
+		if s.fleet[i].feature == "seat limits" {
+			found = &s.fleet[i]
 		}
 	}
 	if found == nil {
-		t.Fatal("a review dispatcher is missing from the queue entirely")
+		t.Fatal("a review dispatcher is missing from the fleet entirely")
 	}
-	if found.want != "approve a merge" {
-		t.Errorf("want = %q, want %q", found.want, "approve a merge")
+	if found.signal != "approve a merge" {
+		t.Errorf("signal = %q, want %q", found.signal, "approve a merge")
 	}
 	var keys []string
 	for _, a := range found.acts {
 		keys = append(keys, a.k)
 	}
 	if !strings.Contains(strings.Join(keys, ""), "y") {
-		t.Errorf("review item offers no merge act: keys %v", keys)
+		t.Errorf("review row offers no merge act: keys %v", keys)
 	}
 }
 
 // TestDispatchKeyIsIdempotent guards the key the footer advertises as "d
 // dispatch". The form's untouched-fall-through set left `d` out, so pressing it
-// while the form was already up typed a letter into the repo filter. With a
-// clear queue the form is up by default, which made `d` look broken outright:
-// the repo list narrowed to the repos containing "d" and nothing else happened.
+// while the form was already up typed a letter into the repo filter. With
+// nothing in flight the form is up by default, which made `d` look broken
+// outright: the repo list narrowed to the repos containing "d" and nothing else
+// happened.
 func TestDispatchKeyIsIdempotent(t *testing.T) {
 	saved := captureVars()
 	defer restoreVars(saved)
-	cqItems = nil // a clear queue: the form owns the keyboard from the start
+	fleet = nil // nothing in flight: the form owns the keyboard from the start
 
 	m := newModel()
 	m.lens = "floor"
 	if !m.cqPromptOn() {
-		t.Fatal("precondition: a clear queue should leave the prompt up")
+		t.Fatal("precondition: an empty fleet should leave the prompt up")
 	}
 
 	mm, _, handled := m.updateFloorQueue("d")
@@ -495,5 +572,59 @@ func TestDispatchKeyIsIdempotent(t *testing.T) {
 	mm2, _, _ := m2.updateFloorQueue(runes("d").String())
 	if mm2.dxFilter != "claud" {
 		t.Errorf("a touched form should take d as text, got %q", mm2.dxFilter)
+	}
+}
+
+// TestShippedTabActionsAreReal guards the class of bug this repo keeps
+// shipping: a notice describing work that never happened. The product panel's
+// SHIPPED tab said a feature had been "dispatched again" and launched nothing,
+// and printed "opening #144" without opening anything.
+func TestShippedTabActionsAreReal(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	products = []product{{name: "acme"}}
+	shipped = map[string][]shippedDay{"acme": {{day: "today", items: []shippedItem{
+		{feature: "csv export", repo: "acme-hq", pr: "#144", session: "abc"},
+	}}}}
+
+	m := newModel()
+	m.lens = "product"
+	m.rightTab = "shipped" // the tab these keys belong to
+
+	// enter opens the overlay; submitting it must launch, not merely announce.
+	mm, _ := m.updateProduct("enter")
+	if !mm.resumeOpen {
+		t.Fatal("enter on a shipped feature should open the resume overlay")
+	}
+	mm.resumeText = "add the per-region footer"
+	mm2, cmd := mm.updateProduct("enter")
+	if cmd == nil {
+		t.Error("submitting the overlay announced a dispatch but returned no command")
+	}
+	if mm2.resumeOpen {
+		t.Error("submitting should close the overlay")
+	}
+
+	// An empty prompt is not a dispatch, and must not claim to be one.
+	mm3 := mm
+	mm3.resumeText = "   "
+	mm4, cmd3 := mm3.updateProduct("enter")
+	if cmd3 != nil {
+		t.Error("an empty prompt should launch nothing")
+	}
+	if !strings.Contains(mm4.notice, "nothing to dispatch") {
+		t.Errorf("notice = %q", mm4.notice)
+	}
+
+	// o must reach a command rather than print "opening".
+	_, cmdOpen := m.updateProduct("o")
+	if cmdOpen == nil {
+		t.Error("o should return a command that opens the PR")
+	}
+
+	// And the footer must not advertise the key nobody implemented.
+	m.width, m.height = 190, 44
+	if out := m.View(); strings.Contains(out, "clone to another repo") {
+		t.Error("the footer still advertises `c clone`, which nothing implements")
 	}
 }
