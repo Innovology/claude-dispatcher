@@ -354,10 +354,31 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 		waitV = velHumanDur(med)
 		waitNote = fmt.Sprintf("median of %d hand-backs to you", len(dwell.waits))
 	}
+	// What the repositories say, summed across products — these count work done
+	// outside the dispatcher too, which every other figure on this lens misses.
+	deploys, merged, commits := 0, 0, 0
+	for _, p := range s.products {
+		deploys += p.deploys7d
+		merged += p.merged7d
+		commits += p.commits7d
+	}
+	deployV, deployNote := "—", "no deploy workflow found"
+	if deploys > 0 {
+		deployV, deployNote = itoa(deploys), "successful deploy runs, last 7 days"
+	}
+	mergedV, mergedNote := "—", "nothing merged in the last 7 days"
+	if merged > 0 {
+		mergedNote = "merged in the last 7 days"
+		mergedV = itoa(merged)
+		if commits > 0 {
+			mergedNote += " · " + itoa(commits) + " " + plural(commits, "commit", "commits")
+		}
+	}
+
 	s.doraFactory = []doraMetric{
-		{key: "first-pass rate", v: "—", unit: "", band: "medium", note: "claims accepted without rework"},
+		{key: "deployments", v: deployV, unit: "", band: "medium", note: deployNote},
+		{key: "prs merged", v: mergedV, unit: "", band: "medium", note: mergedNote},
 		{key: "waiting on you", v: waitV, unit: "", band: "medium", note: waitNote},
-		{key: "turns per feature", v: "—", unit: "", band: "medium", note: "no turn data"},
 		{key: "work in progress", v: itoa(inFlight), unit: "", band: "medium", spark: velSpark(sparkVals), note: "dispatchers not yet live"},
 	}
 
