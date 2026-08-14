@@ -148,6 +148,10 @@ type DeployPipeline struct {
 	Conclusion string // success | failure | cancelled | "" while running
 	At         time.Time
 	RunsToday  int
+	// Successes is how many runs of this workflow succeeded in the window the
+	// caller asked about — the deployments that actually happened, as opposed
+	// to the dispatches the cockpit happens to have started.
+	Successes int
 }
 
 // DeployStatus reports the repo's deploy workflow and its latest run, using the
@@ -184,13 +188,17 @@ func DeployStatus(repoPath, override string) DeployPipeline {
 			return DeployPipeline{Name: target}
 		}
 		p := DeployPipeline{Name: target}
-		cutoff := time.Now().Add(-24 * time.Hour)
+		day := time.Now().Add(-24 * time.Hour)
+		week := time.Now().AddDate(0, 0, -7)
 		for i, r := range rows {
 			if i == 0 {
 				p.Status, p.Conclusion, p.At = r.Status, r.Conclusion, r.CreatedAt
 			}
-			if r.CreatedAt.After(cutoff) {
+			if r.CreatedAt.After(day) {
 				p.RunsToday++
+			}
+			if r.Conclusion == "success" && r.CreatedAt.After(week) {
+				p.Successes++
 			}
 		}
 		return p

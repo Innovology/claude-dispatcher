@@ -112,6 +112,9 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 	// per repo; openPRs is empty when the search fails, which reads as "no
 	// open PRs" only after gh has actually answered.
 	openPRs, _ := gh.OpenPRs()
+	// Merged PRs are a fact about the repository whoever opened them, which is
+	// how work done outside the dispatcher still registers.
+	mergedByRepo, _ := gh.MergedPRs(7)
 
 	ghCache := map[string]repoGHData{}
 	repoGHFor := func(name string) repoGHData {
@@ -241,17 +244,40 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		if med, ok := prodMedian(leads); ok {
 			leadStr, leadDur = prodDur(med), med
 		}
+		// What the repositories themselves say, independent of any dispatch.
+		commits7d, merged7d, deploys7d := 0, 0, 0
+		for _, name := range names {
+			r, ok := discByName[name]
+			if !ok {
+				continue
+			}
+			if n, ok := stqCommitsSince(r.Path, 7); ok {
+				commits7d += n
+			}
+			merged7d += len(mergedByRepo[name])
+			if ghUp {
+				override := ""
+				if cfg != nil {
+					override = cfg.DeployWorkflows[name]
+				}
+				deploys7d += gh.DeployStatus(r.Path, override).Successes
+			}
+		}
+
 		s.products = append(s.products, product{
-			name:     p,
-			repos:    prodRepoCount(len(names)),
-			forge:    prodForge(names, discByName, ctx),
-			inflight: inflight,
-			needs:    needs,
-			review:   review,
-			live:     live,
-			spark:    prodSpark(dailyLive),
-			lead:     leadStr,
-			leadDur:  leadDur,
+			name:      p,
+			commits7d: commits7d,
+			merged7d:  merged7d,
+			deploys7d: deploys7d,
+			repos:     prodRepoCount(len(names)),
+			forge:     prodForge(names, discByName, ctx),
+			inflight:  inflight,
+			needs:     needs,
+			review:    review,
+			live:      live,
+			spark:     prodSpark(dailyLive),
+			lead:      leadStr,
+			leadDur:   leadDur,
 		})
 
 		// ---- note + stats --------------------------------------------------

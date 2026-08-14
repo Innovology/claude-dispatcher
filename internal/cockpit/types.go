@@ -61,6 +61,15 @@ type product struct {
 	// time, and ranking on the formatted string silently puts "48m" above
 	// "2d 4h"; the duration is the sortable truth, the string is for the eye.
 	leadDur time.Duration
+	// commits7d and merged7d are what the repositories say, not what the
+	// dispatcher started: commits on each repo's branch and pull requests merged
+	// in the last week, whoever did them. A product the human works in directly
+	// has no dispatch records and would otherwise read as idle.
+	commits7d int
+	merged7d  int
+	// deploys7d counts successful runs of each repo's deploy workflow — the
+	// deployments that actually happened.
+	deploys7d int
 }
 
 type repoRef struct {

@@ -132,3 +132,22 @@ func stqAge(t time.Time) string {
 		return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 	}
 }
+
+// stqCommitsSince counts commits on the repo's current branch in the last
+// `days`, whoever made them.
+//
+// Every other figure in the cockpit is derived from its own dispatch records,
+// so a repo the human works in directly reads as idle. It is not: this is the
+// signal that says so, and it costs one local git call with no API budget.
+func stqCommitsSince(repoPath string, days int) (int, bool) {
+	out, err := exec.Command("git", "-C", repoPath, "rev-list", "--count",
+		"--since="+itoa(days)+".days.ago", "HEAD").Output()
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}

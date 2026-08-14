@@ -236,30 +236,41 @@ func (m model) velRight(iw int) []string {
 // comparison rather than a bare number — a ratio against a one-repo product is
 // too fragile to state.
 //
-// Only products that can be ranked take part: one with no repos has no lead
-// time to have, and one where nothing has reached live has none yet. When
-// nothing survives that filter the block says which of the two it is instead of
-// picking a winner out of an empty set.
+// Lead time is measured from dispatch records, so it only sees work the cockpit
+// started. A product the human commits to directly has no lead time to rank and
+// used to drop out of the comparison silently, which read as "nothing to say"
+// when the truth was "we cannot see it from here". Those products are now named
+// with what the repositories do show — commits and merges — so the reader knows
+// the ranking is partial rather than complete.
 func velLaggardBlock(iw int) []string {
 	out := []string{"", fg(cRule, strings.Repeat("─", iw)), ""}
 
-	var ranked []product
+	var ranked, unseen []product
 	for _, p := range products {
-		if p.repos == prodRepoCount(0) || p.leadDur <= 0 {
+		if p.repos == prodRepoCount(0) {
 			continue
 		}
-		ranked = append(ranked, p)
+		if p.leadDur > 0 {
+			ranked = append(ranked, p)
+			continue
+		}
+		// No dispatch has reached live here, but the repos may still be moving.
+		if p.commits7d > 0 || p.merged7d > 0 {
+			unseen = append(unseen, p)
+		}
 	}
 
+	out = append(out, line("slowest product", iw, cDim, ""))
+
 	if len(ranked) == 0 {
-		out = append(out, line("velocity per product", iw, cDim, ""))
 		msg := "No products yet — assign repos to products on 2 and this measures each one."
 		if len(products) > 0 {
-			msg = "No product has had a feature reach live yet — this measures dispatch → live, per product."
+			msg = "No product has had a dispatch reach live yet — this measures dispatch → live, per product."
 		}
 		for _, l := range velWrap(msg, iw, 3) {
 			out = append(out, line(l, iw, cFaint, ""))
 		}
+		out = append(out, velUnseenLines(unseen, iw)...)
 		return append(out, "")
 	}
 
@@ -281,9 +292,41 @@ func velLaggardBlock(iw int) []string {
 	} else {
 		slow += " · slowest of " + itoa(len(ranked)) + " products · " + best.name + " ships in " + best.lead
 	}
-	out = append(out, line("slowest product", iw, cDim, ""))
 	out = append(out, line(slow, iw, cAmber, ""))
+	out = append(out, velUnseenLines(unseen, iw)...)
 	return append(out, "")
+}
+
+// velUnseenLines names the products the ranking could not include because the
+// cockpit dispatched none of their work, and says what their repos did anyway.
+// Leaving them out entirely would present a partial ranking as a whole one.
+func velUnseenLines(unseen []product, iw int) []string {
+	if len(unseen) == 0 {
+		return nil
+	}
+	var parts []string
+	for i, p := range unseen {
+		if i == 3 {
+			parts = append(parts, "and "+itoa(len(unseen)-3)+" more")
+			break
+		}
+		what := ""
+		switch {
+		case p.merged7d > 0 && p.commits7d > 0:
+			what = itoa(p.merged7d) + " merged · " + itoa(p.commits7d) + " commits"
+		case p.merged7d > 0:
+			what = itoa(p.merged7d) + " merged"
+		default:
+			what = itoa(p.commits7d) + " commits"
+		}
+		parts = append(parts, p.name+" ("+what+")")
+	}
+	var out []string
+	for _, l := range velWrap("not ranked — moving, but nothing dispatched through here: "+
+		strings.Join(parts, ", "), iw, 3) {
+		out = append(out, line(l, iw, cFaint, ""))
+	}
+	return out
 }
 
 // velTilesBlock lays out metric tiles two-across (one-across when the column

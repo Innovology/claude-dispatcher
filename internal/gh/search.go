@@ -135,3 +135,55 @@ func OpenPRs() (map[string][]OpenPR, bool) {
 	})
 	return r.byRepo, r.ok
 }
+
+// MergedPRs returns pull requests merged in the last `days`, keyed by bare repo
+// name. One search, cached — the same shape as OpenPRs.
+//
+// The cockpit's other counts come from its own dispatch records, which only see
+// work it started. A merged PR is a fact about the repository regardless of who
+// or what opened it, so this is how a product the human works in directly still
+// registers as moving.
+func MergedPRs(days int) (map[string][]OpenPR, bool) {
+	type result struct {
+		byRepo map[string][]OpenPR
+		ok     bool
+	}
+	if days <= 0 {
+		days = 7
+	}
+	since := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
+	r := memo("search:prs:merged:"+since, SearchTTL, func() result {
+		if !Available() {
+			return result{}
+		}
+		out, err := exec.Command("gh", "search", "prs",
+			"--merged", "--merged-at", ">="+since, "--involves", "@me",
+			"--limit", "100",
+			"--json", "repository,number,title,author,createdAt").Output()
+		if err != nil {
+			return result{}
+		}
+		var rows []struct {
+			Repository repoField `json:"repository"`
+			Number     int       `json:"number"`
+			Title      string    `json:"title"`
+			Author     struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			CreatedAt time.Time `json:"createdAt"`
+		}
+		if json.Unmarshal(out, &rows) != nil {
+			return result{}
+		}
+		byRepo := map[string][]OpenPR{}
+		for _, row := range rows {
+			name := row.Repository.shortName()
+			byRepo[name] = append(byRepo[name], OpenPR{
+				Number: row.Number, Title: row.Title,
+				Author: row.Author.Login, CreatedAt: row.CreatedAt,
+			})
+		}
+		return result{byRepo: byRepo, ok: true}
+	})
+	return r.byRepo, r.ok
+}

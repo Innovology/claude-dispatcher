@@ -7,6 +7,7 @@ package cockpit
 // portfolio.
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -103,5 +104,41 @@ func TestCQPhaseFromTranscript(t *testing.T) {
 func TestFanOutIsBounded(t *testing.T) {
 	if n := fanOut(); n < 4 || n > 12 {
 		t.Errorf("fanOut = %d, want it clamped to [4,12] so a big portfolio cannot spawn hundreds of processes", n)
+	}
+}
+
+// TestVelUnseenLinesNamesWhatTheRankingCannotSee guards the gap this lens had:
+// lead time is measured from dispatch records, so a product the human commits
+// to directly has none and used to drop out of the ranking silently. A partial
+// ranking presented as a whole one is a claim about products it never measured.
+func TestVelUnseenLinesNamesWhatTheRankingCannotSee(t *testing.T) {
+	got := strings.Join(velUnseenLines([]product{
+		{name: "Soundbooth", merged7d: 3, commits7d: 41},
+		{name: "Spine", commits7d: 7},
+		{name: "VERA", merged7d: 1},
+	}, 120), " ")
+
+	for _, want := range []string{"Soundbooth", "3 merged", "41 commits", "Spine", "7 commits", "VERA", "1 merged"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in: %s", want, got)
+		}
+	}
+	if !strings.Contains(got, "nothing dispatched through here") {
+		t.Errorf("should say why they are unranked: %s", got)
+	}
+
+	// A product with no activity at all is not "unseen", it is idle — the caller
+	// filters those out, so nothing is claimed about them either way.
+	if velUnseenLines(nil, 120) != nil {
+		t.Error("no unseen products should render no line")
+	}
+
+	// Long lists are summarised rather than run off the pane.
+	many := make([]product, 6)
+	for i := range many {
+		many[i] = product{name: "p" + itoa(i), commits7d: 1}
+	}
+	if s := strings.Join(velUnseenLines(many, 120), " "); !strings.Contains(s, "3 more") {
+		t.Errorf("should summarise the tail: %s", s)
 	}
 }
