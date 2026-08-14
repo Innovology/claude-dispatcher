@@ -1,6 +1,10 @@
 claude-dispatcher
 *.log
 dist/
+
+# nix build output symlinks.
+result
+result-*
 coverage.out
 coverage.xml
 

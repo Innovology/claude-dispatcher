@@ -78,16 +78,57 @@ func hookSpecs() []hookSpec {
 
 const hookMarker = "claude-dispatcher hook"
 
+const nixStore = "/nix/store/"
+
+// hookExe returns the path to bake into the hook command.
+//
+// os.Executable answers with the real file — on Linux /proc/self/exe is
+// already resolved — which for a Nix install is /nix/store/<hash>-…: a path
+// that changes with every upgrade and disappears at the next garbage
+// collection, leaving a hook that silently never fires again. Homebrew has the
+// same shape, one Cellar version deep. The durable name is the one the human
+// invoked through (/run/current-system/sw/bin/…, ~/.nix-profile/bin/…, the
+// brew shim, ~/.local/bin/…), so prefer that — but only once it is proven to
+// resolve to this very binary. PATH may hold a second, older copy (the
+// brew-vs-~/.local/bin trap in the README); a hook aimed at the wrong build
+// would be worse than one pinned to the right one.
+func hookExe(exe, argv0 string, lookPath, eval func(string) (string, error)) string {
+	cand := argv0
+	if !strings.ContainsRune(cand, filepath.Separator) {
+		found, err := lookPath(cand)
+		if err != nil {
+			return exe
+		}
+		cand = found
+	}
+	cand, err := filepath.Abs(cand)
+	if err != nil {
+		return exe
+	}
+	if resolved, err := eval(cand); err != nil || resolved != exe {
+		return exe
+	}
+	return cand
+}
+
 func installHook() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	exe, _ = filepath.EvalSymlinks(exe)
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
 	if strings.Contains(exe, "go-build") {
 		fmt.Println("\n! running via `go run` — install a real binary first (make install), then re-run init,")
 		fmt.Println("  otherwise the hook would point at a temporary build path.")
 		return nil
+	}
+	exe = hookExe(exe, os.Args[0], exec.LookPath, filepath.EvalSymlinks)
+	if strings.HasPrefix(exe, nixStore) {
+		fmt.Println("\n! this build was run straight out of /nix/store, so the hook can only point at")
+		fmt.Println("  this exact build — it stops firing at the next garbage collection. Install it")
+		fmt.Println("  into a profile (nix profile install / systemPackages) and re-run init.")
 	}
 
 	settingsPath := filepath.Join(claudeConfigDir(), "settings.json")
