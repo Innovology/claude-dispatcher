@@ -16,6 +16,9 @@
 // the idle_prompt payload carries no task info, so the Stop's verdict is
 // persisted (WaitingOnTasks) and idle_prompt defers to it.
 //
+// A done record is terminal for every event but the two that prove its session
+// is still going — see reopensDone.
+//
 // Events are attributed to a dispatch by, in order: the CLAUDE_DISPATCHER_ID
 // env var (set at launch, inherited through tmux -> claude -> hook), the
 // session_id, or — for SessionStart only — the newest still-launching
@@ -137,11 +140,31 @@ func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
 	return nil
 }
 
+// reopensDone names the two events that outrank "done means live".
+//
+// internal/track flips a record to done the moment its PR merges, and a
+// dispatcher told to open and merge its own PR and keep working routinely
+// merges mid-run — so "done" can land on a session that is still going. When
+// that happened, this guard used to swallow everything the session said
+// afterwards, including the permission prompt it was stuck on: the record
+// froze at done, and since the triage table only admits blocked/needs/review/
+// working rows, a live dispatcher waiting on an approval vanished from the
+// cockpit entirely, which then showed the empty-fleet dispatch form.
+//
+// A permission prompt and a human's new prompt are proof the session is not
+// finished, and both mean it wants something — and anything that wants
+// something belongs on the table. Every other event (a Stop, an idle prompt, a
+// session ending) is what a shipped feature looks like and still cannot
+// downgrade done. track re-flips it once the turn ends; see track.midWork.
+func reopensDone(event string) bool {
+	return event == "Notification:permission_prompt" || event == "UserPromptSubmit"
+}
+
 // apply mutates the dispatch for the event; it reports whether anything
 // changed and a save is warranted.
 func apply(d *state.Dispatch, event string, in hookInput) bool {
-	if d.Status == state.StatusDone {
-		return false // done means live; nothing downgrades it
+	if d.Status == state.StatusDone && !reopensDone(event) {
+		return false // done means live; only proof of life downgrades it
 	}
 	switch event {
 	case "SessionStart":
