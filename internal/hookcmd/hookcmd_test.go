@@ -26,6 +26,9 @@ func TestApplyTransitions(t *testing.T) {
 		{state.StatusWorking, "SessionEnd", state.StatusExited, true},
 		{state.StatusDone, "Stop", state.StatusDone, false},
 		{state.StatusDone, "SessionEnd", state.StatusDone, false},
+		{state.StatusDone, "Notification:idle_prompt", state.StatusDone, false},
+		{state.StatusDone, "PostToolUse", state.StatusDone, false},
+		{state.StatusDone, "SessionStart", state.StatusDone, false},
 		{state.StatusWorking, "SomeUnknownEvent", state.StatusWorking, false},
 	}
 	for _, c := range cases {
@@ -35,6 +38,31 @@ func TestApplyTransitions(t *testing.T) {
 			t.Errorf("%s + %s: got (%s, changed=%v), want (%s, changed=%v)",
 				c.from, c.event, d.Status, changed, c.want, c.changed)
 		}
+	}
+}
+
+// track flips a record to done the moment its PR merges, which routinely
+// happens while the session is still running. When the session then asks for a
+// permission approval, or the human sends it another prompt, the record has to
+// come back — otherwise a live dispatcher sits at a prompt nobody can see,
+// because triage only shows blocked/needs/review/working rows.
+func TestApplyReopensDone(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusDone}
+	if !apply(d, "Notification:permission_prompt", hookInput{}) {
+		t.Fatal("a permission prompt must reopen a done dispatch")
+	}
+	if d.Status != state.StatusBlocked {
+		t.Fatalf("want blocked, got %s", d.Status)
+	}
+	// And once reopened it behaves like any other blocked dispatch: the tool
+	// completing means the approval was given.
+	if !apply(d, "PostToolUse", hookInput{}) || d.Status != state.StatusWorking {
+		t.Fatalf("want working after PostToolUse, got %s", d.Status)
+	}
+
+	d = &state.Dispatch{Status: state.StatusDone}
+	if !apply(d, "UserPromptSubmit", hookInput{}) || d.Status != state.StatusWorking {
+		t.Fatalf("a new prompt must reopen a done dispatch, got %s", d.Status)
 	}
 }
 

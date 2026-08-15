@@ -6,6 +6,10 @@
 // state dir, and the cockpit's fsnotify watcher picks them up like any other
 // status change. (Consequence: auto-done only advances while a cockpit is
 // open somewhere.)
+//
+// It never marks a dispatch done out from under a session that is still
+// working or waiting on an approval — a merged PR is not the end of a run.
+// See midWork.
 package track
 
 import (
@@ -34,7 +38,18 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 			d.PRMergedAt = pr.MergedAt
 			changed = true
 		}
-		if d.PRState == "MERGED" && d.PRMergedAt != nil && d.DeployedAt == nil {
+		// The done flip waits until the session behind the dispatch has stopped;
+		// see midWork. The PR fields above are refreshed either way, so a row
+		// still on the triage table keeps showing where its PR stands.
+		//
+		// There is deliberately no "DeployedAt == nil" guard here. A record that
+		// shipped and was then reopened — hookcmd.reopensDone, when its session
+		// turned out to still be going — already carries a deploy time, and
+		// skipping it would leave it open forever once its session went quiet
+		// again. Re-asking is cheap (gh memoises the read) and both branches
+		// write the same timestamp they wrote the first time, so it is idempotent
+		// and the reason stays the one the signal actually justifies.
+		if !midWork(d) && d.PRState == "MERGED" && d.PRMergedAt != nil {
 			deployed, at, hasWorkflow := gh.DeploySignal(
 				d.RepoPath, *d.PRMergedAt, cfg.DeployWorkflows[d.RepoName])
 			switch {
@@ -56,4 +71,26 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 		}
 	}
 	return updated
+}
+
+// midWork reports whether the session behind a dispatch is still doing
+// something: working, stopped at a permission prompt it needs answered, or not
+// yet started.
+//
+// Such a dispatch is not done however the forge reads. These dispatchers are
+// told to open and merge their own PRs and keep going, so a merged PR mid-run
+// is routine, not the end — and flipping the record to done there used to
+// strand a live session off the triage table for good, because
+// internal/hookcmd would not let anything the session said afterwards
+// downgrade done. Waiting for the turn to end costs one poll; "done means
+// live" still holds, a few seconds later.
+//
+// A needs-input dispatch is deliberately not mid-work: the turn is over and
+// the feature shipped, which is exactly the case "done means live" is about.
+func midWork(d *state.Dispatch) bool {
+	switch d.Status {
+	case state.StatusWorking, state.StatusBlocked, state.StatusLaunching:
+		return true
+	}
+	return false
 }
