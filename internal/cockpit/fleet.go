@@ -88,6 +88,14 @@ type fleetRow struct {
 	model     string
 	ctxKnown  bool
 
+	// coded is how long a senior developer would have taken to write this
+	// dispatcher's diff by hand (internal/effort), and is the only figure on
+	// the row that is estimated rather than read. codedKnown is false when the
+	// diff could not be read at all — distinct from a coded of zero, which is a
+	// branch that has genuinely not written anything yet.
+	coded      time.Duration
+	codedKnown bool
+
 	acts []cqAct
 
 	// moved is the freshest of the transcript's mtime and the record's
@@ -259,29 +267,32 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	tone := cqToneOf(st, checks, review, clash)
 	goal, goalLabel := cqGoal(rec)
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
+	est, codedKnown := s.effortBy[rec.Feature]
 
 	return fleetRow{
-		id:        rec.ID,
-		kind:      "queue",
-		rank:      fleetRank("queue", tone, false),
-		ask:       ask,
-		product:   ctx.productFor(rec),
-		feature:   rec.Feature,
-		repo:      rec.RepoName,
-		ref:       cqRef(forge, rec),
-		stage:     cqPhase(s.tailLines[rec.Feature], rec),
-		pass:      passes[rec.ID],
-		signal:    cqWant(ask),
-		tone:      tone,
-		why:       cqWhy(s, rec, ask, tone, clash),
-		goal:      goal,
-		goalLabel: goalLabel,
-		ctxTokens: u.Tokens,
-		model:     cqShortModel(u.Model),
-		ctxKnown:  ctxKnown,
-		acts:      cqActs(rec, ask),
-		moved:     fleetMoved(rec),
-		waited:    rec.UpdatedAt,
+		id:         rec.ID,
+		kind:       "queue",
+		rank:       fleetRank("queue", tone, false),
+		ask:        ask,
+		product:    ctx.productFor(rec),
+		feature:    rec.Feature,
+		repo:       rec.RepoName,
+		ref:        cqRef(forge, rec),
+		stage:      cqPhase(s.tailLines[rec.Feature], rec),
+		pass:       passes[rec.ID],
+		signal:     cqWant(ask),
+		tone:       tone,
+		why:        cqWhy(s, rec, ask, tone, clash),
+		goal:       goal,
+		goalLabel:  goalLabel,
+		ctxTokens:  u.Tokens,
+		model:      cqShortModel(u.Model),
+		ctxKnown:   ctxKnown,
+		coded:      est.Dur,
+		codedKnown: codedKnown,
+		acts:       cqActs(rec, ask),
+		moved:      fleetMoved(rec),
+		waited:     rec.UpdatedAt,
 	}
 }
 
@@ -320,30 +331,33 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		tone, why = "amber", "Its checks are green and the PR is not merged."
 	}
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
+	est, codedKnown := s.effortBy[rec.Feature]
 
 	moved := rec.UpdatedAt
 	if mt.After(moved) {
 		moved = mt
 	}
 	return fleetRow{
-		id:        rec.ID,
-		kind:      "run",
-		rank:      fleetRank("run", tone, stalled),
-		product:   ctx.productFor(rec),
-		feature:   rec.Feature,
-		repo:      rec.RepoName,
-		ref:       cqRef(forge, rec),
-		stage:     cqPhase(s.tailLines[rec.Feature], rec),
-		pass:      passes[rec.ID],
-		signal:    signal,
-		tone:      tone,
-		why:       why,
-		ctxTokens: u.Tokens,
-		model:     cqShortModel(u.Model),
-		ctxKnown:  ctxKnown,
-		acts:      cqActs(rec, "running"),
-		moved:     moved,
-		waited:    rec.UpdatedAt,
+		id:         rec.ID,
+		kind:       "run",
+		rank:       fleetRank("run", tone, stalled),
+		product:    ctx.productFor(rec),
+		feature:    rec.Feature,
+		repo:       rec.RepoName,
+		ref:        cqRef(forge, rec),
+		stage:      cqPhase(s.tailLines[rec.Feature], rec),
+		pass:       passes[rec.ID],
+		signal:     signal,
+		tone:       tone,
+		why:        why,
+		ctxTokens:  u.Tokens,
+		model:      cqShortModel(u.Model),
+		ctxKnown:   ctxKnown,
+		coded:      est.Dur,
+		codedKnown: codedKnown,
+		acts:       cqActs(rec, "running"),
+		moved:      moved,
+		waited:     rec.UpdatedAt,
 	}, mt
 }
 

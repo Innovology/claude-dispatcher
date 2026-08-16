@@ -14,7 +14,11 @@ package cockpit
 // lines that close the dispatch form. Nothing is invented here; where a field
 // is empty the row is dropped rather than padded out.
 
-import "strings"
+import (
+	"strings"
+
+	"claude-dispatcher/internal/effort"
+)
 
 // ---- row plumbing -----------------------------------------------------------
 
@@ -204,6 +208,24 @@ func cqCtxLine(r fleetRow) string {
 		s += " · " + r.model
 	}
 	return s
+}
+
+// cqCodedLine is the row's hand-coding equivalent: how long a senior developer
+// would have taken to write this branch's diff by hand.
+//
+// It is the only clause in the status tail that is a model rather than a
+// reading, so it always carries the "≈" that says so, and the verb says what
+// the number counts — hands on a keyboard, not what the dispatcher spent. See
+// internal/effort for the model itself.
+//
+// Two different silences, both correct: a dispatcher whose diff could not be
+// read has no clause, and one that has committed nothing yet has none either.
+// "≈0m to hand-code" is true and tells the reader nothing.
+func cqCodedLine(r fleetRow) string {
+	if !r.codedKnown || r.coded <= 0 {
+		return ""
+	}
+	return "≈" + effort.Human(r.coded) + " to hand-code"
 }
 
 func cqTokens(n int) string {

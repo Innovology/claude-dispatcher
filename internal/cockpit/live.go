@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/effort"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -33,6 +34,11 @@ type snapshot struct {
 		files []diffFile
 		hunk  []hunkLine
 	}
+	// effortBy is the hand-coding estimate per feature, from the same numstat
+	// diffsBy holds. It never reaches a package var: triage carries the figure
+	// on its rows and velocity totals it into its own strings, both inside the
+	// load that produced it, so there is no third copy to go stale.
+	effortBy map[string]effort.Estimate
 
 	fleet        []fleetRow
 	cqLastOutput string

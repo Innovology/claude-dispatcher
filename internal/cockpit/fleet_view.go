@@ -21,7 +21,12 @@ package cockpit
 // All content comes from fleet.go and cq.go, which leave out any clause they
 // have no source for. Nothing is composed here that is not already true.
 
-import "strings"
+import (
+	"strings"
+	"time"
+
+	"claude-dispatcher/internal/effort"
+)
 
 // ---- columns ------------------------------------------------------------------
 
@@ -206,10 +211,16 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 // ---- the header line ------------------------------------------------------------
 
 // fleetHeadline is the sentence above the table: how much is in flight, how
-// much of it wants you, and what `f` is doing.
+// much of it wants you, how much of it is fine, and how big all of it is.
 //
-// Every count is over the FILTERED rows, because the line sits on top of the
+// Every figure is over the FILTERED rows, because the line sits on top of the
 // table and describes what is on it.
+//
+// The hand-coding total is the one figure here that is not a count of rows, and
+// it earns its place because the counts cannot answer "how much work is this".
+// Four dispatchers can be four typo fixes or four rewritten services; the row
+// count reads identically and the hours do not. It goes last, is faint, and
+// keeps its "≈": it is context for the counts, never a rival to the red one.
 func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	wants, warn, clean := fleetCount(rows)
 	f := m.fleetFilter()
@@ -232,7 +243,27 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 		fg(blockHex, itoa(wants)+" want you") + "   " +
 		fg(warnHex, itoa(warn)+" need a look") + "   " +
 		fg(cFaint, itoa(clean)+" running clean")
+	if coded := fleetCoded(rows); coded > 0 {
+		left += "   " + fg(cFaint, "≈"+effort.Human(coded)+" to hand-code")
+	}
 	return flG(flSpread(left, fg(cFaint, right), inner))
+}
+
+// fleetCoded totals the hand-coding equivalent across rows, skipping the ones
+// whose diff could not be read.
+//
+// A total over a partial set is still the right thing to show — it is a floor,
+// and the alternative is showing nothing because one branch was tidied away —
+// but it is only ever the sum of what was measurable, which is why every row
+// that contributes had its own diff read this same load.
+func fleetCoded(rows []fleetRow) time.Duration {
+	var total time.Duration
+	for _, r := range rows {
+		if r.codedKnown {
+			total += r.coded
+		}
+	}
+	return total
 }
 
 // ---- the detail panel -----------------------------------------------------------
@@ -243,16 +274,21 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 const fleetWhyLines = 2
 
 // fleetMeta is the panel's status tail: how many turns it has taken, how full
-// its context was on the last assistant turn, and which model ran it. Each
-// clause is dropped whole when its source said nothing.
+// its context was on the last assistant turn, which model ran it, and what its
+// diff would have cost a senior developer to write by hand. Each clause is
+// dropped whole when its source said nothing.
+//
+// The hand-coding clause goes last on purpose. The first three are readings and
+// the fourth is an estimate, so it sits after them rather than among them, and
+// carries its own "≈" (cqCodedLine) rather than borrowing their authority.
 //
 // Absent, and to stay absent: "of 200k context" (the denominator is not
 // knowable from a model id), "· auto" (nothing persists the mode a session was
 // launched under — dxAuto is a form field, not a record field), and the
 // design's check trend (one sample cannot make a trend).
 func fleetMeta(r fleetRow) string {
-	parts := make([]string, 0, 2)
-	for _, p := range []string{cqPassLine(r.pass), cqCtxLine(r)} {
+	parts := make([]string, 0, 3)
+	for _, p := range []string{cqPassLine(r.pass), cqCtxLine(r), cqCodedLine(r)} {
 		if p != "" {
 			parts = append(parts, p)
 		}
