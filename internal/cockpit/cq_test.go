@@ -35,6 +35,7 @@ func installFleetFixture(t *testing.T) {
 				{k: "s", d: "skip"},
 			},
 			moved: now.Add(-4 * time.Minute), waited: now.Add(-4 * time.Minute),
+			started: now.Add(-2 * time.Hour),
 		},
 		{
 			id: "id-two", kind: "queue", rank: 1, ask: "turn-done", product: "beta",
@@ -47,6 +48,7 @@ func installFleetFixture(t *testing.T) {
 				{k: "s", d: "skip"},
 			},
 			moved: now.Add(-time.Hour), waited: now.Add(-time.Hour),
+			started: now.Add(-time.Hour),
 		},
 		{
 			id: "id-three", kind: "run", rank: 3, product: "alpha",
@@ -56,7 +58,10 @@ func installFleetFixture(t *testing.T) {
 				{k: "⏎", d: "attach", ok: "attaching to alpha-web session…", keep: true},
 				{k: "x", d: "kill", ok: "killed \"three\""},
 			},
+			// Six seconds since it last wrote, going for three hours: the pair
+			// the two age columns exist to tell apart.
 			moved: now.Add(-6 * time.Second), waited: now.Add(-6 * time.Second),
+			started: now.Add(-3 * time.Hour),
 		},
 		{
 			// History: a session that is over. It is in the same collected slice
@@ -71,9 +76,10 @@ func installFleetFixture(t *testing.T) {
 				{k: "o", d: "open pr", ok: "opening the pull request for \"four\"…", keep: true},
 			},
 			moved: now.Add(-3 * time.Hour), waited: now.Add(-3 * time.Hour),
+			started: now.Add(-4 * time.Hour),
 		},
 	}
-	cqLastOutput = "6s"
+	cqLastOutput = now.Add(-6 * time.Second)
 }
 
 func cqModel(t *testing.T) model {
@@ -522,12 +528,13 @@ func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 	}
 }
 
-// Four columns never shed: how bad, what, why and how long. Everything else
-// gives way as the terminal narrows, in the order the fit() tiers set.
+// Five columns never shed: how bad, what, why and both answers to how long.
+// Everything else gives way as the terminal narrows, in the order the fit()
+// tiers set.
 func TestFleetColumnsShedByWidth(t *testing.T) {
 	for _, w := range []int{60, 80, 110, 176} {
 		cols := fleetColumns(w, fleetProductMin)
-		if cols.glyph == 0 || cols.feature < 1 || cols.age == 0 {
+		if cols.glyph == 0 || cols.feature < 1 || cols.seen == 0 || cols.age == 0 {
 			t.Errorf("@%d: a load-bearing column was shed: %+v", w, cols)
 		}
 		if (w >= 70) != (cols.product > 0) {

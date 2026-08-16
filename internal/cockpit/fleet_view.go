@@ -25,9 +25,14 @@ import "strings"
 
 // ---- columns ------------------------------------------------------------------
 
-// The eight cells of a table line, in draw order. The column header and every
+// The nine cells of a table line, in draw order. The column header and every
 // data row go through the same indices, which is the only way the two stay
 // column-exact.
+//
+// LAST and AGE are two columns rather than one composed cell ("4s·3h") because
+// the numbers are only worth having if they can be scanned down the table, and
+// a composite right-aligned against a ragged left-hand number cannot be. Two
+// right-aligned cells put every last-seen under every other last-seen.
 const (
 	flGlyph = iota
 	flProduct
@@ -36,6 +41,7 @@ const (
 	flStage
 	flTurn
 	flSignal
+	flSeen
 	flAge
 	flCells
 )
@@ -43,7 +49,7 @@ const (
 // fleetCols is one terminal width's column widths. A zero width means the
 // column is shed at this size.
 type fleetCols struct {
-	glyph, product, feature, repo, stage, turn, sigPad, age int
+	glyph, product, feature, repo, stage, turn, sigPad, seen, age int
 }
 
 // fleetProductMin is the design's PRODUCT width, kept as the floor so a table
@@ -85,15 +91,21 @@ func fleetProductWidth(rows []fleetRow) int {
 // still draws the full chain for the selected row); below 70 the product label
 // goes too, because a 12ch label is a fifth of a 60-column screen.
 //
-// Four columns never shed: the glyph, the feature, the signal and the age.
-// They are how bad, what, why and how long — the reason the table exists.
+// Five columns never shed: the glyph, the feature, the signal and both ages.
+// They are how bad, what, why and how long — the reason the table exists. The
+// two ages hold together at every width because they are read as a pair: "how
+// long since it moved" is a different fact with and without "how long it has
+// been going", and the narrow tier is exactly where a human is triaging on the
+// table alone rather than opening the panel.
 //
 // row() splits flex width evenly and has no ratio support, so the design's
 // 1.3 : 1 : 1.4 is computed into fixed widths and exactly one column is left
 // flex. With a single flex cell it absorbs the remainder exactly and the row
 // stays column-exact whatever its position in the seg list.
 func fleetColumns(w, want int) fleetCols {
-	cols := fleetCols{glyph: 3, sigPad: 3, age: 6}
+	// seen is 5 and age 6: both hold "365d" with a gap, and the wider one is
+	// last so the table's right edge keeps the design's margin.
+	cols := fleetCols{glyph: 3, sigPad: 3, seen: 5, age: 6}
 	showRepo := w >= 110
 	if w >= 70 {
 		roof := maxi(fleetProductMin, cqInner(w)/fleetProductShare)
@@ -102,7 +114,7 @@ func fleetColumns(w, want int) fleetCols {
 	if showRepo {
 		cols.stage, cols.turn = 9, 4
 	}
-	fixed := cols.glyph + cols.product + cols.stage + cols.turn + cols.sigPad + cols.age
+	fixed := cols.glyph + cols.product + cols.stage + cols.turn + cols.sigPad + cols.seen + cols.age
 	rem := maxi(0, cqInner(w)-fixed)
 
 	share := 13 + 14 // feature : signal
@@ -138,6 +150,7 @@ func fleetLine(w int, cols fleetCols, bg string, v, hex [flCells]string) string 
 	segs = append(segs,
 		c("", cols.sigPad, ""),
 		flexc(v[flSignal], hex[flSignal]),
+		cr(v[flSeen], cols.seen, hex[flSeen]),
 		cr(v[flAge], cols.age, hex[flAge]),
 		c("", pad, ""))
 	return row(w, bg, segs...)
@@ -151,9 +164,13 @@ func fleetLine(w int, cols fleetCols, bg string, v, hex [flCells]string) string 
 // calls it "pass" would re-advertise a meaning it does not have. It is four
 // characters, which is the design's own cell width.
 func fleetHeaderLine(w int, cols fleetCols) string {
+	// LAST is the last thing this dispatcher was seen doing; AGE is how long it
+	// has been alive. Neither header is "AGE" alone any more, because with two
+	// numbers on the row that one word would name whichever the reader assumed.
 	v := [flCells]string{
 		flProduct: "PRODUCT", flFeature: "FEATURE", flRepo: "REPO",
-		flStage: "STAGE", flTurn: "TURN", flSignal: "SIGNAL", flAge: "AGE",
+		flStage: "STAGE", flTurn: "TURN", flSignal: "SIGNAL",
+		flSeen: "LAST", flAge: "AGE",
 	}
 	var hex [flCells]string
 	for i := range hex {
@@ -219,7 +236,8 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flStage:   cqPhaseWord(r.stage),
 		flTurn:    turn,
 		flSignal:  r.signal,
-		flAge:     cqAge(r.moved),
+		flSeen:    cqAge(r.moved),
+		flAge:     cqAge(r.started),
 	}
 	hex := [flCells]string{
 		flGlyph:   rank,
@@ -229,6 +247,7 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flStage:   stageHex,
 		flTurn:    turnHex,
 		flSignal:  rank,
+		flSeen:    cFaint,
 		flAge:     cFaint,
 	}
 	return fleetLine(w, cols, bg, v, hex)

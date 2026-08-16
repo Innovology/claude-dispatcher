@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/gh"
@@ -36,7 +37,7 @@ type snapshot struct {
 	}
 
 	fleet        []fleetRow
-	cqLastOutput string
+	cqLastOutput time.Time
 
 	products       []product
 	reposByProduct map[string][]repoRef
@@ -345,9 +346,9 @@ func applySnapshot(s snapshot) {
 	if s.fleet != nil {
 		fleet = s.fleet
 	}
-	// Unconditionally, unlike every other field: "" means no running session has
-	// a readable transcript, which is an observation the view must show, and a
-	// stale age left in place would be a lie about liveness.
+	// Unconditionally, unlike every other field: the zero time means no running
+	// session has a readable transcript, which is an observation the view must
+	// show, and a stale instant left in place would be a lie about liveness.
 	cqLastOutput = s.cqLastOutput
 	if s.products != nil {
 		products = s.products
