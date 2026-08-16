@@ -131,7 +131,8 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			// checks and another for the review, capped at the newest eight so a
 			// busy repo would not cost forty round-trips — a cap that is gone
 			// now, because the cost no longer counts pull requests.
-			for num, d := range gh.RepoPRs(r.Path) {
+			open, _ := gh.RepoPRs(r.Path)
+			for num, d := range open {
 				v.prs = append(v.prs, d.OpenPR)
 				v.checks[num] = d.Checks
 			}

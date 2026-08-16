@@ -96,14 +96,28 @@ type Checks struct {
 // The repo's open PRs come with their rollups attached in one read, so an open
 // PR is answered from that and costs nothing. Only a merged or closed PR — one
 // a dispatch record still points at, which is no longer in the open list — is
-// worth a request of its own.
+// worth a request of its own, and then only rarely: its check runs are history
+// now, and re-reading history once a minute for every feature the portfolio has
+// ever shipped is most of what a long-lived cockpit was spending.
 func PRChecksFor(repoPath string, number int) Checks {
-	if d, ok := RepoPRs(repoPath)[number]; ok {
+	open, asked := RepoPRs(repoPath)
+	if d, ok := open[number]; ok {
 		return d.Checks
 	}
-	return memo("checks:"+repoPath+":"+strconv.Itoa(number), PRTTL, func() Checks {
+	return memo("checks:"+repoPath+":"+strconv.Itoa(number), settledTTL(asked), func() Checks {
 		return prChecksUncached(repoPath, number)
 	})
+}
+
+// settledTTL is how long to hold a pull request's signals when the repo's open
+// list did not contain it. If the list answered, the PR is merged or closed and
+// what it says has stopped changing. If the list failed, its silence proves
+// nothing and the ordinary TTL stands.
+func settledTTL(asked bool) time.Duration {
+	if asked {
+		return SettledTTL
+	}
+	return PRTTL
 }
 
 func prChecksUncached(repoPath string, number int) Checks {
@@ -202,10 +216,11 @@ type Review struct {
 // Answered from the repo's open PRs where it can be, for the reason given on
 // PRChecksFor: the batch already carries it.
 func PRReviewFor(repoPath string, number int) Review {
-	if d, ok := RepoPRs(repoPath)[number]; ok {
+	open, asked := RepoPRs(repoPath)
+	if d, ok := open[number]; ok {
 		return d.Review
 	}
-	return memo("review:"+repoPath+":"+strconv.Itoa(number), PRTTL, func() Review {
+	return memo("review:"+repoPath+":"+strconv.Itoa(number), settledTTL(asked), func() Review {
 		return prReviewUncached(repoPath, number)
 	})
 }

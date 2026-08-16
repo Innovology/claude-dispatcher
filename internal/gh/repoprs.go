@@ -35,23 +35,32 @@ type PRDetail struct {
 // its checks and review posture. One request, cached at PRTTL because the check
 // rollup it carries is the fastest-moving thing the cockpit shows.
 //
-// An empty map is the answer for a repo with no open PRs and also for a repo we
-// could not reach; callers already treat both as "no signal".
-func RepoPRs(repoPath string) map[int]PRDetail {
-	return memo("repoprs:"+repoPath, PRTTL, func() map[int]PRDetail {
-		return repoPRsUncached(repoPath)
+// The bool separates "this repo has no open pull requests" from "we could not
+// ask", and the difference matters beyond an empty pane here: absence from a
+// list that answered is how the rest of the package knows a pull request has
+// merged or closed, and so that its checks and reviews have stopped changing.
+// Absence from a list that failed is no evidence of anything.
+func RepoPRs(repoPath string) (prs map[int]PRDetail, asked bool) {
+	type result struct {
+		byNumber map[int]PRDetail
+		ok       bool
+	}
+	r := memo("repoprs:"+repoPath, PRTTL, func() result {
+		byNumber, ok := repoPRsUncached(repoPath)
+		return result{byNumber, ok}
 	})
+	return r.byNumber, r.ok
 }
 
-func repoPRsUncached(repoPath string) map[int]PRDetail {
+func repoPRsUncached(repoPath string) (map[int]PRDetail, bool) {
 	if !Available() {
-		return nil
+		return nil, false
 	}
 	out, err := run(command(repoPath, "pr", "list", "--state", "open", "--limit", "50",
 		"--json", "number,title,author,headRefName,baseRefName,reviewDecision,"+
 			"reviews,additions,deletions,createdAt,statusCheckRollup"))
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	var rows []struct {
 		Number int    `json:"number"`
@@ -69,7 +78,7 @@ func repoPRsUncached(repoPath string) map[int]PRDetail {
 		StatusCheckRollup []rollupNode `json:"statusCheckRollup"`
 	}
 	if json.Unmarshal(out, &rows) != nil {
-		return nil
+		return nil, false
 	}
 	byNumber := make(map[int]PRDetail, len(rows))
 	for _, r := range rows {
@@ -89,5 +98,5 @@ func repoPRsUncached(repoPath string) map[int]PRDetail {
 			Review: tallyReviews(r.ReviewDecision, r.Reviews),
 		}
 	}
-	return byNumber
+	return byNumber, true
 }

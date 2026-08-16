@@ -33,8 +33,18 @@ type PR struct {
 // was a fixed per-poll tax that grew with history and never came down. The
 // actions that make the answer stale (a merge, a jump-in) drop the cache
 // themselves, so the poll is the only caller a TTL delays.
-func PRForBranch(repoPath, branch string) *PR {
-	return memo("prforbranch:"+repoPath+":"+branch, PRTTL, func() *PR {
+//
+// settled says the dispatcher behind the branch has stopped. Nothing on our
+// side will open a pull request on it any more; only a human can, by hand. That
+// is still worth finding, and it is not worth asking about every minute for the
+// rest of the week — which is what a state dir full of finished features had
+// the cockpit doing, one request per dead session per poll, for ever.
+func PRForBranch(repoPath, branch string, settled bool) *PR {
+	ttl := PRTTL
+	if settled {
+		ttl = SettledTTL
+	}
+	return memo("prforbranch:"+repoPath+":"+branch, ttl, func() *PR {
 		return prForBranchUncached(repoPath, branch)
 	})
 }

@@ -35,6 +35,13 @@ const (
 	// PRTTL covers per-PR checks and reviews, which change while CI runs, so
 	// it sits exactly on the poll: fresh once per poll, free in between.
 	PRTTL = 60 * time.Second
+	// SettledTTL covers what has stopped changing: a merged pull request's
+	// check runs and reviews, and the branch of a dispatcher that has finished.
+	// Not forever, because a PR can be reopened and a human can raise one by
+	// hand on a branch we are done with — but nowhere near once a minute, which
+	// is what a portfolio's worth of shipped features had the cockpit doing for
+	// the rest of the session, re-reading history that could not change.
+	SettledTTL = 30 * time.Minute
 )
 
 type entry struct {

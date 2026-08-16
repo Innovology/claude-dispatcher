@@ -30,7 +30,12 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 			continue
 		}
 		changed := false
-		if pr := gh.PRForBranch(d.RepoPath, d.Branch); pr != nil &&
+		// A dispatcher that has stopped will not open a pull request; only a
+		// human can now, by hand, on the branch it left behind. gh holds that
+		// answer far longer than a live dispatcher's — see PRForBranch. It is
+		// the difference between asking about a feature that shipped last week
+		// every minute for ever and asking occasionally.
+		if pr := gh.PRForBranch(d.RepoPath, d.Branch, finished(d)); pr != nil &&
 			(pr.Number != d.PRNumber || pr.State != d.PRState) {
 			d.PRNumber = pr.Number
 			d.PRState = pr.State
@@ -71,6 +76,16 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 		}
 	}
 	return updated
+}
+
+// finished reports whether the session behind a dispatch has stopped for good.
+//
+// Deliberately narrower than "not midWork": a needs-input dispatcher is waiting
+// on the human and will carry on the moment they answer, so it may well open a
+// PR in the next minute and is worth asking about at the ordinary rate. An
+// exited one has no session left to open anything.
+func finished(d *state.Dispatch) bool {
+	return d.Status == state.StatusExited
 }
 
 // midWork reports whether the session behind a dispatch is still doing

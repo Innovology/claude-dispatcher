@@ -114,7 +114,7 @@ func TestPRForBranchIsCached(t *testing.T) {
 
 	repo := t.TempDir()
 	for i := 0; i < 3; i++ {
-		if pr := PRForBranch(repo, "feature/x"); pr == nil || pr.Number != 3 {
+		if pr := PRForBranch(repo, "feature/x", false); pr == nil || pr.Number != 3 {
 			t.Fatalf("PRForBranch = %+v, want #3", pr)
 		}
 	}
@@ -191,11 +191,103 @@ func TestBatchedPRsCarryTheFieldsTheSearchNeverReturned(t *testing.T) {
   *) echo '[]' ;;
 esac`)
 
-	d, ok := RepoPRs(t.TempDir())[4]
+	open, _ := RepoPRs(t.TempDir())
+	d, ok := open[4]
 	if !ok {
 		t.Fatal("PR 4 missing from the batch")
 	}
 	if d.HeadRefName != "feature/x" || d.Additions != 120 || d.Deletions != 7 {
 		t.Errorf("got %+v, want the head branch and diff size filled in", d.OpenPR)
+	}
+}
+
+// A pull request the repo's open list does not contain has merged or closed,
+// and its check runs and reviews are history. Re-reading them was most of what
+// a long-lived cockpit spent: every feature the portfolio had ever shipped,
+// twice a minute, for ever.
+func TestMergedPRSignalsAreNotRereadEveryPoll(t *testing.T) {
+	calls := fakeGH(t, `case "$*" in
+  *"pr list --state open"*) echo '[]' ;;
+  *"pr checks"*) echo '[{"state":"SUCCESS"}]' ;;
+  *"pr view"*) echo '{"reviewDecision":"APPROVED","reviews":[]}' ;;
+esac`)
+
+	repo := t.TempDir()
+	PRChecksFor(repo, 12)
+	PRReviewFor(repo, 12)
+
+	// A poll later, with PRTTL long expired, the answer must still stand.
+	agePast(t, PRTTL)
+	PRChecksFor(repo, 12)
+	PRReviewFor(repo, 12)
+
+	if got := len(perPR(calls())); got != 2 {
+		t.Errorf("read a merged PR's frozen signals %d times, want 2: %v", got, perPR(calls()))
+	}
+}
+
+// Unless the open list never answered. Absence from a list that failed is not
+// evidence that anything has settled, so the ordinary TTL stands and the next
+// poll asks again.
+func TestAFailedOpenListDoesNotFreezeAnything(t *testing.T) {
+	calls := fakeGH(t, `case "$*" in
+  *"pr list --state open"*) echo "no git remotes found" >&2; exit 1 ;;
+  *"pr checks"*) echo '[{"state":"SUCCESS"}]' ;;
+esac`)
+
+	repo := t.TempDir()
+	PRChecksFor(repo, 12)
+	agePast(t, PRTTL)
+	PRChecksFor(repo, 12)
+
+	var checks int
+	for _, c := range calls() {
+		if strings.HasPrefix(c, "pr checks") {
+			checks++
+		}
+	}
+	if checks != 2 {
+		t.Errorf("asked %d times, want 2 — a failed list must not settle a PR", checks)
+	}
+}
+
+// The branch of a dispatcher that has stopped is asked about far less often:
+// nothing on our side will raise a PR on it, and a state dir full of finished
+// features was costing one request per dead session per poll, for ever.
+func TestAFinishedDispatchersBranchIsAskedAboutRarely(t *testing.T) {
+	calls := fakeGH(t, `echo '[]'`)
+
+	repo := t.TempDir()
+	PRForBranch(repo, "feature/done", true)
+	agePast(t, PRTTL)
+	PRForBranch(repo, "feature/done", true)
+	if got := len(calls()); got != 1 {
+		t.Errorf("asked %d times about a finished dispatcher's branch, want 1", got)
+	}
+
+	// A live one is still asked at the ordinary rate — its PR may appear at any
+	// moment, which is the whole point of the poll.
+	PRForBranch(repo, "feature/live", false)
+	agePast(t, PRTTL)
+	PRForBranch(repo, "feature/live", false)
+	var live int
+	for _, c := range calls() {
+		if strings.Contains(c, "feature/live") {
+			live++
+		}
+	}
+	if live != 2 {
+		t.Errorf("asked %d times about a live dispatcher's branch, want 2", live)
+	}
+}
+
+// agePast winds every cached entry back so the next read sees it as older than
+// d, without the test having to wait.
+func agePast(t *testing.T, d time.Duration) {
+	t.Helper()
+	mu.Lock()
+	defer mu.Unlock()
+	for _, e := range cache {
+		e.at = e.at.Add(-d - time.Second)
 	}
 }
