@@ -29,7 +29,13 @@
       worktree path and the cockpit's record map are both keyed by it, so a
       second concurrent dispatch of a live name would put two sessions in one
       checkout. Launch refuses it; re-dispatching a *finished* feature is
-      still fine and reuses the worktree left behind.
+      still fine and reuses the worktree left behind. "Live" is two facts
+      (`liveDispatch`), and the second is the one that bites: a live tmux
+      session is **not** a live dispatcher, because `launchCommand` ends
+      `; exec ${SHELL}` on purpose and every finished dispatch keeps its
+      session as an idle login shell. `supervisor.SessionIdle` tells them
+      apart; its *unknown* (a backend that cannot see into a session) is
+      neither, and keeps the refusal rather than guessing.
   - *Product* is the grouping lens: the cockpit list and the dispatch form's
     repo picker group by the `[products]` config, most urgent group first;
     unmapped repos fall under "other". No separate group concept.
@@ -107,6 +113,12 @@
   a real stage and every figure is what it found — the list is a description of
   that function, not decoration over it, so a stage added there gets a step here
   (a test asserts the two sets match). Any key skips it; the load continues.
+  Panels get a height as well as a width: the product panel's history tab is as
+  long as the product's past, and it is the lines *under* the list — the session
+  id and the key that reopens it — that a fixed-height column drops first, so it
+  windows around the cursor and counts what it hides rather than stopping mute.
+  `prodDay` normalises to **local** before truncating: forge timestamps are UTC
+  and the clock's are local, and a day compared across the two is never equal.
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort

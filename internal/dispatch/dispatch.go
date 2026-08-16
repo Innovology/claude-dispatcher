@@ -103,7 +103,7 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 		WorktreePath: worktree,
 		BaseSHA:      baseSHA,
 		Prompt:       prompt,
-		TmuxSession:  supervisor.UniqueName("disp-" + slug),
+		TmuxSession:  uniqueName("disp-" + slug),
 		Status:       state.StatusLaunching,
 		CreatedAt:    time.Now(),
 	}
@@ -115,7 +115,7 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
 	cmd := launchCommand(d.ID, prompt)
-	if err := supervisor.NewSession(d.TmuxSession, worktree, cmd); err != nil {
+	if err := newSession(d.TmuxSession, worktree, cmd); err != nil {
 		d.Status = state.StatusExited
 		d.StatusReason = "tmux launch failed"
 		_ = state.Save(d)
@@ -135,13 +135,30 @@ func Launch(r repos.Repo, feature, prompt string) (*state.Dispatch, error) {
 // cockpit. Re-dispatching a feature whose session has ended is still fine, and
 // deliberately reuses the worktree left behind.
 //
-// The live tmux session, not the record's status, is the test: a record can be
-// left stale by a crash, but a running session is ground truth.
+// The session, not the record's status, is the test: a record can be left stale
+// by a crash, but what is actually running is ground truth.
+//
+// It takes two facts about that session, and the second one was missing. A live
+// session is not a live dispatcher: launchCommand ends `; exec ${SHELL}` on
+// purpose, so the session outlives its claude by design and sits there as a
+// login shell for inspection. Every finished dispatch on a real machine still
+// had one, so this refused to re-dispatch any feature that had ever completed —
+// the exact case per-dispatch worktrees say is allowed, and the fallback the
+// history tab offers a row with no session left to resume.
+//
+// SessionIdle is what tells the two apart, and its "unknown" is neither: a
+// backend that cannot see into a session (the Windows console one) keeps the
+// conservative answer rather than letting a guess put two claudes in one
+// checkout.
 func liveDispatch(slug string) *state.Dispatch {
 	for _, d := range state.LoadAll() {
-		if d.Slug == slug && d.TmuxSession != "" && sessionAlive(d.TmuxSession) {
-			return d
+		if d.Slug != slug || d.TmuxSession == "" || !sessionAlive(d.TmuxSession) {
+			continue
 		}
+		if idle, known := sessionIdle(d.TmuxSession); known && idle {
+			continue // claude has ended; what is left is the shell it dropped to
+		}
+		return d
 	}
 	return nil
 }
