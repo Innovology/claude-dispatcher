@@ -261,9 +261,11 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 	case "u":
 		mm, cmd := m.clAssign(m.clTargets(), "")
 		return mm, cmd, true
-	case "U":
+	case "ctrl+u":
 		// Start over: every repo out of every product. Destructive enough to
-		// deserve its own capital key rather than sharing `u`.
+		// deserve its own key rather than sharing `u`, and a chord rather than
+		// the capital it used to be — `U` never arrived here at all, because
+		// handleKey resolves it as the upgrade key before any lens is asked.
 		var all []string
 		for _, r := range rows {
 			all = append(all, r.name)

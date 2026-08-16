@@ -180,7 +180,7 @@ func TestEnterOnAHistoryRowResumes(t *testing.T) {
 func TestHistoryFooterOffersOnlyWhatWorks(t *testing.T) {
 	m := press(cqModel(t), "h")
 	got := m.footerHelp()
-	for _, gone := range []string{"y ", "x kill", "s skip", "u undo"} {
+	for _, gone := range []string{"y ", "x kill", "s skip", "undo"} {
 		if strings.Contains(got, gone) {
 			t.Errorf("history footer offers %q: %s", gone, got)
 		}

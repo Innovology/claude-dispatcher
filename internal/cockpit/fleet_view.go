@@ -472,6 +472,6 @@ func (m model) cqFooterHelp() string {
 		// footer only names keys that work right now.
 		return strings.Join(append(parts, "j/k move", "h back to the fleet", "? keys"), " · ")
 	}
-	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "u undo", "? keys")
+	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "ctrl+z undo", "? keys")
 	return strings.Join(parts, " · ")
 }

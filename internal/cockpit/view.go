@@ -112,7 +112,7 @@ func (m model) footerView() string {
 	left := fg(cDim, m.footerHelp())
 	notice := m.notice
 	if m.undo != "" {
-		notice += "  ·  u to undo"
+		notice += "  ·  ctrl+z to undo"
 	}
 	right := ""
 	if notice != "" {
@@ -146,7 +146,7 @@ func (m model) footerHelp() string {
 		if m.clNaming {
 			return "type the name · enter creates it · esc cancels"
 		}
-		return "j/k move · tab pane · space mark · enter assign · u unassign · n new · a done"
+		return "j/k move · tab pane · space mark · enter assign · u unassign · ctrl+u start over · n new · a done"
 	}
 	if h, ok := footerByLens[m.lens]; ok {
 		return h

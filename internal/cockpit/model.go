@@ -152,7 +152,7 @@ type model struct {
 	fleetCursor int
 	fleetSelID  string
 
-	cqUndo *cqUndoEntry // the last cleared row, restorable with `u`
+	cqUndo *cqUndoEntry // the last cleared row, restorable with ctrl+z
 
 	// pending is what this cockpit has asked for and not yet seen a record for.
 	// It is the only view state that is not derived from the records, and it has

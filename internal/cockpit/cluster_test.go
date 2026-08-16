@@ -112,6 +112,53 @@ func TestClAssignAndUnassignPersist(t *testing.T) {
 	}
 }
 
+// The editor's two unassign keys have to survive the global router, which gets
+// every key first. "Start over" was a capital U and never arrived: handleKey
+// resolves U as the upgrade key before any lens is asked, so the one key the
+// help sheet promised here opened an upgrade confirm instead. And `u` was
+// stolen from this screen whenever a triage act had left an undo behind.
+func TestClUnassignKeysSurviveTheGlobalRouter(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// A fresh editor per key: clAssign writes through the working map, which a
+	// copied model shares with the one it was copied from.
+	fresh := func() model {
+		m := clFixture(t)
+		m.lens = "products"
+		m.clMap = map[string]string{"acme-api": "acme", "acme-web": "acme", "orbit-billing": "orbit"}
+		m.undo = "ship widget" // a pending undo must not eat this screen's `u`
+		return m
+	}
+
+	// `u` takes the cursor row out of its product and nothing else.
+	m := press(fresh(), "u")
+	if m.undo != "ship widget" {
+		t.Error("u undid a triage act instead of unassigning a repo")
+	}
+	if got := m.clMap["acme-api"]; got != "" {
+		t.Errorf("u left acme-api in %q", got)
+	}
+	if m.clMap["acme-web"] != "acme" {
+		t.Error("u unassigned more than the row it was on")
+	}
+
+	// ctrl+u is start over: every repo out of every product.
+	m = press(fresh(), "ctrl+u")
+	for _, r := range m.clRepos() {
+		if r.product != "" {
+			t.Errorf("start over left %s in %q", r.name, r.product)
+		}
+	}
+	if !strings.Contains(m.notice, "every repo unassigned") {
+		t.Errorf("start over notice = %q", m.notice)
+	}
+
+	// U is the upgrade key here as everywhere — never a second unassign.
+	m = press(fresh(), "U")
+	if m.clMap["acme-api"] != "acme" || m.clMap["orbit-billing"] != "orbit" {
+		t.Error("U unassigned something in the editor")
+	}
+}
+
 // Naming is a text field, so it must take a whole burst — the same hole that
 // once made every input in this cockpit dead to typing at speed.
 func TestClNamingTakesABurstAndCreatesTheProduct(t *testing.T) {
