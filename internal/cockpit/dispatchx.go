@@ -5,14 +5,22 @@ package cockpit
 // It replaces the freeform draft (`cqDraft`) that used to sit under "what
 // should we build?". A draft answered only half the question: it said what to
 // build and then handed off to a three-step overlay to say where. The form asks
-// the four things a dispatch actually needs, on one screen:
+// the five things a dispatch actually needs, on one screen:
 //
 //	WHERE      which repo it lands in — filtered, not scrolled through
-//	WHAT       the work, which is also the feature name and the branch
+//	TITLE      what it is called: the feature name, and the branch
+//	WHAT       the work itself, wrapped over as many rows as it takes
 //	DONE WHEN  the completion condition, optional
 //	AUTO       whether it runs unattended or checks in between steps
 //
-// Two of those are honest about their reach. There is no permission plumbing
+// TITLE and WHAT used to be one field, and the branch was named from it. That
+// asked one line to be two things at once: a name short enough to live in
+// `feature/…`, a worktree path and a tmux session, and a brief long enough to
+// dispatch on. What happened in practice is that the brief went into DONE WHEN
+// — the only field with room — and the completion condition was lost. Naming
+// and describing are separate now, and only TITLE reaches the branch.
+//
+// Two of the five are honest about their reach. There is no permission plumbing
 // behind AUTO and no supervisor watching DONE WHEN: the only thing that reaches
 // a session is the prompt, so both are sentences in the prompt and the copy
 // promises nothing more (see dxPrompt).
@@ -32,7 +40,7 @@ import (
 	"claude-dispatcher/internal/repos"
 )
 
-// ---- the four fields ---------------------------------------------------------
+// ---- the five fields ---------------------------------------------------------
 
 // dxFieldID names the line that owns the keyboard. The order is the tab order
 // and the enter order, so it is also the order the fields are read in.
@@ -40,6 +48,7 @@ type dxFieldID int
 
 const (
 	dxWhereF dxFieldID = iota
+	dxTitleF
 	dxWhatF
 	dxGoalF
 	dxAutoF
@@ -67,7 +76,7 @@ const dxUnassigned = clUnassigned
 func (m model) dxReset() model {
 	m.cqDispatch = false
 	m.dxField, m.dxRepo = dxWhereF, 0
-	m.dxFilter, m.dxWhat, m.dxGoal = "", "", ""
+	m.dxFilter, m.dxTitle, m.dxWhat, m.dxGoal = "", "", "", ""
 	m.dxAuto = true
 	return m
 }
@@ -82,14 +91,14 @@ func (m model) dxOpen(filter string) model {
 	return m
 }
 
-// dxTouched reports whether anything has been typed into the three text fields.
+// dxTouched reports whether anything has been typed into the four text fields.
 // It is what decides whether a navigation key is navigation or text: an
 // untouched form is not a trap, so 1–6, ':' and 'w' still leave it, but the
 // moment there is a filter or a sentence they are letters again. dxAuto and
 // dxField deliberately do not count — toggling auto or tabbing about is not
 // typing, and must not strand the human on this screen.
 func (m model) dxTouched() bool {
-	return m.dxFilter != "" || m.dxWhat != "" || m.dxGoal != ""
+	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != ""
 }
 
 // ---- the repo list -----------------------------------------------------------
@@ -201,10 +210,10 @@ func dxSlugWords(s string, max int) string {
 	return strings.Join(parts, "-")
 }
 
-// dxBranch is the branch WHAT will produce. "untitled" is display-only: submit
-// refuses an empty WHAT long before Launch could see it.
+// dxBranch is the branch TITLE will produce. "untitled" is display-only: submit
+// refuses a title that slugs to nothing long before Launch could see it.
 func (m model) dxBranch() string {
-	slug := dxSlugWords(m.dxWhat, dxBranchWords)
+	slug := dxSlugWords(m.dxTitle, dxBranchWords)
 	if slug == "" {
 		slug = "untitled"
 	}
@@ -216,26 +225,29 @@ func (m model) dxBranch() string {
 // dxDispatch turns the form into the two strings a launch needs: the name the
 // dispatch is filed under, and the prompt the dispatcher actually receives.
 //
-// They come from the same field and must never be the same string. WHAT is
-// asked for once and read twice: as a name it has to be short, because the slug
-// it makes names the branch, the worktree directory and the tmux session; as a
-// brief it has to be whole, because it is the only description of the work that
-// ever reaches the session.
+// They must never be the same string, and they no longer even come from the
+// same field: the name is TITLE, and the prompt opens with TITLE and then
+// carries WHAT whole. A name has to be short, because the slug it makes also
+// names the branch, the worktree directory and the tmux session; a brief has to
+// be whole, because it is the only description of the work that ever reaches
+// the session.
 //
-// Submitting used to name the feature from the capped slug and then compose the
-// prompt from that *same capped value*, so the cap meant to bound three
-// filesystem-facing names silently truncated the brief as well. Everything past
-// the fifth word was discarded at the form, before the record was written and
-// before claude was started — the sentence had no other copy, so it was gone.
-// The dispatcher then received its own de-hyphenated branch name as its
-// instructions: real records carry the prompt "dispatching immediate look up
-// when", which stops mid-clause on the word the condition was about to follow.
+// This seam was cut when both readings came off WHAT alone. Submitting named
+// the feature from the capped slug and then composed the prompt from that *same
+// capped value*, so a cap meant to bound three filesystem-facing names silently
+// truncated the brief as well: everything past the fifth word was discarded at
+// the form, before the record was written and before claude was started, and
+// the sentence had no other copy. Real records still carry the prompt
+// "dispatching immediate look up when", which stops mid-clause on the word the
+// condition was about to follow.
 //
-// Two returns, from two readings of one field, is what keeps that honest: the
-// cap applies to the name and stops there.
-func dxDispatch(what, goal string, auto bool) (feature, prompt string) {
-	what = strings.TrimSpace(what)
-	return dxFeatureName(what), dxPrompt(what, goal, auto)
+// Splitting that field into TITLE and WHAT removes the collision at its source.
+// The two returns stay: a caller that reconstructs the brief from the feature
+// name is precisely the bug, and one function returning both is what stops the
+// next one from trying.
+func dxDispatch(title, what, goal string, auto bool) (feature, prompt string) {
+	title, what = strings.TrimSpace(title), strings.TrimSpace(what)
+	return dxFeatureName(title), dxPrompt(title, what, goal, auto)
 }
 
 // dxPrompt composes the prompt. what is the sentence as it was typed, in full:
@@ -244,8 +256,15 @@ func dxDispatch(what, goal string, auto bool) (feature, prompt string) {
 // them — the launch command is claude with a prompt, with no permission flags
 // and no watchdog — so they are instructions, and this is the only place they
 // exist. Keep the copy inside what a prompt can promise.
-func dxPrompt(what, goal string, auto bool) string {
-	lines := []string{what}
+//
+// TITLE leads, on its own line, because it is the name the branch, the worktree
+// and every screen file this work under: the session should know what it is
+// building before it reads the brief. WHAT follows as the body.
+func dxPrompt(title, what, goal string, auto bool) string {
+	lines := []string{title}
+	if what != "" {
+		lines = append(lines, "", what)
+	}
 	if goal != "" {
 		lines = append(lines, "", "done when: "+goal, "Keep working until that is true.")
 	}
@@ -331,6 +350,8 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		switch field {
 		case dxWhereF:
 			m.dxFilter, m.dxRepo = dxChop(m.dxFilter), 0
+		case dxTitleF:
+			m.dxTitle = dxChop(m.dxTitle)
 		case dxWhatF:
 			m.dxWhat = dxChop(m.dxWhat)
 		case dxGoalF:
@@ -345,6 +366,8 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			// A narrowed list is a different list, so the cursor goes home
 			// rather than pointing at whatever now sits at that index.
 			m.dxFilter, m.dxRepo = m.dxFilter+s, 0
+		case dxTitleF:
+			m.dxTitle += s
 		case dxWhatF:
 			m.dxWhat += s
 		case dxGoalF:
@@ -391,10 +414,17 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		return m, nil
 	}
 	goal := strings.TrimSpace(m.dxGoal)
-	feature, prompt := dxDispatch(m.dxWhat, goal, m.dxAuto)
+	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal, m.dxAuto)
 	if feature == "" {
+		// Empty *or* unslugabble: a title of nothing but punctuation passes a
+		// plain "is it blank" test and then fails inside Launch, where the human
+		// is no longer looking at the form.
+		m.dxField, m.notice = dxTitleF, "name it — the branch is named from the title"
+		return m, nil
+	}
+	if strings.TrimSpace(m.dxWhat) == "" {
 		m.dxField = dxWhatF
-		m.notice = "say what it should do"
+		m.notice = "say what it should do — the title alone is not a brief"
 		return m, nil
 	}
 	branch, auto := m.dxBranch(), m.dxAuto
@@ -452,13 +482,27 @@ func (m model) dxRepoNone() string {
 	return ""
 }
 
-// dxWhatHint turns into the branch preview as soon as there is something to
+// dxTitleHint turns into the branch preview as soon as there is something to
 // preview — the one place the human sees the name their history is filed under.
-func (m model) dxWhatHint() string {
-	if strings.TrimSpace(m.dxWhat) != "" {
+func (m model) dxTitleHint() string {
+	if strings.TrimSpace(m.dxTitle) != "" {
 		return "branch " + m.dxBranch()
 	}
-	return "one line is enough — it reads the repo itself"
+	return "a few words · names the branch, the worktree and the session"
+}
+
+// dxWhatHint says what WHAT is for, and — while it has the keyboard — that
+// enter leaves the field. A box that grows as you type invites enter as a
+// newline, and this form has no newline: enter is the field walk everywhere
+// else on the screen, and it stays that here.
+func (m model) dxWhatHint() string {
+	if m.dxField == dxWhatF {
+		return "wraps as you type · enter moves on · ctrl+d dispatches"
+	}
+	if strings.TrimSpace(m.dxWhat) != "" {
+		return "the brief the session opens with"
+	}
+	return "the work itself — as long as it needs to be"
 }
 
 // dxGoalHint says what leaving DONE WHEN empty costs.
@@ -521,9 +565,18 @@ const (
 	dxGapW    = 2  // the design's 2ch flex gap
 	dxIndent  = 13 // the repo list's padding-left: label column + gap
 	dxNarrowW = 60 // below this the list gives the indent back to the repo name
+
+	// dxWhatMax is how tall WHAT may grow. Past six rows the form stops being a
+	// form and the repo list has nowhere left to be; the text keeps going, and
+	// the box scrolls to hold the end — the part being typed.
+	dxWhatMax = 6
+	// dxListFloor is how many repo rows WHAT may never take. A hidden repo is a
+	// repo that cannot be picked, and unlike the text it cannot be typed back
+	// into view.
+	dxListFloor = 3
 )
 
-// dxView is the dispatch prompt pane: the lead, the four fields, and the line
+// dxView is the dispatch prompt pane: the lead, the five fields, and the line
 // that says what is getting on without you. cqViewEmpty renders it.
 //
 // Same row discipline as the rest of the triage lens (see cq_view.go): fixed
@@ -541,9 +594,16 @@ func (m model) dxView(w, h int) string {
 	}
 
 	autoVal, autoHex := m.dxAutoValue()
-	body := []cqRow{
+	// The gap under TITLE is order 10: the last spacer to go, because the two
+	// fields either side of it are the two the human types into, and a title
+	// touching its brief reads as one run-on sentence.
+	aboveWhat := []cqRow{
 		cqGap(5),
-		cqFixed(m.dxFieldRow(inner, "WHAT", m.dxWhat, m.dxField == dxWhatF, "")),
+		cqFixed(m.dxFieldRow(inner, "TITLE", m.dxTitle, m.dxField == dxTitleF, "")),
+		cqFixed(dxHintRow(inner, m.dxTitleHint())),
+		cqGap(10),
+	}
+	belowWhat := []cqRow{
 		cqFixed(dxHintRow(inner, m.dxWhatHint())),
 		cqGap(7),
 		cqFixed(m.dxFieldRow(inner, "DONE WHEN", m.dxGoal, m.dxField == dxGoalF, "")),
@@ -558,6 +618,22 @@ func (m model) dxView(w, h int) string {
 		cqFixed(flG(fg(cFaint, truncate(cqUnattendedLine(), maxi(1, inner))))),
 		cqGap(9),
 	}
+
+	// WHAT takes the rows its text needs out of the height nothing else has
+	// claimed — never more than dxWhatMax, and never the repo list's floor. The
+	// floor is only worth reserving where there is something to stand on it:
+	// with two repos matching it is two rows, and with none it is the single
+	// line that says so.
+	floor := mini(dxListFloor, maxi(1, len(m.dxRows())))
+	fixed := len(head) + len(aboveWhat) + len(belowWhat) + len(tail)
+	whatRows := m.dxWhatRows(inner, mini(dxWhatMax, maxi(1, h-fixed-floor)))
+
+	body := make([]cqRow, 0, len(aboveWhat)+len(whatRows)+len(belowWhat))
+	body = append(body, aboveWhat...)
+	for _, ln := range whatRows {
+		body = append(body, cqFixed(ln))
+	}
+	body = append(body, belowWhat...)
 
 	// The list takes what is left after everything that must be on screen, and
 	// never more rows than it has repos to show.
@@ -636,6 +712,126 @@ func dxValue(s string, active bool, room int) string {
 	return fg(cFg, string(r)) + paint(cSurface, cFg, " ")
 }
 
+// dxWhatRows is WHAT: the label, then the typed text wrapped down the value
+// column for at most max rows. Continuation rows line up under the first one,
+// so the block reads as one paragraph in the column the other fields use.
+func (m model) dxWhatRows(inner, max int) []string {
+	active := m.dxField == dxWhatF
+	lbl := fg(dxLabelColor(active), padTo("WHAT", dxLabelW, alignLeft))
+	vals := dxWrapValue(m.dxWhat, active, inner-dxLabelW-dxGapW, max)
+	if len(vals) == 0 {
+		return []string{flG(lbl)}
+	}
+	rows := make([]string, 0, len(vals))
+	for i, v := range vals {
+		if i == 0 {
+			rows = append(rows, flG(lbl+blank(dxGapW)+v))
+			continue
+		}
+		rows = append(rows, flG(blank(dxIndent)+v))
+	}
+	return rows
+}
+
+// dxWrapValue is WHAT's text laid out down the value column with the block
+// caret after it.
+//
+// It wraps where the other fields scroll (dxValue), because WHAT is the one
+// field that holds a paragraph: scrolling it left would leave the human typing
+// a brief through a letterbox, able to see only the last few words of what they
+// wrote. When the text outgrows max rows the top goes rather than the bottom —
+// the caret is where the work is.
+func dxWrapValue(s string, active bool, room, max int) []string {
+	if room < 2 || max < 1 {
+		return nil
+	}
+	// Trailing spaces are the caret's, not the wrapper's: strings.Fields eats
+	// them, and then pressing space would not move the caret.
+	body := strings.TrimRight(s, " ")
+	tail := s[len(body):]
+	if len(tail) > room-1 {
+		tail = tail[:room-1]
+	}
+	lines := dxWrap(body, room)
+	// The caret needs a cell of its own. When the last line has no room left for
+	// it, it starts the next one rather than hanging outside the column.
+	if dispWidth(lines[len(lines)-1])+len(tail)+1 > room {
+		lines = append(lines, "")
+	}
+	lines[len(lines)-1] += tail
+	if len(lines) > max {
+		lines = lines[len(lines)-max:]
+	}
+
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = fg(cFg, ln)
+	}
+	// An inactive field keeps the caret's column as a space, so the fields stay
+	// in line whichever one owns the keyboard.
+	if active {
+		out[len(out)-1] += paint(cSurface, cFg, " ")
+	} else {
+		out[len(out)-1] += " "
+	}
+	return out
+}
+
+// dxWrap greedily word-wraps s to w columns, always returning at least one
+// line. A single word too long for the column is broken rather than allowed to
+// overhang: this is a text field, and text that runs outside its column would
+// paint over the pane beside it.
+func dxWrap(s string, w int) []string {
+	if w < 1 {
+		return []string{""}
+	}
+	var lines []string
+	cur := ""
+	for _, word := range strings.Fields(s) {
+		for dispWidth(word) > w {
+			if cur != "" {
+				lines, cur = append(lines, cur), ""
+			}
+			head := dxCut(word, w)
+			lines = append(lines, head)
+			word = word[len(head):]
+		}
+		switch {
+		case cur == "":
+			cur = word
+		case dispWidth(cur)+1+dispWidth(word) <= w:
+			cur += " " + word
+		default:
+			lines, cur = append(lines, cur), word
+		}
+	}
+	if cur != "" || len(lines) == 0 {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
+// dxCut is the first w columns of s, cut on a rune boundary. Unlike
+// truncate it adds no ellipsis: the rest of the word is about to be printed on
+// the next line.
+func dxCut(s string, w int) string {
+	out := ""
+	for _, r := range s {
+		if dispWidth(out+string(r)) > w {
+			break
+		}
+		out += string(r)
+	}
+	if out == "" {
+		// A single rune wider than the column: emit it anyway, or the caller
+		// loops forever on a word it can never shorten.
+		for _, r := range s {
+			return string(r)
+		}
+	}
+	return out
+}
+
 // dxRepoLines is the filtered repo list, windowed so the cursor stays on
 // screen. room is the height it may use; with none it renders nothing, which is
 // honest on a very short terminal — the count on the WHERE line still says how
@@ -696,21 +892,21 @@ func dxRepoLine(inner int, r dxRepoRow, on bool) string {
 	return flG(blank(indent) + row(width, bg, segs...))
 }
 
-// dxFeatureName is the name the dispatch is filed under: the branch's own words,
-// read back as a phrase.
+// dxFeatureName is the name the dispatch is filed under: the title, as typed.
+// It is empty when the title cannot become a branch at all, which is what
+// dxSubmit refuses on.
 //
-// WHAT used to become the feature name whole, so a pasted paragraph produced a
-// 75-word name, a 91-character slug and a 96-character tmux session. Naming the
-// feature from the same capped slug the branch uses keeps all four in agreement
-// — name, branch, worktree and session — and nothing is lost, because the full
-// sentence is the first line of the prompt. That last clause is only true while
-// the prompt is composed from WHAT rather than from this function's return: it
-// was written when both came off one variable, and was false for as long as
-// that lasted. dxDispatch is where the two readings part company.
-func dxFeatureName(what string) string {
-	slug := dispatchpkg.Slugify(strings.TrimSpace(what))
-	if slug == "" {
+// It used to read WHAT back through the slug — a 75-word name, a 91-character
+// slug and a 96-character tmux session were what a pasted paragraph produced
+// otherwise — and that round-trip is what made the name and the brief one
+// string, which is the whole of the truncation dxDispatch describes. A title is
+// already short, and Slugify caps the slug at dispatch.SlugWords, so the name
+// is kept as it was written: the words the human chose, not the words that
+// survived being turned into a path.
+func dxFeatureName(title string) string {
+	title = strings.TrimSpace(title)
+	if dispatchpkg.Slugify(title) == "" {
 		return ""
 	}
-	return strings.ReplaceAll(slug, "-", " ")
+	return title
 }

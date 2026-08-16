@@ -90,7 +90,12 @@ func TestOverlayInputsAcceptBurstTyping(t *testing.T) {
 		t.Errorf("dispatch form filter = %q, want %q", got, "stripe")
 	}
 
-	// …and into each of the other two text fields.
+	// …and into each of the other three text fields.
+	m = newModel()
+	m.cqDispatch, m.dxField = true, dxTitleF
+	if got := typeBurst(m, "payment retries").dxTitle; got != "payment retries" {
+		t.Errorf("TITLE = %q, want %q", got, "payment retries")
+	}
 	m = newModel()
 	m.cqDispatch, m.dxField = true, dxWhatF
 	if got := typeBurst(m, "retry charges").dxWhat; got != "retry charges" {

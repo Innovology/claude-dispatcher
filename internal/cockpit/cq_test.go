@@ -304,12 +304,12 @@ func TestCQFormFallThrough(t *testing.T) {
 	}
 }
 
-// Enter walks the four fields and only submits from the last one; esc abandons
+// Enter walks the five fields and only submits from the last one; esc abandons
 // the whole form.
 func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	for _, want := range []dxFieldID{dxWhatF, dxGoalF, dxAutoF} {
+	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxAutoF} {
 		m = press(m, "enter")
 		if m.dxField != want {
 			t.Fatalf("enter should advance to field %d, got %d", want, m.dxField)
@@ -332,6 +332,7 @@ func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 func TestCQFormSubmitWithoutARepo(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
+	m = press(m, "tab") // → TITLE
 	m = press(m, "tab") // → WHAT
 	for _, k := range strings.Split("fix", "") {
 		m = press(m, k)
@@ -351,14 +352,16 @@ func TestCQFormSubmitWithoutARepo(t *testing.T) {
 
 // The dispatcher must be told what was typed, not what the branch is called.
 //
-// WHAT is read twice — as a name, which is capped to five slug words because it
-// names the branch, the worktree and the tmux session, and as the brief, which
-// is the only description of the work that ever reaches the session. Submit
-// composed the brief from the capped name, so every word past the fifth was
-// dropped at the form: before the record, before claude started, and with no
-// other copy of the sentence anywhere. Real records carry the prompt
-// "dispatching immediate look up when", cut mid-clause.
+// The name and the brief used to be one field read twice: WHAT became the name
+// through a five-word slug cap — it names the branch, the worktree and the tmux
+// session — and submit then composed the brief from that same capped value, so
+// every word past the fifth was dropped at the form, before the record and
+// before claude started, with no other copy of the sentence anywhere. Real
+// records carry the prompt "dispatching immediate look up when", cut
+// mid-clause. TITLE and WHAT are separate fields now, and this asserts what
+// that has to mean at the hand-off: the whole of WHAT reaches the session.
 func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
+	const title = "dispatching immediate look up when"
 	const what = "dispatching immediate look up when the branch already has a dispatcher"
 
 	var gotFeature, gotPrompt string
@@ -372,46 +375,53 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 	m := cqModel(t)
 	m.cfg = &config.Config{Roots: []string{seedRepoRoot(t, "alpha-api")}}
 	m = press(m, "d")
-	m.dxField, m.dxWhat, m.dxGoal = dxWhatF, what, "the pr is merged"
+	m.dxField, m.dxTitle, m.dxWhat, m.dxGoal = dxWhatF, title, what, "the pr is merged"
 	m, _ = m.dxSubmit()
 
-	// The name is still the branch's own words: that is what keeps the record,
-	// the branch, the worktree and the session saying one thing.
-	if want := "dispatching immediate look up when"; gotFeature != want {
-		t.Errorf("feature = %q, want %q", gotFeature, want)
+	// The name is the title, which is what keeps the record, the branch, the
+	// worktree and the session saying one thing.
+	if gotFeature != title {
+		t.Errorf("feature = %q, want %q", gotFeature, title)
 	}
-	// The brief is not.
-	if first := strings.SplitN(gotPrompt, "\n", 2)[0]; first != what {
-		t.Errorf("prompt line 1 = %q\nwant %q", first, what)
+	// The brief is not the name: the title leads, and WHAT follows it whole.
+	if first := strings.SplitN(gotPrompt, "\n", 2)[0]; first != title {
+		t.Errorf("prompt line 1 = %q\nwant %q", first, title)
+	}
+	if !strings.Contains(gotPrompt, what) {
+		t.Errorf("prompt lost the brief:\n%s", gotPrompt)
 	}
 	if !strings.Contains(gotPrompt, "done when: the pr is merged") {
 		t.Errorf("prompt lost DONE WHEN:\n%s", gotPrompt)
 	}
 }
 
-// dxDispatch is the seam the two readings part at: cap the name, never the
-// brief. A sentence inside the cap must come back whole from both.
-func TestDXDispatchCapsTheNameOnly(t *testing.T) {
+// dxDispatch is the seam the two readings part at. They come off two fields
+// now, and neither may be rebuilt from the other: the name is the title as
+// typed, and the brief is WHAT in full, however long either one is.
+func TestDXDispatchNamesFromTitleBriefsFromWhat(t *testing.T) {
 	long := "rebuild the deploy watcher so it stops polling a workflow that already finished"
-	feature, prompt := dxDispatch("  "+long+"  ", "", true)
-	if words := strings.Fields(feature); len(words) != 5 {
-		t.Errorf("feature = %q, want 5 words", feature)
+	feature, prompt := dxDispatch("  deploy watcher  ", "  "+long+"  ", "", true)
+	if feature != "deploy watcher" {
+		t.Errorf("feature = %q, want the title as typed", feature)
 	}
-	if !strings.HasPrefix(prompt, long+"\n") {
-		t.Errorf("prompt = %q, want it to open with the whole sentence", prompt)
-	}
-
-	// Short enough to survive the cap: both readings agree, and neither invents
-	// punctuation or drops a word.
-	feature, prompt = dxDispatch("retry backoff", "", true)
-	if feature != "retry backoff" || !strings.HasPrefix(prompt, "retry backoff\n") {
-		t.Errorf("short WHAT: feature = %q, prompt = %q", feature, prompt)
+	if !strings.HasPrefix(prompt, "deploy watcher\n\n"+long+"\n") {
+		t.Errorf("prompt = %q, want the title then the whole sentence", prompt)
 	}
 
-	// Nothing typed is still nothing: submit's "say what it should do" test
-	// reads the feature, so it must stay empty rather than become whitespace.
-	if feature, _ := dxDispatch("   ", "", true); feature != "" {
-		t.Errorf("blank WHAT gave feature %q", feature)
+	// A title past the branch's five-word cap keeps its words on the record: the
+	// cap belongs to the slug, which is what has to be a path (see
+	// dispatch.SlugWords), not to the name every screen shows.
+	feature, _ = dxDispatch("stop polling a workflow that already finished", "x", "", true)
+	if feature != "stop polling a workflow that already finished" {
+		t.Errorf("a long title was abbreviated on the record: %q", feature)
+	}
+
+	// Nothing nameable is still nothing: submit's "name it" test reads the
+	// feature, so it must stay empty rather than become whitespace.
+	for _, s := range []string{"   ", "!!!"} {
+		if feature, _ := dxDispatch(s, "x", "", true); feature != "" {
+			t.Errorf("title %q gave feature %q", s, feature)
+		}
 	}
 }
 

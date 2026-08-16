@@ -155,13 +155,14 @@ type model struct {
 	pending []pendingDispatch
 
 	// ---- triage lens: the structured dispatch form -------------------------
-	// The floor's freeform draft became four fields: where it lands, what it
-	// does, when it is done, and whether it needs you between steps. See
-	// dispatchx.go — cqDispatch is what says the form is open.
+	// The floor's freeform draft became five fields: where it lands, what it is
+	// called, what it does, when it is done, and whether it needs you between
+	// steps. See dispatchx.go — cqDispatch is what says the form is open.
 	dxField  dxFieldID // which line owns the keyboard
 	dxFilter string    // WHERE: repo filter (runes from the key message)
 	dxRepo   int       // cursor into dxRows(); clamped on read, reset by filtering
-	dxWhat   string    // WHAT: the work, and the feature name
+	dxTitle  string    // TITLE: the feature name, and the branch
+	dxWhat   string    // WHAT: the work — the prompt's body, wrapped as it is typed
 	dxGoal   string    // DONE WHEN: completion condition, optional
 	dxAuto   bool      // AUTO: unattended (default true)
 }

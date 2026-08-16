@@ -38,7 +38,8 @@ func submitting(t *testing.T) model {
 	m.width, m.height = 130, 40
 	m.cfg = &config.Config{Roots: []string{seedRepoRoot(t, "alpha-api")}}
 	m = press(m, "d")
-	m.dxField, m.dxWhat, m.dxGoal = dxWhatF, "retry backoff", "ci is green"
+	m.dxField, m.dxTitle = dxWhatF, "retry backoff"
+	m.dxWhat, m.dxGoal = "retry the declined charges on a backoff", "ci is green"
 	m, _ = m.dxSubmit()
 	return m
 }
