@@ -28,8 +28,11 @@ func fakeGH(t *testing.T, body string) func() []string {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// A clean slate is the harness's job: a park left behind by an earlier test
+	// would make the next one pass by asking nothing at all.
 	InvalidateCache()
-	t.Cleanup(InvalidateCache)
+	clearThrottle()
+	t.Cleanup(func() { InvalidateCache(); clearThrottle() })
 	return func() []string {
 		b, err := os.ReadFile(log)
 		if err != nil {
