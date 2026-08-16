@@ -162,7 +162,7 @@ func TestCQActFlashClearsAndUndoes(t *testing.T) {
 		t.Fatalf("cleared=%d undo=%+v", m.cqCleared, m.cqUndo)
 	}
 
-	m = press(m, "u")
+	m = press(m, "ctrl+z")
 	if got := fleetFeatures(m); got != "one,two,three" {
 		t.Errorf("undo should put the row back at the front, got %s", got)
 	}

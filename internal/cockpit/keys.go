@@ -237,7 +237,11 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.helpOpen = true
 		return m, nil
 	}
-	if k == "u" && (m.cqUndo != nil || m.undo != "") {
+	// ctrl+z, not `u`: `U` upgrades the machine in place, and undo — the key you
+	// hit fastest, without looking — must not be one slipped shift away from it.
+	// The chord also frees `u` for the assignment editor's unassign, which the
+	// pending-undo check here used to steal whenever something was undoable.
+	if k == "ctrl+z" && (m.cqUndo != nil || m.undo != "") {
 		if cu := m.cqUndo; cu != nil {
 			// Puts the row back at the front. The act's command already ran, so
 			// this un-hides an ask; it does not un-kill a session.
@@ -265,9 +269,11 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.dispatchForm = newDispatchForm(m.cfg)
 		return m, m.dispatchForm.filter.Focus()
 	}
-	// Shift-U, not `u`: `u` is undo, and the two must never be one slip apart in
-	// the same hand. Bound globally rather than per-lens because the version it
-	// acts on is in the footer, which every lens carries.
+	// `U` is the upgrade key and nothing else's: bound globally rather than
+	// per-lens because the version it acts on is in the footer, which every lens
+	// carries — so any lens that wanted a capital U of its own would never see
+	// it (the assignment editor's "start over" was exactly that, and is a chord
+	// now).
 	if k == "U" {
 		return m.startUpgrade()
 	}

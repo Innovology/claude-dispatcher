@@ -71,7 +71,7 @@ Every act the table offers is wired to the live session — the key hints show o
 
 - **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back). Coming back **rechecks** rather than redraws: you have just spent minutes driving that session by hand, so the forge is read again instead of replayed from cache, and any session that died without getting a `SessionEnd` out stops being reported as working
 - **`y`** on a PR waiting to merge: `gh pr merge --squash --auto`, then mark live. Elsewhere it marks the record shipped, and it is hidden entirely when the dispatcher has produced no commits
-- **`x`** kill the session · **`s`** skip to the back of the table · **`u`** undo
+- **`x`** kill the session · **`s`** skip to the back of the table · **`ctrl+z`** undo
 - **`d`** open the prompt · **`f`** filter the table · **`enter` on a backlog ticket** dispatches it
 - **`h`** the finished dispatchers, and **`enter`** on one resumes its session — `claude --resume` on the same transcript, in the same worktree, so it comes back knowing what it already did
 
@@ -249,7 +249,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `h` | history — every dispatcher whose session is over; `enter` resumes one |
 | `enter` | attach the selected dispatcher's tmux session · open what is selected |
 | `y` · `x` · `s` | ship (squash-merge) · kill · skip to the back |
-| `d` · `u` | dispatch · put back the last thing you cleared |
+| `d` · `ctrl+z` | dispatch · put back the last thing you cleared |
 | `,` · `:` · `?` | settings · command palette · all keys |
 | `U` | upgrade to the published build and come straight back |
 | `q` | quit |

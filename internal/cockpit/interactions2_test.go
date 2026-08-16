@@ -259,14 +259,38 @@ func TestHandleKeyConfirmCancel(t *testing.T) {
 
 func TestUndoKey(t *testing.T) {
 	m := newModel()
-	m.lens = "products" // on triage an empty queue types 'u' into the draft
+	m.lens = "products"
 	m.undo = "ship widget"
-	mm, _ := m.handleKey("u")
+	mm, _ := m.handleKey("ctrl+z")
 	if mm.(model).undo != "" {
-		t.Error("u should clear a pending undo")
+		t.Error("ctrl+z should clear a pending undo")
 	}
 	if !strings.Contains(mm.(model).notice, "undone") {
 		t.Errorf("notice = %q", mm.(model).notice)
+	}
+}
+
+// Undo is a chord because `U` upgrades the machine in place: the two must not
+// be one slipped shift apart. `u` is the assignment editor's unassign now, and
+// must not undo anything anywhere.
+func TestUndoIsAChordNotAShiftFromUpgrade(t *testing.T) {
+	m := newModel()
+	m.lens = "products"
+	m.undo = "ship widget"
+	if got := press(m, "u").undo; got != "ship widget" {
+		t.Errorf("u undid something: undo = %q", got)
+	}
+
+	// The one thing the chord buys over `u`: it works while the dispatch prompt
+	// owns the keyboard, because a chord cannot be part of a sentence.
+	m = newModel()
+	m.width, m.height = 190, 44
+	if !m.cqPromptOn() {
+		t.Fatal("expected the empty fleet to leave the prompt holding the keyboard")
+	}
+	m.undo = "ship widget"
+	if mm := press(m, "ctrl+z"); mm.undo != "" || !strings.Contains(mm.notice, "undone") {
+		t.Errorf("ctrl+z did not reach undo at the prompt: undo=%q notice=%q", mm.undo, mm.notice)
 	}
 }
 

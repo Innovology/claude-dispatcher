@@ -57,6 +57,14 @@
   `supervisor.AttachSwitches`), the recheck waits for the terminal focus
   event instead. Focus alone never triggers it: a full forge re-read on every
   alt-tab is how the gh quota gets burned.
+- **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
+  a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
+  a lens that wants its own capital U never sees the key — the assignment
+  editor's "start over" was exactly that, dead since the upgrade key landed,
+  and is ctrl+u now. And undo, the key you hit fastest and without looking,
+  must not be one slipped shift from upgrading the machine in place, so it is
+  a chord. That also frees `u` for the editor's unassign, which the global
+  undo used to steal whenever a triage act had left something undoable.
 - **Decisions are read where they were written, never invented.** The
   DECISIONS lens has two sources: an adr-tools folder, and a heading that
   names a set of decisions in the repo's own markdown (`CLAUDE.md`,
