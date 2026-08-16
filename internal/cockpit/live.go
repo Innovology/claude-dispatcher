@@ -234,9 +234,9 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	collectBacklog(ctx, &s)
 	r.done(bootBacklog, countOf(len(s.backlogTickets), "ticket", "tickets"), false)
 
-	r.begin(bootDecisions, "scanning repos for adrs…")
+	r.begin(bootDecisions, "scanning repos for adrs and decision logs…")
 	collectDecisions(ctx, &s)
-	r.done(bootDecisions, countOf(countDecisions(s.decisions), "adr", "adrs")+
+	r.done(bootDecisions, countOf(countDecisions(s.decisions), "record", "records")+
 		" in "+countOf(len(s.decisionRepoOrder), "repo", "repos"), false)
 
 	r.begin(bootUsage, "totalling this week's tokens…")
@@ -291,7 +291,7 @@ func namedProducts(ps []product) int {
 	return n
 }
 
-// countDecisions totals the ADRs found across every repo that has any.
+// countDecisions totals the records found across every repo that has any.
 func countDecisions(byRepo map[string][]decision) int {
 	n := 0
 	for _, ds := range byRepo {

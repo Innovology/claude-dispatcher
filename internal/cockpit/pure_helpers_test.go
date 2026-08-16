@@ -210,7 +210,7 @@ func TestDcnFindAdrsAndParseFile(t *testing.T) {
 		t.Fatalf("dcnFindAdrs files = %v, want 1", files)
 	}
 
-	d, ok := dcnParseFile(files[0])
+	d, ok := dcnParseFile(dir, files[0])
 	if !ok {
 		t.Fatal("dcnParseFile ok = false")
 	}
@@ -232,7 +232,7 @@ func TestDcnFindAdrsAndParseFile(t *testing.T) {
 	if err := os.WriteFile(path2, []byte("no heading here"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d2, ok := dcnParseFile(path2)
+	d2, ok := dcnParseFile(dir, path2)
 	if !ok {
 		t.Fatal("dcnParseFile(no-heading) ok = false")
 	}
@@ -241,7 +241,7 @@ func TestDcnFindAdrsAndParseFile(t *testing.T) {
 	}
 
 	// A missing file returns ok=false.
-	if _, ok := dcnParseFile(filepath.Join(adrDir, "missing.md")); ok {
+	if _, ok := dcnParseFile(dir, filepath.Join(adrDir, "missing.md")); ok {
 		t.Error("dcnParseFile(missing) ok = true, want false")
 	}
 }

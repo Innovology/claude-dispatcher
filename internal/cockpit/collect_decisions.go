@@ -1,11 +1,14 @@
 package cockpit
 
 // collect_decisions.go fills the DECISIONS lens: s.decisions (records per repo),
-// s.decisionRepoOrder (repos that have ADRs, in discovery order) and s.plugins
-// (which decision tool renders each repo). It scans each repo for architecture
-// decision records under the conventional folders and parses the markdown into
-// the view's decision struct. Everything is best-effort and guarded; a repo
-// with no ADRs simply does not appear.
+// s.decisionRepoOrder (repos that have records, in discovery order) and
+// s.plugins (which decision source renders each repo).
+//
+// There are two sources, and a repo may have both. An adr-tools folder is the
+// formal one, parsed here. The other is a decision section written as prose in
+// the repo's own markdown — collect_decision_log.go — which is where these
+// repos actually keep their decisions. Everything is best-effort and guarded; a
+// repo with neither simply does not appear.
 
 import (
 	"os"
@@ -20,25 +23,29 @@ import (
 // repo root. The first that exists and holds markdown wins for that repo.
 var dcnAdrDirs = []string{"doc/adr", "docs/adr", "docs/decisions", "adr"}
 
-// collectDecisions scans every repo for ADR markdown and builds the decisions
-// map, the repo order and the plugin list.
+// collectDecisions scans every repo for both kinds of decision record and
+// builds the decisions map, the repo order and the plugin list.
 func collectDecisions(ctx *collectCtx, s *snapshot) {
 	decs := map[string][]decision{}
-	var order []string
-	var adrRepos []string // repos backed by adr-tools (have an ADR dir)
+	order := []string{}
+	var adrRepos []string // repos backed by adr-tools (an ADR dir with records)
+	var logRepos []string // repos whose decisions are written as prose
 	var otherRepos []string
 
 	for _, r := range ctx.repos {
-		dir, files := dcnFindAdrs(r.Path)
-		if dir == "" || len(files) == 0 {
-			otherRepos = append(otherRepos, r.Name)
-			continue
-		}
 		var list []decision
+		_, files := dcnFindAdrs(r.Path)
 		for _, f := range files {
-			if d, ok := dcnParseFile(f); ok {
+			if d, ok := dcnParseFile(r.Path, f); ok {
 				list = append(list, d)
 			}
+		}
+		if len(list) > 0 {
+			adrRepos = append(adrRepos, r.Name)
+		}
+		if log := dcnScanLogs(r.Path); len(log) > 0 {
+			logRepos = append(logRepos, r.Name)
+			list = append(list, log...)
 		}
 		if len(list) == 0 {
 			otherRepos = append(otherRepos, r.Name)
@@ -46,39 +53,46 @@ func collectDecisions(ctx *collectCtx, s *snapshot) {
 		}
 		decs[r.Name] = list
 		order = append(order, r.Name)
-		adrRepos = append(adrRepos, r.Name)
-	}
-
-	// No repo has ADRs: honest empty state, a single builtin plugin.
-	if len(order) == 0 {
-		s.decisions = map[string][]decision{}
-		s.decisionRepoOrder = []string{}
-		s.plugins = []plugin{dcnBuiltin(otherRepos)}
-		return
 	}
 
 	s.decisions = decs
 	s.decisionRepoOrder = order
-	s.plugins = []plugin{
-		{
+
+	// Only sources that found something are listed. A plugin wired to no repo
+	// is a claim the pane cannot back up, and the left column would show it as
+	// "off" beside the repos it does not explain.
+	s.plugins = nil
+	if len(adrRepos) > 0 {
+		s.plugins = append(s.plugins, plugin{
 			id: "adr-tools", name: "adr-tools", host: "github.com/npryce/adr-tools",
 			kind: "numbered markdown records", repos: adrRepos,
-			note: "doc/adr/NNNN-*.md · the cockpit reads the folder and writes new records as proposed",
-		},
-		dcnBuiltin(otherRepos),
+			note: "doc/adr/NNNN-*.md · the cockpit reads the folder, it does not write records",
+		})
 	}
+	if len(logRepos) > 0 {
+		s.plugins = append(s.plugins, plugin{
+			id: "decision-log", name: "decision log", host: "the repo's own markdown",
+			kind: "prose decision sections", repos: logRepos,
+			note: "a heading that says decisions in CLAUDE.md, DECISIONS.md or ARCHITECTURE.md · " +
+				"each bullet under it is a record, read where it was written",
+		})
+	}
+	s.plugins = append(s.plugins, dcnBuiltin(otherRepos))
 }
 
-// dcnBuiltin is the fallback plugin used for repos that keep no ADR tool of
-// their own; their decisions live in the cockpit's own state.
+// dcnBuiltin is the fallback listed against repos where neither source found
+// anything. Its note used to promise records "kept in the state dir,
+// exportable as markdown"; nothing in the cockpit has ever written one, so it
+// now says what is actually true — there is nothing recorded to read.
 func dcnBuiltin(repos []string) plugin {
 	if repos == nil {
 		repos = []string{}
 	}
 	return plugin{
-		id: "builtin", name: "cockpit records", host: "local state", kind: "fallback",
+		id: "builtin", name: "nothing recorded", host: "no source found", kind: "fallback",
 		repos: repos,
-		note:  "used where a repo has no decision tool of its own · kept in the state dir, exportable as markdown",
+		note: "no doc/adr folder and no decisions heading in CLAUDE.md, DECISIONS.md or " +
+			"ARCHITECTURE.md · write one and it appears here on the next load",
 	}
 }
 
@@ -109,16 +123,22 @@ func dcnFindAdrs(repoPath string) (string, []string) {
 
 var dcnLeadNum = regexp.MustCompile(`^(\d+)`)
 
-// dcnParseFile reads and parses one ADR markdown file into a decision. The
+// dcnParseFile reads and parses one ADR markdown file into a decision, with
+// repoPath naming the root the record's provenance is written relative to. The
 // bool is false only when the file cannot be read.
-func dcnParseFile(path string) (decision, bool) {
+func dcnParseFile(repoPath, path string) (decision, bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return decision{}, false
 	}
 	text := string(raw)
 
-	d := decision{status: "accepted"}
+	// by: where the record lives. The body pane has always had a line for this
+	// and the collector has never filled it, so it rendered blank.
+	d := decision{status: "accepted", by: path}
+	if rel, err := filepath.Rel(repoPath, path); err == nil {
+		d.by = filepath.ToSlash(rel)
+	}
 
 	// id: the leading number of the file name (preserving any zero-padding),
 	// else the base name without extension.
