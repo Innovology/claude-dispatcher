@@ -26,7 +26,21 @@ type cqUndoEntry struct{ id, label string }
 // because `d` opened it, or because nothing is in flight and there is nothing
 // else to do.
 func (m model) cqPromptOn() bool {
-	return m.cqFlash == "" && (m.cqDispatch || len(m.fleetAll()) == 0)
+	return m.cqFlash == "" && m.cqFormOn()
+}
+
+// cqFormOn is whether the dispatch form is the screen — because `d` opened it,
+// or because there is nothing in flight to show instead.
+//
+// The history table is exempt: with nothing in flight the form would otherwise
+// cover it and own the keyboard, so the one screen that exists to reach
+// finished dispatchers could never be worked once the fleet emptied — which is
+// exactly when the human goes looking for it.
+func (m model) cqFormOn() bool {
+	if m.fleetFilter() == fleetHistory {
+		return false
+	}
+	return m.cqDispatch || len(m.fleetAll()) == 0
 }
 
 // fleetSync keeps the cursor on the row it was on.
@@ -119,7 +133,15 @@ func (m model) cqReconcile() model {
 func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
 	switch a.k {
 	case "⏎":
+		// On a history row ⏎ means resume: there is no live session to attach
+		// to, and the record is addressed by id because a feature name can
+		// belong to several finished dispatchers.
+		if r.kind == "past" {
+			return m, resumeCmd(r.id, "")
+		}
 		return m.attach(r.feature)
+	case "o":
+		return m, openPRCmd(r.repo, r.ref)
 	case "y":
 		// On a review row y means "merge it", which is a real squash-merge on
 		// the forge; everywhere else it only marks the record done.
@@ -208,7 +230,12 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// flight (where the form is already up), and the repo list silently
 		// narrowed to the repos containing "d" while nothing appeared to happen.
 		// Falling through re-opens the form, which on an untouched one is a no-op.
-		navKey := isLensDigit(k) || k == ":" || k == "d"
+		// `h` joins that set for the same reason `d` is in it: it is the key that
+		// leaves this form for the history table, and swallowing it would type an
+		// "h" into the repo filter instead — with nothing in flight, the form is
+		// always up, so `h` would be unreachable exactly when history is the only
+		// thing left to look at.
+		navKey := isLensDigit(k) || k == ":" || k == "d" || k == "h"
 		if m.dxTouched() || !navKey {
 			mm, cmd := m.dxKey(k)
 			return mm, cmd, true
@@ -226,7 +253,21 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		return m.fleetTo(len(m.fleetRows()) - 1), nil, true
 	case "f":
 		return m.fleetSetFilter(fleetNextFilter(m.fleetFilter())), nil, true
+	case "h":
+		// A toggle, not a step in the cycle: history is where you go to fetch one
+		// thing back, and the way out of it is the key that got you in. It closes
+		// the dispatch form on the way, which is what was covering the table.
+		if m.fleetFilter() == fleetHistory {
+			return m.fleetSetFilter(fleetFilters[0]), nil, true
+		}
+		return m.dxReset().fleetSetFilter(fleetHistory), nil, true
 	case "d":
+		// Dispatching leaves history behind: the form is drawn over the fleet,
+		// never over the history table, so opening it there would set a form up
+		// that nothing renders.
+		if m.fleetFilter() == fleetHistory {
+			m = m.fleetSetFilter(fleetFilters[0])
+		}
 		return m.dxOpen(""), nil, true
 	}
 

@@ -39,9 +39,19 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		m.notice = "no live tmux session for \"" + feature + "\""
 		return m, nil
 	}
+	return m.attachSession(rec.TmuxSession)
+}
+
+// attachSession hands the terminal to a named session. attach resolves a
+// feature to one; a resume has just started one and knows its name directly.
+func (m model) attachSession(name string) (model, tea.Cmd) {
+	if name == "" || !supervisor.HasSession(name) {
+		m.notice = "no live session to attach to"
+		return m, nil
+	}
 	supervisor.EnsureBackKey()
 	supervisor.EnsureFocusEvents()
-	supervisor.SetStatusHint(rec.TmuxSession)
+	supervisor.SetStatusHint(name)
 	// Whether this command's exit means "they are back" depends on how the
 	// handover works. A plain attach owns the terminal until they detach, so it
 	// exits on the way home. A switch-client (inside tmux) or a raised console
@@ -50,7 +60,7 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 	// they are away and let that close the loop. See the attachReturnedMsg and
 	// tea.FocusMsg cases in model.go.
 	m.away = supervisor.AttachSwitches()
-	return m, tea.ExecProcess(supervisor.AttachCmd(rec.TmuxSession), func(err error) tea.Msg {
+	return m, tea.ExecProcess(supervisor.AttachCmd(name), func(err error) tea.Msg {
 		return attachReturnedMsg{err: err}
 	})
 }
@@ -157,6 +167,44 @@ type launchedMsg struct {
 	feature string
 	notice  string
 	failed  bool
+}
+
+// resumedMsg carries a finished dispatcher's resume back to the UI: the notice
+// to show, and the session to hand the terminal to when one was started.
+// Attaching cannot happen inside the command itself — only Update may return
+// tea.ExecProcess — so the command reports and Update does the handover.
+type resumedMsg struct {
+	notice  string
+	session string
+}
+
+// resumeCmd reopens a finished dispatcher's Claude session, with prompt as the
+// first thing said to it when there is one.
+//
+// The record is addressed by id, not by feature: a feature name can belong to
+// several finished dispatchers (re-dispatching a shipped feature is normal, and
+// deliberately reuses the name), so the feature map would resolve the wrong one.
+func resumeCmd(id, prompt string) tea.Cmd {
+	return func() tea.Msg {
+		rec := recordByID(id)
+		if rec == nil {
+			return actionMsg{notice: "no dispatch record to resume"}
+		}
+		mode, session, err := dispatchpkg.Resume(rec, strings.TrimSpace(prompt))
+		if err != nil {
+			return actionMsg{notice: "resume failed: " + err.Error()}
+		}
+		if mode == dispatchpkg.ResumeLive {
+			return resumedMsg{
+				notice:  "\"" + rec.Feature + "\" is still running — attaching to it",
+				session: session,
+			}
+		}
+		return resumedMsg{
+			notice:  "resumed \"" + rec.Feature + "\" in " + rec.RepoName,
+			session: session,
+		}
+	}
 }
 
 // launchCmd dispatches a new feature into repoName with prompt.

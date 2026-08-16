@@ -68,9 +68,15 @@ type model struct {
 	// it, "" when up to date, unknown, or running unstamped.
 	upgradeTo string
 
-	shipCursor int
-	resumeOpen bool
-	resumeText string
+	shipCursor    int
+	historyCursor int
+	resumeOpen    bool
+	resumeText    string
+	// resumeAt is what the resume overlay is about. It is set when the overlay
+	// opens, because the overlay outlives the cursor that opened it: the panel
+	// keeps refreshing underneath, and a target re-read from the cursor could
+	// resume a different dispatcher than the one the human is reading about.
+	resumeAt *resumeTarget
 
 	backlogCursor int
 	picked        map[string]bool
@@ -343,6 +349,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.fleetSync(), loadSnapshotCmd(m.cfg)
 		}
 		return m.fleetSync(), nil
+
+	case resumedMsg:
+		// The resumed session is the thing the human asked for, so they land in
+		// it — the same handover "jump in" does.
+		if mm, cmd := m.attachSession(msg.session); cmd != nil {
+			mm.notice = msg.notice
+			return mm, cmd
+		}
+		// Nothing to hand over: report what the resume did (never attachSession's
+		// own "no live session", which would describe the handover instead of the
+		// resume) and pick the record's new state up on the next load.
+		m.notice = msg.notice
+		if m.cfg != nil {
+			return m, loadSnapshotCmd(m.cfg)
+		}
+		return m, nil
 
 	case attachReturnedMsg:
 		m.notice = ""

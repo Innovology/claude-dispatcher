@@ -58,6 +58,7 @@ var (
 	team            = map[string][]teamRow{}
 	teamVerdict     = map[string]string{}
 	shipped         = map[string][]shippedDay{}
+	productHistory  = map[string][]historyItem{}
 	productVelocity = map[string][]velTile{}
 )
 

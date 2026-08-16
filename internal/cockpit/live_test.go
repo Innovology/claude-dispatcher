@@ -32,6 +32,7 @@ func restoreVars(s snapshot) {
 	outputWeeks, outputHeadline = s.outputWeeks, s.outputHead
 	outputUnit, outputDelta, outputSpark = s.outputUnit, s.outputDelta, s.outputSpark
 	notVelocity, liveRecords = s.notVelocity, s.records
+	liveByID, productHistory = s.recordsByID, s.productHistory
 }
 
 // captureVars snapshots the current data vars so a test can restore them and
@@ -53,6 +54,7 @@ func captureVars() snapshot {
 		doraWeeks: doraWeeks, outputWeeks: outputWeeks, outputHead: outputHeadline,
 		outputUnit: outputUnit, outputDelta: outputDelta, outputSpark: outputSpark,
 		notVelocity: notVelocity, records: liveRecords,
+		recordsByID: liveByID, productHistory: productHistory,
 	}
 }
 

@@ -85,6 +85,38 @@ func KillSession(name string) error {
 	return exec.Command("tmux", "kill-session", "-t", "="+name).Run()
 }
 
+// shellCommands are the pane commands that mean "nothing is running here": the
+// login shell a dispatch session drops to once claude exits (see
+// launchCommand). A login shell reports as "-bash", hence the leading dash trim.
+var shellCommands = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "fish": true,
+	"dash": true, "ksh": true, "csh": true, "tcsh": true, "login": true,
+}
+
+// SessionIdle reports whether every pane of a session is sitting at a shell —
+// that is, whether the claude process it was launched with has ended.
+//
+// known is false when tmux could not answer (no such session, no tmux). The
+// distinction matters to the caller: "idle" licenses reusing the session, and
+// "unknown" must never be read as either — a session we cannot see into is one
+// we leave alone.
+func SessionIdle(name string) (idle, known bool) {
+	out, err := exec.Command("tmux", "list-panes", "-t", "="+name, "-F", "#{pane_current_command}").Output()
+	if err != nil {
+		return false, false
+	}
+	lines := strings.Fields(string(out))
+	if len(lines) == 0 {
+		return false, false
+	}
+	for _, cmd := range lines {
+		if !shellCommands[strings.TrimPrefix(cmd, "-")] {
+			return false, true
+		}
+	}
+	return true, true
+}
+
 // AttachCmd returns the command that hands the terminal over to a session.
 // Inside an existing tmux client we switch rather than nest.
 func AttachCmd(name string) *exec.Cmd {

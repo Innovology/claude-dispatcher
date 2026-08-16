@@ -58,6 +58,20 @@ func installFleetFixture(t *testing.T) {
 			},
 			moved: now.Add(-6 * time.Second), waited: now.Add(-6 * time.Second),
 		},
+		{
+			// History: a session that is over. It is in the same collected slice
+			// as the live rows and out of the live table — only `h` and the
+			// history filter show it, and ⏎ on it resumes rather than attaches.
+			id: "id-four", kind: "past", rank: fleetPastRank, product: "alpha",
+			feature: "four", repo: "alpha-api", ref: "#4", pass: 3,
+			signal: "merged", tone: "normal", why: "Session ended.",
+			goal: "ship the fourth thing", goalLabel: "prompt",
+			acts: []cqAct{
+				{k: "⏎", d: "resume", ok: "resuming \"four\"…", keep: true},
+				{k: "o", d: "open pr", ok: "opening the pull request for \"four\"…", keep: true},
+			},
+			moved: now.Add(-3 * time.Hour), waited: now.Add(-3 * time.Hour),
+		},
 	}
 	cqLastOutput = "6s"
 }
@@ -231,14 +245,17 @@ func TestFleetCursorFollowsItsRowAcrossARebuild(t *testing.T) {
 	}
 }
 
-// `f` walks the four filters and comes back round; each one narrows to a real
-// question, and the cursor starts again at the top of what is left.
+// `f` walks the filters and comes back round; each one narrows to a real
+// question, and the cursor starts again at the top of what is left. History is
+// the last stop and the one that is not a narrowing at all: it swaps the live
+// table for the finished dispatchers, which no other filter shows.
 func TestFleetFilterCycles(t *testing.T) {
 	m := cqModel(t)
 	want := []struct{ filter, rows string }{
 		{"wants you", "one,two"},
 		{"needs a look", "one,two"},
 		{"running", "three"},
+		{fleetHistory, "four"},
 		{"all", "one,two,three"},
 	}
 	m = press(m, "j") // move off the top so the reset is visible
@@ -480,9 +497,11 @@ func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 		t.Error("nothing here follows a session without attaching")
 	}
 
-	// On the running row there is nothing to skip and nothing to approve.
+	// On the running row there is nothing to skip and nothing to approve. The
+	// act verbs are joined with " · ", so " y " is the act and "y ·" is any word
+	// that happens to end in one — "h history" among them.
 	onRun := press(press(m, "j"), "j").footerHelp()
-	if strings.Contains(onRun, "s skip") || strings.Contains(onRun, "y ") {
+	if strings.Contains(onRun, "s skip") || strings.Contains(onRun, " y ") {
 		t.Errorf("a running row's verbs = %q", onRun)
 	}
 
