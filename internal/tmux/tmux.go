@@ -87,11 +87,16 @@ func KillSession(name string) error {
 
 // shellCommands are the pane commands that mean "nothing is running here": the
 // login shell a dispatch session drops to once claude exits (see
-// launchCommand). A login shell reports as "-bash", hence the leading dash trim.
+// launchCommand). A login shell reports as "-bash", hence the leading dash trim
+// in paneIdle.
 var shellCommands = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "fish": true,
 	"dash": true, "ksh": true, "csh": true, "tcsh": true, "login": true,
 }
+
+// paneIdle reports whether a pane's current command is a shell waiting for
+// input rather than a process doing something.
+func paneIdle(cmd string) bool { return shellCommands[strings.TrimPrefix(cmd, "-")] }
 
 // SessionIdle reports whether every pane of a session is sitting at a shell —
 // that is, whether the claude process it was launched with has ended.
@@ -110,7 +115,7 @@ func SessionIdle(name string) (idle, known bool) {
 		return false, false
 	}
 	for _, cmd := range lines {
-		if !shellCommands[strings.TrimPrefix(cmd, "-")] {
+		if !paneIdle(cmd) {
 			return false, true
 		}
 	}

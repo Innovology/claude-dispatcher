@@ -26,6 +26,19 @@ func TestUniqueNameFallsBackWhenFree(t *testing.T) {
 	}
 }
 
+// A session that does not exist is not an idle one. Resume reads "unknown" as
+// "leave it alone", so answering idle here would have it kill and replace
+// sessions it cannot see.
+func TestSessionIdleIsUnknownForAMissingSession(t *testing.T) {
+	idle, known := SessionIdle("definitely-not-a-real-session-xyz")
+	if known {
+		t.Error("a session that does not exist cannot be reported on")
+	}
+	if idle {
+		t.Error("unknown must never read as idle")
+	}
+}
+
 func TestNonMutatingCallsAreSafe(t *testing.T) {
 	// None of these should panic whether or not tmux is installed.
 	if HasSession("definitely-not-a-real-session-xyz") {
