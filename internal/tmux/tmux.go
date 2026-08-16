@@ -20,6 +20,25 @@ func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", "="+name).Run() == nil
 }
 
+// ListSessions names every live session on the server, in one round trip.
+// HasSession answers the same question for one name, but asking it per record
+// costs a subprocess per dispatch; the opening screen wants the whole picture
+// at once. No server running is not an error — it is zero sessions, which is
+// exactly what a machine with nothing dispatched looks like.
+func ListSessions() []string {
+	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, ln := range strings.Split(string(out), "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			names = append(names, ln)
+		}
+	}
+	return names
+}
+
 // NewSession starts a detached session running shellCommand in dir.
 func NewSession(name, dir, shellCommand string) error {
 	out, err := exec.Command("tmux", "new-session", "-d", "-s", name, "-c", dir, shellCommand).CombinedOutput()

@@ -26,6 +26,11 @@ func (m model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading…"
 	}
+	// The opening screen owns the whole terminal: no lens bar, no footer. The
+	// cockpit's chrome names keys that do nothing until the data is here.
+	if m.boot != nil {
+		return m.viewBoot(m.width, m.height)
+	}
 	header := m.headerView()
 	bars := m.barsView()
 	footer := m.footerView()

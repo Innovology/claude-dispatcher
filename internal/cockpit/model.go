@@ -43,6 +43,13 @@ type model struct {
 	settings     *settingsState
 	dispatchForm *dispatchForm
 
+	// boot is the opening screen, non-nil only while the first load is running
+	// (and for a beat after it lands). It is a pointer because the loader's
+	// progress has to survive Bubble Tea copying the model on every message.
+	// bootCh is the loader's side of that conversation.
+	boot   *bootState
+	bootCh chan bootUpdate
+
 	// key is the untouched message for the key being handled. Routing is by
 	// name (handleKey takes a string), but text input must come from the
 	// message itself — see typedText in keys.go.
@@ -218,7 +225,16 @@ func (m model) Init() tea.Cmd {
 	if m.cfg == nil {
 		return upgradeCheckCmd() // no config — run on demo seed data
 	}
-	return tea.Batch(loadSnapshotCmd(m.cfg), trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), upgradeCheckCmd())
+	// The first load is the one with a screen watching it: it reports each
+	// stage as it runs, and the model subscribes for those reports and ticks
+	// the animation. Every later load takes the plain path.
+	load := loadSnapshotCmd(m.cfg)
+	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), upgradeCheckCmd()}
+	if m.boot != nil {
+		load = bootLoadCmd(m.cfg, m.bootCh)
+		cmds = append(cmds, waitBoot(m.bootCh), bootTick())
+	}
+	return tea.Batch(append([]tea.Cmd{load}, cmds...)...)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -230,11 +246,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case snapshotMsg:
 		applySnapshot(snapshot(msg))
 		m.loading = false
+		// The load the opening screen was narrating is over: settle the
+		// sequence and start the countdown that hands the terminal over.
+		var boot tea.Cmd
+		if m.boot != nil {
+			boot = m.boot.finish()
+		}
 		// The fleet is rebuilt from the fresh records; fold the user's ordering
 		// and cleared set back onto it before anything renders, then re-key the
 		// cursor onto the row it was on — a rank that changed in this refresh
 		// would otherwise move the selection under the reader's hands.
-		return m.cqReconcile().fleetSync(), nil
+		return m.cqReconcile().fleetSync(), boot
+
+	case bootProgressMsg:
+		// Re-arming only while the screen is up is what stops a skipped boot
+		// leaving a goroutine parked on a channel nobody will read again.
+		if m.boot == nil {
+			return m, nil
+		}
+		m.boot.apply(bootUpdate(msg))
+		return m, waitBoot(m.bootCh)
+
+	case bootTickMsg:
+		if m.boot == nil {
+			return m, nil
+		}
+		m.boot.frame++
+		return m, bootTick()
+
+	case bootDoneMsg:
+		m.boot = nil
+		return m, nil
 
 	case stateChangedMsg:
 		return m, tea.Batch(loadSnapshotCmd(m.cfg), waitState(m.stateCh))
@@ -332,6 +374,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// "PRESS ANY KEY" means any key. The load keeps running underneath —
+		// skipping is leaving the screen, not cancelling the work — so the
+		// cockpit comes up on its own loading state and fills in when the
+		// snapshot lands. Ctrl-C is the one key that still means quit.
+		if m.boot != nil {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			m.boot = nil
+			return m, nil
+		}
 		// Ctrl-L: force a full clear + repaint, the universal "redraw" key —
 		// handy after a tmux attach or any terminal noise garbles the screen.
 		if msg.String() == "ctrl+l" {
