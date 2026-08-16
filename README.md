@@ -51,6 +51,10 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 ![Assigning repos to products](docs/assign.svg)
 
+**Everything carries its hand-coding equivalent.** Four dispatchers can be four typo fixes or four rewritten services, and the row count reads exactly the same either way — so triage prices the whole table, and the row under the cursor, in the hours a senior developer would have spent writing that diff by hand. Velocity does the same for what actually reached production, week by week.
+
+It is the one figure in the cockpit that is a model rather than a measurement, so it always says so: an `≈` wherever it appears, and the rate it assumes printed beside the total. The model reads a `git diff --numstat` — a modified line is charged once and not twice, deleting is cheaper than writing, and generated files (lockfiles, `.pb.go`, vendored trees, minified bundles) cost what running the command cost and nothing per line. It answers *how big is this change*, asked in hours; it is not a measure of value, of difficulty, or of what the dispatcher itself spent. See [`internal/effort`](internal/effort/effort.go), where the rate lives in one named constant.
+
 **Velocity** — DORA delivery metrics beside what actually shipped, because a thousand commits that never merge isn't velocity:
 
 ![The velocity lens](docs/velocity.svg)
@@ -233,6 +237,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 - Each dispatcher is an interactive `claude` session inside its own tmux session (`disp-<slug>`), started on a `feature/<slug>` branch. Sessions survive cockpit restarts; the cockpit is a stateless viewer over `~/.local/state/claude-dispatcher/`.
 - Status comes from **one** global Claude Code lifecycle hook (installed by `init` into `~/.claude/settings.json`). It maps events to states: working, needs you, blocked, done, exited.
 - Commits are attributed to dispatchers by **provenance** — each dispatch records the SHAs its feature branch produced (base tip at launch → branch tip). No trailers in your git history.
+- The **hand-coding equivalent** comes off that same provenance diff, read once per load and shared by every screen that shows it, so triage, history and velocity can never quote different hours for one branch. A branch whose diff cannot be read (no base SHA, or a branch since deleted by hand) is left out of the totals rather than counted as zero, and velocity says how many of its live features it could actually price.
 - **Nothing disappears:** a session that ends — shipped, killed or simply exited — moves to history rather than off the screen. `h` on triage and the product panel's `H` tab both list them, and `enter` resumes one: its worktree is put back if it was reclaimed and `claude --resume` picks the same conversation up where it stopped.
 - **Done means live:** when a PR merges, the tracker watches the repo's deploy workflow (auto-detected by name, or set in `[deploy_workflows]`) and flips the feature to done on a green run. Repos with no deploy workflow count merge as live.
 - The layout is **responsive**: wide terminals tile into three panes, narrower ones collapse to essentials.

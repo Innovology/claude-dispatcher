@@ -136,6 +136,19 @@
   `prodDay` normalises to **local** before truncating: forge timestamps are UTC
   and the clock's are local, and a day compared across the two is never equal.
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
+- `internal/effort` — the hand-coding equivalent: how long a senior developer
+  would have taken to write a diff by hand. The ONLY figure in the product
+  that is a model rather than a measurement, so every screen showing it says
+  so — an `≈` on the figure, and the rate (`effort.LinesPerHour`, one named
+  constant) printed beside the velocity total. Read once per load off the
+  provenance diff collectFloor already ran, published on `snapshot.effortBy`
+  keyed by feature, and shared by triage, history and velocity so no two
+  screens can quote different hours for one branch. A feature missing from that
+  map is one whose diff could not be read, which is NOT the same as one that
+  wrote nothing: totals skip it and velocity says how many of its live features
+  it could price. History rows take the figure from that map and never run a
+  diff of their own — `fleetPastRow` stays the cheapest row there is, so a
+  machine with hundreds of finished dispatchers still polls in constant work.
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort
   check for a newer release, and `Detect()`: which package manager installed

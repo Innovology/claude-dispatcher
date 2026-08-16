@@ -409,18 +409,29 @@ func TestFloorAsk(t *testing.T) {
 }
 
 func TestFloorNumstat(t *testing.T) {
-	plus, minus, files, dfs := floorNumstat("", "", "")
+	plus, minus, files, dfs, ok := floorNumstat("", "", "")
 	if plus != 0 || minus != 0 || files != 0 || len(dfs) != 0 {
 		t.Errorf("empty inputs should degrade to zero: %d %d %d %v", plus, minus, files, dfs)
+	}
+	// The counts alone cannot say which zero this is, so the flag must.
+	if ok {
+		t.Error("a diff that was never asked for must not report as read")
 	}
 
 	repo := newTestGitRepo(t, "numstat")
 	base := gitOutput(t, repo, "rev-parse", "HEAD")
 	writeAndCommit(t, repo, "file.txt", "line one\nline two\n", "second commit")
 
-	plus, minus, files, dfs = floorNumstat(repo, base, "HEAD")
-	if files != 1 || plus == 0 {
-		t.Errorf("real diff: plus=%d minus=%d files=%d dfs=%v", plus, minus, files, dfs)
+	plus, minus, files, dfs, ok = floorNumstat(repo, base, "HEAD")
+	if files != 1 || plus == 0 || !ok {
+		t.Errorf("real diff: plus=%d minus=%d files=%d ok=%v dfs=%v", plus, minus, files, ok, dfs)
+	}
+
+	// A branch with nothing on it yet is a read diff of zero lines, not an
+	// unreadable one: the estimate that hangs off this must be able to say
+	// "nothing written yet" without being mistaken for "we could not look".
+	if _, _, _, _, ok = floorNumstat(repo, "HEAD", "HEAD"); !ok {
+		t.Error("an empty-but-real diff should report as read")
 	}
 }
 
