@@ -177,7 +177,12 @@ func productHunkColor(sign string) string {
 // tab strip, then the body of the tab that is up. It renders into whatever width
 // the products lens hands it — 46% of the terminal, or all of it when the
 // terminal is too narrow to hold both.
-func (m model) productPanel(cw int) []string {
+// ch is the height it has to fill. Only the history tab reads it, and it has
+// to: its list is as long as the product's past, and the lines that fall off
+// the bottom are the ones that matter — the session id and `enter resume it`
+// live under the list, so on a 28-row terminal the way back into a session was
+// already gone, while j went on moving a cursor nobody could see.
+func (m model) productPanel(cw, ch int) []string {
 	name := m.productFocusName()
 	var out []string
 
@@ -195,7 +200,7 @@ func (m model) productPanel(cw int) []string {
 	case "shipped":
 		out = append(out, m.productShippedBody(cw)...)
 	case "history":
-		out = append(out, m.productHistoryBody(cw)...)
+		out = append(out, m.productHistoryBody(cw, ch-len(out))...)
 	default:
 		out = append(out, m.productReviewBody(cw, name)...)
 	}
@@ -444,49 +449,86 @@ func (m model) productShippedBody(cw int) []string {
 // other screen in the cockpit — SHIPPED is a ship log and the triage table is
 // what is in flight — so without it the session, its transcript and its branch
 // were all still on disk with nothing anywhere able to reach them.
-func (m model) productHistoryBody(cw int) []string {
+// The detail block is built before the list and the list gets what is left of
+// ch, because the detail is the half that must never be pushed off: it names
+// the session and carries the key that reopens it. A product's history only
+// grows, so "it fits today" is not a property this can be built on.
+func (m model) productHistoryBody(cw, ch int) []string {
 	items := m.historyFlat()
-	var out []string
 	if len(items) == 0 {
-		out = append(out, fg(cFaint, "no dispatcher in this product has finished yet"))
-		return out
+		return []string{fg(cFaint, "no dispatcher in this product has finished yet")}
 	}
 	sel := clampCursor(m.historyCursor, len(items))
-	for i, h := range items {
+
+	h, _ := m.historySelected()
+	detail := []string{fg(cRule, strings.Repeat("─", cw))}
+	ref := h.pr
+	if ref == "" {
+		ref = "no pr"
+	}
+	detail = append(detail, fg(cMid, h.feature)+fg(cFaint, " · "+ref+" · "+h.ended))
+	// The session id is the handle resume works through, so its absence is
+	// stated rather than left as a blank.
+	if h.session == "" {
+		detail = append(detail, fg(cFaint, "no session recorded — enter dispatches it again"))
+	} else {
+		detail = append(detail, fg(cFaint, "session "+h.session))
+	}
+	for _, ln := range productWrap(h.prompt, cw) {
+		detail = append(detail, fg(cMid, ln))
+	}
+	detail = append(detail, fg(cDim, "enter resume it · o open pr"))
+
+	var rows []string
+	for i, it := range items {
 		bg, marker, featColor := "", " ", cFg
 		if i == sel {
 			bg, marker, featColor = cSel, "▸", cWhite
 		}
 		endedColor := cDim
-		if h.ended == "stopped" {
+		if it.ended == "stopped" {
 			endedColor = cFaint
 		}
-		out = append(out, row(cw, bg,
+		rows = append(rows, row(cw, bg,
 			c(marker, 2, cFaint),
-			flexc(h.feature, featColor),
-			c(h.repo, 16, cDim),
-			c(h.ended, 15, endedColor),
-			cr(h.at, 8, cFaint)))
+			flexc(it.feature, featColor),
+			c(it.repo, 16, cDim),
+			c(it.ended, 15, endedColor),
+			cr(it.at, 8, cFaint)))
+	}
+	if older := historyOlder[m.productFocusName()]; older > 0 {
+		rows = append(rows, fg(cFaint, "…and "+itoa(older)+" older"))
 	}
 
-	h, _ := m.historySelected()
-	out = append(out, fg(cRule, strings.Repeat("─", cw)))
-	ref := h.pr
-	if ref == "" {
-		ref = "no pr"
+	return append(historyWindow(rows, sel, ch-len(detail)), detail...)
+}
+
+// historyWindow returns the slice of rows that fits in budget lines and holds
+// the selected one, replacing the row it displaces at each cut with a count of
+// what lies beyond it. A list that simply stopped would read as the whole of a
+// product's past, and j would walk the cursor off a screen that never moved.
+func historyWindow(rows []string, sel, budget int) []string {
+	// Below three there is nothing left to say: one row and two markers.
+	if budget < 3 {
+		budget = 3
 	}
-	out = append(out, fg(cMid, h.feature)+fg(cFaint, " · "+ref+" · "+h.ended))
-	// The session id is the handle resume works through, so its absence is
-	// stated rather than left as a blank.
-	if h.session == "" {
-		out = append(out, fg(cFaint, "no session recorded — enter dispatches it again"))
-	} else {
-		out = append(out, fg(cFaint, "session "+h.session))
+	if len(rows) <= budget {
+		return rows
 	}
-	for _, ln := range productWrap(h.prompt, cw) {
-		out = append(out, fg(cMid, ln))
+	start := sel - budget/2
+	if start < 0 {
+		start = 0
 	}
-	out = append(out, fg(cDim, "enter resume it · o open pr"))
+	if start+budget > len(rows) {
+		start = len(rows) - budget
+	}
+	out := append([]string(nil), rows[start:start+budget]...)
+	if start > 0 {
+		out[0] = fg(cFaint, "↑ "+itoa(start+1)+" more above")
+	}
+	if end := start + budget; end < len(rows) {
+		out[len(out)-1] = fg(cFaint, "↓ "+itoa(len(rows)-end+1)+" more below")
+	}
 	return out
 }
 

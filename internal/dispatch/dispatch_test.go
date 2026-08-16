@@ -195,9 +195,21 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 	}
 
 	alive := map[string]bool{"disp-payment-retry": true}
-	restore := sessionAlive
+	// Both seams, because "live" is two facts now — the session exists, and
+	// something is still running in it. Leaving sessionIdle real also let the
+	// developer's own tmux server answer for a session this test invented.
+	busy := true
+	prevAlive, prevIdle, prevNew, prevUniq := sessionAlive, sessionIdle, newSession, uniqueName
 	sessionAlive = func(name string) bool { return alive[name] }
-	defer func() { sessionAlive = restore }()
+	sessionIdle = func(string) (bool, bool) { return !busy, true }
+	// Launch really does start a session, so the supervisor is stubbed too —
+	// without it a passing assertion below left disp-payment-retry-2 and -3 on
+	// the machine running the suite.
+	newSession = func(string, string, string) error { return nil }
+	uniqueName = func(base string) string { return base }
+	defer func() {
+		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
+	}()
 
 	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go")
 	if err == nil {
@@ -212,6 +224,43 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 	alive["disp-payment-retry"] = false
 	if got := liveDispatch("payment-retry"); got != nil {
 		t.Errorf("dead session still reported live: %#v", got)
+	}
+
+	// And the case that matters more, because it is the ordinary one: the
+	// session is still there but claude has ended and it is sitting at the
+	// login shell launchCommand drops to. Every finished dispatch looks like
+	// this, and treating it as live refused to re-dispatch any of them.
+	alive["disp-payment-retry"] = true
+	busy = false
+	if got := liveDispatch("payment-retry"); got != nil {
+		t.Errorf("a leftover login shell reported as a live dispatcher: %#v", got)
+	}
+	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go"); err != nil {
+		t.Errorf("re-dispatching a finished feature was refused: %v", err)
+	}
+}
+
+// A backend that cannot see into a session — the Windows console one — must not
+// have a dispatcher declared dead on a guess. Unknown keeps the refusal.
+func TestLaunchRefusesWhenIdlenessIsUnknown(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+
+	rec := &state.Dispatch{
+		ID: state.NewID(), Feature: "Payment Retry", Slug: "payment-retry",
+		RepoPath: repo, RepoName: "acme", Branch: "feature/payment-retry",
+		TmuxSession: "disp-payment-retry", Status: state.StatusWorking,
+	}
+	if err := state.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	prevAlive, prevIdle := sessionAlive, sessionIdle
+	sessionAlive = func(string) bool { return true }
+	sessionIdle = func(string) (bool, bool) { return true, false } // idle, but unknowably so
+	defer func() { sessionAlive, sessionIdle = prevAlive, prevIdle }()
+
+	if got := liveDispatch("payment-retry"); got == nil {
+		t.Error("an unreadable session was taken as proof its dispatcher had ended")
 	}
 }
 

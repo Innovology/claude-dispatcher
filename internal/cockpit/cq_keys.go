@@ -15,9 +15,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// cqUndoEntry is the last row `u` can put back. It restores the table row only:
-// the act's command has already run, so `u` un-hides a dispatcher, it does not
-// un-kill a session or un-merge a PR.
+// cqUndoEntry is the last row ctrl+z can put back. It restores the table row
+// only: the act's command has already run, so ctrl+z un-hides a dispatcher, it
+// does not un-kill a session or un-merge a PR.
 type cqUndoEntry struct{ id, label string }
 
 // ---- derived state ----------------------------------------------------------
@@ -172,7 +172,7 @@ func (m model) cqStartFlash(r fleetRow, a cqAct) (model, tea.Cmd) {
 }
 
 // cqFlashDone ends the confirmation: unless the act keeps the row, it leaves
-// the table, the handled count goes up and `u` can put it back. It clears by
+// the table, the handled count goes up and ctrl+z can put it back. It clears by
 // id, never by position, so a refresh that reordered the table mid-flash cannot
 // clear the wrong row.
 func (m model) cqFlashDone() (model, tea.Cmd) {
@@ -209,13 +209,21 @@ func cqWithout(ids []string, drop string) []string {
 func isLensDigit(k string) bool { return len(k) == 1 && k[0] >= '1' && k[0] <= '6' }
 
 // updateFloorQueue is the triage lens's whole key surface. handled is false only
-// for the keys allowed to leave this screen (the lens digits, ':', 'u', '?',
+// for the keys allowed to leave this screen (the lens digits, ':', ctrl+z, '?',
 // 'q'), which handleKey then routes as usual; nothing else escapes, because the
 // v2 list keys (/, space, F, D, tab, r, t, M, p) went with the list.
 func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
-	// A flash is a promise that something happened. Nothing gets through it.
+	// A flash is a promise that something happened. Nothing gets through it —
+	// including undo, which would otherwise race the cqUndo the flash is about
+	// to record.
 	if m.cqFlash != "" {
 		return m, nil, true
+	}
+	// Undo leaves ahead of the prompt check, unlike the letters below it: a
+	// chord cannot be typed into a sentence, so there is no half-written
+	// dispatch for it to steal a keystroke from. `u` had to wait its turn.
+	if k == "ctrl+z" {
+		return m, nil, false
 	}
 
 	if m.cqPromptOn() {
@@ -301,7 +309,7 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 	// Only navigation leaves this screen. ',', '+', 'tab' and every v2 list key
 	// are swallowed: the palette is the way to settings and to a repo-first
 	// dispatch, and the form is the way to a new one.
-	if isLensDigit(k) || k == ":" || k == "u" || k == "?" || k == "q" {
+	if isLensDigit(k) || k == ":" || k == "?" || k == "q" {
 		return m, nil, false
 	}
 	return m, nil, true
