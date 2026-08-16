@@ -380,6 +380,10 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 			m.notice = t.id + " names no repo — dispatch it from the form"
 		default:
 			m.notice = ""
+			// A dispatch from here lands on a lens that does not list it, so the
+			// placeholder is what makes it findable the moment the human presses 1
+			// to go and look — see pending.go.
+			m = m.markPending(m.pendingFor(t.repo, backlogFeature(t), t.prompt))
 			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt)
 		}
 	case "ctrl+d":
@@ -400,6 +404,7 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 				noRepo++
 				continue
 			}
+			m = m.markPending(m.pendingFor(bt.repo, backlogFeature(bt), bt.prompt))
 			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt))
 		}
 		m.picked = map[string]bool{}

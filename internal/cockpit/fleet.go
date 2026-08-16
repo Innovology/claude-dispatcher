@@ -303,6 +303,15 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	// get-url`: collectFloor resolved it for this record moments ago.
 	forge := floorBy[rec.Feature].forge
 	signal, stalled := cqShipDetail(forge, rec)
+	// The record exists and no hook has fired for it: it was launched, and
+	// nothing has been heard from the session since. cqShipDetail has nothing to
+	// say about a dispatcher with no PR, so the cell would be blank — which on
+	// the row the human is watching most closely reads as "no news", when the
+	// news is that it is still starting. It says the same words the placeholder
+	// said a moment ago, because it is the same wait continuing.
+	if signal == "" && rec.Status == state.StatusLaunching {
+		signal = startingSignal
+	}
 
 	tone, why := "normal", s.saidBy[rec.Feature]
 	if stalled {
@@ -422,6 +431,13 @@ func (m model) fleetAll() []fleetRow {
 		if !placed[r.id] && !m.cqSuppressed[r.id] {
 			out = append(out, r)
 		}
+	}
+	// A dispatch that has been asked for and has no record yet leads the table.
+	// It is the newest thing on the screen and the one the human is looking for,
+	// having just pressed the key that made it; and it has nothing to be ranked
+	// by yet, so there is no order it could take its place in. See pending.go.
+	if pend := m.pendingRows(); len(pend) > 0 {
+		out = append(pend, out...)
 	}
 	return out
 }

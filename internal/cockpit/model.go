@@ -148,6 +148,12 @@ type model struct {
 
 	cqUndo *cqUndoEntry // the last cleared row, restorable with `u`
 
+	// pending is what this cockpit has asked for and not yet seen a record for.
+	// It is the only view state that is not derived from the records, and it has
+	// to be: for the seconds a launch takes there are no records to derive from.
+	// See pending.go.
+	pending []pendingDispatch
+
 	// ---- triage lens: the structured dispatch form -------------------------
 	// The floor's freeform draft became four fields: where it lands, what it
 	// does, when it is done, and whether it needs you between steps. See
@@ -256,7 +262,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// and cleared set back onto it before anything renders, then re-key the
 		// cursor onto the row it was on — a rank that changed in this refresh
 		// would otherwise move the selection under the reader's hands.
-		return m.cqReconcile().fleetSync(), boot
+		//
+		// The pending notes are retired first, because retiring one can hand the
+		// cursor over to the row that replaced it, and fleetSync is what acts on
+		// that. See prunePending.
+		return m.prunePending().cqReconcile().fleetSync(), boot
 
 	case bootProgressMsg:
 		// Re-arming only while the screen is up is what stops a skipped boot
@@ -314,6 +324,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, loadSnapshotCmd(m.cfg)
 		}
 		return m, nil
+
+	case launchedMsg:
+		// A launch is the one action whose row was on screen before the action
+		// finished, so its outcome has a placeholder to answer to. A failure
+		// takes the row away with the notice that explains it — leaving a row
+		// saying "starting session" under a notice saying it did not start would
+		// be the screen contradicting itself. A success keeps the row and marks
+		// it launched; the snapshot this queues is what hands over to the record.
+		m.notice = msg.notice
+		if msg.failed {
+			m = m.dropPending(msg.feature)
+		} else {
+			m = m.settlePending(msg.feature)
+		}
+		if m.cfg != nil {
+			return m.fleetSync(), loadSnapshotCmd(m.cfg)
+		}
+		return m.fleetSync(), nil
 
 	case attachReturnedMsg:
 		m.notice = ""

@@ -144,11 +144,26 @@ func replyCmd(feature, text string) tea.Cmd {
 	}
 }
 
+// launchedMsg is a finished launch attempt, carrying the feature it was for as
+// well as the notice.
+//
+// It is not an actionMsg, and the difference is the feature. Every other action
+// works on a record that already exists, so a notice is the whole result. A
+// launch is the one that starts before its record does: the cockpit has put a
+// placeholder row on the table (see pending.go) and that row is now either
+// wrong — nothing launched — or superseded. Neither can be settled from a
+// notice string, so the outcome names what it was about.
+type launchedMsg struct {
+	feature string
+	notice  string
+	failed  bool
+}
+
 // launchCmd dispatches a new feature into repoName with prompt.
 func launchCmd(cfg *config.Config, repoName, feature, prompt string) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
-			return actionMsg{notice: "no config — cannot dispatch"}
+			return launchedMsg{feature: feature, notice: "no config — cannot dispatch", failed: true}
 		}
 		var found *repos.Repo
 		for _, r := range repos.Discover(cfg) {
@@ -159,13 +174,13 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string) tea.Cmd {
 			}
 		}
 		if found == nil {
-			return actionMsg{notice: "repo not found: " + repoName}
+			return launchedMsg{feature: feature, notice: "repo not found: " + repoName, failed: true}
 		}
 		d, err := dispatchpkg.Launch(*found, feature, prompt)
 		if err != nil {
-			return actionMsg{notice: "launch failed: " + err.Error()}
+			return launchedMsg{feature: feature, notice: "launch failed: " + err.Error(), failed: true}
 		}
-		return actionMsg{notice: "dispatched \"" + d.Feature + "\" → " + d.RepoName}
+		return launchedMsg{feature: feature, notice: "dispatched \"" + d.Feature + "\" → " + d.RepoName}
 	}
 }
 

@@ -224,8 +224,8 @@ func TestReplyCmdNoSession(t *testing.T) {
 
 func TestLaunchCmdNoConfig(t *testing.T) {
 	msg := launchCmd(nil, "repo", "feature", "prompt")()
-	am, ok := msg.(actionMsg)
-	if !ok || !strings.Contains(am.notice, "no config") {
+	lm, ok := msg.(launchedMsg)
+	if !ok || !lm.failed || lm.feature != "feature" || !strings.Contains(lm.notice, "no config") {
 		t.Errorf("launchCmd(nil cfg) = %#v", msg)
 	}
 }
@@ -234,8 +234,8 @@ func TestLaunchCmdRepoNotFound(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{Roots: []string{dir}}
 	msg := launchCmd(cfg, "nonexistent-repo", "feature", "prompt")()
-	am, ok := msg.(actionMsg)
-	if !ok || !strings.Contains(am.notice, "repo not found") {
+	lm, ok := msg.(launchedMsg)
+	if !ok || !lm.failed || lm.feature != "feature" || !strings.Contains(lm.notice, "repo not found") {
 		t.Errorf("launchCmd(repo not found) = %#v", msg)
 	}
 }
@@ -254,8 +254,8 @@ func TestLaunchCmdEnsureBranchFails(t *testing.T) {
 	cfg := &config.Config{Roots: []string{root}}
 
 	msg := launchCmd(cfg, "fake-repo", "new feature", "do something")()
-	am, ok := msg.(actionMsg)
-	if !ok || !strings.Contains(am.notice, "launch failed") {
+	lm, ok := msg.(launchedMsg)
+	if !ok || !lm.failed || lm.feature != "new feature" || !strings.Contains(lm.notice, "launch failed") {
 		t.Errorf("launchCmd(broken repo) = %#v", msg)
 	}
 }
