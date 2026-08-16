@@ -98,6 +98,17 @@
   upgrades it. `U` in the cockpit runs that command and re-execs. A
   declaratively-installed Nix build is never upgraded imperatively — only an
   entry in the imperative profile's `manifest.json` proves it may be.
+  - **A cached answer belongs to the build that recorded it.** `U` upgrades in
+    place and re-execs, so the build that comes back would otherwise read a
+    cache naming the release it was upgraded *from* — "latest v3.1.3" read by
+    v3.2.3 compares as "you are current" and hides everything published since,
+    for the rest of the TTL. The cache carries the `Build` that wrote it and a
+    different one re-asks; that is also why a failed check only carries forward
+    an answer this build recorded.
+  - **`U` with nothing on offer checks rather than reciting the cache**
+    (`version.Recheck`). The ambient answer is hours old by design, and a human
+    presses `U` precisely when they think it is behind. Finding a release goes
+    straight to the confirm — they pressed it to upgrade, not to be told.
 
 ## Build
 `make build` / `make vet` / `make install` (binary to ~/.local/bin — the init
