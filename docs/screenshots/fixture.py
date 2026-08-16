@@ -48,6 +48,34 @@ DISPATCHES = [
      129, "MERGED", 6, 180, ["Bash"], "Export shipped and the deploy is green."),
 ]
 
+# What each dispatch's branch actually changed, as (path, lines written).
+#
+# The cockpit reads `git diff <base_sha>..<branch>` for its diff totals and for
+# the hand-coding equivalent, so a fixture that only names a branch renders
+# every one of those figures as zero — the screenshots would show the feature
+# as absent rather than as small. The paths are chosen to exercise the file
+# kinds too: source, tests, prose, and a lockfile nobody typed.
+#
+# A dispatch with no entry has no branch at all, which is the honest picture of
+# one that has not committed anything yet.
+DIFFS = {
+    "seat limits":     [("internal/billing/seats.go", 320),
+                        ("internal/billing/seats_test.go", 180),
+                        ("docs/seat-limits.md", 40)],
+    "webhook retries": [("internal/queue/retry.go", 210),
+                        ("internal/queue/retry_test.go", 90)],
+    "audit filters":   [("src/audit/filters.tsx", 260),
+                        ("src/audit/filters.test.tsx", 140),
+                        ("package-lock.json", 3000)],
+    "offline cache":   [("src/cache/offline.ts", 120)],
+    "rate limiter":    [("internal/limits/bucket.go", 180),
+                        ("internal/limits/bucket_test.go", 90)],
+    "csv export":      [("internal/export/csv.go", 430),
+                        ("internal/export/csv_test.go", 220),
+                        ("docs/export.md", 60)],
+}
+
+
 def sh(*a, cwd=None):
     subprocess.run(a, cwd=cwd, check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -62,6 +90,30 @@ def make_repo(name):
     sh("git", "add", "-A", cwd=d)
     sh("git", "commit", "-q", "-m", "init", cwd=d)
     return d
+
+def make_branch(repo, branch, files):
+    """Cut the dispatch's feature branch, put a real diff on it, and return the
+    SHA it was cut from — which is what the record's base_sha has to be.
+
+    It leaves the repo back on main, because several dispatches share one repo
+    and each needs its branch cut from the same place. Nothing here is a
+    worktree: the screenshots only need the refs to exist, and the real
+    dispatcher's worktrees are not what is being pictured.
+    """
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                          capture_output=True, text=True).stdout.strip()
+    if not files:
+        return base
+    sh("git", "checkout", "-q", "-b", branch, cwd=repo)
+    for path, lines in files:
+        p = repo / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("".join(f"// {path} line {i}\n" for i in range(lines)))
+    sh("git", "add", "-A", cwd=repo)
+    sh("git", "commit", "-q", "-m", branch, cwd=repo)
+    sh("git", "checkout", "-q", "main", cwd=repo)
+    return base
+
 
 def transcript(path, tools, said):
     """A Claude Code JSONL tail: tool_use blocks then the assistant's message."""
@@ -92,10 +144,11 @@ def main():
         # age the file too — otherwise every dispatcher looks like it spoke a
         # moment ago, whatever its record says.
         os.utime(tp, (ago(age), ago(age)))
+        base = make_branch(paths[repo], f"feature/{slug}", DIFFS.get(feat, []))
         rec = {
             "id": f"fix{i:04d}", "feature": feat, "slug": slug,
             "repo_path": str(paths[repo]), "repo_name": repo, "product": prod,
-            "branch": f"feature/{slug}", "prompt": said,
+            "branch": f"feature/{slug}", "base_sha": base, "prompt": said,
             "tmux_session": f"disp-{slug}", "transcript_path": str(tp),
             "commits": ["0" * 40] * ncom,
             "status": status, "status_reason": reason,
