@@ -334,20 +334,23 @@ func TestCollectCtxProductFor(t *testing.T) {
 		Products: map[string][]string{"shop": {"shop-api"}},
 	}}
 
-	if got := ctx.productFor(&state.Dispatch{Product: "shop"}); got != "shop" {
-		t.Errorf("recorded product: got %q, want shop", got)
-	}
 	if got := ctx.productFor(&state.Dispatch{RepoName: "shop-api"}); got != "shop" {
 		t.Errorf("mapped by repo name: got %q, want shop", got)
 	}
-	// A repo with no mapping, and a stale product no longer in the config,
-	// both fold into "unassigned" — the same key collectProducts uses, so the
-	// floor's groups line up with the products lens.
+	// A repo with no mapping, and a product recorded on the dispatch that the
+	// config no longer agrees with, both fold into "unassigned" — the same key
+	// collectProducts uses, so the floor's groups line up with the products lens.
 	if got := ctx.productFor(&state.Dispatch{RepoName: "not-mapped"}); got != "unassigned" {
 		t.Errorf("unmapped repo: got %q, want unassigned", got)
 	}
-	if got := ctx.productFor(&state.Dispatch{Product: "retired"}); got != "unassigned" {
+	if got := ctx.productFor(&state.Dispatch{RepoName: "not-mapped", Product: "retired"}); got != "unassigned" {
 		t.Errorf("product no longer in config: got %q, want unassigned", got)
+	}
+	// With no config at all there is nothing to ask, so what the dispatch was
+	// launched under is all there is to go on.
+	none := &collectCtx{}
+	if got := none.productFor(&state.Dispatch{RepoName: "shop-api", Product: "shop"}); got != "shop" {
+		t.Errorf("no config: got %q, want the recorded shop", got)
 	}
 }
 

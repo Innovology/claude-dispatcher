@@ -39,31 +39,18 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		}
 	}
 
-	// Known product keys from config.
-	known := map[string]bool{}
-	for p := range cfg.Products {
-		known[p] = true
-	}
-
-	// prodOf maps a record onto a product key, folding anything unmapped into
-	// "unassigned".
-	prodOf := func(rec *state.Dispatch) string {
-		p := rec.Product
-		if p == "" {
-			p = cfg.ProductFor(rec.RepoName)
-		}
-		if p == "" || !known[p] {
-			return "unassigned"
-		}
-		return p
-	}
-
+	// Records group by ctx.productFor, the same rule triage uses. This was a
+	// second copy of it here, and copies drift: it read the product recorded on
+	// the dispatch while the repo grid two blocks down read the config, so one
+	// lens could show a repo under the product it had just been assigned to while
+	// the count beside it still belonged to the old one.
 	recsByProduct := map[string][]*state.Dispatch{}
 	openByRepo := map[string]int{}
 	recBranch := map[string]bool{}
 	recPR := map[string]bool{}
 	for _, rec := range ctx.records {
-		recsByProduct[prodOf(rec)] = append(recsByProduct[prodOf(rec)], rec)
+		p := ctx.productFor(rec)
+		recsByProduct[p] = append(recsByProduct[p], rec)
 		if rec.Status != state.StatusDone && rec.Status != state.StatusExited {
 			openByRepo[rec.RepoName]++
 		}
