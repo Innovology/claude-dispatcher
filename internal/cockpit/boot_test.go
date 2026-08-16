@@ -61,6 +61,32 @@ func TestLoadSnapshotIgnoresNilReporter(t *testing.T) {
 	}
 }
 
+// TestBootLoadCmdReportsThenCloses covers the loader command end to end: it
+// produces the same snapshot as any other load, it fills the channel on the
+// way, and it closes it afterwards so the last waitBoot is released rather
+// than parked on a channel nothing will ever send to again.
+func TestBootLoadCmdReportsThenCloses(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	defer restoreVars(captureVars())
+
+	ch := make(chan bootUpdate, bootChanBuffer)
+	msg := bootLoadCmd(&config.Config{}, ch)()
+	if snapshot(msg.(snapshotMsg)).dataMode != "live" {
+		t.Error("bootLoadCmd did not produce a live snapshot")
+	}
+
+	n := 0
+	for range ch { // ranges to completion only if the channel was closed
+		n++
+	}
+	if n == 0 {
+		t.Error("bootLoadCmd reported nothing to the opening screen")
+	}
+	if got := waitBoot(ch)(); got != nil {
+		t.Errorf("waitBoot on a closed channel = %#v, want nil", got)
+	}
+}
+
 // TestBootScreenRendersAtEverySize sweeps the sizes the screen has to survive:
 // a wide terminal, the classic 80×24, and one too small for the wordmark.
 func TestBootScreenRendersAtEverySize(t *testing.T) {

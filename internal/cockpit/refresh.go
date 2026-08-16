@@ -95,11 +95,17 @@ func bootLoadCmd(cfg *config.Config, ch chan bootUpdate) tea.Cmd {
 			default:
 			}
 		}
-		return snapshotMsg(loadSnapshotReporting(cfg, report))
+		s := loadSnapshotReporting(cfg, report)
+		// Every send happens inside the call above, on this goroutine, so the
+		// channel is safe to close here — and closing it is what releases the
+		// waitBoot that would otherwise sit on it for the life of the process.
+		close(ch)
+		return snapshotMsg(s)
 	}
 }
 
-// waitBoot blocks until the loader reports its next step.
+// waitBoot blocks until the loader reports its next step. A closed channel ends
+// the subscription: the load is over and nothing more will be reported.
 func waitBoot(ch chan bootUpdate) tea.Cmd {
 	return func() tea.Msg {
 		if ch == nil {
