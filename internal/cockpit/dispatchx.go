@@ -93,7 +93,7 @@ func (m model) dxOpen(filter string) model {
 
 // dxTouched reports whether anything has been typed into the four text fields.
 // It is what decides whether a navigation key is navigation or text: an
-// untouched form is not a trap, so 1–6, ':' and 'w' still leave it, but the
+// untouched form is not a trap, so 1–6, ':', 'd' and 'h' still leave it, but the
 // moment there is a filter or a sentence they are letters again. dxAuto and
 // dxField deliberately do not count — toggling auto or tabbing about is not
 // typing, and must not strand the human on this screen.

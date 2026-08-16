@@ -29,13 +29,31 @@ type teamRow struct {
 
 // ---- shipped ----------------------------------------------------------------
 
+// id is the dispatch record's own id, and is what the resume overlay acts
+// through — a feature name can belong to several records, its id cannot.
 type shippedItem struct {
-	feature, repo, pr, at, session, closedBy, prompt string
+	id, feature, repo, pr, at, session, closedBy, prompt string
 }
 
 type shippedDay struct {
 	day   string
 	items []shippedItem
+}
+
+// ---- history ----------------------------------------------------------------
+
+// historyItem is one finished dispatcher on the product's HISTORY tab: every
+// session that is over, whether it shipped or not.
+//
+// SHIPPED cannot answer for these. It is a ship log — grouped by the day a
+// feature went live, and built only from records with a merge or a deploy
+// behind them — so a dispatcher that was killed, that ended without a PR, or
+// that was marked shipped by hand appears on it nowhere, and used to be
+// unreachable from every screen in the product. ended says how it finished and
+// session is the transcript to resume; an empty session means there is nothing
+// to resume and the overlay says so rather than pretending.
+type historyItem struct {
+	id, feature, repo, pr, at, ended, session, prompt string
 }
 
 // ---- diffs + findings -------------------------------------------------------

@@ -21,6 +21,11 @@ func KillSession(name string) error               { return tmux.KillSession(name
 func UniqueName(base string) string               { return tmux.UniqueName(base) }
 func SetStatusHint(name string)                   { tmux.SetStatusHint(name) }
 
+// SessionIdle reports whether a session is sitting at its shell with nothing
+// running — the state a dispatch session is left in once claude exits. known is
+// false when the backend cannot tell, which is never the same answer as "idle".
+func SessionIdle(name string) (idle, known bool) { return tmux.SessionIdle(name) }
+
 // EnsureBackKey binds the prefix-free "back to the cockpit" key (Ctrl-\).
 func EnsureBackKey() { tmux.EnsureDetachKey() }
 

@@ -211,10 +211,13 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 // Every count is over the FILTERED rows, because the line sits on top of the
 // table and describes what is on it.
 func (m model) fleetHeadline(inner int, rows []fleetRow) string {
-	wants, warn, clean := fleetCount(rows)
 	f := m.fleetFilter()
+	if f == fleetHistory {
+		return m.fleetHistoryHeadline(inner, rows)
+	}
+	wants, warn, clean := fleetCount(rows)
 
-	title, right := itoa(len(rows))+" in flight", "f filters · sorted by urgency"
+	title, right := itoa(len(rows))+" in flight", "f filters · h history · sorted by urgency"
 	if f != fleetFilters[0] {
 		title, right = itoa(len(rows))+" · "+f, "showing "+f+" · f cycles"
 	}
@@ -233,6 +236,22 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 		fg(warnHex, itoa(warn)+" need a look") + "   " +
 		fg(cFaint, itoa(clean)+" running clean")
 	return flG(flSpread(left, fg(cFaint, right), inner))
+}
+
+// fleetHistoryHeadline is the line above the history table. It answers the two
+// questions history is for — how much of it there is, and how much of it
+// actually shipped — and says the way back, because `h` got you here.
+func (m model) fleetHistoryHeadline(inner int, rows []fleetRow) string {
+	shipped := 0
+	for _, r := range rows {
+		if r.signal != "stopped" {
+			shipped++
+		}
+	}
+	left := fg(cFg, itoa(len(rows))+" finished") + "   " +
+		fg(cFaint, itoa(shipped)+" shipped") + "   " +
+		fg(cFaint, itoa(len(rows)-shipped)+" stopped")
+	return flG(flSpread(left, fg(cFaint, "⏎ resumes one · h back to the fleet"), inner))
 }
 
 // ---- the detail panel -----------------------------------------------------------
@@ -314,8 +333,9 @@ func (m model) viewCQ(w, h int) string {
 	// The gate is the UNFILTERED fleet. The design tests its filtered row count,
 	// so narrowing to `running` with nothing running dropped the human into the
 	// dispatch form and its own "nothing matches this filter" line could never
-	// render.
-	if m.cqDispatch || len(m.fleetAll()) == 0 {
+	// render. cqFormOn also holds the form back on the history filter, which is
+	// a table of its own rather than a narrowing of the fleet.
+	if m.cqFormOn() {
 		return m.cqViewEmpty(w, h)
 	}
 	return m.viewFleet(w, h)
@@ -351,7 +371,11 @@ func (m model) viewFleet(w, h int) string {
 	}
 	layout = cqShed(layout, maxi(1, h-fleetMinRows))
 
-	body := fleetBody(w, cols, rows, sel, maxi(0, h-cqSolid(layout)))
+	empty := "nothing matches this filter"
+	if m.fleetFilter() == fleetHistory {
+		empty = "no dispatcher has finished yet · h goes back to the fleet"
+	}
+	body := fleetBody(w, cols, rows, sel, maxi(0, h-cqSolid(layout)), empty)
 	out := make([]cqRow, 0, len(layout)+len(body))
 	for _, r := range layout {
 		if !r.fill {
@@ -370,16 +394,16 @@ func (m model) viewFleet(w, h int) string {
 // There is no "↑ N more" / "↓ N more" sacrificial row: window() keeps the
 // cursor on screen and j/k move the cursor rather than a scroll offset, so no
 // row is unreachable and none of the height needs spending to say so.
-func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int) []string {
+func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string) []string {
 	if h <= 0 {
 		return nil
 	}
 	out := make([]string, 0, h)
 	if len(rows) == 0 {
 		// viewCQ would have shown the dispatch form if the fleet were empty, so
-		// this is the filter — and it says which, rather than reading as
-		// "nothing is running".
-		out = append(out, flG(fg(cFaint, "nothing matches this filter")))
+		// this is the filter — and the caller's line says which, rather than
+		// reading as "nothing is running".
+		out = append(out, flG(fg(cFaint, empty)))
 	}
 	start, end := window(sel, len(rows), h)
 	for i := start; i < end; i++ {
@@ -401,7 +425,7 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int) []string {
 // without attaching to it, so it is not advertised here, in the help sheet or
 // in the key handler.
 func (m model) cqFooterHelp() string {
-	if m.cqDispatch || len(m.fleetAll()) == 0 {
+	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}
 	parts := make([]string, 0, 8)
@@ -410,6 +434,11 @@ func (m model) cqFooterHelp() string {
 			parts = append(parts, a.k+" "+a.d)
 		}
 	}
-	parts = append(parts, "j/k move", "f filter", "d dispatch", "u undo", "? keys")
+	if m.fleetFilter() == fleetHistory {
+		// No f, no d, no undo: none of them act on a finished dispatcher, and the
+		// footer only names keys that work right now.
+		return strings.Join(append(parts, "j/k move", "h back to the fleet", "? keys"), " · ")
+	}
+	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "u undo", "? keys")
 	return strings.Join(parts, " · ")
 }

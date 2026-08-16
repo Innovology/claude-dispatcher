@@ -162,6 +162,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 	s.productNote = map[string]string{}
 	s.productStats = map[string]productStat{}
 	s.shipped = map[string][]shippedDay{}
+	s.productHistory = map[string][]historyItem{}
 	s.productVelocity = map[string][]velTile{}
 	s.team = map[string][]teamRow{}
 	s.teamVerdict = map[string]string{}
@@ -184,8 +185,34 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			t  time.Time
 		}
 		shipGroups := map[time.Time][]shipEntry{}
+		// Every finished dispatcher in this product, shipped or not — see
+		// historyItem for why the ship log cannot stand in for it.
+		type histEntry struct {
+			it historyItem
+			t  time.Time
+		}
+		var hist []histEntry
 
 		for _, rec := range recs {
+			if rec.Status == state.StatusDone || rec.Status == state.StatusExited {
+				pr := ""
+				if rec.PRNumber > 0 {
+					pr = "#" + itoa(rec.PRNumber)
+				}
+				hist = append(hist, histEntry{
+					it: historyItem{
+						id:      rec.ID,
+						feature: rec.Feature,
+						repo:    rec.RepoName,
+						pr:      pr,
+						at:      prodAge(rec.UpdatedAt) + " ago",
+						ended:   cqEnded(rec),
+						session: rec.SessionID,
+						prompt:  rec.Prompt,
+					},
+					t: rec.UpdatedAt,
+				})
+			}
 			if rec.Status != state.StatusDone && rec.Status != state.StatusExited {
 				inflight++
 			}
@@ -226,6 +253,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			}
 			shipGroups[key] = append(shipGroups[key], shipEntry{
 				it: shippedItem{
+					id:       rec.ID,
 					feature:  rec.Feature,
 					repo:     rec.RepoName,
 					pr:       pr,
@@ -356,6 +384,19 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			shippedDays = append(shippedDays, shippedDay{day: prodDayLabel(k, now), items: items})
 		}
 		s.shipped[p] = shippedDays
+
+		// ---- history (every finished session, newest first) -----------------
+		sort.Slice(hist, func(i, j int) bool {
+			if !hist[i].t.Equal(hist[j].t) {
+				return hist[i].t.After(hist[j].t)
+			}
+			return hist[i].it.id < hist[j].it.id
+		})
+		items := make([]historyItem, 0, len(hist))
+		for _, h := range hist {
+			items = append(items, h.it)
+		}
+		s.productHistory[p] = items
 
 		// ---- velocity tiles ------------------------------------------------
 		deploys7 := 0

@@ -56,6 +56,51 @@ func (m model) shipSelected() shippedItem {
 	return f[clampCursor(m.shipCursor, len(f))]
 }
 
+// historyFlat is every finished dispatcher in the focused product, newest first.
+func (m model) historyFlat() []historyItem { return productHistory[m.productFocusName()] }
+
+// historySelected returns the finished dispatcher under the history cursor.
+func (m model) historySelected() (historyItem, bool) {
+	h := m.historyFlat()
+	if len(h) == 0 {
+		return historyItem{}, false
+	}
+	return h[clampCursor(m.historyCursor, len(h))], true
+}
+
+// ---- the resume target ------------------------------------------------------
+
+// resumeTarget is the dispatcher the resume overlay is about, from whichever
+// tab opened it. id addresses the record; session is the conversation to pick
+// back up, and "" means there is none — the overlay then offers the only honest
+// alternative, which is to dispatch the feature again.
+type resumeTarget struct {
+	id, feature, repo, pr, at, session, prompt string
+}
+
+// resumable reports whether this target can actually be resumed: a record we
+// can find, and a session id on it.
+func (t resumeTarget) resumable() bool { return t.id != "" && t.session != "" }
+
+func shipTarget(s shippedItem) *resumeTarget {
+	return &resumeTarget{id: s.id, feature: s.feature, repo: s.repo, pr: s.pr,
+		at: "shipped " + s.at, session: s.session, prompt: s.prompt}
+}
+
+func historyTarget(h historyItem) *resumeTarget {
+	return &resumeTarget{id: h.id, feature: h.feature, repo: h.repo, pr: h.pr,
+		at: h.ended + " " + h.at, session: h.session, prompt: h.prompt}
+}
+
+// resumeSelected is the overlay's target: the one it opened on, falling back to
+// the shipped cursor for a caller that opened the overlay without setting one.
+func (m model) resumeSelected() resumeTarget {
+	if m.resumeAt != nil {
+		return *m.resumeAt
+	}
+	return *shipTarget(m.shipSelected())
+}
+
 // productSelectedReview returns the review under the review cursor, if any.
 func (m model) productSelectedReview() (reviewItem, bool) {
 	rv := reviews[m.productFocusName()]
@@ -149,6 +194,8 @@ func (m model) productPanel(cw int) []string {
 		out = append(out, m.productTeamBody(cw, name)...)
 	case "shipped":
 		out = append(out, m.productShippedBody(cw)...)
+	case "history":
+		out = append(out, m.productHistoryBody(cw)...)
 	default:
 		out = append(out, m.productReviewBody(cw, name)...)
 	}
@@ -163,8 +210,9 @@ func productSummaryLine(name string) string {
 	return itoa(n) + " " + plural(n, "repo", "repos") + " · " + itoa(p.inflight) + " in flight · " + itoa(p.live) + " live today"
 }
 
-// productTabStrip is the O/R/T/S strip. The counts are on the tabs because they
-// are the reason to switch to one: nothing waiting is worth a keypress to see.
+// productTabStrip is the O/R/T/S/H strip. The counts are on the tabs because
+// they are the reason to switch to one: nothing waiting is worth a keypress to
+// see.
 func (m model) productTabStrip(name string) string {
 	waiting := 0
 	for _, r := range reviews[name] {
@@ -183,6 +231,7 @@ func (m model) productTabStrip(name string) string {
 		tab("review", "R review "+itoa(waiting)),
 		tab("team", "T team"),
 		tab("shipped", "S shipped "+itoa(len(m.shippedFlat()))),
+		tab("history", "H history "+itoa(len(m.historyFlat()))),
 	}, "  ")
 }
 
@@ -383,7 +432,61 @@ func (m model) productShippedBody(cw int) []string {
 	}
 	// `c clone to another repo` is not offered: nothing implements it, and a key
 	// the footer names that does nothing is worse than an absent one.
-	out = append(out, fg(cDim, "enter dispatch again · o open pr"))
+	out = append(out, fg(cDim, "enter pick it back up · o open pr · H every finished session"))
+	return out
+}
+
+// productHistoryBody is the H tab: every dispatcher in this product whose
+// session is over, newest first, and the way back into one.
+//
+// This is the tab that answers "where did it go". A dispatcher that was killed,
+// that ended without opening a PR, or that was marked shipped by hand is on no
+// other screen in the cockpit — SHIPPED is a ship log and the triage table is
+// what is in flight — so without it the session, its transcript and its branch
+// were all still on disk with nothing anywhere able to reach them.
+func (m model) productHistoryBody(cw int) []string {
+	items := m.historyFlat()
+	var out []string
+	if len(items) == 0 {
+		out = append(out, fg(cFaint, "no dispatcher in this product has finished yet"))
+		return out
+	}
+	sel := clampCursor(m.historyCursor, len(items))
+	for i, h := range items {
+		bg, marker, featColor := "", " ", cFg
+		if i == sel {
+			bg, marker, featColor = cSel, "▸", cWhite
+		}
+		endedColor := cDim
+		if h.ended == "stopped" {
+			endedColor = cFaint
+		}
+		out = append(out, row(cw, bg,
+			c(marker, 2, cFaint),
+			flexc(h.feature, featColor),
+			c(h.repo, 16, cDim),
+			c(h.ended, 15, endedColor),
+			cr(h.at, 8, cFaint)))
+	}
+
+	h, _ := m.historySelected()
+	out = append(out, fg(cRule, strings.Repeat("─", cw)))
+	ref := h.pr
+	if ref == "" {
+		ref = "no pr"
+	}
+	out = append(out, fg(cMid, h.feature)+fg(cFaint, " · "+ref+" · "+h.ended))
+	// The session id is the handle resume works through, so its absence is
+	// stated rather than left as a blank.
+	if h.session == "" {
+		out = append(out, fg(cFaint, "no session recorded — enter dispatches it again"))
+	} else {
+		out = append(out, fg(cFaint, "session "+h.session))
+	}
+	for _, ln := range productWrap(h.prompt, cw) {
+		out = append(out, fg(cMid, ln))
+	}
+	out = append(out, fg(cDim, "enter resume it · o open pr"))
 	return out
 }
 
@@ -460,27 +563,54 @@ func (m model) viewReview(w, h int) string {
 
 // ---- resume overlay ---------------------------------------------------------
 
+// viewResume is the overlay that picks a finished dispatcher back up.
+//
+// Its copy used to promise a resume it did not perform — "resumes session <id>
+// with its full context — the branch is recreated from the merge commit" — over
+// a key that launched an entirely new session on the same feature name. Both
+// halves are now real and each says which one is about to happen: with a
+// recorded session the transcript is reopened in the dispatch's own worktree;
+// without one there is nothing to reopen, and a fresh dispatch is offered as
+// what it is.
 func (m model) viewResume(w, h int) string {
-	s := m.shipSelected()
+	t := m.resumeSelected()
 	cw := w - 2*pad
 	if cw < 10 {
 		cw = w
 	}
+	where := t.repo
+	for _, part := range []string{t.pr, t.at} {
+		if part != "" && part != "—" {
+			where += " · " + part
+		}
+	}
+
 	var out []string
-	out = append(out, fg(cDim, "enhance a shipped feature"))
-	out = append(out, line(s.feature, cw, cWhite, ""))
-	out = append(out, fg(cDim, s.repo+" · "+s.pr+" · shipped "+s.at))
-	for _, ln := range productWrap("resumes session "+s.session+" with its full context — the branch is recreated from the merge commit", cw) {
+	lead, explain := "pick a finished dispatcher back up", "reopens session "+t.session+
+		" in its own worktree, with everything it already knows — leave the line empty to just open it"
+	if !t.resumable() {
+		lead = "dispatch this feature again"
+		explain = "no session was recorded for this one, so there is no conversation to reopen — " +
+			"this starts a fresh dispatcher on the same feature, and needs a prompt"
+	}
+	out = append(out, fg(cDim, lead))
+	out = append(out, line(t.feature, cw, cWhite, ""))
+	out = append(out, fg(cDim, where))
+	for _, ln := range productWrap(explain, cw) {
 		out = append(out, fg(cFaint, ln))
 	}
 	out = append(out, "")
 	out = append(out, fg(cDim, "originally"))
-	for _, ln := range productWrap(s.prompt, cw) {
+	for _, ln := range productWrap(t.prompt, cw) {
 		out = append(out, fg(cMid, ln))
 	}
 	out = append(out, fg(cRule, strings.Repeat("─", cw)))
 	out = append(out, fg(cAmber, "now ")+fg(cWhite, m.resumeText+"▏"))
-	out = append(out, fg(cFaint, "enter dispatch · esc cancel"))
+	verb := "enter resume"
+	if !t.resumable() {
+		verb = "enter dispatch"
+	}
+	out = append(out, fg(cFaint, verb+" · esc cancel"))
 	return clampLines(gutter(strings.Join(out, "\n"), pad), h)
 }
 
@@ -518,22 +648,28 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 	if m.resumeOpen {
 		next, submit, cancel := applyEdit(m.resumeText, k, m.key)
 		if cancel {
-			m.resumeOpen, m.resumeText = false, ""
+			m.resumeOpen, m.resumeText, m.resumeAt = false, "", nil
 			return m, nil
 		}
 		if submit {
-			sel := m.shipSelected()
+			t := m.resumeSelected()
 			text := strings.TrimSpace(m.resumeText)
-			m.resumeOpen, m.resumeText = false, ""
+			m.resumeOpen, m.resumeText, m.resumeAt = false, "", nil
+			// A recorded session is reopened where it ran, and an empty line is a
+			// legitimate ask: "just give it back to me". Without one there is no
+			// conversation to reopen, so this falls back to a fresh dispatch on
+			// the same feature — which does need a prompt, and says so rather
+			// than announcing a dispatch it did not make.
+			if t.resumable() {
+				m.notice = "resuming \"" + t.feature + "\"…"
+				return m, resumeCmd(t.id, text)
+			}
 			if text == "" {
 				m.notice = "nothing to dispatch — type what to change"
 				return m, nil
 			}
-			// This used to set a notice saying the feature had been "dispatched
-			// again" and launch nothing. It re-dispatches the same feature, which
-			// reuses its branch and worktree, with the typed text as the prompt.
-			m.notice = "dispatching \"" + sel.feature + "\" again…"
-			return m, launchCmd(m.cfg, sel.repo, sel.feature, text)
+			m.notice = "dispatching \"" + t.feature + "\" again…"
+			return m, launchCmd(m.cfg, t.repo, t.feature, text)
 		}
 		m.resumeText = next
 		return m, nil
@@ -560,6 +696,9 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		return m, nil
 	case "S":
 		m.rightTab = "shipped"
+		return m, nil
+	case "H":
+		m.rightTab, m.historyCursor = "history", 0
 		return m, nil
 	}
 
@@ -598,6 +737,31 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		// Neither tab has a cursor. Without this the fall-through below would
 		// move the shipped cursor from a tab that cannot show it moving.
 		return m, nil
+	case "history":
+		items := m.historyFlat()
+		sel, has := m.historySelected()
+		switch k {
+		case "j", "down":
+			if len(items) > 0 {
+				m.historyCursor = mini(m.historyCursor+1, len(items)-1)
+			}
+		case "k", "up":
+			m.historyCursor = maxi(m.historyCursor-1, 0)
+		case "enter":
+			if has {
+				m.resumeOpen, m.resumeText, m.resumeAt = true, "", historyTarget(sel)
+			}
+		case "o":
+			if !has {
+				return m, nil
+			}
+			if sel.pr == "" {
+				m.notice = "\"" + sel.feature + "\" has no pull request"
+				return m, nil
+			}
+			return m, openPRCmd(sel.repo, sel.pr)
+		}
+		return m, nil
 	}
 
 	// shipped tab
@@ -611,7 +775,7 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		m.shipCursor = maxi(m.shipCursor-1, 0)
 	case "enter":
 		if n > 0 {
-			m.resumeOpen, m.resumeText = true, ""
+			m.resumeOpen, m.resumeText, m.resumeAt = true, "", shipTarget(m.shipSelected())
 		}
 	case "o":
 		sel := m.shipSelected()

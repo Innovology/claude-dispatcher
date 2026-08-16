@@ -13,7 +13,7 @@ var footerByLens = map[string]string{
 	"products": "j/k move · enter opens the product panel · a assign · n new product · : palette",
 	// The design also offers J/K scroll and q close. Neither is wired — the
 	// panel does not scroll, and q is quit everywhere — so neither is offered.
-	"product":   "O overview · R review · T team · S shipped · esc close · 1 triage",
+	"product":   "O overview · R review · T team · S shipped · H history · esc close · 1 triage",
 	"backlog":   "j/k move · space pick · enter dispatch · ctrl+d dispatch picked · s source · 1 triage",
 	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
 	"decisions": "j/k records · J/K repo · → body · a accept · s supersede · e tool · o open",

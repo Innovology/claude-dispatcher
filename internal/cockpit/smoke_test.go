@@ -103,7 +103,7 @@ func TestProductTabs(t *testing.T) {
 	if m.rightTab != "overview" {
 		t.Errorf("enter should open the panel on overview, got %q", m.rightTab)
 	}
-	for _, tab := range []string{"R", "T", "S", "O"} {
+	for _, tab := range []string{"R", "T", "S", "H", "O"} {
 		m = press(m, tab)
 		renderClean(t, m, "product tab "+tab)
 	}
@@ -123,6 +123,11 @@ func TestProductTabs(t *testing.T) {
 	m = press(m, "enter")
 	renderClean(t, m, "resume or list")
 	m = press(m, "esc")
+	// history → the same overlay, on a dispatcher that never shipped
+	m = press(m, "H")
+	m = press(m, "enter")
+	renderClean(t, m, "history resume or list")
+	m = press(m, "esc")
 	// esc with no overlay up closes the panel and leaves the products lens
 	// showing, which is the only way back out — q is quit, not close.
 	m = press(m, "esc")
@@ -136,7 +141,7 @@ func TestProductTabs(t *testing.T) {
 func TestProductPanelRendersAtEveryWidth(t *testing.T) {
 	installFixture(t)
 	for _, w := range smokeWidths {
-		for _, tab := range []string{"O", "R", "T", "S"} {
+		for _, tab := range []string{"O", "R", "T", "S", "H"} {
 			m := newModel()
 			m.width, m.height = w, 44
 			m = press(m, "2")

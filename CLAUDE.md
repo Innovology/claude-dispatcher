@@ -78,7 +78,11 @@
   `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited).
-- `internal/dispatch` — branch + tmux + record creation.
+- `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
+  finished dispatcher's session reopened with `claude --resume <session id>`
+  in its own worktree (rebuilt if it was reclaimed). A session ending never
+  loses a dispatcher — triage's `h` and the product panel's `H` tab list every
+  finished one and resume it.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over

@@ -25,13 +25,19 @@ var helpSections = []struct {
 	{section: "work the fleet", keys: []struct{ k, d string }{
 		{"j / k", "move the cursor — the panel and the key hints follow it"},
 		{"g / G", "first row · last row"},
-		{"f", "filter: all → wants you → needs a look → running"},
+		{"f", "filter: all → wants you → needs a look → running → history"},
 		{"⏎", "attach the session"},
 		{"y", "approve the merge, or mark it shipped once it has commits"},
 		{"x", "kill it · the branch and any dirty worktree survive"},
 		{"s", "skip · send it to the back, it comes round again"},
 		{"d", "dispatch · pick a repo, say what it does"},
 		{"u", "put back the last thing you cleared"},
+	}},
+	{section: "what has finished", keys: []struct{ k, d string }{
+		{"h", "history · every dispatcher whose session is over, and back again"},
+		{"⏎", "resume it · its own transcript, in its own worktree"},
+		{"o", "open its pull request"},
+		{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
 	}},
 	{section: "move", keys: []struct{ k, d string }{
 		{"1…6", "triage · products · backlog · usage · decisions · velocity"},
@@ -41,7 +47,7 @@ var helpSections = []struct {
 	}},
 	{section: "products · lens 2", keys: []struct{ k, d string }{
 		{"⏎", "open the product panel beside the table"},
-		{"O R T S", "in the panel: overview · review · team · shipped"},
+		{"O R T S H", "in the panel: overview · review · team · shipped · history"},
 		{"esc", "close the panel"},
 		{"a", "assign repos to products"},
 		{"n", "new product — names it and moves the marked repos in"},

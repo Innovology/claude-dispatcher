@@ -15,6 +15,7 @@ package cockpit
 import (
 	"os/exec"
 	"strings"
+	"sync"
 
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/gh"
@@ -55,6 +56,7 @@ type snapshot struct {
 	team            map[string][]teamRow
 	teamVerdict     map[string]string
 	shipped         map[string][]shippedDay
+	productHistory  map[string][]historyItem
 	productVelocity map[string][]velTile
 
 	decisions         map[string][]decision
@@ -80,6 +82,14 @@ type snapshot struct {
 	// records maps a view dispatch's feature to its live record, so an action
 	// on the selected row reaches the real tmux session / branch / PR.
 	records map[string]*state.Dispatch
+	// recordsByID is EVERY record, finished ones included, keyed by its own id.
+	//
+	// records cannot serve the history rows: it is keyed by feature, so a
+	// re-dispatch of a name shadows the earlier record under the same key, and
+	// it only holds what the floor shows — a dispatcher that ended without
+	// shipping is not on the floor at all. An act on a finished session
+	// therefore addresses its record by id, which is unique and permanent.
+	recordsByID map[string]*state.Dispatch
 	// dataMode is "live" once a real load has run, "" while still on seed.
 	dataMode string
 }
@@ -89,6 +99,15 @@ type collectCtx struct {
 	cfg     *config.Config
 	records []*state.Dispatch
 	repos   []repos.Repo
+
+	// forges memoises forge(repoPath) for the life of one load. Every record
+	// asks for its repo's forge — collectFloor, collectFleet and the history
+	// rows all do — and a machine with fifty records in a handful of repos would
+	// otherwise pay fifty `git remote get-url` calls per refresh for a handful
+	// of distinct answers. Guarded because collectFloor resolves records
+	// concurrently (forEach).
+	forgeMu sync.Mutex
+	forges  map[string]string
 }
 
 // productFor maps a record onto the same product key collectProducts uses,
@@ -117,8 +136,28 @@ func (c *collectCtx) productFor(rec *state.Dispatch) string {
 }
 
 // forge reports the forge a repo path belongs to: "ado" for Azure DevOps
-// remotes, else "gh". Detection is by the origin remote URL.
+// remotes, else "gh". Detection is by the origin remote URL, and the answer is
+// memoised per load (see collectCtx.forges).
 func (c *collectCtx) forge(repoPath string) string {
+	c.forgeMu.Lock()
+	if f, ok := c.forges[repoPath]; ok {
+		c.forgeMu.Unlock()
+		return f
+	}
+	c.forgeMu.Unlock()
+
+	f := readForge(repoPath)
+
+	c.forgeMu.Lock()
+	if c.forges == nil {
+		c.forges = map[string]string{}
+	}
+	c.forges[repoPath] = f
+	c.forgeMu.Unlock()
+	return f
+}
+
+func readForge(repoPath string) string {
 	out, err := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return "gh"
@@ -175,6 +214,10 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	var s snapshot
 	s.dataMode = "live"
 	s.discovered = ctx.repos
+	s.recordsByID = make(map[string]*state.Dispatch, len(ctx.records))
+	for _, rec := range ctx.records {
+		s.recordsByID[rec.ID] = rec
+	}
 
 	r.begin(bootDispatchers, "reading transcripts, diffs and prs…")
 	collectFloor(ctx, &s)
@@ -391,6 +434,12 @@ func applySnapshot(s snapshot) {
 	if s.records != nil {
 		liveRecords = s.records
 	}
+	if s.recordsByID != nil {
+		liveByID = s.recordsByID
+	}
+	if s.productHistory != nil {
+		productHistory = s.productHistory
+	}
 }
 
 // liveRecords maps the selected view dispatch's feature to its real record. It
@@ -398,5 +447,12 @@ func applySnapshot(s snapshot) {
 // feature has no record (e.g. while still showing seed data).
 var liveRecords = map[string]*state.Dispatch{}
 
+// liveByID is every record, finished ones included, keyed by its own id — the
+// map the history rows and the resume overlay act through.
+var liveByID = map[string]*state.Dispatch{}
+
 // recordFor returns the live record backing feature, or nil.
 func recordFor(feature string) *state.Dispatch { return liveRecords[feature] }
+
+// recordByID returns the record with this id, finished or not, or nil.
+func recordByID(id string) *state.Dispatch { return liveByID[id] }

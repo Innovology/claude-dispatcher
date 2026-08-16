@@ -263,6 +263,23 @@ func cqClashNote(rec *state.Dispatch, clash *cqClash) string {
 // the dispatch form).  Attaching is the honest answer to all of them: it hands
 // you the session where the prompt actually is.
 func cqActs(rec *state.Dispatch, kind string) []cqAct {
+	// A finished dispatcher has no session to attach to and nothing left to
+	// approve or kill. What it has is a transcript, so ⏎ resumes it — and the
+	// act keeps its row, because until the resumed session reports in, the
+	// record it was fired on is still a finished one.
+	if kind == "past" {
+		acts := []cqAct{
+			{k: "⏎", d: "resume", ok: "resuming \"" + rec.Feature + "\"…", keep: true},
+		}
+		if rec.PRNumber > 0 {
+			// No forge is threaded in here, so the flash names the feature rather
+			// than a "#123" that would be wrong on azure devops. The row's REF
+			// cell already carries the id in the right notation (cqRef).
+			acts = append(acts, cqAct{k: "o", d: "open pr",
+				ok: "opening the pull request for \"" + rec.Feature + "\"…", keep: true})
+		}
+		return acts
+	}
 	acts := []cqAct{
 		{k: "⏎", d: "attach", ok: "attaching to " + rec.RepoName + " session…", keep: true},
 	}
