@@ -68,6 +68,11 @@ type model struct {
 	// it, "" when up to date, unknown, or running unstamped.
 	upgradeTo string
 
+	// upgradeChecking is a U-triggered lookup in flight. It keeps a second press
+	// from opening a second network call while the first is still out — the
+	// notice already says we are looking.
+	upgradeChecking bool
+
 	shipCursor    int
 	historyCursor int
 	resumeOpen    bool
@@ -305,8 +310,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(trackRefreshCmd(m.cfg), refreshTick(), upgradeCheckCmd())
 
 	case upgradeMsg:
-		if version.IsOutdated(msg.latest) {
+		m.upgradeChecking = false
+		switch {
+		case msg.latest == "":
+			// No answer came back. Nothing is learned, so nothing already known
+			// is thrown away — but a human who asked is told we could not look,
+			// rather than left reading a corner that says nothing.
+			if msg.forced {
+				m.notice = "could not reach GitHub — the check will retry"
+			}
+		case version.IsOutdated(msg.latest):
 			m.upgradeTo = msg.latest
+			if msg.forced {
+				// They pressed U to upgrade, not to be told an upgrade exists.
+				// The confirm bar still asks before anything runs.
+				m.notice = ""
+				return m.startUpgrade()
+			}
+		default:
+			// A checked answer that is not ahead of us retires any older offer:
+			// the nag must not outlive the release that raised it.
+			m.upgradeTo = ""
+			if msg.forced {
+				m.notice = version.Display() + " is the latest"
+			}
 		}
 		return m, nil
 

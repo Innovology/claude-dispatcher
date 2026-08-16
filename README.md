@@ -134,6 +134,12 @@ package manager so you can watch it work, then restarts itself in place —
 same terminal, same tmux pane. Your dispatchers are tmux sessions and are not
 touched by any of this.
 
+The corner is fed by a cached check (a few hours old at most, so the cockpit
+does not chatter at GitHub). Pressing `U` when it shows nothing does not repeat
+that cache — it goes and looks, and if a release did go out in the meantime it
+takes you straight to the same confirm. So `U` is always worth a press, and
+"`v3.2.3` is the latest" is only ever said about a check that just ran.
+
 Which command it runs is read from the running binary's own path, not guessed
 from your OS:
 

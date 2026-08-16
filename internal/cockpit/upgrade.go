@@ -13,7 +13,13 @@ import (
 )
 
 // upgradeMsg carries the newest published release tag to the UI goroutine.
-type upgradeMsg struct{ latest string }
+// forced marks the answer a human asked for by pressing U, which is the only
+// one that gets to speak: the poll's check is ambient and says nothing unless
+// it has an upgrade to offer.
+type upgradeMsg struct {
+	latest string
+	forced bool
+}
 
 // upgradeCheckCmd looks up the newest release off the UI goroutine. The lookup
 // is cache-gated inside the version package, so firing it on every poll costs a
@@ -24,6 +30,13 @@ func upgradeCheckCmd() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg { return upgradeMsg{latest: version.Latest()} }
+}
+
+// upgradeRecheckCmd is the same lookup with the cache stepped over. It is what
+// U runs when nothing newer is known: the cached answer is good for hours, and
+// "you are on the latest" is the one thing we must not say on its word alone.
+func upgradeRecheckCmd() tea.Cmd {
+	return func() tea.Msg { return upgradeMsg{latest: version.Recheck(), forced: true} }
 }
 
 // upgradeRanMsg reports how the package manager got on, once the terminal
@@ -63,8 +76,17 @@ func (m model) startUpgrade() (model, tea.Cmd) {
 		return m, nil
 	}
 	if m.upgradeTo == "" {
-		m.notice = version.Display() + " is the latest"
-		return m, nil
+		// Knowing of nothing newer is not the same as there being nothing newer.
+		// The ambient answer is up to checkTTL old, and a human presses U because
+		// they think a release is out — so go and look rather than reciting a
+		// file. The answer comes back as a forced upgradeMsg, which either opens
+		// the confirm below or says we are current, having actually checked.
+		if m.upgradeChecking {
+			return m, nil
+		}
+		m.upgradeChecking = true
+		m.notice = "checking for a newer build…"
+		return m, upgradeRecheckCmd()
 	}
 	if !m.install.CanUpgrade() {
 		m.notice = m.install.Note
