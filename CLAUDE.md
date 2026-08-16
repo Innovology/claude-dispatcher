@@ -66,8 +66,12 @@
   and 170 columns (more panes on wide screens, never one ballooned view).
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
 - `internal/version` — the build's version (stamped by goreleaser via
-  `-X claude-dispatcher/internal/version.Version`) and the cached, best-effort
-  check for a newer release that drives the cockpit's upgrade hint.
+  `-X claude-dispatcher/internal/version.Version`), the cached, best-effort
+  check for a newer release, and `Detect()`: which package manager installed
+  this binary, read from its own resolved path, and the one command that
+  upgrades it. `U` in the cockpit runs that command and re-execs. A
+  declaratively-installed Nix build is never upgraded imperatively — only an
+  entry in the imperative profile's `manifest.json` proves it may be.
 
 ## Build
 `make build` / `make vet` / `make install` (binary to ~/.local/bin — the init

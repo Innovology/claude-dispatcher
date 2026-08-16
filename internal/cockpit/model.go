@@ -26,7 +26,7 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship"
+	kind          string // "kill" | "ship" | "upgrade"
 	feature, repo string
 	features      []string // kill targets (marked set, or the one selected)
 }
@@ -101,6 +101,16 @@ type model struct {
 	undo    string
 	undoSeq int
 
+	// install is how this build got onto the machine, and so what would upgrade
+	// it — see version.Detect.
+	install version.Install
+
+	// relaunch says the cockpit is quitting only to come back as the build it
+	// just installed. Run reads it after the program returns — the terminal has
+	// to be handed back before we exec, or the new process inherits an alt
+	// screen and raw mode it did not set up. See relaunch().
+	relaunch bool
+
 	// ---- triage lens: the command queue -------------------------------------
 	// The queue itself is derived from the records on every read (cq.go), so the
 	// model holds only what the user did to it: the order they left it in, what
@@ -148,6 +158,11 @@ func newModel() model {
 		clMarked:     map[string]bool{},
 		clMap:        map[string]string{},
 		cqSuppressed: map[string]bool{},
+		// How this build was installed cannot change while it runs, so it is
+		// read once here rather than from the footer, which redraws on every
+		// frame. Holding it on the model is also what lets a test drive the
+		// brew/nix/unknown cases without being installed that way.
+		install: version.Detect(),
 		// The default dispatch is unattended. Without this the form opens on
 		// "asks after every step", which is not the product's default posture.
 		dxAuto: true,
@@ -230,6 +245,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case upgradeRanMsg:
+		if msg.err != nil {
+			m.notice = upgradeFailed(m.install, msg.err)
+			return m, nil
+		}
+		// The binary on disk is now the new one, but this process is still the
+		// old one — a running program cannot become a different program. Quit
+		// and let Run exec what was just installed, which keeps the human in the
+		// same terminal rather than making them start the cockpit again.
+		m.relaunch = true
+		return m, tea.Quit
+
 	case trackedMsg:
 		return m, loadSnapshotCmd(m.cfg)
 
@@ -306,6 +333,10 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		mm, tick := m.startShip(x)
 		mm2, undo := mm.offerUndo("ship " + c.feature)
 		return mm2, tea.Batch(tick, shipCmd(c.feature), undo)
+	case "upgrade":
+		// No undo is offered: the package manager owns what happens next, and
+		// an offer to undo something we cannot undo would be a lie.
+		return m, upgradeRunCmd(m.install)
 	}
 	return m, nil
 }

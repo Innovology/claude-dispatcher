@@ -10,6 +10,10 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
+// binaryName is this command as it is installed on PATH — what relaunch execs
+// after an in-place upgrade.
+const binaryName = "claude-dispatcher"
+
 // applyConfigEnv exports integration settings from config into the environment
 // so the env-gated Linear/Azure clients pick them up. A real env var already
 // set wins, so a secret can stay out of config.toml if preferred.
@@ -50,8 +54,16 @@ func Run() error {
 		m.notice = "no config — showing demo data · run `claude-dispatcher init`"
 	}
 
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
-	return err
+	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	if err != nil {
+		return err
+	}
+	// The one exit that is not an exit: `U` installed a new build, and this
+	// process quit so the terminal would be handed back before we exec it.
+	if fm, ok := final.(model); ok && fm.relaunch {
+		return relaunch()
+	}
+	return nil
 }
 
 // forwardEvents coalesces fsnotify chatter into at most one pending signal.

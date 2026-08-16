@@ -123,6 +123,43 @@ your own copies still win — which leaves `claude` and `gh` yours to provide.
 `/run/current-system/sw/bin/…`), not the `/nix/store` path behind it, so the
 hook survives upgrades and you do not have to re-run it after every rebuild.
 
+## Upgrading
+
+When a newer release exists, the cockpit says so in the bottom-right corner.
+Press **`U`**: it names the exact command, asks, hands the terminal to your
+package manager so you can watch it work, then restarts itself in place —
+same terminal, same tmux pane. Your dispatchers are tmux sessions and are not
+touched by any of this.
+
+Which command it runs is read from the running binary's own path, not guessed
+from your OS:
+
+| installed via | `U` runs |
+|---|---|
+| Homebrew cask (the tap) | `brew upgrade --cask claude-dispatcher` |
+| Homebrew formula | `brew upgrade claude-dispatcher` |
+| `nix profile install` | `nix profile upgrade claude-dispatcher` |
+| scoop | `scoop update claude-dispatcher` |
+| winget | `winget upgrade --id Innovology.claude-dispatcher` |
+
+A **declarative** Nix install — home-manager, a NixOS module, a flake input —
+is deliberately left alone: the version lives in a file you own, and an
+imperative upgrade would either fail or install a second copy shadowing the
+declared one. The footer shows the version gap and says `nix-managed` instead
+of offering the key. Same for a binary we cannot place (`make install`, or a
+copy you moved yourself) — it points at the releases page.
+
+`claude-dispatcher version` prints both lines, which is the quickest way to
+see why `U` is or is not on offer:
+
+```
+claude-dispatcher v3.1.2
+homebrew cask · brew upgrade --cask claude-dispatcher
+```
+
+On Windows there is no exec-in-place, so `U` installs and tells you to start
+the cockpit again rather than pretending to restart.
+
 `nix develop` gives the full toolchain — Go, `golangci-lint`, `goreleaser`,
 `tmux` — for working on the dispatcher itself; `nix flake check` runs the test
 suite and the `gofmt` gate.
@@ -197,11 +234,12 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `1`–`6` | switch lens (triage · products · backlog · usage · decisions · velocity) |
 | `+` | dispatch new work — repo → feature → prompt |
 | `j` / `k` · `g` / `G` | move · first row · last row |
-| `f` · `w` | cycle the triage filter · running only, and back |
+| `f` | cycle the triage filter (all · wants you · needs a look · running) |
 | `enter` | attach the selected dispatcher's tmux session · open what is selected |
 | `y` · `x` · `s` | ship (squash-merge) · kill · skip to the back |
 | `d` · `u` | dispatch · put back the last thing you cleared |
 | `,` · `:` · `?` | settings · command palette · all keys |
+| `U` | upgrade to the published build and come straight back |
 | `q` | quit |
 
 

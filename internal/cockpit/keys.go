@@ -122,6 +122,10 @@ func (m model) runCommand() (model, tea.Cmd) {
 		m.dispatchForm = newDispatchForm(m.cfg)
 		return m, m.dispatchForm.filter.Focus()
 	}
+	if c.name == "upgrade" {
+		m.paletteOpen, m.paletteText = false, ""
+		return m.startUpgrade()
+	}
 	direct := map[string]string{
 		"backlog": "backlog", "usage": "usage",
 		"decisions": "decisions", "plugins": "decisions", "velocity": "velocity",
@@ -260,6 +264,12 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	if k == "+" {
 		m.dispatchForm = newDispatchForm(m.cfg)
 		return m, m.dispatchForm.filter.Focus()
+	}
+	// Shift-U, not `u`: `u` is undo, and the two must never be one slip apart in
+	// the same hand. Bound globally rather than per-lens because the version it
+	// acts on is in the footer, which every lens carries.
+	if k == "U" {
+		return m.startUpgrade()
 	}
 	if k == "q" {
 		return m, tea.Quit

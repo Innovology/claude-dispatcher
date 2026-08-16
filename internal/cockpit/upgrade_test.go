@@ -1,6 +1,7 @@
 package cockpit
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -8,6 +9,9 @@ import (
 
 	"claude-dispatcher/internal/version"
 )
+
+// errUpgrade stands in for whatever the package manager exited with.
+var errUpgrade = errors.New("exit status 1")
 
 // stampVersion runs the model as a released build for the duration of a test.
 func stampVersion(t *testing.T, v string) {
@@ -55,20 +59,164 @@ func TestFooterCarriesTheVersion(t *testing.T) {
 	}
 }
 
-// TestFooterNagsWhenTheBuildIsBehind checks the upgrade command appears beside
-// the version once a newer release is known.
+// brewInstall and nixManaged are the two shapes the footer has to tell apart:
+// one we can upgrade in place, one we must not touch.
+var (
+	brewInstall = version.Install{
+		Method: version.MethodBrewCask,
+		Cmd:    []string{"brew", "upgrade", "--cask", "claude-dispatcher"},
+	}
+	nixManaged = version.Install{
+		Method: version.MethodNixManaged,
+		Note:   "nix-managed · upgrade it where it is declared",
+	}
+)
+
+// TestFooterNagsWhenTheBuildIsBehind checks the offer appears beside the
+// version once a newer release is known — the key when we can act on it, and
+// the reason when we cannot.
 func TestFooterNagsWhenTheBuildIsBehind(t *testing.T) {
 	stampVersion(t, "2.1.1")
 	m := newModel()
 	m.width, m.height = 190, 44
 	m.upgradeTo = "v2.2.0"
+	m.install = brewInstall
 
 	footer := footerOf(m)
 	if !strings.Contains(footer, "v2.1.1 → v2.2.0") {
 		t.Errorf("footer does not show the upgrade: %q", footer)
 	}
-	if !strings.Contains(footer, version.UpgradeHint()) {
-		t.Errorf("footer does not show %q: %q", version.UpgradeHint(), footer)
+	// The key, not the command: it is shorter and it is what does the work.
+	if !strings.Contains(footer, "U upgrades") {
+		t.Errorf("footer does not offer the key: %q", footer)
+	}
+
+	// An install we will not upgrade in place says why, and never offers a key
+	// that would do nothing.
+	m.install = nixManaged
+	footer = footerOf(m)
+	if !strings.Contains(footer, "v2.1.1 → v2.2.0") {
+		t.Errorf("nix footer lost the version gap: %q", footer)
+	}
+	if !strings.Contains(footer, "nix-managed") {
+		t.Errorf("nix footer does not explain itself: %q", footer)
+	}
+	if strings.Contains(footer, "U upgrades") {
+		t.Errorf("nix footer offered a key it cannot honour: %q", footer)
+	}
+}
+
+// TestUpgradeKeyAsksFirst: U opens the confirm bar spelling out the exact
+// command, because it is the one act in the cockpit that changes the machine
+// rather than the state dir.
+func TestUpgradeKeyAsksFirst(t *testing.T) {
+	stampVersion(t, "2.1.1")
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.upgradeTo = "v2.2.0"
+	m.install = brewInstall
+	m = press(m, "4") // any lens where the dispatch prompt is not holding the keyboard
+
+	m = press(m, "U")
+	if m.confirm == nil || m.confirm.kind != "upgrade" {
+		t.Fatalf("U did not ask: %+v", m.confirm)
+	}
+	if !strings.Contains(m.confirm.label, "brew upgrade --cask claude-dispatcher") {
+		t.Errorf("confirm does not name the command: %q", m.confirm.label)
+	}
+	if !strings.Contains(m.confirm.label, "v2.2.0") {
+		t.Errorf("confirm does not name the target: %q", m.confirm.label)
+	}
+	if bar := ansi.Strip(m.barsView()); !strings.Contains(bar, "brew upgrade") {
+		t.Errorf("confirm bar does not show the command: %q", bar)
+	}
+
+	// n cancels and nothing is run.
+	m = press(m, "n")
+	if m.confirm != nil || m.relaunch {
+		t.Error("cancelling must leave nothing pending")
+	}
+}
+
+// TestUpgradeKeyRefusesWhatItCannotDo covers the three ways U is a no-op, each
+// of which has to say something rather than nothing.
+func TestUpgradeKeyRefusesWhatItCannotDo(t *testing.T) {
+	// Nix-managed: a real upgrade exists, but not one we may run.
+	stampVersion(t, "2.1.1")
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.upgradeTo, m.install = "v2.2.0", nixManaged
+	m = press(m, "4")
+	m = press(m, "U")
+	if m.confirm != nil {
+		t.Error("a nix-managed install must not be offered an imperative upgrade")
+	}
+	if !strings.Contains(m.notice, "nix-managed") {
+		t.Errorf("notice does not explain the refusal: %q", m.notice)
+	}
+
+	// Already current.
+	m = newModel()
+	m.width, m.height, m.install = 190, 44, brewInstall
+	m = press(press(m, "4"), "U")
+	if m.confirm != nil || !strings.Contains(m.notice, "latest") {
+		t.Errorf("up-to-date build: confirm=%v notice=%q", m.confirm, m.notice)
+	}
+
+	// A dev build has no release to be behind.
+	stampVersion(t, "dev")
+	m = newModel()
+	m.width, m.height, m.install = 190, 44, brewInstall
+	m.upgradeTo = "v2.2.0"
+	m = press(press(m, "4"), "U")
+	if m.confirm != nil || !strings.Contains(m.notice, "dev build") {
+		t.Errorf("dev build: confirm=%v notice=%q", m.confirm, m.notice)
+	}
+}
+
+// TestUpgradeKeyIsTextAtThePrompt: while the dispatch prompt has the keyboard —
+// which it does whenever nothing is in flight — every letter is what the human
+// is typing, U included. The same rule already governs `?`, `u` and `q` there,
+// and a key that quietly upgraded the machine mid-sentence would be the worst
+// of the set to make an exception for.
+func TestUpgradeKeyIsTextAtThePrompt(t *testing.T) {
+	stampVersion(t, "2.1.1")
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.upgradeTo, m.install = "v2.2.0", brewInstall
+	if !m.cqPromptOn() {
+		t.Fatal("expected the empty fleet to leave the prompt holding the keyboard")
+	}
+
+	m = press(m, "U")
+	if m.confirm != nil {
+		t.Error("U interrupted the human mid-prompt")
+	}
+}
+
+// TestUpgradeRelaunches: a clean upgrade quits, but only so Run can exec the
+// build that was just installed. A failed one stays put and says so.
+func TestUpgradeRelaunches(t *testing.T) {
+	m := newModel()
+	m.width, m.height, m.install = 190, 44, brewInstall
+
+	next, cmd := m.Update(upgradeRanMsg{})
+	nm := next.(model)
+	if !nm.relaunch {
+		t.Error("a clean upgrade must ask Run to relaunch")
+	}
+	if cmd == nil {
+		t.Error("a clean upgrade must quit so the terminal is handed back first")
+	}
+
+	next, _ = m.Update(upgradeRanMsg{err: errUpgrade})
+	nm = next.(model)
+	if nm.relaunch {
+		t.Error("a failed upgrade must not relaunch into the old build")
+	}
+	if !strings.Contains(nm.notice, "upgrade failed") ||
+		!strings.Contains(nm.notice, "brew upgrade --cask claude-dispatcher") {
+		t.Errorf("failure notice does not say what failed: %q", nm.notice)
 	}
 }
 
