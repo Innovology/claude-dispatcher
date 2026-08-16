@@ -46,7 +46,37 @@ type fleetCols struct {
 	glyph, product, feature, repo, stage, turn, sigPad, age int
 }
 
-// fleetColumns sizes the table for a terminal width.
+// fleetProductMin is the design's PRODUCT width, kept as the floor so a table
+// of short names is laid out exactly as it was. fleetProductShare caps how much
+// of the writable width the cell may claim when it grows past that: a quarter,
+// so the three columns that answer what/why/how-long always keep the other
+// three quarters between them.
+const (
+	fleetProductMin   = 12
+	fleetProductShare = 4
+)
+
+// fleetProductWidth is the PRODUCT cell the rows in front of the human would
+// need to print their labels in full — the longest of them plus the 1ch gap the
+// cell reserves. fleetColumns takes it as a want, not an instruction.
+//
+// It is sized from the labels on the table rather than left at the design's
+// fixed 12 because a product name is the one cell on a row with no shorter true
+// form: a feature or a signal reads on into the detail panel, but "EQUESTRIAN
+// PASSPORT" clipped to "EQUESTRIAN…" is clipped on every row, on every poll,
+// forever — and two products that share a first eleven characters are then the
+// same cell.
+func fleetProductWidth(rows []fleetRow) int {
+	nat := 0
+	for _, r := range rows {
+		nat = maxi(nat, dispWidth(cqLabel(r.product)))
+	}
+	return nat + 1
+}
+
+// fleetColumns sizes the table for a terminal width. want is the PRODUCT width
+// the rows would like (fleetProductWidth); it is granted only as far as the
+// width allows.
 //
 // The design has no responsive story — its eight cells assume a browser window
 // — so the columns shed on the repo's own fit() breakpoints rather than a third
@@ -62,11 +92,12 @@ type fleetCols struct {
 // 1.3 : 1 : 1.4 is computed into fixed widths and exactly one column is left
 // flex. With a single flex cell it absorbs the remainder exactly and the row
 // stays column-exact whatever its position in the seg list.
-func fleetColumns(w int) fleetCols {
+func fleetColumns(w, want int) fleetCols {
 	cols := fleetCols{glyph: 3, sigPad: 3, age: 6}
 	showRepo := w >= 110
 	if w >= 70 {
-		cols.product = 12
+		roof := maxi(fleetProductMin, cqInner(w)/fleetProductShare)
+		cols.product = mini(maxi(want, fleetProductMin), roof)
 	}
 	if showRepo {
 		cols.stage, cols.turn = 9, 4
@@ -331,8 +362,10 @@ const fleetMinRows = 3
 // viewFleet is the table and the panel.
 func (m model) viewFleet(w, h int) string {
 	inner := cqInner(w)
-	cols := fleetColumns(w)
 	rows := m.fleetRows()
+	// Sized from the filtered rows — the ones actually on the table. The header
+	// goes through the same cols, so the two cannot drift.
+	cols := fleetColumns(w, fleetProductWidth(rows))
 	sel := clampCursor(m.fleetCursor, len(rows))
 	rule := flG(fg(cRule, strings.Repeat("─", inner)))
 
