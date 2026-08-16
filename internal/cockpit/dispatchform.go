@@ -1,11 +1,18 @@
 package cockpit
 
 // dispatchform.go is the in-cockpit "new dispatch" overlay: the classic
-// cockpit's repo → feature → prompt flow, ported into v2 so ad-hoc work can be
-// dispatched without a backlog ticket. Open it with `+` or the palette's
+// cockpit's repo → feature → mode → prompt flow, ported into v2 so ad-hoc work
+// can be dispatched without a backlog ticket. Open it with `+` or the palette's
 // "dispatch" / "new dispatch" command. Like settings, it lives behind a pointer
 // on the model so its textinputs keep focus state across value-receiver Update
 // copies. Submitting hands off to launchCmd, which does the real dispatch.
+//
+// MODE is a step of its own rather than a default this overlay picks quietly.
+// It is the session's permission mode — what a dispatcher may do without
+// asking — and it reaches the process as --permission-mode, so a form that
+// chose it on the human's behalf would be deciding that silently every time.
+// It opens on the default with the list in view, so taking the default is one
+// keypress and changing it is two.
 
 import (
 	"strings"
@@ -23,7 +30,9 @@ type dispatchStep int
 const (
 	dispatchRepo dispatchStep = iota
 	dispatchFeature
+	dispatchMode
 	dispatchPrompt
+	dispatchStepCount
 )
 
 // dispatchForm is the open new-dispatch overlay. Each step owns one textinput;
@@ -37,9 +46,17 @@ type dispatchForm struct {
 
 	filter  textinput.Model // step 1: filter repos by name/product
 	feature textinput.Model // step 2: feature name
-	prompt  textinput.Model // step 3: the prompt
+	modeSel int             // step 3: cursor into dispatchpkg.Modes()
+	prompt  textinput.Model // step 4: the prompt
 
 	errMsg string
+}
+
+// mode is the permission mode step 3 has landed on. The cursor is the state
+// and the mode is derived from it, so the two can never disagree.
+func (df *dispatchForm) mode() dispatchpkg.Mode {
+	all := dispatchpkg.Modes()
+	return all[clampCursor(df.modeSel, len(all))]
 }
 
 // newDispatchForm builds the overlay, discovering repos from cfg. It focuses
@@ -62,7 +79,16 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 	prompt.Placeholder = "describe the work to dispatch…"
 	prompt.CharLimit = 500
 
-	return &dispatchForm{step: dispatchRepo, repos: rs, filter: filter, feature: feature, prompt: prompt}
+	// modeSel opens on the default's own index rather than on 0, so the offer
+	// order in dispatchpkg.Modes() can change without silently changing what a
+	// dispatch that took the default runs as.
+	sel := 0
+	for i, k := range dispatchpkg.Modes() {
+		if k == dispatchpkg.DefaultMode {
+			sel = i
+		}
+	}
+	return &dispatchForm{step: dispatchRepo, repos: rs, modeSel: sel, filter: filter, feature: feature, prompt: prompt}
 }
 
 // filtered returns the repos matching the current filter (by name or product).
@@ -136,21 +162,44 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 				df.errMsg = "feature name is required — history is navigated by feature"
 				return m, nil
 			}
-			df.step = dispatchPrompt
+			df.step = dispatchMode
 			df.feature.Blur()
-			return m, df.prompt.Focus()
+			return m, nil
 		default:
 			var cmd tea.Cmd
 			df.feature, cmd = df.feature.Update(m.inputMsg(k))
 			return m, cmd
 		}
 
-	case dispatchPrompt:
+	case dispatchMode:
+		// Nothing on this step types, so every key is navigation and anything
+		// unrecognised is swallowed rather than treated as text.
 		switch k {
 		case "esc":
 			df.step = dispatchFeature
-			df.prompt.Blur()
 			return m, df.feature.Focus()
+		case "up", "ctrl+k", "left":
+			if df.modeSel > 0 {
+				df.modeSel--
+			}
+			return m, nil
+		case "down", "ctrl+j", "right":
+			if df.modeSel < len(dispatchpkg.Modes())-1 {
+				df.modeSel++
+			}
+			return m, nil
+		case "enter":
+			df.step = dispatchPrompt
+			return m, df.prompt.Focus()
+		}
+		return m, nil
+
+	case dispatchPrompt:
+		switch k {
+		case "esc":
+			df.step = dispatchMode
+			df.prompt.Blur()
+			return m, nil
 		case "enter", "ctrl+d":
 			if strings.TrimSpace(df.prompt.Value()) == "" {
 				df.errMsg = "prompt is required"
@@ -159,13 +208,14 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			repo := df.repo.Name
 			feature := strings.TrimSpace(df.feature.Value())
 			prompt := strings.TrimSpace(df.prompt.Value())
+			mode := df.mode()
 			m.dispatchForm = nil
-			m.notice = "dispatching \"" + feature + "\"…"
+			m.notice = "dispatching \"" + feature + "\" · " + string(mode) + "…"
 			// This overlay closes onto whichever lens was behind it, so the
 			// dispatch has to be on the triage table by the time the human gets
 			// there — see pending.go.
 			m = m.markPending(m.pendingFor(repo, feature, prompt)).fleetSync()
-			return m, launchCmd(m.cfg, repo, feature, prompt)
+			return m, launchCmd(m.cfg, repo, feature, prompt, mode)
 		default:
 			var cmd tea.Cmd
 			df.prompt, cmd = df.prompt.Update(m.inputMsg(k))
@@ -221,7 +271,8 @@ func (m model) viewDispatchForm(w, h int) string {
 
 	var lines []string
 	lines = append(lines, fg(cWhite, "new dispatch"))
-	lines = append(lines, fg(cDim, "step "+itoa(int(df.step)+1)+" of 3 · repo → feature → prompt · esc backs out"))
+	lines = append(lines, fg(cDim, "step "+itoa(int(df.step)+1)+" of "+itoa(int(dispatchStepCount))+
+		" · repo → feature → mode → prompt · esc backs out"))
 	lines = append(lines, "")
 
 	// Breadcrumb of what's already been chosen.
@@ -234,6 +285,9 @@ func (m model) viewDispatchForm(w, h int) string {
 	}
 	if df.step > dispatchFeature {
 		lines = append(lines, row(iw, "", c("feature", 10, cFaint), flexc("feature/"+slugPreview(df.feature.Value()), cMid)))
+	}
+	if df.step > dispatchMode {
+		lines = append(lines, row(iw, "", c("mode", 10, cFaint), flexc(string(df.mode()), cMid)))
 	}
 	if df.step > dispatchRepo {
 		lines = append(lines, "")
@@ -275,14 +329,33 @@ func (m model) viewDispatchForm(w, h int) string {
 		lines = append(lines, row(iw, "", c("feature", 10, cMid), flexc(df.feature.View(), cWhite)))
 		lines = append(lines, "")
 		lines = append(lines, blank(2)+fg(cFaint, "the branch will be ")+fg(cMid, "feature/"+slugPreview(df.feature.Value())))
-		lines = append(lines, blank(2)+fg(cFaint, "enter → prompt · esc → repo"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter → mode · esc → repo"))
+
+	case dispatchMode:
+		lines = append(lines, fg(cMid, "mode")+fg(cFaint, "  what the session may do without asking"))
+		lines = append(lines, "")
+		all := dispatchpkg.Modes()
+		sel := clampCursor(df.modeSel, len(all))
+		for i, k := range all {
+			bg, marker, nameColor := cTransparent, " ", cFg
+			if i == sel {
+				bg, marker, nameColor = cSel, "▸", cWhite
+			}
+			lines = append(lines, row(iw, bg,
+				c(marker, 2, cMid),
+				c(string(k), 10, nameColor),
+				flexc(k.Hint(), cDim),
+			))
+		}
+		lines = append(lines, "")
+		lines = append(lines, blank(2)+fg(cFaint, "enter → prompt · esc → feature"))
 
 	case dispatchPrompt:
 		lines = append(lines, fg(cFaint, "prompt")+"  "+fg(cMid, df.repo.Name)+fg(cFaint, " · ")+fg(cMid, strings.TrimSpace(df.feature.Value())))
 		lines = append(lines, "")
 		lines = append(lines, df.prompt.View())
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "enter or ctrl+d dispatches · esc → feature"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter or ctrl+d dispatches · esc → mode"))
 	}
 
 	if df.errMsg != "" {

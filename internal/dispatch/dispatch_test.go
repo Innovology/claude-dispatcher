@@ -211,7 +211,7 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
 	}()
 
-	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go")
+	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto)
 	if err == nil {
 		t.Fatal("expected a duplicate of a live feature to be refused")
 	}
@@ -235,8 +235,15 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 	if got := liveDispatch("payment-retry"); got != nil {
 		t.Errorf("a leftover login shell reported as a live dispatcher: %#v", got)
 	}
-	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go"); err != nil {
+	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModePlan)
+	if err != nil {
 		t.Errorf("re-dispatching a finished feature was refused: %v", err)
+	}
+	// The only Launch in the suite that runs to completion, so it is where the
+	// mode reaching the record is provable: Resume reads it back to reopen the
+	// dispatcher the way it went out.
+	if d != nil && d.Mode != string(ModePlan) {
+		t.Errorf("the record kept mode %q, want plan", d.Mode)
 	}
 }
 

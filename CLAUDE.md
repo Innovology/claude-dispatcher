@@ -90,6 +90,22 @@
   (merge counts as live for repos with no deploy workflow). `d` in the
   cockpit is the manual override. Auto-done only advances while a cockpit
   is open (the tracker runs from the cockpit's poll loop).
+- **The dispatch form's MODE is Claude Code's permission mode, not a
+  sentence about one.** A dispatch is launched with `--permission-mode` —
+  `auto` (takes its own edits and safe commands), `manual` (asks before each
+  step) or `plan` — recorded on the dispatch, and passed again on `Resume`,
+  so a reopened dispatcher comes back the way it went out. Auto is the
+  default: a dispatcher is by definition work sent somewhere else to happen,
+  with nobody sitting on its permission prompt. The form's closing prompt
+  sentence stays, because the flag says what claude may do without asking and
+  the sentence says how far to take the work — "may edit without asking" is
+  not "commit, push and open the PR". This shipped as a two-position AUTO
+  switch with nothing behind it: whatever it said, the session opened in
+  whatever the human's own Claude Code defaults to and stopped on its first
+  permission prompt unattended. A claude too old to know a mode's current
+  spelling is given the older one (`acceptEdits`/`default`) and one with no
+  such flag gets none, because a rejected flag is not a degraded session —
+  it is a launch that never happens.
 - Commit attribution is by provenance (dispatch records its branch SHAs),
   NEVER by Co-Authored-By trailers — the user strips those from commits.
 - User is on a Claude subscription (not API billing): portfolio roll-up

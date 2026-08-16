@@ -51,15 +51,20 @@ func TestCQCodedLineSaysNothingItCannotSource(t *testing.T) {
 	}
 }
 
-// The status tail is three readings and one estimate, and the estimate goes
-// last so it does not sit among figures that were counted.
+// The status tail is readings first and the one estimate last, so it does not
+// sit among figures that were counted. Asserted with every clause populated,
+// because the ordering is the only thing keeping the distinction visible.
 func TestFleetMetaPutsTheEstimateLast(t *testing.T) {
 	full := fleetMeta(fleetRow{
-		pass: 2, ctxKnown: true, ctxTokens: 9000, model: "opus-5",
+		pass: 2, ctxKnown: true, ctxTokens: 9000, model: "opus-5", mode: "auto",
 		codedKnown: true, coded: 90 * time.Minute,
 	})
-	if full != "turn 2 · 9k context · opus-5 · ≈1h 30m to hand-code" {
+	if full != "turn 2 · 9k context · opus-5 · auto · ≈1h 30m to hand-code" {
 		t.Errorf("meta = %q", full)
+	}
+	// And with the readings absent it is still the last thing, not the first.
+	if got := fleetMeta(fleetRow{codedKnown: true, coded: time.Hour}); got != "≈1h 00m to hand-code" {
+		t.Errorf("estimate alone = %q", got)
 	}
 }
 

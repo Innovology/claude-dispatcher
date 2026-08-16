@@ -39,7 +39,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 **`h` is what has already finished.** Shipped, killed, or simply exited — every dispatcher whose session is over, newest first, on the table the live fleet leaves. `enter` resumes one: the worktree comes back if it was reclaimed and the conversation picks up where it stopped, so a session ending is never the end of it.
 
-**With the fleet clear, the same screen becomes the prompt.** Give it a title — that is the branch — then the brief, which wraps for as long as it needs to be, and what "done" means. `tab` moves between the fields; `ctrl+d` dispatches.
+**With the fleet clear, the same screen becomes the prompt.** Give it a title — that is the branch — then the brief, which wraps for as long as it needs to be, what "done" means, and the mode it runs in: **auto** takes its own edits and safe commands, **manual** asks you before each step, **plan** changes nothing until you accept the plan. That is Claude Code's own `--permission-mode`, so the session really does open that way. `tab` moves between the fields, `space` cycles the mode, `ctrl+d` dispatches.
 
 ![Dispatching straight from an empty fleet](docs/dispatch.svg)
 

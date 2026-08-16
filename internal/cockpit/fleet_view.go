@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/effort"
 )
 
@@ -373,26 +374,46 @@ func (m model) fleetHistoryHeadline(inner int, rows []fleetRow) string {
 const fleetWhyLines = 2
 
 // fleetMeta is the panel's status tail: how many turns it has taken, how full
-// its context was on the last assistant turn, which model ran it, and what its
-// diff would have cost a senior developer to write by hand. Each clause is
-// dropped whole when its source said nothing.
+// its context was on the last assistant turn, which model ran it, the
+// permission mode it was dispatched in, and what its diff would have cost a
+// senior developer to write by hand. Each clause is dropped whole when its
+// source said nothing.
 //
-// The hand-coding clause goes last on purpose. The first three are readings and
-// the fourth is an estimate, so it sits after them rather than among them, and
-// carries its own "≈" (cqCodedLine) rather than borrowing their authority.
+// The mode used to be in the list of things this line must never claim, because
+// nothing persisted it — it was a form field and not a record field, so any
+// "auto" here would have been the form's intention rather than the session's
+// configuration. It is on the record now, and it is a fact about the dispatcher
+// the human otherwise has no way to see once the form is closed. A record
+// written before the mode was a choice still carries none, and still says
+// nothing rather than the default.
+//
+// The hand-coding clause goes last on purpose. Everything before it is a
+// reading and it alone is an estimate, so it sits after them rather than among
+// them, and carries its own "≈" (cqCodedLine) rather than borrowing their
+// authority.
 //
 // Absent, and to stay absent: "of 200k context" (the denominator is not
-// knowable from a model id), "· auto" (nothing persists the mode a session was
-// launched under — dxAuto is a form field, not a record field), and the
-// design's check trend (one sample cannot make a trend).
+// knowable from a model id) and the design's check trend (one sample cannot
+// make a trend).
 func fleetMeta(r fleetRow) string {
-	parts := make([]string, 0, 3)
-	for _, p := range []string{cqPassLine(r.pass), cqCtxLine(r), cqCodedLine(r)} {
+	parts := make([]string, 0, 4)
+	for _, p := range []string{
+		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode), cqCodedLine(r),
+	} {
 		if p != "" {
 			parts = append(parts, p)
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// fleetModeLine names the permission mode a dispatcher was launched in, and
+// says nothing at all for a record that never recorded one.
+func fleetModeLine(mode string) string {
+	if !dispatchpkg.Mode(mode).Known() {
+		return ""
+	}
+	return mode
 }
 
 // fleetDetail is everything under the table about the selected row: what it is
