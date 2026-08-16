@@ -412,6 +412,13 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		notice += " · auto"
 	}
 	m.notice = notice
+	// The row goes on the table now, not when the launch comes back. The form is
+	// closing over the table it was drawn on top of, and without this the human
+	// watches their dispatch land on an unchanged screen — or, with nothing else
+	// in flight, on a blank form, because that is what this lens shows when the
+	// table is empty. fleetSync re-keys the cursor over the row that just moved
+	// down; on an empty table it lands the cursor on the new row itself.
+	m = m.markPending(m.pendingFor(row.repo, feature, prompt)).fleetSync()
 	return m, dxLaunch(m.cfg, row.repo, feature, prompt)
 }
 

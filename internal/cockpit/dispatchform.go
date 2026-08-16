@@ -161,6 +161,10 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			prompt := strings.TrimSpace(df.prompt.Value())
 			m.dispatchForm = nil
 			m.notice = "dispatching \"" + feature + "\"…"
+			// This overlay closes onto whichever lens was behind it, so the
+			// dispatch has to be on the triage table by the time the human gets
+			// there — see pending.go.
+			m = m.markPending(m.pendingFor(repo, feature, prompt)).fleetSync()
 			return m, launchCmd(m.cfg, repo, feature, prompt)
 		default:
 			var cmd tea.Cmd
