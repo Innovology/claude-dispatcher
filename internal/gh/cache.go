@@ -18,13 +18,30 @@ import (
 )
 
 // TTLs are per query class: issue/PR lists move slowly, check runs move fast.
+//
+// Every one of them must be at least the cockpit's poll interval. A TTL shorter
+// than the poll does not buy the human fresher data — the poll is what asks —
+// it only lets the rebuilds *between* polls pay for the same answer again, and
+// the cockpit rebuilds on every dispatch-record write, which with a handful of
+// live sessions is far more often than once a minute. PRTTL was 45s against a
+// 60s poll, so the busiest class in the cache was guaranteed to be cold on
+// arrival at every poll and to refetch a second time in between. See
+// cockpit.TestForgeTTLsOutlastThePoll, which holds this the right way round.
 const (
 	// SearchTTL covers the whole-account searches (assigned issues, open PRs).
 	SearchTTL = 3 * time.Minute
 	// RepoTTL covers per-repo lists.
 	RepoTTL = 2 * time.Minute
-	// PRTTL covers per-PR checks and reviews, which change while CI runs.
-	PRTTL = 45 * time.Second
+	// PRTTL covers per-PR checks and reviews, which change while CI runs, so
+	// it sits exactly on the poll: fresh once per poll, free in between.
+	PRTTL = 60 * time.Second
+	// SettledTTL covers what has stopped changing: a merged pull request's
+	// check runs and reviews, and the branch of a dispatcher that has finished.
+	// Not forever, because a PR can be reopened and a human can raise one by
+	// hand on a branch we are done with — but nowhere near once a minute, which
+	// is what a portfolio's worth of shipped features had the cockpit doing for
+	// the rest of the session, re-reading history that could not change.
+	SettledTTL = 30 * time.Minute
 )
 
 type entry struct {
@@ -71,7 +88,17 @@ func memo[T any](key string, ttl time.Duration, fetch func() T) T {
 	val := fetch()
 
 	mu.Lock()
-	cache[key] = &entry{val: val, at: time.Now()}
+	if _, parked := Throttled(); parked {
+		// What comes back from a locked-out read is not an answer, and caching
+		// it would outlive the lockout: the quota would come back and the
+		// cockpit would go on showing the nothing it collected while refused,
+		// for a whole TTL, with no request in flight to correct it. Drop it —
+		// a caller that arrives while still parked pays nothing to be told the
+		// same thing, because run spawns no process while the park holds.
+		delete(cache, key)
+	} else {
+		cache[key] = &entry{val: val, at: time.Now()}
+	}
 	mu.Unlock()
 	close(pending.ready)
 	return val

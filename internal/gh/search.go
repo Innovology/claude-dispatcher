@@ -49,9 +49,9 @@ func AssignedIssues() (map[string][]Issue, bool) {
 		if !Available() {
 			return result{}
 		}
-		out, err := exec.Command("gh", "search", "issues",
+		out, err := run(exec.Command("gh", "search", "issues",
 			"--assignee", "@me", "--state", "open", "--limit", "100",
-			"--json", "repository,number,title,url,body,state,labels,updatedAt").Output()
+			"--json", "repository,number,title,url,body,state,labels,updatedAt"))
 		if err != nil {
 			return result{}
 		}
@@ -103,9 +103,9 @@ func OpenPRs() (map[string][]OpenPR, bool) {
 		if !Available() {
 			return result{}
 		}
-		out, err := exec.Command("gh", "search", "prs",
+		out, err := run(exec.Command("gh", "search", "prs",
 			"--state", "open", "--involves", "@me", "--limit", "100",
-			"--json", "repository,number,title,author,createdAt").Output()
+			"--json", "repository,number,title,author,createdAt"))
 		if err != nil {
 			return result{}
 		}
@@ -156,10 +156,10 @@ func MergedPRs(days int) (map[string][]OpenPR, bool) {
 		if !Available() {
 			return result{}
 		}
-		out, err := exec.Command("gh", "search", "prs",
+		out, err := run(exec.Command("gh", "search", "prs",
 			"--merged", "--merged-at", ">="+since, "--involves", "@me",
 			"--limit", "100",
-			"--json", "repository,number,title,author,createdAt").Output()
+			"--json", "repository,number,title,author,createdAt"))
 		if err != nil {
 			return result{}
 		}

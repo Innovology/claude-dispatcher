@@ -225,10 +225,17 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	r.done(bootRepos, countOf(len(found), "repo", "repos"), len(found) == 0)
 
 	r.begin(bootForge, "checking the github cli…")
-	if gh.Available() {
-		r.done(bootForge, "github cli", false)
-	} else {
+	// A spent quota has to be named here, because every downstream lens hides
+	// it perfectly: gh refuses, each collector degrades to no signal, and the
+	// screen fills with "—" and empty check columns that read as facts about
+	// the repositories instead of a fact about us being locked out.
+	switch until, throttled := gh.Throttled(); {
+	case !gh.Available():
 		r.done(bootForge, "gh not found — no pr or check signals", true)
+	case throttled:
+		r.done(bootForge, "github api quota spent — retrying in "+gh.ThrottledFor(until), true)
+	default:
+		r.done(bootForge, "github cli", false)
 	}
 
 	ctx := &collectCtx{cfg: cfg, records: records, repos: found}

@@ -26,9 +26,32 @@ type PR struct {
 
 // PRForBranch returns the PR whose head is the given branch, preferring a
 // live one (merged or open) over closed. Nil when there is none.
-func PRForBranch(repoPath, branch string) *PR {
-	out, err := command(repoPath, "pr", "list", "--head", branch, "--state", "all",
-		"--json", "number,state,url,mergedAt").Output()
+//
+// Cached like every other forge read. track.Refresh asks this for every
+// dispatch that is not done, on every poll — and most of a long-lived state
+// dir is exited records that will never reach done, so an uncached read here
+// was a fixed per-poll tax that grew with history and never came down. The
+// actions that make the answer stale (a merge, a jump-in) drop the cache
+// themselves, so the poll is the only caller a TTL delays.
+//
+// settled says the dispatcher behind the branch has stopped. Nothing on our
+// side will open a pull request on it any more; only a human can, by hand. That
+// is still worth finding, and it is not worth asking about every minute for the
+// rest of the week — which is what a state dir full of finished features had
+// the cockpit doing, one request per dead session per poll, for ever.
+func PRForBranch(repoPath, branch string, settled bool) *PR {
+	ttl := PRTTL
+	if settled {
+		ttl = SettledTTL
+	}
+	return memo("prforbranch:"+repoPath+":"+branch, ttl, func() *PR {
+		return prForBranchUncached(repoPath, branch)
+	})
+}
+
+func prForBranchUncached(repoPath, branch string) *PR {
+	out, err := run(command(repoPath, "pr", "list", "--head", branch, "--state", "all",
+		"--json", "number,state,url,mergedAt"))
 	if err != nil {
 		return nil
 	}
@@ -61,7 +84,7 @@ func workflows(repoPath string) []string {
 		return cached
 	}
 	var names []string
-	if out, err := command(repoPath, "workflow", "list", "--json", "name").Output(); err == nil {
+	if out, err := run(command(repoPath, "workflow", "list", "--json", "name")); err == nil {
 		var rows []struct {
 			Name string `json:"name"`
 		}
@@ -77,36 +100,56 @@ func workflows(repoPath string) []string {
 	return names
 }
 
-// DeploySignal reports whether a deploy workflow succeeded after `since`.
-// The deploy workflow is the override from config if set, otherwise the
-// first workflow with a deploy-ish name. hasWorkflow=false means the repo
-// has no deploy workflow at all — callers treat merge itself as "live".
-func DeploySignal(repoPath string, since time.Time, override string) (deployed bool, at time.Time, hasWorkflow bool) {
-	target := override
-	if target == "" {
-		for _, name := range workflows(repoPath) {
-			if deployRe.MatchString(name) {
-				target = name
-				break
-			}
+// deployTarget is the workflow a repo deploys with: the override from config
+// if set, otherwise the first workflow with a deploy-ish name. Empty means the
+// repo has no deploy workflow at all — a real answer, not a failure to look.
+func deployTarget(repoPath, override string) string {
+	if override != "" {
+		return override
+	}
+	for _, name := range workflows(repoPath) {
+		if deployRe.MatchString(name) {
+			return name
 		}
 	}
+	return ""
+}
+
+// deployRun is one run of a repo's deploy workflow.
+type deployRun struct {
+	Conclusion string    `json:"conclusion"`
+	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// deployRuns lists the workflow's recent runs, newest first. One cached read
+// shared by DeploySignal and DeployStatus: the tracker and the product lens
+// were each fetching the same list on the same poll, which is both a wasted
+// request and the only way the two could ever disagree about a deploy.
+func deployRuns(repoPath, target string) []deployRun {
+	return memo("deployruns:"+repoPath+":"+target, RepoTTL, func() []deployRun {
+		out, err := run(command(repoPath, "run", "list", "--workflow", target,
+			"--json", "conclusion,createdAt,status", "--limit", "20"))
+		if err != nil {
+			return nil
+		}
+		var runs []deployRun
+		if json.Unmarshal(out, &runs) != nil {
+			return nil
+		}
+		return runs
+	})
+}
+
+// DeploySignal reports whether a deploy workflow succeeded after `since`.
+// hasWorkflow=false means the repo has no deploy workflow at all — callers
+// treat merge itself as "live".
+func DeploySignal(repoPath string, since time.Time, override string) (deployed bool, at time.Time, hasWorkflow bool) {
+	target := deployTarget(repoPath, override)
 	if target == "" {
 		return false, time.Time{}, false
 	}
-	out, err := command(repoPath, "run", "list", "--workflow", target,
-		"--json", "conclusion,createdAt,status", "--limit", "20").Output()
-	if err != nil {
-		return false, time.Time{}, true
-	}
-	var runs []struct {
-		Conclusion string    `json:"conclusion"`
-		CreatedAt  time.Time `json:"createdAt"`
-	}
-	if json.Unmarshal(out, &runs) != nil {
-		return false, time.Time{}, true
-	}
-	for _, r := range runs {
+	for _, r := range deployRuns(repoPath, target) {
 		if r.Conclusion == "success" && r.CreatedAt.After(since) {
 			return true, r.CreatedAt, true
 		}
@@ -120,9 +163,9 @@ func PRsCreatedToday() (count int, ok bool) {
 	if !Available() {
 		return 0, false
 	}
-	out, err := exec.Command("gh", "search", "prs",
+	out, err := run(exec.Command("gh", "search", "prs",
 		"--author=@me", "--created="+time.Now().Format("2006-01-02"),
-		"--json", "url", "--limit", "200").Output()
+		"--json", "url", "--limit", "200"))
 	if err != nil {
 		return 0, false
 	}
@@ -162,31 +205,11 @@ func DeployStatus(repoPath, override string) DeployPipeline {
 		if !Available() {
 			return DeployPipeline{}
 		}
-		target := override
-		if target == "" {
-			for _, name := range workflows(repoPath) {
-				if deployRe.MatchString(name) {
-					target = name
-					break
-				}
-			}
-		}
+		target := deployTarget(repoPath, override)
 		if target == "" {
 			return DeployPipeline{}
 		}
-		out, err := command(repoPath, "run", "list", "--workflow", target,
-			"--json", "conclusion,createdAt,status", "--limit", "20").Output()
-		if err != nil {
-			return DeployPipeline{Name: target}
-		}
-		var rows []struct {
-			Conclusion string    `json:"conclusion"`
-			Status     string    `json:"status"`
-			CreatedAt  time.Time `json:"createdAt"`
-		}
-		if json.Unmarshal(out, &rows) != nil {
-			return DeployPipeline{Name: target}
-		}
+		rows := deployRuns(repoPath, target)
 		p := DeployPipeline{Name: target}
 		day := time.Now().Add(-24 * time.Hour)
 		week := time.Now().AddDate(0, 0, -7)

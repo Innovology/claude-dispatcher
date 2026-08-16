@@ -63,6 +63,24 @@
   `supervisor.AttachSwitches`), the recheck waits for the terminal focus
   event instead. Focus alone never triggers it: a full forge re-read on every
   alt-tab is how the gh quota gets burned.
+- **The forge bill counts repositories, not pull requests — and stops when
+  GitHub says stop.** Measured, one idle cockpit spent 5,409 GraphQL requests
+  an hour against a limit of 5,000: it exhausted the quota by itself and took
+  the dispatchers' `gh` calls and the human's down with it. Three rules keep
+  it there. *Ask a repo once* — `gh.RepoPRs` gets every open PR's check
+  rollup and review posture in one `pr list`, where the cockpit used to ask
+  `pr checks` and `pr view` per PR. *Do not re-read history* — a PR the open
+  list does not contain has merged or closed and cannot change, so it is held
+  for `gh.SettledTTL`, as is the branch of an exited dispatcher that has no
+  session left to raise one. *Never poll below the poll* — every cache TTL is
+  at least `cockpit.refreshEvery`, or the rebuilds between polls (one per
+  dispatch-record write) pay for the same answer again; a test holds the two
+  the right way round. And the refusal is itself a signal: the first
+  rate-limit error parks every read in `internal/gh` until the window resets,
+  spawning nothing, because a collector that degrades to "no signal" cannot
+  otherwise tell a quiet portfolio from a locked-out client. The cockpit says
+  so — "—" in every check column is a claim about the repositories when it is
+  a fact about us.
 - **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
   a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
   a lens that wants its own capital U never sees the key — the assignment

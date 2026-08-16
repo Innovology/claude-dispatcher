@@ -42,10 +42,10 @@ func issuesUncached(repoPath string) ([]Issue, bool) {
 	if !Available() {
 		return nil, false
 	}
-	out, err := command(repoPath, "issue", "list",
+	out, err := run(command(repoPath, "issue", "list",
 		"--assignee", "@me", "--state", "open",
 		"--json", "number,title,url,body,state,labels,updatedAt",
-		"--limit", "100").Output()
+		"--limit", "100"))
 	if err != nil {
 		return nil, false
 	}
@@ -92,10 +92,32 @@ type Checks struct {
 
 // PRChecksFor counts the check-run states of a PR. Degrades to a zero Checks
 // on any error.
+//
+// The repo's open PRs come with their rollups attached in one read, so an open
+// PR is answered from that and costs nothing. Only a merged or closed PR — one
+// a dispatch record still points at, which is no longer in the open list — is
+// worth a request of its own, and then only rarely: its check runs are history
+// now, and re-reading history once a minute for every feature the portfolio has
+// ever shipped is most of what a long-lived cockpit was spending.
 func PRChecksFor(repoPath string, number int) Checks {
-	return memo("checks:"+repoPath+":"+strconv.Itoa(number), PRTTL, func() Checks {
+	open, asked := RepoPRs(repoPath)
+	if d, ok := open[number]; ok {
+		return d.Checks
+	}
+	return memo("checks:"+repoPath+":"+strconv.Itoa(number), ttlWhenAbsent(asked), func() Checks {
 		return prChecksUncached(repoPath, number)
 	})
+}
+
+// ttlWhenAbsent is how long to hold a pull request's signals when the repo's
+// open list did not contain it. If the list answered, the PR is merged or
+// closed and what it says has stopped changing. If the list failed, its silence
+// proves nothing and the ordinary TTL stands.
+func ttlWhenAbsent(asked bool) time.Duration {
+	if asked {
+		return SettledTTL
+	}
+	return PRTTL
 }
 
 func prChecksUncached(repoPath string, number int) Checks {
@@ -103,18 +125,23 @@ func prChecksUncached(repoPath string, number int) Checks {
 	if !Available() {
 		return c
 	}
-	out, err := command(repoPath, "pr", "checks", strconv.Itoa(number),
-		"--json", "state").Output()
-	if err != nil {
-		// Fall back to the rollup view, which is populated even before
-		// checks are queryable via `pr checks`.
-		return prChecksRollup(repoPath, number)
-	}
+	// `gh pr checks` answers in its exit code as well as on stdout: 1 when a
+	// check has failed, 8 while any is still pending. Those are precisely the
+	// two states the cockpit polls hardest, so reading a non-zero exit as "no
+	// answer" threw away the JSON we had already paid a request for and bought
+	// the same answer again from the rollup — two GraphQL requests per running
+	// or red PR, on every refresh, on the largest key class there is. Read
+	// stdout first; the exit code only decides what to do when it is empty.
+	out, _ := run(command(repoPath, "pr", "checks", strconv.Itoa(number),
+		"--json", "state"))
 	var rows []struct {
 		State string `json:"state"`
 	}
-	if json.Unmarshal(out, &rows) != nil {
-		return c
+	if json.Unmarshal(out, &rows) != nil || len(rows) == 0 {
+		// No checks reported (gh exits 1 and prints nothing), or gh failed
+		// outright. Fall back to the rollup view, which is populated even
+		// before checks are queryable via `pr checks`.
+		return prChecksRollup(repoPath, number)
 	}
 	for _, r := range rows {
 		c.Total++
@@ -125,24 +152,33 @@ func prChecksUncached(repoPath string, number int) Checks {
 
 func prChecksRollup(repoPath string, number int) Checks {
 	var c Checks
-	out, err := command(repoPath, "pr", "view", strconv.Itoa(number),
-		"--json", "statusCheckRollup").Output()
+	out, err := run(command(repoPath, "pr", "view", strconv.Itoa(number),
+		"--json", "statusCheckRollup"))
 	if err != nil {
 		return c
 	}
 	var row struct {
-		StatusCheckRollup []struct {
-			State      string `json:"state"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-		} `json:"statusCheckRollup"`
+		StatusCheckRollup []rollupNode `json:"statusCheckRollup"`
 	}
 	if json.Unmarshal(out, &row) != nil {
 		return c
 	}
-	for _, r := range row.StatusCheckRollup {
+	return countRollup(row.StatusCheckRollup)
+}
+
+// rollupNode is one entry of a PR's statusCheckRollup. GitHub returns two
+// shapes through it: check runs, which report status plus conclusion, and the
+// older status contexts, which report a single state.
+type rollupNode struct {
+	State      string `json:"state"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+func countRollup(nodes []rollupNode) Checks {
+	var c Checks
+	for _, r := range nodes {
 		c.Total++
-		// Check runs report status+conclusion; status contexts report state.
 		s := r.State
 		if s == "" {
 			if r.Status != "" && r.Status != "COMPLETED" {
@@ -176,41 +212,53 @@ type Review struct {
 
 // PRReviewFor counts the latest review state per author and reports the
 // aggregate review decision. Degrades to a zero Review on any error.
+//
+// Answered from the repo's open PRs where it can be, for the reason given on
+// PRChecksFor: the batch already carries it.
 func PRReviewFor(repoPath string, number int) Review {
-	return memo("review:"+repoPath+":"+strconv.Itoa(number), PRTTL, func() Review {
+	open, asked := RepoPRs(repoPath)
+	if d, ok := open[number]; ok {
+		return d.Review
+	}
+	return memo("review:"+repoPath+":"+strconv.Itoa(number), ttlWhenAbsent(asked), func() Review {
 		return prReviewUncached(repoPath, number)
 	})
 }
 
 func prReviewUncached(repoPath string, number int) Review {
-	var rv Review
 	if !Available() {
-		return rv
+		return Review{}
 	}
-	out, err := command(repoPath, "pr", "view", strconv.Itoa(number),
-		"--json", "reviewDecision,reviews").Output()
+	out, err := run(command(repoPath, "pr", "view", strconv.Itoa(number),
+		"--json", "reviewDecision,reviews"))
 	if err != nil {
-		return rv
+		return Review{}
 	}
 	var row struct {
-		ReviewDecision string `json:"reviewDecision"`
-		Reviews        []struct {
-			Author struct {
-				Login string `json:"login"`
-			} `json:"author"`
-			State       string    `json:"state"`
-			SubmittedAt time.Time `json:"submittedAt"`
-		} `json:"reviews"`
+		ReviewDecision string       `json:"reviewDecision"`
+		Reviews        []reviewNode `json:"reviews"`
 	}
 	if json.Unmarshal(out, &row) != nil {
-		return rv
+		return Review{}
 	}
-	rv.Decision = row.ReviewDecision
+	return tallyReviews(row.ReviewDecision, row.Reviews)
+}
 
-	// Keep the latest submitted review per author, then tally.
+// reviewNode is one submitted review as gh reports it.
+type reviewNode struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	State       string    `json:"state"`
+	SubmittedAt time.Time `json:"submittedAt"`
+}
+
+// tallyReviews keeps the latest submitted review per author, then counts.
+func tallyReviews(decision string, reviews []reviewNode) Review {
+	rv := Review{Decision: decision}
 	latest := map[string]string{}
 	latestAt := map[string]time.Time{}
-	for _, r := range row.Reviews {
+	for _, r := range reviews {
 		who := r.Author.Login
 		if r.State != "APPROVED" && r.State != "CHANGES_REQUESTED" {
 			continue
@@ -250,9 +298,9 @@ func runsForBranchUncached(repoPath, branch string) []Run {
 	if !Available() {
 		return nil
 	}
-	out, err := command(repoPath, "run", "list", "--branch", branch,
+	out, err := run(command(repoPath, "run", "list", "--branch", branch,
 		"--json", "workflowName,status,conclusion,createdAt",
-		"--limit", "10").Output()
+		"--limit", "10"))
 	if err != nil {
 		return nil
 	}
@@ -288,54 +336,4 @@ type OpenPR struct {
 	Additions      int
 	Deletions      int
 	CreatedAt      time.Time
-}
-
-// OpenPRsFor returns up to 50 open pull requests for the repo.
-func OpenPRsFor(repoPath string) []OpenPR {
-	return memo("openprs:"+repoPath, RepoTTL, func() []OpenPR {
-		return openPRsForUncached(repoPath)
-	})
-}
-
-func openPRsForUncached(repoPath string) []OpenPR {
-	if !Available() {
-		return nil
-	}
-	out, err := command(repoPath, "pr", "list", "--state", "open",
-		"--json", "number,title,author,headRefName,baseRefName,reviewDecision,additions,deletions,createdAt",
-		"--limit", "50").Output()
-	if err != nil {
-		return nil
-	}
-	var rows []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Author struct {
-			Login string `json:"login"`
-		} `json:"author"`
-		HeadRefName    string    `json:"headRefName"`
-		BaseRefName    string    `json:"baseRefName"`
-		ReviewDecision string    `json:"reviewDecision"`
-		Additions      int       `json:"additions"`
-		Deletions      int       `json:"deletions"`
-		CreatedAt      time.Time `json:"createdAt"`
-	}
-	if json.Unmarshal(out, &rows) != nil {
-		return nil
-	}
-	prs := make([]OpenPR, 0, len(rows))
-	for _, r := range rows {
-		prs = append(prs, OpenPR{
-			Number:         r.Number,
-			Title:          r.Title,
-			Author:         r.Author.Login,
-			HeadRefName:    r.HeadRefName,
-			BaseRefName:    r.BaseRefName,
-			ReviewDecision: r.ReviewDecision,
-			Additions:      r.Additions,
-			Deletions:      r.Deletions,
-			CreatedAt:      r.CreatedAt,
-		})
-	}
-	return prs
 }
