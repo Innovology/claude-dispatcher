@@ -39,31 +39,18 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		}
 	}
 
-	// Known product keys from config.
-	known := map[string]bool{}
-	for p := range cfg.Products {
-		known[p] = true
-	}
-
-	// prodOf maps a record onto a product key, folding anything unmapped into
-	// "unassigned".
-	prodOf := func(rec *state.Dispatch) string {
-		p := rec.Product
-		if p == "" {
-			p = cfg.ProductFor(rec.RepoName)
-		}
-		if p == "" || !known[p] {
-			return "unassigned"
-		}
-		return p
-	}
-
+	// Records group by ctx.productFor, the same rule triage uses. This was a
+	// second copy of it here, and copies drift: it read the product recorded on
+	// the dispatch while the repo grid two blocks down read the config, so one
+	// lens could show a repo under the product it had just been assigned to while
+	// the count beside it still belonged to the old one.
 	recsByProduct := map[string][]*state.Dispatch{}
 	openByRepo := map[string]int{}
 	recBranch := map[string]bool{}
 	recPR := map[string]bool{}
 	for _, rec := range ctx.records {
-		recsByProduct[prodOf(rec)] = append(recsByProduct[prodOf(rec)], rec)
+		p := ctx.productFor(rec)
+		recsByProduct[p] = append(recsByProduct[p], rec)
 		if rec.Status != state.StatusDone && rec.Status != state.StatusExited {
 			openByRepo[rec.RepoName]++
 		}
@@ -162,6 +149,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 	s.productNote = map[string]string{}
 	s.productStats = map[string]productStat{}
 	s.shipped = map[string][]shippedDay{}
+	s.productHistory = map[string][]historyItem{}
 	s.productVelocity = map[string][]velTile{}
 	s.team = map[string][]teamRow{}
 	s.teamVerdict = map[string]string{}
@@ -184,8 +172,34 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			t  time.Time
 		}
 		shipGroups := map[time.Time][]shipEntry{}
+		// Every finished dispatcher in this product, shipped or not — see
+		// historyItem for why the ship log cannot stand in for it.
+		type histEntry struct {
+			it historyItem
+			t  time.Time
+		}
+		var hist []histEntry
 
 		for _, rec := range recs {
+			if rec.Status == state.StatusDone || rec.Status == state.StatusExited {
+				pr := ""
+				if rec.PRNumber > 0 {
+					pr = "#" + itoa(rec.PRNumber)
+				}
+				hist = append(hist, histEntry{
+					it: historyItem{
+						id:      rec.ID,
+						feature: rec.Feature,
+						repo:    rec.RepoName,
+						pr:      pr,
+						at:      prodAge(rec.UpdatedAt) + " ago",
+						ended:   cqEnded(rec),
+						session: rec.SessionID,
+						prompt:  rec.Prompt,
+					},
+					t: rec.UpdatedAt,
+				})
+			}
 			if rec.Status != state.StatusDone && rec.Status != state.StatusExited {
 				inflight++
 			}
@@ -226,6 +240,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			}
 			shipGroups[key] = append(shipGroups[key], shipEntry{
 				it: shippedItem{
+					id:       rec.ID,
 					feature:  rec.Feature,
 					repo:     rec.RepoName,
 					pr:       pr,
@@ -356,6 +371,19 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			shippedDays = append(shippedDays, shippedDay{day: prodDayLabel(k, now), items: items})
 		}
 		s.shipped[p] = shippedDays
+
+		// ---- history (every finished session, newest first) -----------------
+		sort.Slice(hist, func(i, j int) bool {
+			if !hist[i].t.Equal(hist[j].t) {
+				return hist[i].t.After(hist[j].t)
+			}
+			return hist[i].it.id < hist[j].it.id
+		})
+		items := make([]historyItem, 0, len(hist))
+		for _, h := range hist {
+			items = append(items, h.it)
+		}
+		s.productHistory[p] = items
 
 		// ---- velocity tiles ------------------------------------------------
 		deploys7 := 0

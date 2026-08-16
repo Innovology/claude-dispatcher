@@ -45,8 +45,10 @@ type fleetRow struct {
 	// from the records on every poll and every fsnotify event, and that UI state
 	// has to survive the rebuild.
 	id string
-	// kind is "queue" — it is waiting on you — or "run", it is getting on with
-	// it. rank orders the table and picks the glyph; see fleetRank.
+	// kind is "queue" — it is waiting on you — "run", it is getting on with it,
+	// or "past", its session is over. rank orders the table and picks the glyph;
+	// see fleetRank. Past rows are not part of the in-flight table at all: they
+	// are what `h` and the history filter show, and what resume acts on.
 	kind string
 	rank int
 	// ask classifies what a queue row wants: permission | review | turn-done |
@@ -99,9 +101,17 @@ type fleetRow struct {
 	acts []cqAct
 
 	// moved is the freshest of the transcript's mtime and the record's
-	// UpdatedAt: how long since ANYTHING happened, which is the one question the
-	// AGE column asks of every row. See fleetMoved.
+	// UpdatedAt: when this dispatcher was last seen doing anything. It is the
+	// LAST column. See fleetMoved.
 	moved time.Time
+	// started is when the dispatch was created, and is the AGE column: how long
+	// this dispatcher has been alive, which nothing it does resets.
+	//
+	// The two are different questions and a row can answer them very
+	// differently — "4s / 3h" is a session still going after three hours, "3h /
+	// 3h" is one that has said nothing since the moment it started. One column
+	// could only ever have shown one of those, and the pair is the reading.
+	started time.Time
 	// waited is the record's UpdatedAt, kept as the queue rows' tie-break sort
 	// key so the ask that has waited longest surfaces first.
 	waited time.Time
@@ -116,7 +126,7 @@ type fleetRow struct {
 // register collectFleet in loadSnapshot after collectFloor:
 //
 //	fleet        []fleetRow
-//	cqLastOutput string
+//	cqLastOutput time.Time
 func collectFleet(ctx *collectCtx, s *snapshot) {
 	// Floor rows keyed by feature. collectFloor resolved the forge for every
 	// record in this same load; re-deriving it here would mean a second
@@ -147,14 +157,22 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 			if mt.After(lastOut) {
 				lastOut = mt
 			}
+		default:
+			// Everything else is a session that is over: shipped ("live"), or
+			// ended without shipping (floorState ""). Both used to be dropped
+			// here, and a dropped record is a dispatcher the cockpit can never
+			// show again — its transcript, branch and worktree all still exist,
+			// but nothing on any screen could reach them. They are collected as
+			// history rows, kept out of the in-flight table, and resumable.
+			rows = append(rows, fleetPastRow(ctx, s, passes, rec))
 		}
 	}
 
 	fleetSort(rows)
 	s.fleet = rows
-	if !lastOut.IsZero() {
-		s.cqLastOutput = cqAge(lastOut)
-	}
+	// The instant, not its age: rendering it here would freeze it at the age it
+	// had when this load ran. See cqLastOutput in data.go.
+	s.cqLastOutput = lastOut
 }
 
 // ---- rank and order -------------------------------------------------------------
@@ -173,7 +191,14 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 // The design's other rank-2 trigger, thrash, is not implemented and must not
 // be: it needs a check result sampled twice over time, and gh.Checks is a point
 // sample. See cqShipDetail.
+//
+// Rank 4 is history. It is below every live row and never shares a table with
+// one, so it needs no glyph or colour of its own: both fall through to the
+// rank-3 defaults, and the SIGNAL cell says how the session ended.
 func fleetRank(kind, tone string, stalled bool) int {
+	if kind == "past" {
+		return fleetPastRank
+	}
 	if kind == "queue" {
 		if tone == "red" {
 			return 0
@@ -200,6 +225,15 @@ func fleetSort(rows []fleetRow) {
 		a, b := rows[i], rows[j]
 		if a.rank != b.rank {
 			return a.rank < b.rank
+		}
+		if a.kind == "past" {
+			// History reads the other way round from the live table: the thing
+			// that just ended is the one you are most likely to want back, so the
+			// newest sits at the top.
+			if !a.moved.Equal(b.moved) {
+				return a.moved.After(b.moved)
+			}
+			return a.id < b.id
 		}
 		if a.kind == "queue" {
 			if ua, ub := cqUrgency(a), cqUrgency(b); ua != ub {
@@ -292,6 +326,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		codedKnown: codedKnown,
 		acts:       cqActs(rec, ask),
 		moved:      fleetMoved(rec),
+		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
 	}
 }
@@ -357,20 +392,84 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		codedKnown: codedKnown,
 		acts:       cqActs(rec, "running"),
 		moved:      moved,
+		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
 	}, mt
 }
 
-// fleetMoved is how long since anything happened to a dispatcher: the freshest
-// of what it last wrote and when the hook last saved it.
+// fleetPastRank is where history sits: below everything alive.
+const fleetPastRank = 4
+
+// fleetPastRow builds a row for a dispatcher whose session is over.
 //
-// The AGE column asks one question of every row, so it must have one answer.
-// The design asks two — the record's age for a queue row, the transcript's for
-// a running one — which would put two different measurements in one column. The
-// max is right for both: for a blocked or turn-done dispatcher the transcript
-// stops moving at the same instant UpdatedAt does, so they agree; for a working
-// one the transcript is the only honest liveness signal (see cqLastWrite); and
-// it degrades to UpdatedAt when the transcript cannot be read at all.
+// It is deliberately the cheapest row of the three. A machine accumulates
+// finished dispatchers forever while the live table stays small, so this pays
+// for no gh request, no diff and no transcript read — one stat for the age, and
+// facts already on the record. That is also why the STAGE cell is left empty:
+// the phase is inferred from a transcript tail (cqPhase), and reading one per
+// finished record on every five-second poll would cost the whole history.
+//
+// The hand-coding estimate is the one exception, and it does not break that
+// rule: it is a map lookup, not a diff. collectFloor ran the numstat for every
+// record it could place on the floor — which includes the shipped ones that
+// land here — so the figure is already paid for. A dispatcher that ended
+// WITHOUT shipping was never on the floor and has no entry, so it carries no
+// estimate, which is the honest answer rather than a zero.
+func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *state.Dispatch) fleetRow {
+	goal, goalLabel := cqGoal(rec)
+	est, codedKnown := s.effortBy[rec.Feature]
+	return fleetRow{
+		id:         rec.ID,
+		kind:       "past",
+		rank:       fleetRank("past", "normal", false),
+		product:    ctx.productFor(rec),
+		feature:    rec.Feature,
+		repo:       rec.RepoName,
+		ref:        cqRef(ctx.forge(rec.RepoPath), rec),
+		pass:       passes[rec.ID],
+		signal:     cqEnded(rec),
+		tone:       "normal",
+		why:        cqSentence(rec.StatusReason),
+		goal:       goal,
+		goalLabel:  goalLabel,
+		coded:      est.Dur,
+		codedKnown: codedKnown,
+		acts:       cqActs(rec, "past"),
+		moved:      fleetMoved(rec),
+		started:    rec.CreatedAt,
+		waited:     rec.UpdatedAt,
+	}
+}
+
+// cqEnded is how a finished dispatcher finished, in the SIGNAL cell's width. It
+// reports the furthest point its work actually reached — deployed over merged
+// over marked — and "stopped" for a session that ended with none of them, which
+// is the honest word for both a kill and a plain exit.
+func cqEnded(rec *state.Dispatch) string {
+	switch {
+	case rec.DeployedAt != nil:
+		return "deployed"
+	case rec.PRState == "MERGED":
+		return "merged"
+	case rec.Status == state.StatusDone:
+		return "marked shipped"
+	}
+	return "stopped"
+}
+
+// fleetMoved is when a dispatcher was last seen doing anything: the freshest of
+// what it last wrote and when the hook last saved it.
+//
+// The LAST column asks one question of every row, so it must have one answer,
+// and the max is right for all three kinds. For a blocked or turn-done
+// dispatcher the transcript stops moving at the same instant UpdatedAt does, so
+// they agree; for a working one the transcript is the only honest liveness
+// signal (see cqLastWrite); and it degrades to UpdatedAt when the transcript
+// cannot be read at all.
+//
+// What it is NOT is the dispatcher's age. That is CreatedAt, in its own column
+// next to this one, because activity and lifetime are two facts and neither
+// substitutes for the other — see fleetRow.started.
 func fleetMoved(rec *state.Dispatch) time.Time {
 	t := rec.UpdatedAt
 	if mt := cqLastWrite(rec.TranscriptPath); mt.After(t) {
@@ -393,9 +492,13 @@ func fleetRepo(repo, product string) string {
 
 // ---- the derived table ------------------------------------------------------------
 
-// fleetFilters is the cycle `f` walks. "all" is the resting state; the other
-// three each narrow to a question the human might be asking.
-var fleetFilters = []string{"all", "wants you", "needs a look", "running"}
+// fleetHistory is the filter that swaps the live table for the finished one.
+const fleetHistory = "history"
+
+// fleetFilters is the cycle `f` walks. "all" is the resting state; the next
+// three each narrow to a question the human might be asking, and the last
+// leaves the fleet entirely for what it used to be — see fleetPast.
+var fleetFilters = []string{"all", "wants you", "needs a look", "running", fleetHistory}
 
 // fleetKeep reports whether a row survives a filter.
 //
@@ -410,8 +513,10 @@ func fleetKeep(filter string, r fleetRow) bool {
 		return r.rank <= 2
 	case "running":
 		return r.kind == "run"
+	case fleetHistory:
+		return r.kind == "past"
 	}
-	return true
+	return r.kind != "past"
 }
 
 // fleetFilter is the active filter, defaulting to "all" so a zero model reads
@@ -423,15 +528,22 @@ func (m model) fleetFilter() string {
 	return m.cqFilter
 }
 
-// fleetAll is the whole table in display order: the ids the user has arranged
-// first, then anything that has arrived since, in the collector's rank order.
-// Rows acted on this session are suppressed until their record actually leaves
-// the fleet — the kill or the merge takes a moment to land, and without this the
-// row the user just cleared would reappear on the next 5s refresh.
+// fleetAll is the in-flight table in display order: the ids the user has
+// arranged first, then anything that has arrived since, in the collector's rank
+// order. Rows acted on this session are suppressed until their record actually
+// leaves the fleet — the kill or the merge takes a moment to land, and without
+// this the row the user just cleared would reappear on the next 5s refresh.
+//
+// History is not in here, and must not be. Every "is anything in flight"
+// question in the cockpit is this function's length — the dispatch form opens
+// on an empty fleet, the headline counts it — and a machine with a month of
+// finished dispatchers would answer all of them wrongly.
 func (m model) fleetAll() []fleetRow {
 	byID := make(map[string]fleetRow, len(fleet))
 	for _, r := range fleet {
-		byID[r.id] = r
+		if r.kind != "past" {
+			byID[r.id] = r
+		}
 	}
 	out := make([]fleetRow, 0, len(fleet))
 	placed := make(map[string]bool, len(fleet))
@@ -442,7 +554,7 @@ func (m model) fleetAll() []fleetRow {
 		}
 	}
 	for _, r := range fleet {
-		if !placed[r.id] && !m.cqSuppressed[r.id] {
+		if r.kind != "past" && !placed[r.id] && !m.cqSuppressed[r.id] {
 			out = append(out, r)
 		}
 	}
@@ -456,9 +568,28 @@ func (m model) fleetAll() []fleetRow {
 	return out
 }
 
-// fleetRows is what the table actually draws: fleetAll narrowed by `f`.
+// fleetPast is the history table: every dispatcher whose session is over,
+// newest first (fleetSort). The user's ordering does not apply — `s` rotates a
+// queue, and there is no queue here — but the suppressed set still does, so a
+// row cleared moments ago does not reappear under `h` while the record catches
+// up.
+func (m model) fleetPast() []fleetRow {
+	out := make([]fleetRow, 0, len(fleet))
+	for _, r := range fleet {
+		if r.kind == "past" && !m.cqSuppressed[r.id] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// fleetRows is what the table actually draws: fleetAll narrowed by `f`, or the
+// history table when that is what `f` (or `h`) selected.
 func (m model) fleetRows() []fleetRow {
 	f := m.fleetFilter()
+	if f == fleetHistory {
+		return m.fleetPast()
+	}
 	all := m.fleetAll()
 	if f == fleetFilters[0] {
 		return all

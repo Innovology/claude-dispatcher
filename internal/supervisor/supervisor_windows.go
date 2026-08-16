@@ -212,6 +212,13 @@ func UniqueName(base string) string {
 	return name
 }
 
+// SessionIdle cannot be answered by this backend: the registry tracks the
+// cmd.exe that hosts the session, and that process is alive both while claude
+// runs and while the trailing `pause` holds the window open afterwards. It
+// reports "unknown" rather than guessing, and the caller leaves the old console
+// alone and starts a new one — see dispatch.Resume.
+func SessionIdle(name string) (idle, known bool) { return false, false }
+
 // SetStatusHint and EnsureBackKey are tmux status-line / key-binding concerns
 // with no console-window analogue; they are no-ops on Windows. Focus reporting
 // is the console's own business rather than something we can switch on for it,

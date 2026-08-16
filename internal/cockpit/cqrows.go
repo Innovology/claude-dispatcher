@@ -132,12 +132,21 @@ func cqLabel(p string) string {
 // The PR reference rides here and nowhere else on this screen. The v3 item
 // header that used to carry it is gone with the one-at-a-time queue, and a PR
 // number is the handle you would actually type into gh.
+// The panel has room for words the table's two age columns do not, so it spends
+// them: bare "4s · 3h" here would be two numbers with nothing saying which is
+// which, where the table has LAST and AGE standing over them.
 func cqWhere(r fleetRow) string {
-	parts := make([]string, 0, 4)
-	for _, p := range []string{cqLabel(r.product), r.repo, r.ref, cqAge(r.moved)} {
+	parts := make([]string, 0, 5)
+	for _, p := range []string{cqLabel(r.product), r.repo, r.ref} {
 		if p != "" {
 			parts = append(parts, p)
 		}
+	}
+	if a := cqAge(r.moved); a != "" {
+		parts = append(parts, "moved "+a+" ago")
+	}
+	if a := cqAge(r.started); a != "" {
+		parts = append(parts, a+" old")
 	}
 	return strings.Join(parts, " · ")
 }
@@ -265,8 +274,8 @@ func cqUnattendedLine() string {
 		return "nothing running unattended"
 	}
 	s := itoa(n) + " running unattended"
-	if cqLastOutput != "" {
-		s += " · last output " + cqLastOutput + " ago"
+	if a := cqAge(cqLastOutput); a != "" {
+		s += " · last output " + a + " ago"
 	}
 	// `w` no longer opens a view of its own — it narrows the table to the
 	// running rows — so the sentence advertises what the key now does.

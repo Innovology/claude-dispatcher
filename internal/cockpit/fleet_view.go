@@ -30,9 +30,14 @@ import (
 
 // ---- columns ------------------------------------------------------------------
 
-// The eight cells of a table line, in draw order. The column header and every
+// The nine cells of a table line, in draw order. The column header and every
 // data row go through the same indices, which is the only way the two stay
 // column-exact.
+//
+// LAST and AGE are two columns rather than one composed cell ("4s·3h") because
+// the numbers are only worth having if they can be scanned down the table, and
+// a composite right-aligned against a ragged left-hand number cannot be. Two
+// right-aligned cells put every last-seen under every other last-seen.
 const (
 	flGlyph = iota
 	flProduct
@@ -41,6 +46,7 @@ const (
 	flStage
 	flTurn
 	flSignal
+	flSeen
 	flAge
 	flCells
 )
@@ -48,10 +54,40 @@ const (
 // fleetCols is one terminal width's column widths. A zero width means the
 // column is shed at this size.
 type fleetCols struct {
-	glyph, product, feature, repo, stage, turn, sigPad, age int
+	glyph, product, feature, repo, stage, turn, sigPad, seen, age int
 }
 
-// fleetColumns sizes the table for a terminal width.
+// fleetProductMin is the design's PRODUCT width, kept as the floor so a table
+// of short names is laid out exactly as it was. fleetProductShare caps how much
+// of the writable width the cell may claim when it grows past that: a quarter,
+// so the three columns that answer what/why/how-long always keep the other
+// three quarters between them.
+const (
+	fleetProductMin   = 12
+	fleetProductShare = 4
+)
+
+// fleetProductWidth is the PRODUCT cell the rows in front of the human would
+// need to print their labels in full — the longest of them plus the 1ch gap the
+// cell reserves. fleetColumns takes it as a want, not an instruction.
+//
+// It is sized from the labels on the table rather than left at the design's
+// fixed 12 because a product name is the one cell on a row with no shorter true
+// form: a feature or a signal reads on into the detail panel, but "EQUESTRIAN
+// PASSPORT" clipped to "EQUESTRIAN…" is clipped on every row, on every poll,
+// forever — and two products that share a first eleven characters are then the
+// same cell.
+func fleetProductWidth(rows []fleetRow) int {
+	nat := 0
+	for _, r := range rows {
+		nat = maxi(nat, dispWidth(cqLabel(r.product)))
+	}
+	return nat + 1
+}
+
+// fleetColumns sizes the table for a terminal width. want is the PRODUCT width
+// the rows would like (fleetProductWidth); it is granted only as far as the
+// width allows.
 //
 // The design has no responsive story — its eight cells assume a browser window
 // — so the columns shed on the repo's own fit() breakpoints rather than a third
@@ -60,23 +96,30 @@ type fleetCols struct {
 // still draws the full chain for the selected row); below 70 the product label
 // goes too, because a 12ch label is a fifth of a 60-column screen.
 //
-// Four columns never shed: the glyph, the feature, the signal and the age.
-// They are how bad, what, why and how long — the reason the table exists.
+// Five columns never shed: the glyph, the feature, the signal and both ages.
+// They are how bad, what, why and how long — the reason the table exists. The
+// two ages hold together at every width because they are read as a pair: "how
+// long since it moved" is a different fact with and without "how long it has
+// been going", and the narrow tier is exactly where a human is triaging on the
+// table alone rather than opening the panel.
 //
 // row() splits flex width evenly and has no ratio support, so the design's
 // 1.3 : 1 : 1.4 is computed into fixed widths and exactly one column is left
 // flex. With a single flex cell it absorbs the remainder exactly and the row
 // stays column-exact whatever its position in the seg list.
-func fleetColumns(w int) fleetCols {
-	cols := fleetCols{glyph: 3, sigPad: 3, age: 6}
+func fleetColumns(w, want int) fleetCols {
+	// seen is 5 and age 6: both hold "365d" with a gap, and the wider one is
+	// last so the table's right edge keeps the design's margin.
+	cols := fleetCols{glyph: 3, sigPad: 3, seen: 5, age: 6}
 	showRepo := w >= 110
 	if w >= 70 {
-		cols.product = 12
+		roof := maxi(fleetProductMin, cqInner(w)/fleetProductShare)
+		cols.product = mini(maxi(want, fleetProductMin), roof)
 	}
 	if showRepo {
 		cols.stage, cols.turn = 9, 4
 	}
-	fixed := cols.glyph + cols.product + cols.stage + cols.turn + cols.sigPad + cols.age
+	fixed := cols.glyph + cols.product + cols.stage + cols.turn + cols.sigPad + cols.seen + cols.age
 	rem := maxi(0, cqInner(w)-fixed)
 
 	share := 13 + 14 // feature : signal
@@ -112,6 +155,7 @@ func fleetLine(w int, cols fleetCols, bg string, v, hex [flCells]string) string 
 	segs = append(segs,
 		c("", cols.sigPad, ""),
 		flexc(v[flSignal], hex[flSignal]),
+		cr(v[flSeen], cols.seen, hex[flSeen]),
 		cr(v[flAge], cols.age, hex[flAge]),
 		c("", pad, ""))
 	return row(w, bg, segs...)
@@ -125,9 +169,13 @@ func fleetLine(w int, cols fleetCols, bg string, v, hex [flCells]string) string 
 // calls it "pass" would re-advertise a meaning it does not have. It is four
 // characters, which is the design's own cell width.
 func fleetHeaderLine(w int, cols fleetCols) string {
+	// LAST is the last thing this dispatcher was seen doing; AGE is how long it
+	// has been alive. Neither header is "AGE" alone any more, because with two
+	// numbers on the row that one word would name whichever the reader assumed.
 	v := [flCells]string{
 		flProduct: "PRODUCT", flFeature: "FEATURE", flRepo: "REPO",
-		flStage: "STAGE", flTurn: "TURN", flSignal: "SIGNAL", flAge: "AGE",
+		flStage: "STAGE", flTurn: "TURN", flSignal: "SIGNAL",
+		flSeen: "LAST", flAge: "AGE",
 	}
 	var hex [flCells]string
 	for i := range hex {
@@ -193,7 +241,8 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flStage:   cqPhaseWord(r.stage),
 		flTurn:    turn,
 		flSignal:  r.signal,
-		flAge:     cqAge(r.moved),
+		flSeen:    cqAge(r.moved),
+		flAge:     cqAge(r.started),
 	}
 	hex := [flCells]string{
 		flGlyph:   rank,
@@ -203,6 +252,7 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flStage:   stageHex,
 		flTurn:    turnHex,
 		flSignal:  rank,
+		flSeen:    cFaint,
 		flAge:     cFaint,
 	}
 	return fleetLine(w, cols, bg, v, hex)
@@ -222,10 +272,13 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 // count reads identically and the hours do not. It goes last, is faint, and
 // keeps its "≈": it is context for the counts, never a rival to the red one.
 func (m model) fleetHeadline(inner int, rows []fleetRow) string {
-	wants, warn, clean := fleetCount(rows)
 	f := m.fleetFilter()
+	if f == fleetHistory {
+		return m.fleetHistoryHeadline(inner, rows)
+	}
+	wants, warn, clean := fleetCount(rows)
 
-	title, right := itoa(len(rows))+" in flight", "f filters · sorted by urgency"
+	title, right := itoa(len(rows))+" in flight", "f filters · h history · sorted by urgency"
 	if f != fleetFilters[0] {
 		title, right = itoa(len(rows))+" · "+f, "showing "+f+" · f cycles"
 	}
@@ -247,13 +300,28 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	// truncate the left side, which would leave "≈10h t…" hanging off the end of
 	// a narrow terminal — a clause half-said is worse than one not said, and it
 	// would be eating the counts it is meant to qualify.
-	if coded := fleetCoded(rows); coded > 0 {
-		cell := "≈" + effort.Human(coded) + " to hand-code"
-		if dispWidth(left)+3+dispWidth(cell) <= inner {
-			left += "   " + fg(cFaint, cell)
-		}
-	}
+	//
+	// The right-hand hint counts as occupied width, so the estimate is never
+	// what pushes it off. That hint is the only place `h history` is advertised,
+	// and trading a discoverable key for a figure is not a trade worth making.
+	left = fleetAppendCoded(left, right, rows, inner)
 	return flG(flSpread(left, fg(cFaint, right), inner))
+}
+
+// fleetAppendCoded adds the hand-coding total to a headline's left side, but
+// only when it fits alongside everything already there — the cells on the left
+// and the hint pinned right. Shared by the two headlines so they cannot drift
+// into two different answers about when the figure is worth its width.
+func fleetAppendCoded(left, right string, rows []fleetRow, inner int) string {
+	coded := fleetCoded(rows)
+	if coded <= 0 {
+		return left
+	}
+	cell := "≈" + effort.Human(coded) + " to hand-code"
+	if dispWidth(left)+3+dispWidth(cell)+1+dispWidth(right) > inner {
+		return left
+	}
+	return left + "   " + fg(cFaint, cell)
 }
 
 // fleetCoded totals the hand-coding equivalent across rows, skipping the ones
@@ -271,6 +339,30 @@ func fleetCoded(rows []fleetRow) time.Duration {
 		}
 	}
 	return total
+}
+
+// fleetHistoryHeadline is the line above the history table. It answers the two
+// questions history is for — how much of it there is, how much of it actually
+// shipped, and what all of it amounted to — and says the way back, because `h`
+// got you here.
+//
+// The hand-coding total earns its place here more than anywhere: history is the
+// one screen where every row is finished, so the hours are the whole of what
+// the work turned out to be rather than a running count. Same rule as the
+// fleet's — appended only when it fits whole.
+func (m model) fleetHistoryHeadline(inner int, rows []fleetRow) string {
+	shipped := 0
+	for _, r := range rows {
+		if r.signal != "stopped" {
+			shipped++
+		}
+	}
+	left := fg(cFg, itoa(len(rows))+" finished") + "   " +
+		fg(cFaint, itoa(shipped)+" shipped") + "   " +
+		fg(cFaint, itoa(len(rows)-shipped)+" stopped")
+	right := "⏎ resumes one · h back to the fleet"
+	left = fleetAppendCoded(left, right, rows, inner)
+	return flG(flSpread(left, fg(cFaint, right), inner))
 }
 
 // ---- the detail panel -----------------------------------------------------------
@@ -357,8 +449,9 @@ func (m model) viewCQ(w, h int) string {
 	// The gate is the UNFILTERED fleet. The design tests its filtered row count,
 	// so narrowing to `running` with nothing running dropped the human into the
 	// dispatch form and its own "nothing matches this filter" line could never
-	// render.
-	if m.cqDispatch || len(m.fleetAll()) == 0 {
+	// render. cqFormOn also holds the form back on the history filter, which is
+	// a table of its own rather than a narrowing of the fleet.
+	if m.cqFormOn() {
 		return m.cqViewEmpty(w, h)
 	}
 	return m.viewFleet(w, h)
@@ -374,8 +467,10 @@ const fleetMinRows = 3
 // viewFleet is the table and the panel.
 func (m model) viewFleet(w, h int) string {
 	inner := cqInner(w)
-	cols := fleetColumns(w)
 	rows := m.fleetRows()
+	// Sized from the filtered rows — the ones actually on the table. The header
+	// goes through the same cols, so the two cannot drift.
+	cols := fleetColumns(w, fleetProductWidth(rows))
 	sel := clampCursor(m.fleetCursor, len(rows))
 	rule := flG(fg(cRule, strings.Repeat("─", inner)))
 
@@ -394,7 +489,11 @@ func (m model) viewFleet(w, h int) string {
 	}
 	layout = cqShed(layout, maxi(1, h-fleetMinRows))
 
-	body := fleetBody(w, cols, rows, sel, maxi(0, h-cqSolid(layout)))
+	empty := "nothing matches this filter"
+	if m.fleetFilter() == fleetHistory {
+		empty = "no dispatcher has finished yet · h goes back to the fleet"
+	}
+	body := fleetBody(w, cols, rows, sel, maxi(0, h-cqSolid(layout)), empty)
 	out := make([]cqRow, 0, len(layout)+len(body))
 	for _, r := range layout {
 		if !r.fill {
@@ -413,16 +512,16 @@ func (m model) viewFleet(w, h int) string {
 // There is no "↑ N more" / "↓ N more" sacrificial row: window() keeps the
 // cursor on screen and j/k move the cursor rather than a scroll offset, so no
 // row is unreachable and none of the height needs spending to say so.
-func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int) []string {
+func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string) []string {
 	if h <= 0 {
 		return nil
 	}
 	out := make([]string, 0, h)
 	if len(rows) == 0 {
 		// viewCQ would have shown the dispatch form if the fleet were empty, so
-		// this is the filter — and it says which, rather than reading as
-		// "nothing is running".
-		out = append(out, flG(fg(cFaint, "nothing matches this filter")))
+		// this is the filter — and the caller's line says which, rather than
+		// reading as "nothing is running".
+		out = append(out, flG(fg(cFaint, empty)))
 	}
 	start, end := window(sel, len(rows), h)
 	for i := start; i < end; i++ {
@@ -444,7 +543,7 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int) []string {
 // without attaching to it, so it is not advertised here, in the help sheet or
 // in the key handler.
 func (m model) cqFooterHelp() string {
-	if m.cqDispatch || len(m.fleetAll()) == 0 {
+	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}
 	parts := make([]string, 0, 8)
@@ -453,6 +552,11 @@ func (m model) cqFooterHelp() string {
 			parts = append(parts, a.k+" "+a.d)
 		}
 	}
-	parts = append(parts, "j/k move", "f filter", "d dispatch", "u undo", "? keys")
+	if m.fleetFilter() == fleetHistory {
+		// No f, no d, no undo: none of them act on a finished dispatcher, and the
+		// footer only names keys that work right now.
+		return strings.Join(append(parts, "j/k move", "h back to the fleet", "? keys"), " · ")
+	}
+	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "u undo", "? keys")
 	return strings.Join(parts, " · ")
 }

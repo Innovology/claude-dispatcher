@@ -105,6 +105,73 @@ func TestFleetHeadlineDropsTheEstimateRatherThanCutIt(t *testing.T) {
 	if !strings.Contains(narrow, "want you") {
 		t.Errorf("narrow headline lost the counts it exists for: %q", narrow)
 	}
+	// The estimate must never be what costs the reader the hint pinned right —
+	// it is the only place `h history` is advertised.
+	mid := plain(m.fleetHeadline(106, rows))
+	if strings.Contains(mid, "hand-code") && !strings.Contains(mid, "h history") {
+		t.Errorf("the estimate pushed the key hint off the line: %q", mid)
+	}
+}
+
+// History is the one table where every row is finished, so the total is the
+// whole of what the work turned out to be rather than a running count.
+func TestFleetHistoryHeadlineCarriesTheTotal(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+
+	rows := []fleetRow{
+		{id: "a", kind: "past", rank: fleetPastRank, feature: "csv export",
+			signal: "deployed", codedKnown: true, coded: 9 * time.Hour},
+		// Ended without shipping, so it was never on the floor and has no diff
+		// behind it. It counts as a row and contributes no hours.
+		{id: "b", kind: "past", rank: fleetPastRank, feature: "spike", signal: "stopped"},
+	}
+	m := newModel()
+	got := plain(m.fleetHistoryHeadline(140, rows))
+	if !strings.Contains(got, "≈9h 00m to hand-code") {
+		t.Errorf("history headline lost the total: %q", got)
+	}
+	if !strings.Contains(got, "2 finished") || !strings.Contains(got, "1 shipped") {
+		t.Errorf("history headline lost its counts: %q", got)
+	}
+	// The way back must survive: the estimate is appended only when both it and
+	// the right-hand hint still fit.
+	if !strings.Contains(got, "h back to the fleet") {
+		t.Errorf("history headline lost the way back: %q", got)
+	}
+	if narrow := plain(m.fleetHistoryHeadline(56, rows)); strings.Contains(narrow, "hand-code") {
+		t.Errorf("narrow history headline kept a clause that does not fit: %q", narrow)
+	}
+}
+
+// A finished dispatcher's row must stay the cheapest row there is: a machine
+// accumulates them forever, and a diff per row on every five-second poll would
+// cost the whole history. The estimate is a lookup into what collectFloor
+// already read, never a diff of its own.
+func TestPastRowsTakeTheEstimateWithoutReadingADiff(t *testing.T) {
+	rec := &state.Dispatch{
+		ID: "zzz", Feature: "csv export", RepoName: "shop-hq",
+		// A path that does not exist: any git call here would fail, and a row
+		// that quietly ran one would still come back with codedKnown false.
+		RepoPath: filepath.Join(t.TempDir(), "not-a-repo"),
+		Branch:   "feature/csv-export", BaseSHA: "deadbeef",
+		Status: state.StatusDone, PRState: "MERGED",
+	}
+	s := &snapshot{effortBy: map[string]effort.Estimate{
+		"csv export": {Dur: 4 * time.Hour, Files: 3, Lines: 200},
+	}}
+	got := fleetPastRow(&collectCtx{}, s, nil, rec)
+	if !got.codedKnown || got.coded != 4*time.Hour {
+		t.Errorf("past row = %s (known %v), want the floor's own figure",
+			effort.Human(got.coded), got.codedKnown)
+	}
+
+	// And a dispatcher that ended without shipping was never on the floor, so
+	// it has no entry and says nothing rather than claiming zero.
+	rec.Feature = "abandoned spike"
+	if got := fleetPastRow(&collectCtx{}, s, nil, rec); got.codedKnown {
+		t.Error("a record with no floor entry should carry no estimate")
+	}
 }
 
 // ---- the velocity lines -----------------------------------------------------

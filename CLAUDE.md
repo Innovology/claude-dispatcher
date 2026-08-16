@@ -57,6 +57,15 @@
   `supervisor.AttachSwitches`), the recheck waits for the terminal focus
   event instead. Focus alone never triggers it: a full forge re-read on every
   alt-tab is how the gh quota gets burned.
+- **Decisions are read where they were written, never invented.** The
+  DECISIONS lens has two sources: an adr-tools folder, and a heading that
+  names a set of decisions in the repo's own markdown (`CLAUDE.md`,
+  `DECISIONS.md`, `ARCHITECTURE.md`, `README.md`) — this section is one, and
+  the lens reads it. Nothing writes a record: not the cockpit, not a
+  dispatcher. A commit or a PR title is not promoted to a decision, because
+  inventing records is worse than an empty pane. It shipped reading only
+  `doc/adr/`, which no repo in the fleet keeps, so the lens was empty for
+  every repo while decisions sat in plain sight one file away.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
@@ -78,7 +87,11 @@
   `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited).
-- `internal/dispatch` — branch + tmux + record creation.
+- `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
+  finished dispatcher's session reopened with `claude --resume <session id>`
+  in its own worktree (rebuilt if it was reclaimed). A session ending never
+  loses a dispatcher — triage's `h` and the product panel's `H` tab list every
+  finished one and resume it.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
@@ -93,11 +106,13 @@
   so — an `≈` on the figure, and the rate (`effort.LinesPerHour`, one named
   constant) printed beside the velocity total. Read once per load off the
   provenance diff collectFloor already ran, published on `snapshot.effortBy`
-  keyed by feature, and shared by triage and velocity so the two can never
-  quote different hours for one branch. A feature missing from that map is one
-  whose diff could not be read, which is NOT the same as one that wrote
-  nothing: totals skip it and velocity says how many of its live features it
-  could price.
+  keyed by feature, and shared by triage, history and velocity so no two
+  screens can quote different hours for one branch. A feature missing from that
+  map is one whose diff could not be read, which is NOT the same as one that
+  wrote nothing: totals skip it and velocity says how many of its live features
+  it could price. History rows take the figure from that map and never run a
+  diff of their own — `fleetPastRow` stays the cheapest row there is, so a
+  machine with hundreds of finished dispatchers still polls in constant work.
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort
   check for a newer release, and `Detect()`: which package manager installed
@@ -105,6 +120,17 @@
   upgrades it. `U` in the cockpit runs that command and re-execs. A
   declaratively-installed Nix build is never upgraded imperatively — only an
   entry in the imperative profile's `manifest.json` proves it may be.
+  - **A cached answer belongs to the build that recorded it.** `U` upgrades in
+    place and re-execs, so the build that comes back would otherwise read a
+    cache naming the release it was upgraded *from* — "latest v3.1.3" read by
+    v3.2.3 compares as "you are current" and hides everything published since,
+    for the rest of the TTL. The cache carries the `Build` that wrote it and a
+    different one re-asks; that is also why a failed check only carries forward
+    an answer this build recorded.
+  - **`U` with nothing on offer checks rather than reciting the cache**
+    (`version.Recheck`). The ambient answer is hours old by design, and a human
+    presses `U` precisely when they think it is behind. Finding a release goes
+    straight to the confirm — they pressed it to upgrade, not to be told.
 
 ## Build
 `make build` / `make vet` / `make install` (binary to ~/.local/bin — the init

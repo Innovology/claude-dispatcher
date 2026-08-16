@@ -82,6 +82,14 @@ func installFixture(t *testing.T) {
 			{feature: "two", repo: "alpha-web", pr: "#2", at: "11:00", session: "disp-two", closedBy: "merge", prompt: "do the other thing"},
 		}}},
 	}
+	// History is the wider list: the two shipped features plus the one that was
+	// killed, which the ship log cannot show.
+	productHistory = map[string][]historyItem{
+		"alpha": {
+			{id: "h-1", feature: "three", repo: "alpha-api", ended: "stopped", at: "2h ago", session: "sess-three", prompt: "spike an idea"},
+			{id: "h-2", feature: "one", repo: "alpha-api", pr: "#1", ended: "merged", at: "3h ago", session: "sess-one", prompt: "do the thing"},
+		},
+	}
 	productVelocity = map[string][]velTile{
 		"alpha": {{k: "lead time", v: "2h", band: "high", spark: "▁▂▃"}},
 	}

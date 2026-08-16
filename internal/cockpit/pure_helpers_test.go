@@ -210,7 +210,7 @@ func TestDcnFindAdrsAndParseFile(t *testing.T) {
 		t.Fatalf("dcnFindAdrs files = %v, want 1", files)
 	}
 
-	d, ok := dcnParseFile(files[0])
+	d, ok := dcnParseFile(dir, files[0])
 	if !ok {
 		t.Fatal("dcnParseFile ok = false")
 	}
@@ -232,7 +232,7 @@ func TestDcnFindAdrsAndParseFile(t *testing.T) {
 	if err := os.WriteFile(path2, []byte("no heading here"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d2, ok := dcnParseFile(path2)
+	d2, ok := dcnParseFile(dir, path2)
 	if !ok {
 		t.Fatal("dcnParseFile(no-heading) ok = false")
 	}
@@ -241,7 +241,7 @@ func TestDcnFindAdrsAndParseFile(t *testing.T) {
 	}
 
 	// A missing file returns ok=false.
-	if _, ok := dcnParseFile(filepath.Join(adrDir, "missing.md")); ok {
+	if _, ok := dcnParseFile(dir, filepath.Join(adrDir, "missing.md")); ok {
 		t.Error("dcnParseFile(missing) ok = true, want false")
 	}
 }
@@ -334,20 +334,23 @@ func TestCollectCtxProductFor(t *testing.T) {
 		Products: map[string][]string{"shop": {"shop-api"}},
 	}}
 
-	if got := ctx.productFor(&state.Dispatch{Product: "shop"}); got != "shop" {
-		t.Errorf("recorded product: got %q, want shop", got)
-	}
 	if got := ctx.productFor(&state.Dispatch{RepoName: "shop-api"}); got != "shop" {
 		t.Errorf("mapped by repo name: got %q, want shop", got)
 	}
-	// A repo with no mapping, and a stale product no longer in the config,
-	// both fold into "unassigned" — the same key collectProducts uses, so the
-	// floor's groups line up with the products lens.
+	// A repo with no mapping, and a product recorded on the dispatch that the
+	// config no longer agrees with, both fold into "unassigned" — the same key
+	// collectProducts uses, so the floor's groups line up with the products lens.
 	if got := ctx.productFor(&state.Dispatch{RepoName: "not-mapped"}); got != "unassigned" {
 		t.Errorf("unmapped repo: got %q, want unassigned", got)
 	}
-	if got := ctx.productFor(&state.Dispatch{Product: "retired"}); got != "unassigned" {
+	if got := ctx.productFor(&state.Dispatch{RepoName: "not-mapped", Product: "retired"}); got != "unassigned" {
 		t.Errorf("product no longer in config: got %q, want unassigned", got)
+	}
+	// With no config at all there is nothing to ask, so what the dispatch was
+	// launched under is all there is to go on.
+	none := &collectCtx{}
+	if got := none.productFor(&state.Dispatch{RepoName: "shop-api", Product: "shop"}); got != "shop" {
+		t.Errorf("no config: got %q, want the recorded shop", got)
 	}
 }
 

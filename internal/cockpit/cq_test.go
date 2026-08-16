@@ -35,6 +35,7 @@ func installFleetFixture(t *testing.T) {
 				{k: "s", d: "skip"},
 			},
 			moved: now.Add(-4 * time.Minute), waited: now.Add(-4 * time.Minute),
+			started: now.Add(-2 * time.Hour),
 		},
 		{
 			id: "id-two", kind: "queue", rank: 1, ask: "turn-done", product: "beta",
@@ -47,6 +48,7 @@ func installFleetFixture(t *testing.T) {
 				{k: "s", d: "skip"},
 			},
 			moved: now.Add(-time.Hour), waited: now.Add(-time.Hour),
+			started: now.Add(-time.Hour),
 		},
 		{
 			id: "id-three", kind: "run", rank: 3, product: "alpha",
@@ -56,10 +58,28 @@ func installFleetFixture(t *testing.T) {
 				{k: "⏎", d: "attach", ok: "attaching to alpha-web session…", keep: true},
 				{k: "x", d: "kill", ok: "killed \"three\""},
 			},
+			// Six seconds since it last wrote, going for three hours: the pair
+			// the two age columns exist to tell apart.
 			moved: now.Add(-6 * time.Second), waited: now.Add(-6 * time.Second),
+			started: now.Add(-3 * time.Hour),
+		},
+		{
+			// History: a session that is over. It is in the same collected slice
+			// as the live rows and out of the live table — only `h` and the
+			// history filter show it, and ⏎ on it resumes rather than attaches.
+			id: "id-four", kind: "past", rank: fleetPastRank, product: "alpha",
+			feature: "four", repo: "alpha-api", ref: "#4", pass: 3,
+			signal: "merged", tone: "normal", why: "Session ended.",
+			goal: "ship the fourth thing", goalLabel: "prompt",
+			acts: []cqAct{
+				{k: "⏎", d: "resume", ok: "resuming \"four\"…", keep: true},
+				{k: "o", d: "open pr", ok: "opening the pull request for \"four\"…", keep: true},
+			},
+			moved: now.Add(-3 * time.Hour), waited: now.Add(-3 * time.Hour),
+			started: now.Add(-4 * time.Hour),
 		},
 	}
-	cqLastOutput = "6s"
+	cqLastOutput = now.Add(-6 * time.Second)
 }
 
 func cqModel(t *testing.T) model {
@@ -231,14 +251,17 @@ func TestFleetCursorFollowsItsRowAcrossARebuild(t *testing.T) {
 	}
 }
 
-// `f` walks the four filters and comes back round; each one narrows to a real
-// question, and the cursor starts again at the top of what is left.
+// `f` walks the filters and comes back round; each one narrows to a real
+// question, and the cursor starts again at the top of what is left. History is
+// the last stop and the one that is not a narrowing at all: it swaps the live
+// table for the finished dispatchers, which no other filter shows.
 func TestFleetFilterCycles(t *testing.T) {
 	m := cqModel(t)
 	want := []struct{ filter, rows string }{
 		{"wants you", "one,two"},
 		{"needs a look", "one,two"},
 		{"running", "three"},
+		{fleetHistory, "four"},
 		{"all", "one,two,three"},
 	}
 	m = press(m, "j") // move off the top so the reset is visible
@@ -480,9 +503,11 @@ func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 		t.Error("nothing here follows a session without attaching")
 	}
 
-	// On the running row there is nothing to skip and nothing to approve.
+	// On the running row there is nothing to skip and nothing to approve. The
+	// act verbs are joined with " · ", so " y " is the act and "y ·" is any word
+	// that happens to end in one — "h history" among them.
 	onRun := press(press(m, "j"), "j").footerHelp()
-	if strings.Contains(onRun, "s skip") || strings.Contains(onRun, "y ") {
+	if strings.Contains(onRun, "s skip") || strings.Contains(onRun, " y ") {
 		t.Errorf("a running row's verbs = %q", onRun)
 	}
 
@@ -503,12 +528,13 @@ func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 	}
 }
 
-// Four columns never shed: how bad, what, why and how long. Everything else
-// gives way as the terminal narrows, in the order the fit() tiers set.
+// Five columns never shed: how bad, what, why and both answers to how long.
+// Everything else gives way as the terminal narrows, in the order the fit()
+// tiers set.
 func TestFleetColumnsShedByWidth(t *testing.T) {
 	for _, w := range []int{60, 80, 110, 176} {
-		cols := fleetColumns(w)
-		if cols.glyph == 0 || cols.feature < 1 || cols.age == 0 {
+		cols := fleetColumns(w, fleetProductMin)
+		if cols.glyph == 0 || cols.feature < 1 || cols.seen == 0 || cols.age == 0 {
 			t.Errorf("@%d: a load-bearing column was shed: %+v", w, cols)
 		}
 		if (w >= 70) != (cols.product > 0) {
@@ -519,6 +545,47 @@ func TestFleetColumnsShedByWidth(t *testing.T) {
 		}
 		// The signal cell is the flex, so it takes whatever the fixed cells
 		// leave — the row must still be exactly w columns wide.
+		line := fleetLine(w, cols, cTransparent, [flCells]string{}, [flCells]string{})
+		if dispWidth(line) != w {
+			t.Errorf("@%d: a table line is %d columns wide", w, dispWidth(line))
+		}
+	}
+}
+
+// The PRODUCT cell grows to the longest label on the table when the row can
+// spare the width, and never past a quarter of it — the design's 12 clipped
+// every real product name ("Equestrian Passport", "Claude Dispatcher") on every
+// row forever, and a clipped identity has no second chance to be read.
+func TestFleetProductColumnFitsTheLongestName(t *testing.T) {
+	rows := []fleetRow{{product: "equestrian passport"}, {product: "aura"}}
+	want := fleetProductWidth(rows) // 19 + the 1ch gap
+	if want != 20 {
+		t.Fatalf("fleetProductWidth = %d, want 20", want)
+	}
+
+	// Wide enough to spare it: the label lands whole, gap included.
+	for _, w := range []int{130, 176} {
+		cols := fleetColumns(w, want)
+		if cols.product != want {
+			t.Errorf("@%d: product = %d, want %d", w, cols.product, want)
+		}
+		if got := truncate(cqLabel(rows[0].product), cols.product-1); got != "EQUESTRIAN PASSPORT" {
+			t.Errorf("@%d: label = %q", w, got)
+		}
+	}
+
+	// Short names leave the design's layout exactly as it was.
+	if cols := fleetColumns(130, fleetProductWidth([]fleetRow{{product: "aura"}})); cols.product != fleetProductMin {
+		t.Errorf("short names moved the column: %d", cols.product)
+	}
+
+	// And no width lets it take more than a quarter of the writable row, nor
+	// drop below the floor, nor break the row's column arithmetic.
+	for _, w := range []int{70, 80, 110, 130, 176} {
+		cols := fleetColumns(w, 40)
+		if cols.product < fleetProductMin || cols.product > maxi(fleetProductMin, cqInner(w)/4) {
+			t.Errorf("@%d: a greedy product cell took %d of %d", w, cols.product, cqInner(w))
+		}
 		line := fleetLine(w, cols, cTransparent, [flCells]string{}, [flCells]string{})
 		if dispWidth(line) != w {
 			t.Errorf("@%d: a table line is %d columns wide", w, dispWidth(line))

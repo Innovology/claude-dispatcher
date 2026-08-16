@@ -15,6 +15,8 @@ package cockpit
 import (
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/effort"
@@ -41,7 +43,7 @@ type snapshot struct {
 	effortBy map[string]effort.Estimate
 
 	fleet        []fleetRow
-	cqLastOutput string
+	cqLastOutput time.Time
 
 	products       []product
 	reposByProduct map[string][]repoRef
@@ -61,6 +63,7 @@ type snapshot struct {
 	team            map[string][]teamRow
 	teamVerdict     map[string]string
 	shipped         map[string][]shippedDay
+	productHistory  map[string][]historyItem
 	productVelocity map[string][]velTile
 
 	decisions         map[string][]decision
@@ -88,6 +91,14 @@ type snapshot struct {
 	// records maps a view dispatch's feature to its live record, so an action
 	// on the selected row reaches the real tmux session / branch / PR.
 	records map[string]*state.Dispatch
+	// recordsByID is EVERY record, finished ones included, keyed by its own id.
+	//
+	// records cannot serve the history rows: it is keyed by feature, so a
+	// re-dispatch of a name shadows the earlier record under the same key, and
+	// it only holds what the floor shows — a dispatcher that ended without
+	// shipping is not on the floor at all. An act on a finished session
+	// therefore addresses its record by id, which is unique and permanent.
+	recordsByID map[string]*state.Dispatch
 	// dataMode is "live" once a real load has run, "" while still on seed.
 	dataMode string
 }
@@ -97,10 +108,33 @@ type collectCtx struct {
 	cfg     *config.Config
 	records []*state.Dispatch
 	repos   []repos.Repo
+
+	// forges memoises forge(repoPath) for the life of one load. Every record
+	// asks for its repo's forge — collectFloor, collectFleet and the history
+	// rows all do — and a machine with fifty records in a handful of repos would
+	// otherwise pay fifty `git remote get-url` calls per refresh for a handful
+	// of distinct answers. Guarded because collectFloor resolves records
+	// concurrently (forEach).
+	forgeMu sync.Mutex
+	forges  map[string]string
 }
 
-// productFor maps a record onto the same product key collectProducts uses,
-// folding anything unmapped into "unassigned".
+// productFor maps a record onto a product key, folding anything unmapped into
+// "unassigned". It is the ONE rule the whole cockpit groups records by — triage
+// and the products lens both call it, so the two can never disagree about where
+// a dispatch belongs.
+//
+// The config decides, not the record. rec.Product is a copy of this same lookup
+// taken when the dispatch went out (dispatch.go), so the moment the human
+// reassigns a repo the two disagree — and the record is the one that is out of
+// date. Preferring it meant an assignment landed on the products lens (which
+// reads the config) while every dispatch of that repo stayed where it was on
+// triage, or fell out into "unassigned" when the product it named had since been
+// renamed away. The config is what the human just edited; it wins, and a repo it
+// maps to nothing is unassigned because that is what unassigning it means.
+//
+// The record is still the fallback when there is no config to ask at all — with
+// nothing loaded, what the dispatch was launched under is the only thing known.
 //
 // It reads the config rather than the package's productOrder/reposByProduct
 // vars on purpose. Collectors run in order and applySnapshot only publishes
@@ -109,24 +143,41 @@ type collectCtx struct {
 // up empty while work was in flight. A collector must derive from its ctx, not
 // from the state a later collector will produce.
 func (c *collectCtx) productFor(rec *state.Dispatch) string {
-	p := rec.Product
-	if p == "" && c.cfg != nil {
-		p = c.cfg.ProductFor(rec.RepoName)
-	}
-	if p == "" {
-		return "unassigned"
-	}
-	if c.cfg != nil {
-		if _, ok := c.cfg.Products[p]; !ok {
+	if c.cfg == nil {
+		if rec.Product == "" {
 			return "unassigned"
 		}
+		return rec.Product
 	}
-	return p
+	if p := c.cfg.ProductFor(rec.RepoName); p != "" {
+		return p
+	}
+	return "unassigned"
 }
 
 // forge reports the forge a repo path belongs to: "ado" for Azure DevOps
-// remotes, else "gh". Detection is by the origin remote URL.
+// remotes, else "gh". Detection is by the origin remote URL, and the answer is
+// memoised per load (see collectCtx.forges).
 func (c *collectCtx) forge(repoPath string) string {
+	c.forgeMu.Lock()
+	if f, ok := c.forges[repoPath]; ok {
+		c.forgeMu.Unlock()
+		return f
+	}
+	c.forgeMu.Unlock()
+
+	f := readForge(repoPath)
+
+	c.forgeMu.Lock()
+	if c.forges == nil {
+		c.forges = map[string]string{}
+	}
+	c.forges[repoPath] = f
+	c.forgeMu.Unlock()
+	return f
+}
+
+func readForge(repoPath string) string {
 	out, err := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return "gh"
@@ -183,6 +234,10 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	var s snapshot
 	s.dataMode = "live"
 	s.discovered = ctx.repos
+	s.recordsByID = make(map[string]*state.Dispatch, len(ctx.records))
+	for _, rec := range ctx.records {
+		s.recordsByID[rec.ID] = rec
+	}
 
 	r.begin(bootDispatchers, "reading transcripts, diffs and prs…")
 	collectFloor(ctx, &s)
@@ -199,9 +254,9 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	collectBacklog(ctx, &s)
 	r.done(bootBacklog, countOf(len(s.backlogTickets), "ticket", "tickets"), false)
 
-	r.begin(bootDecisions, "scanning repos for adrs…")
+	r.begin(bootDecisions, "scanning repos for adrs and decision logs…")
 	collectDecisions(ctx, &s)
-	r.done(bootDecisions, countOf(countDecisions(s.decisions), "adr", "adrs")+
+	r.done(bootDecisions, countOf(countDecisions(s.decisions), "record", "records")+
 		" in "+countOf(len(s.decisionRepoOrder), "repo", "repos"), false)
 
 	r.begin(bootUsage, "totalling this week's tokens…")
@@ -256,7 +311,7 @@ func namedProducts(ps []product) int {
 	return n
 }
 
-// countDecisions totals the ADRs found across every repo that has any.
+// countDecisions totals the records found across every repo that has any.
 func countDecisions(byRepo map[string][]decision) int {
 	n := 0
 	for _, ds := range byRepo {
@@ -299,9 +354,9 @@ func applySnapshot(s snapshot) {
 	if s.fleet != nil {
 		fleet = s.fleet
 	}
-	// Unconditionally, unlike every other field: "" means no running session has
-	// a readable transcript, which is an observation the view must show, and a
-	// stale age left in place would be a lie about liveness.
+	// Unconditionally, unlike every other field: the zero time means no running
+	// session has a readable transcript, which is an observation the view must
+	// show, and a stale instant left in place would be a lie about liveness.
 	cqLastOutput = s.cqLastOutput
 	if s.products != nil {
 		products = s.products
@@ -404,6 +459,12 @@ func applySnapshot(s snapshot) {
 	if s.records != nil {
 		liveRecords = s.records
 	}
+	if s.recordsByID != nil {
+		liveByID = s.recordsByID
+	}
+	if s.productHistory != nil {
+		productHistory = s.productHistory
+	}
 }
 
 // liveRecords maps the selected view dispatch's feature to its real record. It
@@ -411,5 +472,12 @@ func applySnapshot(s snapshot) {
 // feature has no record (e.g. while still showing seed data).
 var liveRecords = map[string]*state.Dispatch{}
 
+// liveByID is every record, finished ones included, keyed by its own id — the
+// map the history rows and the resume overlay act through.
+var liveByID = map[string]*state.Dispatch{}
+
 // recordFor returns the live record backing feature, or nil.
 func recordFor(feature string) *state.Dispatch { return liveRecords[feature] }
+
+// recordByID returns the record with this id, finished or not, or nil.
+func recordByID(id string) *state.Dispatch { return liveByID[id] }

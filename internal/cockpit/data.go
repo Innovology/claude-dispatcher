@@ -1,6 +1,10 @@
 package cockpit
 
-import "claude-dispatcher/internal/repos"
+import (
+	"time"
+
+	"claude-dispatcher/internal/repos"
+)
 
 // data.go declares every data var the lenses render. They start empty and are
 // only ever filled by applySnapshot (live.go) from the collectors, so nothing
@@ -30,13 +34,20 @@ var (
 //
 // fleet is every dispatcher in flight, ranked: the ones that want you first.
 //
-// cqLastOutput is a bare age ("6s"), or "" when no running session has a
-// transcript we could read — the view drops the clause rather than printing a
-// zero, so an unreadable transcript never reads as "silent for 0s".
+// cqLastOutput is when a running session last wrote anything, or the zero time
+// when none of them has a transcript we could read — the view drops the clause
+// rather than printing a zero, so an unreadable transcript never reads as
+// "silent for 0s".
+//
+// It is the instant and not the rendered age ("6s") it used to be. A string
+// formatted in the collector is only as fresh as the snapshot that carried it,
+// so it stood still between polls while the clock did not — the same standing
+// still the AGE column had, in a line that claims to report liveness. The view
+// formats it, once a second, from the clock (see ageEvery).
 
 var (
 	fleet        []fleetRow
-	cqLastOutput string
+	cqLastOutput time.Time
 )
 
 // ---- products ---------------------------------------------------------------
@@ -58,6 +69,7 @@ var (
 	team            = map[string][]teamRow{}
 	teamVerdict     = map[string]string{}
 	shipped         = map[string][]shippedDay{}
+	productHistory  = map[string][]historyItem{}
 	productVelocity = map[string][]velTile{}
 )
 

@@ -76,6 +76,18 @@ func buildEnvScenario(t *testing.T) envScenario {
 		t.Fatal(err)
 	}
 
+	// shop-web keeps no ADR folder and writes its decisions as prose instead —
+	// the shape every repo in the real fleet turned out to have.
+	claudeMD := "# shop-web\n\n## Agreed decisions (2026-08-06)\n\n" +
+		"- **Server components by default** — the client bundle is the budget.\n" +
+		"  Islands are opted into, never inherited.\n" +
+		"  - a component that needs state says so\n" +
+		"- Checkout stays on the legacy stack until payments move.\n\n" +
+		"## Conventions\n\n- not a decision, and must not be read as one\n"
+	if err := os.WriteFile(filepath.Join(repoBPath, "CLAUDE.md"), []byte(claudeMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// A transcript for the blocked record, with a tool-use + assistant text
 	// tail, real usage tokens, and a 429 rate_limit hit.
 	transcriptPath := filepath.Join(t.TempDir(), "session.jsonl")
@@ -338,8 +350,29 @@ func TestCollectorsDirect(t *testing.T) {
 	if len(s4.decisions["shop-api"]) != 1 {
 		t.Errorf("collectDecisions found %d records for shop-api, want 1", len(s4.decisions["shop-api"]))
 	}
-	if len(s4.plugins) < 2 {
-		t.Errorf("expected at least the adr-tools + builtin plugins, got %d", len(s4.plugins))
+	// shop-web's decisions are prose in CLAUDE.md: both bullets under the
+	// decisions heading, and nothing from the "Conventions" section after it.
+	web := s4.decisions["shop-web"]
+	if len(web) != 2 {
+		t.Fatalf("collectDecisions found %d records for shop-web, want 2: %+v", len(web), web)
+	}
+	if web[0].title != "Server components by default" {
+		t.Errorf("shop-web record title = %q", web[0].title)
+	}
+	if web[0].by != "CLAUDE.md:5" {
+		t.Errorf("shop-web provenance = %q, want CLAUDE.md:5", web[0].by)
+	}
+	if web[0].consequences != "a component that needs state says so" {
+		t.Errorf("shop-web consequences = %q", web[0].consequences)
+	}
+	if len(s4.plugins) != 3 {
+		t.Errorf("expected adr-tools + decision-log + builtin plugins, got %d", len(s4.plugins))
+	}
+	if p := pluginByID(s4.plugins, "decision-log"); !pluginHasRepo(p, "shop-web") {
+		t.Errorf("decision-log plugin not wired to shop-web: %+v", p)
+	}
+	if p := pluginByID(s4.plugins, "builtin"); !pluginHasRepo(p, "billing-core") {
+		t.Errorf("builtin fallback should carry the repo with no records: %+v", p)
 	}
 
 	var s5 snapshot

@@ -138,8 +138,8 @@ func TestUpgradeKeyAsksFirst(t *testing.T) {
 	}
 }
 
-// TestUpgradeKeyRefusesWhatItCannotDo covers the three ways U is a no-op, each
-// of which has to say something rather than nothing.
+// TestUpgradeKeyRefusesWhatItCannotDo covers the two ways U is a no-op, each of
+// which has to say something rather than nothing.
 func TestUpgradeKeyRefusesWhatItCannotDo(t *testing.T) {
 	// Nix-managed: a real upgrade exists, but not one we may run.
 	stampVersion(t, "2.1.1")
@@ -155,14 +155,6 @@ func TestUpgradeKeyRefusesWhatItCannotDo(t *testing.T) {
 		t.Errorf("notice does not explain the refusal: %q", m.notice)
 	}
 
-	// Already current.
-	m = newModel()
-	m.width, m.height, m.install = 190, 44, brewInstall
-	m = press(press(m, "4"), "U")
-	if m.confirm != nil || !strings.Contains(m.notice, "latest") {
-		t.Errorf("up-to-date build: confirm=%v notice=%q", m.confirm, m.notice)
-	}
-
 	// A dev build has no release to be behind.
 	stampVersion(t, "dev")
 	m = newModel()
@@ -171,6 +163,93 @@ func TestUpgradeKeyRefusesWhatItCannotDo(t *testing.T) {
 	m = press(press(m, "4"), "U")
 	if m.confirm != nil || !strings.Contains(m.notice, "dev build") {
 		t.Errorf("dev build: confirm=%v notice=%q", m.confirm, m.notice)
+	}
+}
+
+// TestUpgradeKeyLooksBeforeClaimingToBeCurrent: knowing of nothing newer is not
+// the same as there being nothing newer — the ambient answer is up to six hours
+// old, and after an in-place upgrade it is older than the build reading it. U
+// goes and asks, and only then says we are current.
+func TestUpgradeKeyLooksBeforeClaimingToBeCurrent(t *testing.T) {
+	stampVersion(t, "2.1.1")
+	m := newModel()
+	m.width, m.height, m.install = 190, 44, brewInstall
+	m = press(m, "4")
+
+	m, cmd := m.startUpgrade()
+	if cmd == nil {
+		t.Fatal("U answered from the cache instead of checking")
+	}
+	if !m.upgradeChecking || !strings.Contains(m.notice, "checking") {
+		t.Errorf("U does not say it is looking: checking=%v notice=%q", m.upgradeChecking, m.notice)
+	}
+	// A second press must not put a second call on the wire.
+	if _, again := m.startUpgrade(); again != nil {
+		t.Error("a second U fired a second check while the first was still out")
+	}
+
+	// The check comes back current: now the claim is one we have made.
+	next, _ := m.Update(upgradeMsg{latest: "v2.1.1", forced: true})
+	nm := next.(model)
+	if nm.confirm != nil || !strings.Contains(nm.notice, "is the latest") {
+		t.Errorf("checked-and-current: confirm=%v notice=%q", nm.confirm, nm.notice)
+	}
+	if nm.upgradeChecking {
+		t.Error("the check finished but the model still thinks one is in flight")
+	}
+
+	// It comes back unreachable: say so rather than leaving the press unanswered.
+	next, _ = m.Update(upgradeMsg{forced: true})
+	if nm = next.(model); !strings.Contains(nm.notice, "could not reach") {
+		t.Errorf("a check that could not run said %q", nm.notice)
+	}
+}
+
+// TestForcedCheckFindsOneAndAsks: the human pressed U to upgrade, not to be
+// told an upgrade exists. Finding one goes straight to the confirm bar — which
+// still asks, so nothing runs unattended.
+func TestForcedCheckFindsOneAndAsks(t *testing.T) {
+	stampVersion(t, "2.1.1")
+	m := newModel()
+	m.width, m.height, m.install = 190, 44, brewInstall
+
+	next, _ := m.Update(upgradeMsg{latest: "v2.2.0", forced: true})
+	nm := next.(model)
+	if nm.upgradeTo != "v2.2.0" {
+		t.Errorf("the found release was not recorded: %q", nm.upgradeTo)
+	}
+	if nm.confirm == nil || nm.confirm.kind != "upgrade" {
+		t.Fatalf("U found a release and then made the human press it again: %+v", nm.confirm)
+	}
+	if !strings.Contains(nm.confirm.label, "v2.2.0") {
+		t.Errorf("confirm does not name what it found: %q", nm.confirm.label)
+	}
+}
+
+// TestPollCheckStaysAmbient: the once-a-minute check has no human waiting on
+// it. It may raise the offer and it may retire it, but it never speaks.
+func TestPollCheckStaysAmbient(t *testing.T) {
+	stampVersion(t, "2.1.1")
+	m := newModel()
+	m.width, m.height, m.install = 190, 44, brewInstall
+
+	next, _ := m.Update(upgradeMsg{latest: "v2.2.0"})
+	nm := next.(model)
+	if nm.upgradeTo != "v2.2.0" || nm.confirm != nil || nm.notice != "" {
+		t.Errorf("the poll interrupted: to=%q confirm=%v notice=%q", nm.upgradeTo, nm.confirm, nm.notice)
+	}
+
+	// A check that could not run keeps what is already known: an offer must not
+	// blink out because the network did.
+	next, _ = nm.Update(upgradeMsg{})
+	if got := next.(model).upgradeTo; got != "v2.2.0" {
+		t.Errorf("a failed check dropped the known upgrade: %q", got)
+	}
+
+	// A check that ran and found us current retires it.
+	next, _ = nm.Update(upgradeMsg{latest: "v2.1.1"})
+	if got := next.(model).upgradeTo; got != "" {
+		t.Errorf("the nag outlived the release that raised it: %q", got)
 	}
 }
 
