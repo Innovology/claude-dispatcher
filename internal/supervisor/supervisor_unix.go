@@ -14,6 +14,7 @@ import (
 func Available() bool                             { return tmux.Available() }
 func Backend() string                             { return "tmux" }
 func HasSession(name string) bool                 { return tmux.HasSession(name) }
+func Sessions() []string                          { return tmux.ListSessions() }
 func NewSession(name, dir, shellCmd string) error { return tmux.NewSession(name, dir, shellCmd) }
 func AttachCmd(name string) *exec.Cmd             { return tmux.AttachCmd(name) }
 func KillSession(name string) error               { return tmux.KillSession(name) }

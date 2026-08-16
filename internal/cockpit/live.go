@@ -17,8 +17,10 @@ import (
 	"strings"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // snapshot is a full rebuild of every reassignable data var, plus the record
@@ -130,26 +132,144 @@ func (c *collectCtx) forge(repoPath string) string {
 
 // loadSnapshot assembles a full snapshot from the real backends. Each collector
 // fills its own fields; collectors live in collect_*.go.
-func loadSnapshot(cfg *config.Config) snapshot {
-	ctx := &collectCtx{
-		cfg:     cfg,
-		records: state.LoadAll(),
-		repos:   repos.Discover(cfg),
+func loadSnapshot(cfg *config.Config) snapshot { return loadSnapshotReporting(cfg, nil) }
+
+// loadSnapshotReporting is loadSnapshot with the opening screen watching. Every
+// stage announces what it is about to do and then what it found, so the boot
+// sequence is a description of this function rather than a decoration over it.
+// A nil report is the ordinary refresh: no screen, no reporting, same work.
+func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
+	r.begin(bootSupervisor, "looking for "+supervisor.Backend()+"…")
+	if supervisor.Available() {
+		r.done(bootSupervisor, supervisor.Backend(), false)
+	} else {
+		// Without the supervisor there is nothing to attach to or kill; the
+		// cockpit still opens, so this is a warning and not an exit.
+		r.done(bootSupervisor, supervisor.Backend()+" not found", true)
 	}
+
+	r.begin(bootRecords, "reading "+state.DispatchesDir()+"…")
+	records := state.LoadAll()
+	r.done(bootRecords, countOf(len(records), "dispatch", "dispatches"), false)
+
+	r.begin(bootSessions, "asking "+supervisor.Backend()+" what is still running…")
+	live := liveSessions(records)
+	r.done(bootSessions, countOf(live, "session", "sessions")+" live of "+itoa(len(records)), false)
+
+	roots := cfg.ExpandedRoots()
+	r.begin(bootRepos, "scanning "+countOf(len(roots), "root", "roots")+"…")
+	found := repos.Discover(cfg)
+	// No repos with roots configured means the roots point somewhere without
+	// any: an empty cockpit whose cause is worth naming here rather than
+	// leaving the human to infer it from six empty lenses.
+	r.done(bootRepos, countOf(len(found), "repo", "repos"), len(found) == 0)
+
+	r.begin(bootForge, "checking the github cli…")
+	if gh.Available() {
+		r.done(bootForge, "github cli", false)
+	} else {
+		r.done(bootForge, "gh not found — no pr or check signals", true)
+	}
+
+	ctx := &collectCtx{cfg: cfg, records: records, repos: found}
 	var s snapshot
 	s.dataMode = "live"
 	s.discovered = ctx.repos
+
+	r.begin(bootDispatchers, "reading transcripts, diffs and prs…")
 	collectFloor(ctx, &s)
 	// collectFleet must follow collectFloor: it reads the forge, diff and
 	// transcript work that load already did rather than paying for it twice.
 	collectFleet(ctx, &s)
+	r.done(bootDispatchers, countOf(len(s.dispatches), "dispatcher", "dispatchers")+" in flight", false)
+
+	r.begin(bootProducts, "grouping repos by product…")
 	collectProducts(ctx, &s)
+	r.done(bootProducts, countOf(namedProducts(s.products), "product", "products"), false)
+
+	r.begin(bootBacklog, "fetching assigned issues…")
 	collectBacklog(ctx, &s)
+	r.done(bootBacklog, countOf(len(s.backlogTickets), "ticket", "tickets"), false)
+
+	r.begin(bootDecisions, "scanning repos for adrs…")
 	collectDecisions(ctx, &s)
+	r.done(bootDecisions, countOf(countDecisions(s.decisions), "adr", "adrs")+
+		" in "+countOf(len(s.decisionRepoOrder), "repo", "repos"), false)
+
+	r.begin(bootUsage, "totalling this week's tokens…")
 	collectUsage(ctx, &s)
+	r.done(bootUsage, countOf(len(s.usageModels), "model", "models")+" this week", false)
+
+	r.begin(bootVelocity, "measuring what reached production…")
 	collectVelocity(ctx, &s)
+	// Deploys, not len(doraWeeks): the week series is a fixed six-week window
+	// the collector always emits, so its length would report "6 weeks of
+	// history" on a portfolio that has never shipped anything.
+	r.done(bootVelocity, countOf(countDeploys(s.doraWeeks), "deploy", "deploys")+" in 6 weeks", false)
+
+	r.begin(bootStale, "looking for repos nothing is working on…")
 	collectStale(ctx, &s)
+	r.done(bootStale, countOf(len(s.staleRepos), "repo", "repos")+" gone quiet", false)
+
 	return s
+}
+
+// liveSessions counts the recorded dispatches whose supervisor session is still
+// running, from one listing rather than a probe per record.
+//
+// It is read for the opening screen alone. The cockpit's own notion of what is
+// live comes from the records the lifecycle hook writes, and replacing that
+// with a session probe would be a different change with different consequences
+// — a session can outlive the work in it, and the work can outlive a session
+// the human killed by hand.
+func liveSessions(records []*state.Dispatch) int {
+	alive := map[string]bool{}
+	for _, name := range supervisor.Sessions() {
+		alive[name] = true
+	}
+	n := 0
+	for _, rec := range records {
+		if rec.TmuxSession != "" && alive[rec.TmuxSession] {
+			n++
+		}
+	}
+	return n
+}
+
+// namedProducts counts real products, excluding the bucket every unmapped repo
+// is folded into — the same distinction the header's portfolio line makes.
+func namedProducts(ps []product) int {
+	n := 0
+	for _, p := range ps {
+		if p.name != clUnassigned {
+			n++
+		}
+	}
+	return n
+}
+
+// countDecisions totals the ADRs found across every repo that has any.
+func countDecisions(byRepo map[string][]decision) int {
+	n := 0
+	for _, ds := range byRepo {
+		n += len(ds)
+	}
+	return n
+}
+
+// countDeploys totals what reached production across the measured window.
+func countDeploys(weeks []doraWeek) int {
+	n := 0
+	for _, w := range weeks {
+		n += w.deploys
+	}
+	return n
+}
+
+// countOf renders "0 repos" / "1 repo" / "57 repos" — the boot sequence's only
+// figure format, so a zero reads as a counted zero and not as a blank.
+func countOf(n int, one, many string) string {
+	return itoa(n) + " " + plural(n, one, many)
 }
 
 // applySnapshot swaps freshly collected data into the package vars. It runs on

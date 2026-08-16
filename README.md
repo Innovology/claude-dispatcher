@@ -226,6 +226,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 - Commits are attributed to dispatchers by **provenance** — each dispatch records the SHAs its feature branch produced (base tip at launch → branch tip). No trailers in your git history.
 - **Done means live:** when a PR merges, the tracker watches the repo's deploy workflow (auto-detected by name, or set in `[deploy_workflows]`) and flips the feature to done on a green run. Repos with no deploy workflow count merge as live.
 - The layout is **responsive**: wide terminals tile into three panes, narrower ones collapse to essentials.
+- **It opens on a boot screen.** The first load reads every dispatch record, asks tmux which sessions are still running, scans your roots and talks to the forge — seconds of work on a real portfolio. The opening screen shows each stage ticking off with what it found and how long it took, so the wait is legible instead of blank. Any key skips straight to the cockpit; the load carries on behind it.
 
 ## Keys
 

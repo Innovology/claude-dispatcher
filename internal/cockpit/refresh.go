@@ -28,6 +28,12 @@ type (
 	refreshTickMsg struct{}
 	// trackedMsg fires after a track.Refresh pass (PR/deploy reconciliation).
 	trackedMsg struct{}
+	// bootProgressMsg carries one opening-screen step transition to the UI.
+	bootProgressMsg bootUpdate
+	// bootTickMsg paces the opening screen's spinner and colour sweep.
+	bootTickMsg struct{}
+	// bootDoneMsg retires the opening screen and hands over to the cockpit.
+	bootDoneMsg struct{}
 )
 
 // loadSnapshotCmd rebuilds the whole snapshot off the UI goroutine.
@@ -72,6 +78,38 @@ func recheckCmd(cfg *config.Config) tea.Cmd {
 		dispatchpkg.ReconcileSessions(state.LoadAll())
 		track.Refresh(state.LoadAll(), cfg)
 		return snapshotMsg(loadSnapshot(cfg))
+	}
+}
+
+// bootLoadCmd is the first load, narrating itself to the opening screen. The
+// snapshot it produces is identical to loadSnapshotCmd's.
+//
+// Sends are non-blocking over a buffered channel, so a screen that has been
+// skipped — or a UI busy elsewhere — can never hold the load up waiting to be
+// watched. A dropped update costs one line's figure, never a step.
+func bootLoadCmd(cfg *config.Config, ch chan bootUpdate) tea.Cmd {
+	return func() tea.Msg {
+		report := func(u bootUpdate) {
+			select {
+			case ch <- u:
+			default:
+			}
+		}
+		return snapshotMsg(loadSnapshotReporting(cfg, report))
+	}
+}
+
+// waitBoot blocks until the loader reports its next step.
+func waitBoot(ch chan bootUpdate) tea.Cmd {
+	return func() tea.Msg {
+		if ch == nil {
+			return nil
+		}
+		u, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return bootProgressMsg(u)
 	}
 }
 

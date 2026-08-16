@@ -50,6 +50,11 @@ func Run() error {
 			}
 		}
 		m.loading = true
+		// The opening screen belongs to the first load and only to it. Without
+		// a config nothing is loaded, so there is nothing to narrate and the
+		// cockpit opens straight onto its "run init" notice.
+		m.boot = newBootState()
+		m.bootCh = make(chan bootUpdate, bootChanBuffer)
 	} else {
 		m.notice = "no config — showing demo data · run `claude-dispatcher init`"
 	}
