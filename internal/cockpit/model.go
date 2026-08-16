@@ -241,8 +241,11 @@ func (m model) Init() tea.Cmd {
 	// The first load is the one with a screen watching it: it reports each
 	// stage as it runs, and the model subscribes for those reports and ticks
 	// the animation. Every later load takes the plain path.
+	// ageTick rides with the poll rather than with the demo path above: it keeps
+	// the printed ages of real dispatchers honest, and a cockpit with no config
+	// has none to age.
 	load := loadSnapshotCmd(m.cfg)
-	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), upgradeCheckCmd()}
+	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), ageTick(), upgradeCheckCmd()}
 	if m.boot != nil {
 		load = bootLoadCmd(m.cfg, m.bootCh)
 		cmds = append(cmds, waitBoot(m.bootCh), bootTick())
@@ -303,6 +306,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// a release; the version package's own cache decides when that costs a
 		// network call.
 		return m, tea.Batch(trackRefreshCmd(m.cfg), refreshTick(), upgradeCheckCmd())
+
+	case ageTickMsg:
+		// Deliberately the emptiest arm in this switch. The model is returned
+		// exactly as it arrived: the tick's only effect is that returning at all
+		// gets View called again, and View reads the clock. Anything else done
+		// here would be work happening once a second.
+		return m, ageTick()
 
 	case upgradeMsg:
 		if version.IsOutdated(msg.latest) {
