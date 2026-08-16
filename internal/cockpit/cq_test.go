@@ -526,7 +526,7 @@ func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 // gives way as the terminal narrows, in the order the fit() tiers set.
 func TestFleetColumnsShedByWidth(t *testing.T) {
 	for _, w := range []int{60, 80, 110, 176} {
-		cols := fleetColumns(w)
+		cols := fleetColumns(w, fleetProductMin)
 		if cols.glyph == 0 || cols.feature < 1 || cols.age == 0 {
 			t.Errorf("@%d: a load-bearing column was shed: %+v", w, cols)
 		}
@@ -538,6 +538,47 @@ func TestFleetColumnsShedByWidth(t *testing.T) {
 		}
 		// The signal cell is the flex, so it takes whatever the fixed cells
 		// leave — the row must still be exactly w columns wide.
+		line := fleetLine(w, cols, cTransparent, [flCells]string{}, [flCells]string{})
+		if dispWidth(line) != w {
+			t.Errorf("@%d: a table line is %d columns wide", w, dispWidth(line))
+		}
+	}
+}
+
+// The PRODUCT cell grows to the longest label on the table when the row can
+// spare the width, and never past a quarter of it — the design's 12 clipped
+// every real product name ("Equestrian Passport", "Claude Dispatcher") on every
+// row forever, and a clipped identity has no second chance to be read.
+func TestFleetProductColumnFitsTheLongestName(t *testing.T) {
+	rows := []fleetRow{{product: "equestrian passport"}, {product: "aura"}}
+	want := fleetProductWidth(rows) // 19 + the 1ch gap
+	if want != 20 {
+		t.Fatalf("fleetProductWidth = %d, want 20", want)
+	}
+
+	// Wide enough to spare it: the label lands whole, gap included.
+	for _, w := range []int{130, 176} {
+		cols := fleetColumns(w, want)
+		if cols.product != want {
+			t.Errorf("@%d: product = %d, want %d", w, cols.product, want)
+		}
+		if got := truncate(cqLabel(rows[0].product), cols.product-1); got != "EQUESTRIAN PASSPORT" {
+			t.Errorf("@%d: label = %q", w, got)
+		}
+	}
+
+	// Short names leave the design's layout exactly as it was.
+	if cols := fleetColumns(130, fleetProductWidth([]fleetRow{{product: "aura"}})); cols.product != fleetProductMin {
+		t.Errorf("short names moved the column: %d", cols.product)
+	}
+
+	// And no width lets it take more than a quarter of the writable row, nor
+	// drop below the floor, nor break the row's column arithmetic.
+	for _, w := range []int{70, 80, 110, 130, 176} {
+		cols := fleetColumns(w, 40)
+		if cols.product < fleetProductMin || cols.product > maxi(fleetProductMin, cqInner(w)/4) {
+			t.Errorf("@%d: a greedy product cell took %d of %d", w, cols.product, cqInner(w))
+		}
 		line := fleetLine(w, cols, cTransparent, [flCells]string{}, [flCells]string{})
 		if dispWidth(line) != w {
 			t.Errorf("@%d: a table line is %d columns wide", w, dispWidth(line))
