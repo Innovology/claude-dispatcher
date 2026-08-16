@@ -57,6 +57,15 @@
   `supervisor.AttachSwitches`), the recheck waits for the terminal focus
   event instead. Focus alone never triggers it: a full forge re-read on every
   alt-tab is how the gh quota gets burned.
+- **Decisions are read where they were written, never invented.** The
+  DECISIONS lens has two sources: an adr-tools folder, and a heading that
+  names a set of decisions in the repo's own markdown (`CLAUDE.md`,
+  `DECISIONS.md`, `ARCHITECTURE.md`, `README.md`) — this section is one, and
+  the lens reads it. Nothing writes a record: not the cockpit, not a
+  dispatcher. A commit or a PR title is not promoted to a decision, because
+  inventing records is worse than an empty pane. It shipped reading only
+  `doc/adr/`, which no repo in the fleet keeps, so the lens was empty for
+  every repo while decisions sat in plain sight one file away.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main

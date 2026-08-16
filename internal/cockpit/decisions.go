@@ -49,8 +49,13 @@ func pluginForRepo(repo string) plugin {
 			}
 		}
 	}
-	for _, p := range plugins {
-		if p.id == "builtin" {
+	return pluginByID(plugins, "builtin")
+}
+
+// pluginByID returns the plugin with the given id, or the zero plugin.
+func pluginByID(list []plugin, id string) plugin {
+	for _, p := range list {
+		if p.id == id {
 			return p
 		}
 	}
@@ -101,11 +106,22 @@ func (m model) viewDecisions(w, h int) string {
 
 	repos := decisionRepoOrder
 	if len(repos) == 0 {
+		// Naming both places it looked matters: the lens spent its first life
+		// reading only doc/adr, said "no decision records found" over repos
+		// whose decisions were written down in plain sight, and gave the human
+		// no way to tell an empty fleet from a scanner looking in one place.
 		msg := vjoin(
 			fg(cDim, "where decisions live"),
 			"",
 			fg(cFaint, "no decision records found in any repo."),
-			fg(cFaint, "add ADRs under doc/adr/ (adr-tools) and they appear here."),
+			"",
+			fg(cFaint, "the cockpit reads two things:"),
+			fg(cFaint, "  · ADRs under doc/adr/, docs/adr/ or docs/decisions/"),
+			fg(cFaint, "  · a decisions heading in CLAUDE.md, DECISIONS.md,"),
+			fg(cFaint, "    ARCHITECTURE.md or README.md — every bullet under"),
+			fg(cFaint, "    it is a record"),
+			"",
+			fg(cFaint, "write either and it appears here on the next load."),
 		)
 		return clampLines(gutter(msg, pad), h)
 	}
@@ -259,7 +275,7 @@ func (m model) decLeftBlock(cw int, selRepo string, _ []decision, _ plugin) stri
 		lines = append(lines, line("  "+p.host, cw, cFaint, ""))
 	}
 	lines = append(lines, "")
-	lines = append(lines, line("e · "+selRepo, cw, cFaint, ""))
+	lines = append(lines, line("e · cycle sources", cw, cFaint, ""))
 	return vjoin(lines...)
 }
 
@@ -336,7 +352,7 @@ func (m model) decBodyBlock(cw int, _ string, list []decision, ci int, decPlugin
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, fg(cDim, "a accept · s supersede · e change tool · o open in "+decPlugin.name))
+	lines = append(lines, fg(cDim, "a status · s supersede · e sources · o where it lives"))
 	return vjoin(lines...)
 }
 
