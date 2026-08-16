@@ -72,16 +72,18 @@ type snapshot struct {
 	usageProjection string
 	usageAdvice     []usageAdviceItem
 
-	doraOrg     []doraMetric
-	doraFactory []doraMetric
-	doraSplit   []splitPart
-	doraWeeks   []doraWeek
-	outputWeeks []outWeek
-	outputHead  string
-	outputUnit  string
-	outputDelta string
-	outputSpark string
-	notVelocity []notVelocityRow
+	doraOrg         []doraMetric
+	doraFactory     []doraMetric
+	doraSplit       []splitPart
+	doraWeeks       []doraWeek
+	outputWeeks     []outWeek
+	outputHead      string
+	outputUnit      string
+	outputDelta     string
+	outputSpark     string
+	outputCoded     string
+	outputCodedNote string
+	notVelocity     []notVelocityRow
 
 	// records maps a view dispatch's feature to its live record, so an action
 	// on the selected row reaches the real tmux session / branch / PR.
@@ -391,6 +393,11 @@ func applySnapshot(s snapshot) {
 	if s.outputSpark != "" {
 		outputSpark = s.outputSpark
 	}
+	// Unconditionally, like cqLastOutput: "" means nothing reached production
+	// in the window, which is an observation the lens must show. Keeping the
+	// last figure would price work that has not happened. The note moves with
+	// the figure so the estimate can never be drawn without its model.
+	outputCoded, outputCodedNote = s.outputCoded, s.outputCodedNote
 	if s.notVelocity != nil {
 		notVelocity = s.notVelocity
 	}

@@ -87,6 +87,17 @@
   that function, not decoration over it, so a stage added there gets a step here
   (a test asserts the two sets match). Any key skips it; the load continues.
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
+- `internal/effort` — the hand-coding equivalent: how long a senior developer
+  would have taken to write a diff by hand. The ONLY figure in the product
+  that is a model rather than a measurement, so every screen showing it says
+  so — an `≈` on the figure, and the rate (`effort.LinesPerHour`, one named
+  constant) printed beside the velocity total. Read once per load off the
+  provenance diff collectFloor already ran, published on `snapshot.effortBy`
+  keyed by feature, and shared by triage and velocity so the two can never
+  quote different hours for one branch. A feature missing from that map is one
+  whose diff could not be read, which is NOT the same as one that wrote
+  nothing: totals skip it and velocity says how many of its live features it
+  could price.
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort
   check for a newer release, and `Detect()`: which package manager installed

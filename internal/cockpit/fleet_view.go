@@ -243,8 +243,15 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 		fg(blockHex, itoa(wants)+" want you") + "   " +
 		fg(warnHex, itoa(warn)+" need a look") + "   " +
 		fg(cFaint, itoa(clean)+" running clean")
+	// Appended only when the whole cell fits. flSpread's overflow answer is to
+	// truncate the left side, which would leave "≈10h t…" hanging off the end of
+	// a narrow terminal — a clause half-said is worse than one not said, and it
+	// would be eating the counts it is meant to qualify.
 	if coded := fleetCoded(rows); coded > 0 {
-		left += "   " + fg(cFaint, "≈"+effort.Human(coded)+" to hand-code")
+		cell := "≈" + effort.Human(coded) + " to hand-code"
+		if dispWidth(left)+3+dispWidth(cell) <= inner {
+			left += "   " + fg(cFaint, cell)
+		}
 	}
 	return flG(flSpread(left, fg(cFaint, right), inner))
 }
