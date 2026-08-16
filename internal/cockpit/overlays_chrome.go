@@ -31,7 +31,7 @@ var helpSections = []struct {
 		{"x", "kill it · the branch and any dirty worktree survive"},
 		{"s", "skip · send it to the back, it comes round again"},
 		{"d", "dispatch · pick a repo, say what it does"},
-		{"u", "put back the last thing you cleared"},
+		{"ctrl+z", "put back the last thing you cleared"},
 	}},
 	{section: "what has finished", keys: []struct{ k, d string }{
 		{"h", "history · every dispatcher whose session is over, and back again"},
@@ -53,7 +53,7 @@ var helpSections = []struct {
 		{"n", "new product — names it and moves the marked repos in"},
 		{"space", "mark a repo · enter moves every marked one"},
 		{"tab", "between the repo list and the products"},
-		{"u / U", "take repos back out of a product · start over"},
+		{"u / ctrl+u", "take repos back out of a product · start over"},
 	}},
 	{section: "the other lenses", keys: []struct{ k, d string }{
 		{"j / k", "up and down the list"},

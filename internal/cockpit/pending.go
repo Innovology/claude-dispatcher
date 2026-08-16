@@ -223,7 +223,10 @@ func pendingRow(p pendingDispatch) fleetRow {
 		// No acts. Attach would have no session to hand over, and kill would have
 		// no record to mark — an offered key that cannot act is the defect this
 		// lens keeps finding in its own design.
-		moved:  p.since,
-		waited: p.since,
+		// Both ages count from the same instant, which is the truth about a
+		// dispatcher that has existed for as long as it has been silent.
+		moved:   p.since,
+		started: p.since,
+		waited:  p.since,
 	}
 }

@@ -90,12 +90,34 @@ type fleetRow struct {
 	model     string
 	ctxKnown  bool
 
+	// coded is how long a senior developer would have taken to write this
+	// dispatcher's diff by hand (internal/effort), and is the only figure on
+	// the row that is estimated rather than read. codedKnown is false when the
+	// diff could not be read at all — distinct from a coded of zero, which is a
+	// branch that has genuinely not written anything yet.
+	coded      time.Duration
+	codedKnown bool
+
+	// mode is the permission mode this dispatcher was launched in, straight off
+	// the record. Empty for a record written before the mode was a choice: those
+	// ran in whatever the human's own Claude Code defaults to, and reporting
+	// that as "auto" would be inventing the one fact nobody recorded.
+	mode string
+
 	acts []cqAct
 
 	// moved is the freshest of the transcript's mtime and the record's
-	// UpdatedAt: how long since ANYTHING happened, which is the one question the
-	// AGE column asks of every row. See fleetMoved.
+	// UpdatedAt: when this dispatcher was last seen doing anything. It is the
+	// LAST column. See fleetMoved.
 	moved time.Time
+	// started is when the dispatch was created, and is the AGE column: how long
+	// this dispatcher has been alive, which nothing it does resets.
+	//
+	// The two are different questions and a row can answer them very
+	// differently — "4s / 3h" is a session still going after three hours, "3h /
+	// 3h" is one that has said nothing since the moment it started. One column
+	// could only ever have shown one of those, and the pair is the reading.
+	started time.Time
 	// waited is the record's UpdatedAt, kept as the queue rows' tie-break sort
 	// key so the ask that has waited longest surfaces first.
 	waited time.Time
@@ -110,7 +132,7 @@ type fleetRow struct {
 // register collectFleet in loadSnapshot after collectFloor:
 //
 //	fleet        []fleetRow
-//	cqLastOutput string
+//	cqLastOutput time.Time
 func collectFleet(ctx *collectCtx, s *snapshot) {
 	// Floor rows keyed by feature. collectFloor resolved the forge for every
 	// record in this same load; re-deriving it here would mean a second
@@ -148,15 +170,15 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 			// show again — its transcript, branch and worktree all still exist,
 			// but nothing on any screen could reach them. They are collected as
 			// history rows, kept out of the in-flight table, and resumable.
-			rows = append(rows, fleetPastRow(ctx, passes, rec))
+			rows = append(rows, fleetPastRow(ctx, s, passes, rec))
 		}
 	}
 
 	fleetSort(rows)
 	s.fleet = rows
-	if !lastOut.IsZero() {
-		s.cqLastOutput = cqAge(lastOut)
-	}
+	// The instant, not its age: rendering it here would freeze it at the age it
+	// had when this load ran. See cqLastOutput in data.go.
+	s.cqLastOutput = lastOut
 }
 
 // ---- rank and order -------------------------------------------------------------
@@ -285,29 +307,34 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	tone := cqToneOf(st, checks, review, clash)
 	goal, goalLabel := cqGoal(rec)
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
+	est, codedKnown := s.effortBy[rec.Feature]
 
 	return fleetRow{
-		id:        rec.ID,
-		kind:      "queue",
-		rank:      fleetRank("queue", tone, false),
-		ask:       ask,
-		product:   ctx.productFor(rec),
-		feature:   rec.Feature,
-		repo:      rec.RepoName,
-		ref:       cqRef(forge, rec),
-		stage:     cqPhase(s.tailLines[rec.Feature], rec),
-		pass:      passes[rec.ID],
-		signal:    cqWant(ask),
-		tone:      tone,
-		why:       cqWhy(s, rec, ask, tone, clash),
-		goal:      goal,
-		goalLabel: goalLabel,
-		ctxTokens: u.Tokens,
-		model:     cqShortModel(u.Model),
-		ctxKnown:  ctxKnown,
-		acts:      cqActs(rec, ask),
-		moved:     fleetMoved(rec),
-		waited:    rec.UpdatedAt,
+		id:         rec.ID,
+		kind:       "queue",
+		rank:       fleetRank("queue", tone, false),
+		ask:        ask,
+		product:    ctx.productFor(rec),
+		feature:    rec.Feature,
+		repo:       rec.RepoName,
+		ref:        cqRef(forge, rec),
+		stage:      cqPhase(s.tailLines[rec.Feature], rec),
+		pass:       passes[rec.ID],
+		signal:     cqWant(ask),
+		tone:       tone,
+		why:        cqWhy(s, rec, ask, tone, clash),
+		goal:       goal,
+		goalLabel:  goalLabel,
+		ctxTokens:  u.Tokens,
+		model:      cqShortModel(u.Model),
+		ctxKnown:   ctxKnown,
+		coded:      est.Dur,
+		codedKnown: codedKnown,
+		mode:       rec.Mode,
+		acts:       cqActs(rec, ask),
+		moved:      fleetMoved(rec),
+		started:    rec.CreatedAt,
+		waited:     rec.UpdatedAt,
 	}
 }
 
@@ -346,30 +373,35 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		tone, why = "amber", "Its checks are green and the PR is not merged."
 	}
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
+	est, codedKnown := s.effortBy[rec.Feature]
 
 	moved := rec.UpdatedAt
 	if mt.After(moved) {
 		moved = mt
 	}
 	return fleetRow{
-		id:        rec.ID,
-		kind:      "run",
-		rank:      fleetRank("run", tone, stalled),
-		product:   ctx.productFor(rec),
-		feature:   rec.Feature,
-		repo:      rec.RepoName,
-		ref:       cqRef(forge, rec),
-		stage:     cqPhase(s.tailLines[rec.Feature], rec),
-		pass:      passes[rec.ID],
-		signal:    signal,
-		tone:      tone,
-		why:       why,
-		ctxTokens: u.Tokens,
-		model:     cqShortModel(u.Model),
-		ctxKnown:  ctxKnown,
-		acts:      cqActs(rec, "running"),
-		moved:     moved,
-		waited:    rec.UpdatedAt,
+		id:         rec.ID,
+		kind:       "run",
+		rank:       fleetRank("run", tone, stalled),
+		product:    ctx.productFor(rec),
+		feature:    rec.Feature,
+		repo:       rec.RepoName,
+		ref:        cqRef(forge, rec),
+		stage:      cqPhase(s.tailLines[rec.Feature], rec),
+		pass:       passes[rec.ID],
+		signal:     signal,
+		tone:       tone,
+		why:        why,
+		ctxTokens:  u.Tokens,
+		model:      cqShortModel(u.Model),
+		ctxKnown:   ctxKnown,
+		coded:      est.Dur,
+		codedKnown: codedKnown,
+		mode:       rec.Mode,
+		acts:       cqActs(rec, "running"),
+		moved:      moved,
+		started:    rec.CreatedAt,
+		waited:     rec.UpdatedAt,
 	}, mt
 }
 
@@ -384,25 +416,37 @@ const fleetPastRank = 4
 // facts already on the record. That is also why the STAGE cell is left empty:
 // the phase is inferred from a transcript tail (cqPhase), and reading one per
 // finished record on every five-second poll would cost the whole history.
-func fleetPastRow(ctx *collectCtx, passes map[string]int, rec *state.Dispatch) fleetRow {
+//
+// The hand-coding estimate is the one exception, and it does not break that
+// rule: it is a map lookup, not a diff. collectFloor ran the numstat for every
+// record it could place on the floor — which includes the shipped ones that
+// land here — so the figure is already paid for. A dispatcher that ended
+// WITHOUT shipping was never on the floor and has no entry, so it carries no
+// estimate, which is the honest answer rather than a zero.
+func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *state.Dispatch) fleetRow {
 	goal, goalLabel := cqGoal(rec)
+	est, codedKnown := s.effortBy[rec.Feature]
 	return fleetRow{
-		id:        rec.ID,
-		kind:      "past",
-		rank:      fleetRank("past", "normal", false),
-		product:   ctx.productFor(rec),
-		feature:   rec.Feature,
-		repo:      rec.RepoName,
-		ref:       cqRef(ctx.forge(rec.RepoPath), rec),
-		pass:      passes[rec.ID],
-		signal:    cqEnded(rec),
-		tone:      "normal",
-		why:       cqSentence(rec.StatusReason),
-		goal:      goal,
-		goalLabel: goalLabel,
-		acts:      cqActs(rec, "past"),
-		moved:     fleetMoved(rec),
-		waited:    rec.UpdatedAt,
+		id:         rec.ID,
+		kind:       "past",
+		rank:       fleetRank("past", "normal", false),
+		product:    ctx.productFor(rec),
+		feature:    rec.Feature,
+		repo:       rec.RepoName,
+		ref:        cqRef(ctx.forge(rec.RepoPath), rec),
+		pass:       passes[rec.ID],
+		signal:     cqEnded(rec),
+		tone:       "normal",
+		why:        cqSentence(rec.StatusReason),
+		goal:       goal,
+		goalLabel:  goalLabel,
+		coded:      est.Dur,
+		codedKnown: codedKnown,
+		mode:       rec.Mode,
+		acts:       cqActs(rec, "past"),
+		moved:      fleetMoved(rec),
+		started:    rec.CreatedAt,
+		waited:     rec.UpdatedAt,
 	}
 }
 
@@ -422,16 +466,19 @@ func cqEnded(rec *state.Dispatch) string {
 	return "stopped"
 }
 
-// fleetMoved is how long since anything happened to a dispatcher: the freshest
-// of what it last wrote and when the hook last saved it.
+// fleetMoved is when a dispatcher was last seen doing anything: the freshest of
+// what it last wrote and when the hook last saved it.
 //
-// The AGE column asks one question of every row, so it must have one answer.
-// The design asks two — the record's age for a queue row, the transcript's for
-// a running one — which would put two different measurements in one column. The
-// max is right for both: for a blocked or turn-done dispatcher the transcript
-// stops moving at the same instant UpdatedAt does, so they agree; for a working
-// one the transcript is the only honest liveness signal (see cqLastWrite); and
-// it degrades to UpdatedAt when the transcript cannot be read at all.
+// The LAST column asks one question of every row, so it must have one answer,
+// and the max is right for all three kinds. For a blocked or turn-done
+// dispatcher the transcript stops moving at the same instant UpdatedAt does, so
+// they agree; for a working one the transcript is the only honest liveness
+// signal (see cqLastWrite); and it degrades to UpdatedAt when the transcript
+// cannot be read at all.
+//
+// What it is NOT is the dispatcher's age. That is CreatedAt, in its own column
+// next to this one, because activity and lifetime are two facts and neither
+// substitutes for the other — see fleetRow.started.
 func fleetMoved(rec *state.Dispatch) time.Time {
 	t := rec.UpdatedAt
 	if mt := cqLastWrite(rec.TranscriptPath); mt.After(t) {

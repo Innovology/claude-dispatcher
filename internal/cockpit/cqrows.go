@@ -14,7 +14,11 @@ package cockpit
 // lines that close the dispatch form. Nothing is invented here; where a field
 // is empty the row is dropped rather than padded out.
 
-import "strings"
+import (
+	"strings"
+
+	"claude-dispatcher/internal/effort"
+)
 
 // ---- row plumbing -----------------------------------------------------------
 
@@ -128,12 +132,21 @@ func cqLabel(p string) string {
 // The PR reference rides here and nowhere else on this screen. The v3 item
 // header that used to carry it is gone with the one-at-a-time queue, and a PR
 // number is the handle you would actually type into gh.
+// The panel has room for words the table's two age columns do not, so it spends
+// them: bare "4s · 3h" here would be two numbers with nothing saying which is
+// which, where the table has LAST and AGE standing over them.
 func cqWhere(r fleetRow) string {
-	parts := make([]string, 0, 4)
-	for _, p := range []string{cqLabel(r.product), r.repo, r.ref, cqAge(r.moved)} {
+	parts := make([]string, 0, 5)
+	for _, p := range []string{cqLabel(r.product), r.repo, r.ref} {
 		if p != "" {
 			parts = append(parts, p)
 		}
+	}
+	if a := cqAge(r.moved); a != "" {
+		parts = append(parts, "moved "+a+" ago")
+	}
+	if a := cqAge(r.started); a != "" {
+		parts = append(parts, a+" old")
 	}
 	return strings.Join(parts, " · ")
 }
@@ -206,6 +219,24 @@ func cqCtxLine(r fleetRow) string {
 	return s
 }
 
+// cqCodedLine is the row's hand-coding equivalent: how long a senior developer
+// would have taken to write this branch's diff by hand.
+//
+// It is the only clause in the status tail that is a model rather than a
+// reading, so it always carries the "≈" that says so, and the verb says what
+// the number counts — hands on a keyboard, not what the dispatcher spent. See
+// internal/effort for the model itself.
+//
+// Two different silences, both correct: a dispatcher whose diff could not be
+// read has no clause, and one that has committed nothing yet has none either.
+// "≈0m to hand-code" is true and tells the reader nothing.
+func cqCodedLine(r fleetRow) string {
+	if !r.codedKnown || r.coded <= 0 {
+		return ""
+	}
+	return "≈" + effort.Human(r.coded) + " to hand-code"
+}
+
 func cqTokens(n int) string {
 	if n >= 1000 {
 		return itoa(n/1000) + "k"
@@ -243,8 +274,8 @@ func cqUnattendedLine() string {
 		return "nothing running unattended"
 	}
 	s := itoa(n) + " running unattended"
-	if cqLastOutput != "" {
-		s += " · last output " + cqLastOutput + " ago"
+	if a := cqAge(cqLastOutput); a != "" {
+		s += " · last output " + a + " ago"
 	}
 	// `w` no longer opens a view of its own — it narrows the table to the
 	// running rows — so the sentence advertises what the key now does.

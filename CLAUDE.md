@@ -29,7 +29,13 @@
       worktree path and the cockpit's record map are both keyed by it, so a
       second concurrent dispatch of a live name would put two sessions in one
       checkout. Launch refuses it; re-dispatching a *finished* feature is
-      still fine and reuses the worktree left behind.
+      still fine and reuses the worktree left behind. "Live" is two facts
+      (`liveDispatch`), and the second is the one that bites: a live tmux
+      session is **not** a live dispatcher, because `launchCommand` ends
+      `; exec ${SHELL}` on purpose and every finished dispatch keeps its
+      session as an idle login shell. `supervisor.SessionIdle` tells them
+      apart; its *unknown* (a backend that cannot see into a session) is
+      neither, and keeps the refusal rather than guessing.
   - *Product* is the grouping lens: the cockpit list and the dispatch form's
     repo picker group by the `[products]` config, most urgent group first;
     unmapped repos fall under "other". No separate group concept.
@@ -75,6 +81,14 @@
   otherwise tell a quiet portfolio from a locked-out client. The cockpit says
   so — "—" in every check column is a claim about the repositories when it is
   a fact about us.
+- **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
+  a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
+  a lens that wants its own capital U never sees the key — the assignment
+  editor's "start over" was exactly that, dead since the upgrade key landed,
+  and is ctrl+u now. And undo, the key you hit fastest and without looking,
+  must not be one slipped shift from upgrading the machine in place, so it is
+  a chord. That also frees `u` for the editor's unassign, which the global
+  undo used to steal whenever a triage act had left something undoable.
 - **Decisions are read where they were written, never invented.** The
   DECISIONS lens has two sources: an adr-tools folder, and a heading that
   names a set of decisions in the repo's own markdown (`CLAUDE.md`,
@@ -94,6 +108,22 @@
   (merge counts as live for repos with no deploy workflow). `d` in the
   cockpit is the manual override. Auto-done only advances while a cockpit
   is open (the tracker runs from the cockpit's poll loop).
+- **The dispatch form's MODE is Claude Code's permission mode, not a
+  sentence about one.** A dispatch is launched with `--permission-mode` —
+  `auto` (takes its own edits and safe commands), `manual` (asks before each
+  step) or `plan` — recorded on the dispatch, and passed again on `Resume`,
+  so a reopened dispatcher comes back the way it went out. Auto is the
+  default: a dispatcher is by definition work sent somewhere else to happen,
+  with nobody sitting on its permission prompt. The form's closing prompt
+  sentence stays, because the flag says what claude may do without asking and
+  the sentence says how far to take the work — "may edit without asking" is
+  not "commit, push and open the PR". This shipped as a two-position AUTO
+  switch with nothing behind it: whatever it said, the session opened in
+  whatever the human's own Claude Code defaults to and stopped on its first
+  permission prompt unattended. A claude too old to know a mode's current
+  spelling is given the older one (`acceptEdits`/`default`) and one with no
+  such flag gets none, because a rejected flag is not a degraded session —
+  it is a launch that never happens.
 - Commit attribution is by provenance (dispatch records its branch SHAs),
   NEVER by Co-Authored-By trailers — the user strips those from commits.
 - User is on a Claude subscription (not API billing): portfolio roll-up
@@ -117,7 +147,26 @@
   a real stage and every figure is what it found — the list is a description of
   that function, not decoration over it, so a stage added there gets a step here
   (a test asserts the two sets match). Any key skips it; the load continues.
+  Panels get a height as well as a width: the product panel's history tab is as
+  long as the product's past, and it is the lines *under* the list — the session
+  id and the key that reopens it — that a fixed-height column drops first, so it
+  windows around the cursor and counts what it hides rather than stopping mute.
+  `prodDay` normalises to **local** before truncating: forge timestamps are UTC
+  and the clock's are local, and a day compared across the two is never equal.
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
+- `internal/effort` — the hand-coding equivalent: how long a senior developer
+  would have taken to write a diff by hand. The ONLY figure in the product
+  that is a model rather than a measurement, so every screen showing it says
+  so — an `≈` on the figure, and the rate (`effort.LinesPerHour`, one named
+  constant) printed beside the velocity total. Read once per load off the
+  provenance diff collectFloor already ran, published on `snapshot.effortBy`
+  keyed by feature, and shared by triage, history and velocity so no two
+  screens can quote different hours for one branch. A feature missing from that
+  map is one whose diff could not be read, which is NOT the same as one that
+  wrote nothing: totals skip it and velocity says how many of its live features
+  it could price. History rows take the figure from that map and never run a
+  diff of their own — `fleetPastRow` stays the cheapest row there is, so a
+  machine with hundreds of finished dispatchers still polls in constant work.
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort
   check for a newer release, and `Detect()`: which package manager installed
@@ -125,6 +174,17 @@
   upgrades it. `U` in the cockpit runs that command and re-execs. A
   declaratively-installed Nix build is never upgraded imperatively — only an
   entry in the imperative profile's `manifest.json` proves it may be.
+  - **A cached answer belongs to the build that recorded it.** `U` upgrades in
+    place and re-execs, so the build that comes back would otherwise read a
+    cache naming the release it was upgraded *from* — "latest v3.1.3" read by
+    v3.2.3 compares as "you are current" and hides everything published since,
+    for the rest of the TTL. The cache carries the `Build` that wrote it and a
+    different one re-asks; that is also why a failed check only carries forward
+    an answer this build recorded.
+  - **`U` with nothing on offer checks rather than reciting the cache**
+    (`version.Recheck`). The ambient answer is hours old by design, and a human
+    presses `U` precisely when they think it is behind. Finding a release goes
+    straight to the confirm — they pressed it to upgrade, not to be told.
 
 ## Build
 `make build` / `make vet` / `make install` (binary to ~/.local/bin — the init

@@ -34,10 +34,10 @@ type splitPart struct {
 
 // doraWeek is one row of the by-week DORA table. best marks the current week.
 type doraWeek struct {
-	w                                string
-	deploys                          int
-	lead, fail, restore, first, wait string
-	best                             bool
+	w                                       string
+	deploys                                 int
+	lead, coded, fail, restore, first, wait string
+	best                                    bool
 }
 
 // outWeek is one row of the shipped-of-dispatched table.
@@ -54,6 +54,14 @@ var (
 	outputUnit     string
 	outputDelta    string
 	outputSpark    string
+	// outputCoded prices the live features in senior-developer hours, and
+	// outputCodedNote states the model that produced the figure. They are drawn
+	// as a pair and are empty as a pair — the estimate never appears without
+	// the sentence that says how it was arrived at. Both are copied
+	// unconditionally by applySnapshot: a stale line here would price work that
+	// did not happen.
+	outputCoded     string
+	outputCodedNote string
 )
 
 type notVelocityRow struct{ k, v, why string }
@@ -65,12 +73,28 @@ type velCol struct {
 	rank       int
 }
 
+// velCellW is the by-week table's cell width, and it is 12 rather than 11
+// because "WAIT ON YOU" is exactly 11 characters: right-aligned in its own
+// width it left no gap, and the header before it ran straight into it
+// ("1st PASSWAIT ON YOU"). One column of headroom is what separates a table's
+// columns from each other.
+const velCellW = 12
+
+// HAND-CODED ranks third, behind only WAIT ON YOU and LEAD.
+//
+// It goes above FAIL, RESTORE and 1st PASS because those three have no incident
+// or repair data behind them and render "—" on every row: a column with a
+// figure in it beats one that is structurally empty, whatever the design's
+// original ordering said. It goes above DEPLOYS because the output pane's
+// shipped-of-dispatched table already states that week by week, and this is the
+// one thing on the lens that says how big those deploys were.
 var velColsAll = []velCol{
-	{"deploys", "DEPLOYS", 6},
+	{"deploys", "DEPLOYS", 7},
 	{"lead", "LEAD", 2},
-	{"fail", "FAIL", 4},
-	{"restore", "RESTORE", 7},
-	{"first", "1st PASS", 5},
+	{"coded", "HAND-CODED", 3},
+	{"fail", "FAIL", 5},
+	{"restore", "RESTORE", 8},
+	{"first", "1st PASS", 6},
 	{"wait", "WAIT ON YOU", 1},
 }
 
@@ -105,6 +129,22 @@ func (m model) velLeft(iw int) []string {
 		cr(outputSpark, dispWidth(outputSpark), cGreen),
 	))
 	out = append(out, line(outputDelta, iw, cGreen, ""))
+	// How much those features actually were. "3 live" is the same headline for
+	// three typo fixes and three rewritten services, and the hours are the only
+	// thing on this pane that tells the two apart.
+	//
+	// The note is drawn with the figure or not at all. It is the one estimated
+	// number on the lens, sitting directly under a column of counted ones, and
+	// what keeps that honest is the line beneath it saying what the estimate
+	// assumed — so the two are never separated, not even by a shed spacer.
+	if outputCoded != "" {
+		for _, l := range velWrap(outputCoded, iw, 2) {
+			out = append(out, line(l, iw, cMid, ""))
+		}
+		for _, l := range velWrap(outputCodedNote, iw, 2) {
+			out = append(out, line(l, iw, cFaint, ""))
+		}
+	}
 	out = append(out, "")
 
 	// shipped-of-dispatched table.
@@ -209,7 +249,7 @@ func (m model) velRight(iw int) []string {
 
 	hdr := []seg{flexc("WEEK", cFaint)}
 	for _, col := range cols {
-		hdr = append(hdr, cr(col.label, 11, cFaint))
+		hdr = append(hdr, cr(col.label, velCellW, cFaint))
 	}
 	out = append(out, row(iw, "", hdr...))
 
@@ -224,7 +264,7 @@ func (m model) velRight(iw int) []string {
 			if col.key == "wait" {
 				cc = cAmber
 			}
-			cells = append(cells, cr(velCellValue(wk, col.key), 11, cc))
+			cells = append(cells, cr(velCellValue(wk, col.key), velCellW, cc))
 		}
 		out = append(out, row(iw, "", cells...))
 	}
@@ -407,7 +447,7 @@ func velTileLines(mtr doraMetric, cw int, org bool) []string {
 // that would not fit, and finally restores the original column order.
 func velColumns(iw, velFit int) []velCol {
 	n := maxi(3, velFit-1)
-	if byWidth := (iw - 10) / 11; byWidth < n {
+	if byWidth := (iw - 10) / velCellW; byWidth < n {
 		n = byWidth
 	}
 	if n < 1 {
@@ -457,6 +497,8 @@ func velCellValue(w doraWeek, key string) string {
 		return itoa(w.deploys)
 	case "lead":
 		return w.lead
+	case "coded":
+		return w.coded
 	case "fail":
 		return w.fail
 	case "restore":

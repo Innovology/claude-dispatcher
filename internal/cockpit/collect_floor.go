@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/effort"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/transcript"
@@ -27,6 +28,12 @@ func collectFloor(ctx *collectCtx, s *snapshot) {
 		files []diffFile
 		hunk  []hunkLine
 	}{}
+	// Keyed by feature like the rest, and deliberately sparse: a feature with
+	// no entry is one whose diff could not be read, which is not the same as a
+	// feature that changed nothing. Both triage and velocity are built on this
+	// one map so the two lenses can never quote different figures for the same
+	// branch — and so the estimate costs the numstat this load already ran.
+	s.effortBy = map[string]effort.Estimate{}
 
 	// Each record costs several git and gh round-trips, and they are
 	// independent, so gather them concurrently and assemble in record order —
@@ -51,6 +58,9 @@ func collectFloor(ctx *collectCtx, s *snapshot) {
 			files []diffFile
 			hunk  []hunkLine
 		}{files: r.dfs, hunk: []hunkLine{}}
+		if r.diffOK {
+			s.effortBy[rec.Feature] = r.est
+		}
 	}
 }
 
@@ -63,6 +73,11 @@ type floorRow struct {
 	said string
 	tail []string
 	dfs  []diffFile
+	// est is the hand-coding estimate for dfs, and diffOK is whether git
+	// answered at all. They are separate because a zero estimate is a fact
+	// ("nothing has been written yet") and an unread diff is not.
+	est    effort.Estimate
+	diffOK bool
 }
 
 // buildFloorRow resolves one dispatch record into its view row. It is called
@@ -76,7 +91,7 @@ func buildFloorRow(ctx *collectCtx, rec *state.Dispatch) floorRow {
 	commits := len(rec.Commits)
 
 	// Diff provenance: what BaseSHA..Branch actually changed.
-	plus, minus, files, dfs := floorNumstat(rec.RepoPath, rec.BaseSHA, rec.Branch)
+	plus, minus, files, dfs, diffOK := floorNumstat(rec.RepoPath, rec.BaseSHA, rec.Branch)
 
 	// PR review + checks signals (gh only; ado degrades to zero).
 	var checks gh.Checks
@@ -146,7 +161,22 @@ func buildFloorRow(ctx *collectCtx, rec *state.Dispatch) floorRow {
 		ask:   floorAsk(rec, st, commits, age),
 	}
 
-	return floorRow{ok: true, rec: rec, d: d, said: floorSaid(tail), tail: tail, dfs: dfs}
+	return floorRow{
+		ok: true, rec: rec, d: d, said: floorSaid(tail), tail: tail, dfs: dfs,
+		est: floorEffort(dfs), diffOK: diffOK,
+	}
+}
+
+// floorEffort estimates how long a senior developer would have taken to write
+// this dispatch's diff by hand. It is the one figure in the cockpit that is a
+// model rather than a measurement, and internal/effort documents the model —
+// every screen that shows it says so in the words around it.
+func floorEffort(dfs []diffFile) effort.Estimate {
+	fs := make([]effort.File, 0, len(dfs))
+	for _, f := range dfs {
+		fs = append(fs, effort.File{Path: f.path, Plus: f.plus, Minus: f.minus})
+	}
+	return effort.Of(fs)
 }
 
 // floorState maps a record's Status to the floor's view state, or "" to skip.
@@ -345,7 +375,14 @@ func floorSaid(tail []string) string {
 
 // floorNumstat sums `git diff --numstat BaseSHA..Branch` into totals plus a
 // per-file list. Degrades to zero/empty on any error.
-func floorNumstat(repoPath, base, branch string) (plus, minus, files int, dfs []diffFile) {
+//
+// ok separates the two zeroes: git answered and the branch has changed nothing
+// yet, versus git could not be asked at all — no BaseSHA recorded, or a branch
+// somebody has since deleted. The counts read the same either way, so callers
+// that would otherwise report "no work here" for a diff they never saw take the
+// flag instead. (Nothing in this repo deletes a feature branch — `git worktree
+// remove` leaves the ref — so the second case is a human tidying up.)
+func floorNumstat(repoPath, base, branch string) (plus, minus, files int, dfs []diffFile, ok bool) {
 	dfs = []diffFile{}
 	if repoPath == "" || base == "" || branch == "" {
 		return
@@ -354,6 +391,7 @@ func floorNumstat(repoPath, base, branch string) (plus, minus, files int, dfs []
 	if err != nil {
 		return
 	}
+	ok = true
 	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if ln == "" {
 			continue

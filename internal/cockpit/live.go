@@ -16,8 +16,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/effort"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -34,9 +36,14 @@ type snapshot struct {
 		files []diffFile
 		hunk  []hunkLine
 	}
+	// effortBy is the hand-coding estimate per feature, from the same numstat
+	// diffsBy holds. It never reaches a package var: triage carries the figure
+	// on its rows and velocity totals it into its own strings, both inside the
+	// load that produced it, so there is no third copy to go stale.
+	effortBy map[string]effort.Estimate
 
 	fleet        []fleetRow
-	cqLastOutput string
+	cqLastOutput time.Time
 
 	products       []product
 	reposByProduct map[string][]repoRef
@@ -57,6 +64,7 @@ type snapshot struct {
 	teamVerdict     map[string]string
 	shipped         map[string][]shippedDay
 	productHistory  map[string][]historyItem
+	historyOlder    map[string]int
 	productVelocity map[string][]velTile
 
 	decisions         map[string][]decision
@@ -68,16 +76,18 @@ type snapshot struct {
 	usageProjection string
 	usageAdvice     []usageAdviceItem
 
-	doraOrg     []doraMetric
-	doraFactory []doraMetric
-	doraSplit   []splitPart
-	doraWeeks   []doraWeek
-	outputWeeks []outWeek
-	outputHead  string
-	outputUnit  string
-	outputDelta string
-	outputSpark string
-	notVelocity []notVelocityRow
+	doraOrg         []doraMetric
+	doraFactory     []doraMetric
+	doraSplit       []splitPart
+	doraWeeks       []doraWeek
+	outputWeeks     []outWeek
+	outputHead      string
+	outputUnit      string
+	outputDelta     string
+	outputSpark     string
+	outputCoded     string
+	outputCodedNote string
+	notVelocity     []notVelocityRow
 
 	// records maps a view dispatch's feature to its live record, so an action
 	// on the selected row reaches the real tmux session / branch / PR.
@@ -110,8 +120,22 @@ type collectCtx struct {
 	forges  map[string]string
 }
 
-// productFor maps a record onto the same product key collectProducts uses,
-// folding anything unmapped into "unassigned".
+// productFor maps a record onto a product key, folding anything unmapped into
+// "unassigned". It is the ONE rule the whole cockpit groups records by — triage
+// and the products lens both call it, so the two can never disagree about where
+// a dispatch belongs.
+//
+// The config decides, not the record. rec.Product is a copy of this same lookup
+// taken when the dispatch went out (dispatch.go), so the moment the human
+// reassigns a repo the two disagree — and the record is the one that is out of
+// date. Preferring it meant an assignment landed on the products lens (which
+// reads the config) while every dispatch of that repo stayed where it was on
+// triage, or fell out into "unassigned" when the product it named had since been
+// renamed away. The config is what the human just edited; it wins, and a repo it
+// maps to nothing is unassigned because that is what unassigning it means.
+//
+// The record is still the fallback when there is no config to ask at all — with
+// nothing loaded, what the dispatch was launched under is the only thing known.
 //
 // It reads the config rather than the package's productOrder/reposByProduct
 // vars on purpose. Collectors run in order and applySnapshot only publishes
@@ -120,19 +144,16 @@ type collectCtx struct {
 // up empty while work was in flight. A collector must derive from its ctx, not
 // from the state a later collector will produce.
 func (c *collectCtx) productFor(rec *state.Dispatch) string {
-	p := rec.Product
-	if p == "" && c.cfg != nil {
-		p = c.cfg.ProductFor(rec.RepoName)
-	}
-	if p == "" {
-		return "unassigned"
-	}
-	if c.cfg != nil {
-		if _, ok := c.cfg.Products[p]; !ok {
+	if c.cfg == nil {
+		if rec.Product == "" {
 			return "unassigned"
 		}
+		return rec.Product
 	}
-	return p
+	if p := c.cfg.ProductFor(rec.RepoName); p != "" {
+		return p
+	}
+	return "unassigned"
 }
 
 // forge reports the forge a repo path belongs to: "ado" for Azure DevOps
@@ -341,9 +362,9 @@ func applySnapshot(s snapshot) {
 	if s.fleet != nil {
 		fleet = s.fleet
 	}
-	// Unconditionally, unlike every other field: "" means no running session has
-	// a readable transcript, which is an observation the view must show, and a
-	// stale age left in place would be a lie about liveness.
+	// Unconditionally, unlike every other field: the zero time means no running
+	// session has a readable transcript, which is an observation the view must
+	// show, and a stale instant left in place would be a lie about liveness.
 	cqLastOutput = s.cqLastOutput
 	if s.products != nil {
 		products = s.products
@@ -435,6 +456,11 @@ func applySnapshot(s snapshot) {
 	if s.outputSpark != "" {
 		outputSpark = s.outputSpark
 	}
+	// Unconditionally, like cqLastOutput: "" means nothing reached production
+	// in the window, which is an observation the lens must show. Keeping the
+	// last figure would price work that has not happened. The note moves with
+	// the figure so the estimate can never be drawn without its model.
+	outputCoded, outputCodedNote = s.outputCoded, s.outputCodedNote
 	if s.notVelocity != nil {
 		notVelocity = s.notVelocity
 	}
@@ -446,6 +472,9 @@ func applySnapshot(s snapshot) {
 	}
 	if s.productHistory != nil {
 		productHistory = s.productHistory
+	}
+	if s.historyOlder != nil {
+		historyOlder = s.historyOlder
 	}
 }
 

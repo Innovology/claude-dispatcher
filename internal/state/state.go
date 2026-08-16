@@ -64,8 +64,16 @@ type Dispatch struct {
 	// under WorktreesDir); the claude session runs there so concurrent
 	// dispatches never fight over the repo's working copy. RepoPath stays the
 	// main repo — refs, PRs, and commit provenance are read from there.
-	WorktreePath   string `json:"worktree_path,omitempty"`
-	Prompt         string `json:"prompt"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	Prompt       string `json:"prompt"`
+	// Mode is the permission mode the session was dispatched in — one of
+	// dispatch.Mode's values. It is on the record because a resumed session has
+	// to reopen the way it went out and the transcript does not carry it, and
+	// because every screen that says a dispatcher is unattended should be
+	// reading the mode it was actually launched with. Empty on records written
+	// before the mode was a choice: those ran in whatever claude defaulted to,
+	// which is not the same fact as "auto".
+	Mode           string `json:"mode,omitempty"`
 	TmuxSession    string `json:"tmux_session"`
 	SessionID      string `json:"session_id,omitempty"`
 	TranscriptPath string `json:"transcript_path,omitempty"`

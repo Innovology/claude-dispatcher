@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/effort"
 	"claude-dispatcher/internal/state"
 )
 
@@ -229,6 +230,49 @@ func velLeadBand(d time.Duration) string {
 	}
 }
 
+// velCodedLines are the two lines under the output headline: what the features
+// that reached production would have cost a senior developer to write by hand,
+// and — directly beneath it, never separated from it — the model that produced
+// that figure.
+//
+// The pair is deliberate. This is the one number on the lens that is estimated
+// rather than counted, so the sentence that says how it was arrived at is part
+// of the figure, not a footnote to it: the rate every hour scales with, and how
+// much of what shipped the estimate could actually see.
+//
+// The rate is read from effort.LinesPerHour rather than written out here. A
+// printed copy of the constant that could drift from the constant would be
+// worse than not printing it at all.
+//
+// It lives in the output pane rather than as a sixth factory tile on the right.
+// That was the first shape and it cost a row of tiles, which pushed the by-week
+// table off a 44-row terminal — a figure that hides a table to show itself is
+// not worth its space. The output pane is also where it belongs: "what actually
+// reached production" is the argument this pane makes, and how much of it there
+// was is the same argument.
+func velCodedLines(week, window time.Duration, weeks, measured, live int) (figure, note string) {
+	if live == 0 || measured == 0 {
+		// Nothing shipped, or nothing that shipped could be measured. The
+		// headline above already says how many features went live; a line of
+		// dashes under it would add a shape and no fact.
+		return "", ""
+	}
+	if week > 0 {
+		figure = "≈" + effort.Human(week) + " to hand-code this week · ≈" +
+			effort.Human(window) + " over " + itoa(weeks) + " weeks"
+	} else {
+		figure = "≈" + effort.Human(window) + " to hand-code over " + itoa(weeks) + " weeks"
+	}
+
+	note = "senior developer at " + itoa(int(effort.LinesPerHour)) + " lines/hour"
+	if measured < live {
+		return figure, note + " · " + itoa(measured) + " of " + itoa(live) +
+			" live features measurable"
+	}
+	return figure, note + " · from " + itoa(live) + " live " +
+		plural(live, "feature", "features")
+}
+
 // collectVelocity computes output and DORA metrics from ctx.records.
 func collectVelocity(ctx *collectCtx, s *snapshot) {
 	now := time.Now()
@@ -241,6 +285,9 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 		live       int
 		dispatched int
 		leads      []time.Duration
+		// coded is the hand-coding equivalent of the features that went live in
+		// this week, summed over the ones whose diff could be read.
+		coded time.Duration
 	}
 	weeks := make([]weekAgg, nWeeks)
 	for i := 0; i < nWeeks; i++ {
@@ -268,6 +315,14 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 	deploys7 := 0
 	var allLeads []time.Duration
 
+	// Hand-coding equivalent across the window, and the coverage behind it.
+	// liveInWindow counts every feature that reached production; codedMeasured
+	// counts the subset whose diff collectFloor could read. The two are quoted
+	// together wherever the total is, because a total over eight of eleven
+	// features is a floor and must not be read as a ceiling.
+	var codedWindow time.Duration
+	liveInWindow, codedMeasured := 0, 0
+
 	for _, r := range ctx.records {
 		if r == nil {
 			continue
@@ -281,6 +336,15 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 		if lt, ok := velLiveTime(r); ok {
 			if idx := weekIndex(lt); idx >= 0 {
 				weeks[idx].live++
+				liveInWindow++
+				// Priced into the week it went LIVE, not the week it was
+				// written. This pane's whole argument is that only production
+				// counts, so a feature's size lands where its deploy did.
+				if est, known := s.effortBy[r.Feature]; known {
+					weeks[idx].coded += est.Dur
+					codedWindow += est.Dur
+					codedMeasured++
+				}
 				if !r.CreatedAt.IsZero() {
 					if lead := lt.Sub(r.CreatedAt); lead > 0 {
 						weeks[idx].leads = append(weeks[idx].leads, lead)
@@ -322,6 +386,13 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 		sign = "+"
 	}
 	s.outputDelta = fmt.Sprintf("%s%d on last week", sign, delta)
+
+	// What the features that reached production would have cost to write by
+	// hand. Assigned even when empty (see the outputCoded comment in
+	// velocity.go): a window that shipped nothing must not keep the last
+	// figure on screen.
+	s.outputCoded, s.outputCodedNote = velCodedLines(
+		weeks[0].coded, codedWindow, nWeeks, codedMeasured, liveInWindow)
 
 	// ---- org DORA -----------------------------------------------------------
 	freq := float64(deploys7) / 7.0
@@ -393,6 +464,7 @@ func collectVelocity(ctx *collectCtx, s *snapshot) {
 			w:       weeks[i].label,
 			deploys: weeks[i].live,
 			lead:    lead,
+			coded:   effort.Human(weeks[i].coded),
 			fail:    "—",
 			restore: "—",
 			first:   "—",

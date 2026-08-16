@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/version"
 )
 
@@ -67,6 +68,11 @@ type model struct {
 	// upgradeTo is the newest published release tag when this build is behind
 	// it, "" when up to date, unknown, or running unstamped.
 	upgradeTo string
+
+	// upgradeChecking is a U-triggered lookup in flight. It keeps a second press
+	// from opening a second network call while the first is still out — the
+	// notice already says we are looking.
+	upgradeChecking bool
 
 	shipCursor    int
 	historyCursor int
@@ -152,7 +158,7 @@ type model struct {
 	fleetCursor int
 	fleetSelID  string
 
-	cqUndo *cqUndoEntry // the last cleared row, restorable with `u`
+	cqUndo *cqUndoEntry // the last cleared row, restorable with ctrl+z
 
 	// pending is what this cockpit has asked for and not yet seen a record for.
 	// It is the only view state that is not derived from the records, and it has
@@ -162,15 +168,15 @@ type model struct {
 
 	// ---- triage lens: the structured dispatch form -------------------------
 	// The floor's freeform draft became five fields: where it lands, what it is
-	// called, what it does, when it is done, and whether it needs you between
-	// steps. See dispatchx.go — cqDispatch is what says the form is open.
-	dxField  dxFieldID // which line owns the keyboard
-	dxFilter string    // WHERE: repo filter (runes from the key message)
-	dxRepo   int       // cursor into dxRows(); clamped on read, reset by filtering
-	dxTitle  string    // TITLE: the feature name, and the branch
-	dxWhat   string    // WHAT: the work — the prompt's body, wrapped as it is typed
-	dxGoal   string    // DONE WHEN: completion condition, optional
-	dxAuto   bool      // AUTO: unattended (default true)
+	// called, what it does, when it is done, and how much it may do without
+	// asking. See dispatchx.go — cqDispatch is what says the form is open.
+	dxField  dxFieldID        // which line owns the keyboard
+	dxFilter string           // WHERE: repo filter (runes from the key message)
+	dxRepo   int              // cursor into dxRows(); clamped on read, reset by filtering
+	dxTitle  string           // TITLE: the feature name, and the branch
+	dxWhat   string           // WHAT: the work — the prompt's body, wrapped as it is typed
+	dxGoal   string           // DONE WHEN: completion condition, optional
+	dxMode   dispatchpkg.Mode // MODE: auto / manual / plan — the session's permission mode
 }
 
 func newModel() model {
@@ -190,8 +196,10 @@ func newModel() model {
 		// brew/nix/unknown cases without being installed that way.
 		install: version.Detect(),
 		// The default dispatch is unattended. Without this the form opens on
-		// "asks after every step", which is not the product's default posture.
-		dxAuto: true,
+		// the zero value, which is not a mode at all — and the launch it made
+		// would open a session asking about every step, which is not the
+		// product's default posture.
+		dxMode: dispatchpkg.DefaultMode,
 	}
 }
 
@@ -241,8 +249,11 @@ func (m model) Init() tea.Cmd {
 	// The first load is the one with a screen watching it: it reports each
 	// stage as it runs, and the model subscribes for those reports and ticks
 	// the animation. Every later load takes the plain path.
+	// ageTick rides with the poll rather than with the demo path above: it keeps
+	// the printed ages of real dispatchers honest, and a cockpit with no config
+	// has none to age.
 	load := loadSnapshotCmd(m.cfg)
-	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), upgradeCheckCmd()}
+	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), ageTick(), upgradeCheckCmd()}
 	if m.boot != nil {
 		load = bootLoadCmd(m.cfg, m.bootCh)
 		cmds = append(cmds, waitBoot(m.bootCh), bootTick())
@@ -305,9 +316,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// network call.
 		return m, tea.Batch(trackRefreshCmd(m.cfg), refreshTick(), upgradeCheckCmd())
 
+	case ageTickMsg:
+		// Deliberately the emptiest arm in this switch. The model is returned
+		// exactly as it arrived: the tick's only effect is that returning at all
+		// gets View called again, and View reads the clock. Anything else done
+		// here would be work happening once a second.
+		return m, ageTick()
+
 	case upgradeMsg:
-		if version.IsOutdated(msg.latest) {
+		m.upgradeChecking = false
+		switch {
+		case msg.latest == "":
+			// No answer came back. Nothing is learned, so nothing already known
+			// is thrown away — but a human who asked is told we could not look,
+			// rather than left reading a corner that says nothing.
+			if msg.forced {
+				m.notice = "could not reach GitHub — the check will retry"
+			}
+		case version.IsOutdated(msg.latest):
 			m.upgradeTo = msg.latest
+			if msg.forced {
+				// They pressed U to upgrade, not to be told an upgrade exists.
+				// The confirm bar still asks before anything runs.
+				m.notice = ""
+				return m.startUpgrade()
+			}
+		default:
+			// A checked answer that is not ahead of us retires any older offer:
+			// the nag must not outlive the release that raised it.
+			m.upgradeTo = ""
+			if msg.forced {
+				m.notice = version.Display() + " is the latest"
+			}
 		}
 		return m, nil
 

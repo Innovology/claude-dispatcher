@@ -334,20 +334,23 @@ func TestCollectCtxProductFor(t *testing.T) {
 		Products: map[string][]string{"shop": {"shop-api"}},
 	}}
 
-	if got := ctx.productFor(&state.Dispatch{Product: "shop"}); got != "shop" {
-		t.Errorf("recorded product: got %q, want shop", got)
-	}
 	if got := ctx.productFor(&state.Dispatch{RepoName: "shop-api"}); got != "shop" {
 		t.Errorf("mapped by repo name: got %q, want shop", got)
 	}
-	// A repo with no mapping, and a stale product no longer in the config,
-	// both fold into "unassigned" — the same key collectProducts uses, so the
-	// floor's groups line up with the products lens.
+	// A repo with no mapping, and a product recorded on the dispatch that the
+	// config no longer agrees with, both fold into "unassigned" — the same key
+	// collectProducts uses, so the floor's groups line up with the products lens.
 	if got := ctx.productFor(&state.Dispatch{RepoName: "not-mapped"}); got != "unassigned" {
 		t.Errorf("unmapped repo: got %q, want unassigned", got)
 	}
-	if got := ctx.productFor(&state.Dispatch{Product: "retired"}); got != "unassigned" {
+	if got := ctx.productFor(&state.Dispatch{RepoName: "not-mapped", Product: "retired"}); got != "unassigned" {
 		t.Errorf("product no longer in config: got %q, want unassigned", got)
+	}
+	// With no config at all there is nothing to ask, so what the dispatch was
+	// launched under is all there is to go on.
+	none := &collectCtx{}
+	if got := none.productFor(&state.Dispatch{RepoName: "shop-api", Product: "shop"}); got != "shop" {
+		t.Errorf("no config: got %q, want the recorded shop", got)
 	}
 }
 
@@ -406,18 +409,29 @@ func TestFloorAsk(t *testing.T) {
 }
 
 func TestFloorNumstat(t *testing.T) {
-	plus, minus, files, dfs := floorNumstat("", "", "")
+	plus, minus, files, dfs, ok := floorNumstat("", "", "")
 	if plus != 0 || minus != 0 || files != 0 || len(dfs) != 0 {
 		t.Errorf("empty inputs should degrade to zero: %d %d %d %v", plus, minus, files, dfs)
+	}
+	// The counts alone cannot say which zero this is, so the flag must.
+	if ok {
+		t.Error("a diff that was never asked for must not report as read")
 	}
 
 	repo := newTestGitRepo(t, "numstat")
 	base := gitOutput(t, repo, "rev-parse", "HEAD")
 	writeAndCommit(t, repo, "file.txt", "line one\nline two\n", "second commit")
 
-	plus, minus, files, dfs = floorNumstat(repo, base, "HEAD")
-	if files != 1 || plus == 0 {
-		t.Errorf("real diff: plus=%d minus=%d files=%d dfs=%v", plus, minus, files, dfs)
+	plus, minus, files, dfs, ok = floorNumstat(repo, base, "HEAD")
+	if files != 1 || plus == 0 || !ok {
+		t.Errorf("real diff: plus=%d minus=%d files=%d ok=%v dfs=%v", plus, minus, files, ok, dfs)
+	}
+
+	// A branch with nothing on it yet is a read diff of zero lines, not an
+	// unreadable one: the estimate that hangs off this must be able to say
+	// "nothing written yet" without being mistaken for "we could not look".
+	if _, _, _, _, ok = floorNumstat(repo, "HEAD", "HEAD"); !ok {
+		t.Error("an empty-but-real diff should report as read")
 	}
 }
 

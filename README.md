@@ -39,7 +39,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 **`h` is what has already finished.** Shipped, killed, or simply exited — every dispatcher whose session is over, newest first, on the table the live fleet leaves. `enter` resumes one: the worktree comes back if it was reclaimed and the conversation picks up where it stopped, so a session ending is never the end of it.
 
-**With the fleet clear, the same screen becomes the prompt.** Give it a title — that is the branch — then the brief, which wraps for as long as it needs to be, and what "done" means. `tab` moves between the fields; `ctrl+d` dispatches.
+**With the fleet clear, the same screen becomes the prompt.** Give it a title — that is the branch — then the brief, which wraps for as long as it needs to be, what "done" means, and the mode it runs in: **auto** takes its own edits and safe commands, **manual** asks you before each step, **plan** changes nothing until you accept the plan. That is Claude Code's own `--permission-mode`, so the session really does open that way. `tab` moves between the fields, `space` cycles the mode, `ctrl+d` dispatches.
 
 ![Dispatching straight from an empty fleet](docs/dispatch.svg)
 
@@ -50,6 +50,10 @@ Switch with the number keys. Each lens is a different question about the same fa
 **Press `a` to say which repos make up which product.** Mark repos with `space`, `enter` moves them into the selected product, `n` names a new one. It writes straight to `[products]` in your config, so the grouping every other lens uses is one screen away rather than a file you have to remember the syntax for.
 
 ![Assigning repos to products](docs/assign.svg)
+
+**Everything carries its hand-coding equivalent.** Four dispatchers can be four typo fixes or four rewritten services, and the row count reads exactly the same either way — so triage prices the whole table, and the row under the cursor, in the hours a senior developer would have spent writing that diff by hand. Velocity does the same for what actually reached production, week by week.
+
+It is the one figure in the cockpit that is a model rather than a measurement, so it always says so: an `≈` wherever it appears, and the rate it assumes printed beside the total. The model reads a `git diff --numstat` — a modified line is charged once and not twice, deleting is cheaper than writing, and generated files (lockfiles, `.pb.go`, vendored trees, minified bundles) cost what running the command cost and nothing per line. It answers *how big is this change*, asked in hours; it is not a measure of value, of difficulty, or of what the dispatcher itself spent. See [`internal/effort`](internal/effort/effort.go), where the rate lives in one named constant.
 
 **Velocity** — DORA delivery metrics beside what actually shipped, because a thousand commits that never merge isn't velocity:
 
@@ -71,7 +75,7 @@ Every act the table offers is wired to the live session — the key hints show o
 
 - **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back). Coming back **rechecks** rather than redraws: you have just spent minutes driving that session by hand, so the forge is read again instead of replayed from cache, and any session that died without getting a `SessionEnd` out stops being reported as working
 - **`y`** on a PR waiting to merge: `gh pr merge --squash --auto`, then mark live. Elsewhere it marks the record shipped, and it is hidden entirely when the dispatcher has produced no commits
-- **`x`** kill the session · **`s`** skip to the back of the table · **`u`** undo
+- **`x`** kill the session · **`s`** skip to the back of the table · **`ctrl+z`** undo
 - **`d`** open the prompt · **`f`** filter the table · **`enter` on a backlog ticket** dispatches it
 - **`h`** the finished dispatchers, and **`enter`** on one resumes its session — `claude --resume` on the same transcript, in the same worktree, so it comes back knowing what it already did
 
@@ -133,6 +137,12 @@ Press **`U`**: it names the exact command, asks, hands the terminal to your
 package manager so you can watch it work, then restarts itself in place —
 same terminal, same tmux pane. Your dispatchers are tmux sessions and are not
 touched by any of this.
+
+The corner is fed by a cached check (a few hours old at most, so the cockpit
+does not chatter at GitHub). Pressing `U` when it shows nothing does not repeat
+that cache — it goes and looks, and if a release did go out in the meantime it
+takes you straight to the same confirm. So `U` is always worth a press, and
+"`v3.2.3` is the latest" is only ever said about a check that just ran.
 
 Which command it runs is read from the running binary's own path, not guessed
 from your OS:
@@ -227,6 +237,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 - Each dispatcher is an interactive `claude` session inside its own tmux session (`disp-<slug>`), started on a `feature/<slug>` branch. Sessions survive cockpit restarts; the cockpit is a stateless viewer over `~/.local/state/claude-dispatcher/`.
 - Status comes from **one** global Claude Code lifecycle hook (installed by `init` into `~/.claude/settings.json`). It maps events to states: working, needs you, blocked, done, exited.
 - Commits are attributed to dispatchers by **provenance** — each dispatch records the SHAs its feature branch produced (base tip at launch → branch tip). No trailers in your git history.
+- The **hand-coding equivalent** comes off that same provenance diff, read once per load and shared by every screen that shows it, so triage, history and velocity can never quote different hours for one branch. A branch whose diff cannot be read (no base SHA, or a branch since deleted by hand) is left out of the totals rather than counted as zero, and velocity says how many of its live features it could actually price.
 - **Nothing disappears:** a session that ends — shipped, killed or simply exited — moves to history rather than off the screen. `h` on triage and the product panel's `H` tab both list them, and `enter` resumes one: its worktree is put back if it was reclaimed and `claude --resume` picks the same conversation up where it stopped.
 - **Done means live:** when a PR merges, the tracker watches the repo's deploy workflow (auto-detected by name, or set in `[deploy_workflows]`) and flips the feature to done on a green run. Repos with no deploy workflow count merge as live.
 - The layout is **responsive**: wide terminals tile into three panes, narrower ones collapse to essentials.
@@ -243,7 +254,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `h` | history — every dispatcher whose session is over; `enter` resumes one |
 | `enter` | attach the selected dispatcher's tmux session · open what is selected |
 | `y` · `x` · `s` | ship (squash-merge) · kill · skip to the back |
-| `d` · `u` | dispatch · put back the last thing you cleared |
+| `d` · `ctrl+z` | dispatch · put back the last thing you cleared |
 | `,` · `:` · `?` | settings · command palette · all keys |
 | `U` | upgrade to the published build and come straight back |
 | `q` | quit |

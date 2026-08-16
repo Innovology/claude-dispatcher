@@ -31,6 +31,7 @@ func restoreVars(s snapshot) {
 	doraOrg, doraFactory, doraSplit, doraWeeks = s.doraOrg, s.doraFactory, s.doraSplit, s.doraWeeks
 	outputWeeks, outputHeadline = s.outputWeeks, s.outputHead
 	outputUnit, outputDelta, outputSpark = s.outputUnit, s.outputDelta, s.outputSpark
+	outputCoded, outputCodedNote = s.outputCoded, s.outputCodedNote
 	notVelocity, liveRecords = s.notVelocity, s.records
 	liveByID, productHistory = s.recordsByID, s.productHistory
 }
@@ -53,6 +54,7 @@ func captureVars() snapshot {
 		doraOrg: doraOrg, doraFactory: doraFactory, doraSplit: doraSplit,
 		doraWeeks: doraWeeks, outputWeeks: outputWeeks, outputHead: outputHeadline,
 		outputUnit: outputUnit, outputDelta: outputDelta, outputSpark: outputSpark,
+		outputCoded: outputCoded, outputCodedNote: outputCodedNote,
 		notVelocity: notVelocity, records: liveRecords,
 		recordsByID: liveByID, productHistory: productHistory,
 	}

@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 )
 
@@ -35,6 +36,7 @@ func installFleetFixture(t *testing.T) {
 				{k: "s", d: "skip"},
 			},
 			moved: now.Add(-4 * time.Minute), waited: now.Add(-4 * time.Minute),
+			started: now.Add(-2 * time.Hour),
 		},
 		{
 			id: "id-two", kind: "queue", rank: 1, ask: "turn-done", product: "beta",
@@ -47,6 +49,7 @@ func installFleetFixture(t *testing.T) {
 				{k: "s", d: "skip"},
 			},
 			moved: now.Add(-time.Hour), waited: now.Add(-time.Hour),
+			started: now.Add(-time.Hour),
 		},
 		{
 			id: "id-three", kind: "run", rank: 3, product: "alpha",
@@ -56,7 +59,10 @@ func installFleetFixture(t *testing.T) {
 				{k: "⏎", d: "attach", ok: "attaching to alpha-web session…", keep: true},
 				{k: "x", d: "kill", ok: "killed \"three\""},
 			},
+			// Six seconds since it last wrote, going for three hours: the pair
+			// the two age columns exist to tell apart.
 			moved: now.Add(-6 * time.Second), waited: now.Add(-6 * time.Second),
+			started: now.Add(-3 * time.Hour),
 		},
 		{
 			// History: a session that is over. It is in the same collected slice
@@ -71,9 +77,10 @@ func installFleetFixture(t *testing.T) {
 				{k: "o", d: "open pr", ok: "opening the pull request for \"four\"…", keep: true},
 			},
 			moved: now.Add(-3 * time.Hour), waited: now.Add(-3 * time.Hour),
+			started: now.Add(-4 * time.Hour),
 		},
 	}
-	cqLastOutput = "6s"
+	cqLastOutput = now.Add(-6 * time.Second)
 }
 
 func cqModel(t *testing.T) model {
@@ -156,7 +163,7 @@ func TestCQActFlashClearsAndUndoes(t *testing.T) {
 		t.Fatalf("cleared=%d undo=%+v", m.cqCleared, m.cqUndo)
 	}
 
-	m = press(m, "u")
+	m = press(m, "ctrl+z")
 	if got := fleetFeatures(m); got != "one,two,three" {
 		t.Errorf("undo should put the row back at the front, got %s", got)
 	}
@@ -297,8 +304,8 @@ func TestFleetEmptyFilterStaysOnTheTable(t *testing.T) {
 func TestCQFormFallThrough(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	if !m.cqDispatch || m.dxTouched() || !m.dxAuto {
-		t.Fatalf("d should open an empty form, auto on: %v %v %v", m.cqDispatch, m.dxTouched(), m.dxAuto)
+	if !m.cqDispatch || m.dxTouched() || m.dxMode != dispatchpkg.ModeAuto {
+		t.Fatalf("d should open an empty form in auto: %v %v %q", m.cqDispatch, m.dxTouched(), m.dxMode)
 	}
 
 	// Untouched: a lens digit still navigates rather than typing itself.
@@ -326,21 +333,34 @@ func TestCQFormFallThrough(t *testing.T) {
 func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxAutoF} {
+	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxModeF} {
 		m = press(m, "enter")
 		if m.dxField != want {
 			t.Fatalf("enter should advance to field %d, got %d", want, m.dxField)
 		}
 	}
-	// On AUTO, space is the switch rather than a character.
-	m = press(m, "space")
-	if m.dxAuto {
-		t.Error("space on AUTO should turn it off")
+	// On MODE, space is the switch rather than a character, and it walks all
+	// three positions back round to where it started.
+	for _, want := range []dispatchpkg.Mode{dispatchpkg.ModeManual, dispatchpkg.ModePlan, dispatchpkg.ModeAuto} {
+		m = press(m, "space")
+		if m.dxMode != want {
+			t.Fatalf("space on MODE should reach %q, got %q", want, m.dxMode)
+		}
+	}
+	// left walks the other way, so the third choice is never three keypresses.
+	m = press(m, "left")
+	if m.dxMode != dispatchpkg.ModePlan {
+		t.Errorf("left on MODE = %q, want plan", m.dxMode)
 	}
 
 	m = press(m, "esc")
 	if m.cqDispatch || m.dxTouched() || m.dxField != dxWhereF {
 		t.Error("esc should abandon the form and reset every field")
+	}
+	// Including the mode: the next form opens on the default, not on whatever
+	// the abandoned one had been cycled to.
+	if m.dxMode != dispatchpkg.DefaultMode {
+		t.Errorf("esc left the mode at %q, want the default back", m.dxMode)
 	}
 }
 
@@ -383,7 +403,7 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 
 	var gotFeature, gotPrompt string
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, feature, prompt string) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode) tea.Cmd {
 		gotFeature, gotPrompt = feature, prompt
 		return nil
 	}
@@ -417,7 +437,7 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 // typed, and the brief is WHAT in full, however long either one is.
 func TestDXDispatchNamesFromTitleBriefsFromWhat(t *testing.T) {
 	long := "rebuild the deploy watcher so it stops polling a workflow that already finished"
-	feature, prompt := dxDispatch("  deploy watcher  ", "  "+long+"  ", "", true)
+	feature, prompt := dxDispatch("  deploy watcher  ", "  "+long+"  ", "", dispatchpkg.ModeAuto)
 	if feature != "deploy watcher" {
 		t.Errorf("feature = %q, want the title as typed", feature)
 	}
@@ -428,7 +448,7 @@ func TestDXDispatchNamesFromTitleBriefsFromWhat(t *testing.T) {
 	// A title past the branch's five-word cap keeps its words on the record: the
 	// cap belongs to the slug, which is what has to be a path (see
 	// dispatch.SlugWords), not to the name every screen shows.
-	feature, _ = dxDispatch("stop polling a workflow that already finished", "x", "", true)
+	feature, _ = dxDispatch("stop polling a workflow that already finished", "x", "", dispatchpkg.ModeAuto)
 	if feature != "stop polling a workflow that already finished" {
 		t.Errorf("a long title was abbreviated on the record: %q", feature)
 	}
@@ -436,7 +456,7 @@ func TestDXDispatchNamesFromTitleBriefsFromWhat(t *testing.T) {
 	// Nothing nameable is still nothing: submit's "name it" test reads the
 	// feature, so it must stay empty rather than become whitespace.
 	for _, s := range []string{"   ", "!!!"} {
-		if feature, _ := dxDispatch(s, "x", "", true); feature != "" {
+		if feature, _ := dxDispatch(s, "x", "", dispatchpkg.ModeAuto); feature != "" {
 			t.Errorf("title %q gave feature %q", s, feature)
 		}
 	}
@@ -522,12 +542,13 @@ func TestCQFooterHelpFollowsTheCursor(t *testing.T) {
 	}
 }
 
-// Four columns never shed: how bad, what, why and how long. Everything else
-// gives way as the terminal narrows, in the order the fit() tiers set.
+// Five columns never shed: how bad, what, why and both answers to how long.
+// Everything else gives way as the terminal narrows, in the order the fit()
+// tiers set.
 func TestFleetColumnsShedByWidth(t *testing.T) {
 	for _, w := range []int{60, 80, 110, 176} {
 		cols := fleetColumns(w, fleetProductMin)
-		if cols.glyph == 0 || cols.feature < 1 || cols.age == 0 {
+		if cols.glyph == 0 || cols.feature < 1 || cols.seen == 0 || cols.age == 0 {
 			t.Errorf("@%d: a load-bearing column was shed: %+v", w, cols)
 		}
 		if (w >= 70) != (cols.product > 0) {

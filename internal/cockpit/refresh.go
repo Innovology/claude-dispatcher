@@ -19,6 +19,27 @@ import (
 // than one could finish.
 const refreshEvery = 60 * time.Second
 
+// ageEvery paces the clock tick — the one message whose whole job is to make
+// the screen say a later time than it did a second ago.
+//
+// Nothing on a Bubble Tea screen ages by itself. View is called in response to
+// a message and at no other moment, so an age computed inside it is only ever
+// recomputed when something else happens to send one — and between keystrokes
+// the only thing that regularly does is the poll above, once a minute. The
+// triage table counts its ages in seconds (cqAge), so a row that had just
+// reported "4s" sat on "4s" until the next poll and then jumped most of a
+// minute. The reading was never wrong when it was drawn; it was drawn once and
+// then left there, which is worse, because a seconds column that is not moving
+// is the display a human trusts most.
+//
+// One second, because that is the resolution the column prints. The tick is as
+// cheap as its rate demands: it reads no file, makes no request, reconciles
+// nothing and rebuilds no snapshot — the handler re-arms it and returns the
+// model untouched, and the renderer's next frame re-reads the clock. Where
+// refreshTickMsg is a poll and pays for one, this is a redraw and pays for a
+// redraw.
+const ageEvery = time.Second
+
 type (
 	// snapshotMsg carries a freshly built snapshot to the UI goroutine.
 	snapshotMsg snapshot
@@ -26,6 +47,8 @@ type (
 	stateChangedMsg struct{}
 	// refreshTickMsg is the periodic poll.
 	refreshTickMsg struct{}
+	// ageTickMsg is the clock tick: a redraw and nothing else.
+	ageTickMsg struct{}
 	// trackedMsg fires after a track.Refresh pass (PR/deploy reconciliation).
 	trackedMsg struct{}
 	// bootProgressMsg carries one opening-screen step transition to the UI.
@@ -141,4 +164,8 @@ func waitState(ch chan struct{}) tea.Cmd {
 
 func refreshTick() tea.Cmd {
 	return tea.Tick(refreshEvery, func(time.Time) tea.Msg { return refreshTickMsg{} })
+}
+
+func ageTick() tea.Cmd {
+	return tea.Tick(ageEvery, func(time.Time) tea.Msg { return ageTickMsg{} })
 }

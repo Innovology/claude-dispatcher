@@ -39,6 +39,32 @@ func TestSaveLoadAllSortsByUrgency(t *testing.T) {
 	}
 }
 
+// The permission mode has to survive the round trip, and an unset one has to
+// stay unset. Resume reads Mode off the record to reopen a dispatcher the way
+// it went out; a dropped field would silently bring a manual or plan
+// dispatcher back in auto, which is a permission change nobody asked for. A
+// record from before the mode was a choice carries none, and inventing one
+// here would be claiming a session ran in a mode nobody picked.
+func TestSaveLoadKeepsTheMode(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	if err := Save(&Dispatch{ID: "m", Feature: "planned", Mode: "plan", Status: StatusWorking}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(&Dispatch{ID: "o", Feature: "older", Status: StatusWorking}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, d := range LoadAll() {
+		got[d.ID] = d.Mode
+	}
+	if got["m"] != "plan" {
+		t.Errorf("mode did not survive the round trip: %q", got["m"])
+	}
+	if got["o"] != "" {
+		t.Errorf("a record that never chose a mode came back as %q", got["o"])
+	}
+}
+
 func TestSaveStampsUpdatedAt(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 	d := &Dispatch{ID: "x", Status: StatusWorking}

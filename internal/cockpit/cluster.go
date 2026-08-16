@@ -137,6 +137,18 @@ func (m model) clAssign(repos []string, product string) (model, tea.Cmd) {
 // clPersist rewrites [products] from the working copy. Products are rebuilt
 // wholesale rather than patched: a repo belongs to exactly one product, so the
 // map is the truth and a merge could leave a repo in two.
+//
+// A save that works is also published into the cockpit's own config, because
+// that object — loaded once at startup and never re-read — is what every
+// collector groups by. This used to write a *copy* and leave m.cfg alone, so the
+// file on disk was right and the running cockpit went on grouping by the mapping
+// the human had just replaced: the assignment appeared in this editor's working
+// copy and nowhere else, and triage went on calling the repo unassigned until
+// the cockpit was restarted.
+//
+// The write is synchronous, like the settings editor's, so the config in memory
+// and the config on disk are never two different things: a failed write leaves
+// both as they were and says so.
 func (m model) clPersist() tea.Cmd {
 	if m.cfg == nil {
 		return func() tea.Msg { return actionMsg{notice: "no config — nothing saved"} }
@@ -153,12 +165,11 @@ func (m model) clPersist() tea.Cmd {
 	}
 	cfg := *m.cfg
 	cfg.Products = next
-	return func() tea.Msg {
-		if err := config.Save(&cfg); err != nil {
-			return actionMsg{notice: "could not save products: " + err.Error()}
-		}
-		return actionMsg{notice: ""} // reloads the snapshot so every lens regroups
+	if err := config.Save(&cfg); err != nil {
+		return func() tea.Msg { return actionMsg{notice: "could not save products: " + err.Error()} }
 	}
+	m.cfg.Products = next
+	return func() tea.Msg { return actionMsg{notice: ""} } // reloads the snapshot so every lens regroups
 }
 
 // ---- keys -------------------------------------------------------------------
@@ -250,9 +261,11 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 	case "u":
 		mm, cmd := m.clAssign(m.clTargets(), "")
 		return mm, cmd, true
-	case "U":
+	case "ctrl+u":
 		// Start over: every repo out of every product. Destructive enough to
-		// deserve its own capital key rather than sharing `u`.
+		// deserve its own key rather than sharing `u`, and a chord rather than
+		// the capital it used to be — `U` never arrived here at all, because
+		// handleKey resolves it as the upgrade key before any lens is asked.
 		var all []string
 		for _, r := range rows {
 			all = append(all, r.name)
