@@ -131,10 +131,19 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			// checks and another for the review, capped at the newest eight so a
 			// busy repo would not cost forty round-trips — a cap that is gone
 			// now, because the cost no longer counts pull requests.
-			open, _ := gh.RepoPRs(r.Path)
+			open, asked := gh.RepoPRs(r.Path)
 			for num, d := range open {
 				v.prs = append(v.prs, d.OpenPR)
 				v.checks[num] = d.Checks
+			}
+			if !asked {
+				// The detail read failed — a heavy rollup query GitHub declined,
+				// a repo that has gone unreachable since the search. The search
+				// still told us these pull requests are open, and a queue that
+				// drops them says the product has nothing waiting, which is a
+				// claim. Keep the rows; the checks column goes to "—", which is
+				// only the absence it already means.
+				v.prs = openPRs[name]
 			}
 			sort.Slice(v.prs, func(i, j int) bool { return v.prs[i].Number > v.prs[j].Number })
 			anyFail, anyRun, anyPass := false, false, false
