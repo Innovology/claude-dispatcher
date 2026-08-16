@@ -37,7 +37,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 ![The fleet filtered to what is running](docs/working.svg)
 
-**With the fleet clear, the same screen becomes the prompt.** Type what to build and press enter; `tab` picks the repo.
+**With the fleet clear, the same screen becomes the prompt.** Give it a title — that is the branch — then the brief, which wraps for as long as it needs to be, and what "done" means. `tab` moves between the fields; `ctrl+d` dispatches.
 
 ![Dispatching straight from an empty fleet](docs/dispatch.svg)
 
