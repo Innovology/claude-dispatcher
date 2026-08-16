@@ -25,11 +25,28 @@ const quotaNotice = "github api quota spent — forge signals paused, retrying i
 // itself down when the window resets rather than sitting there after the fact.
 func (m model) noteQuota() model {
 	until, throttled := gh.Throttled()
-	switch {
-	case throttled && (m.notice == "" || strings.HasPrefix(m.notice, quotaNotice)):
-		m.notice = quotaNotice + gh.ThrottledFor(until)
-	case !throttled && strings.HasPrefix(m.notice, quotaNotice):
-		m.notice = ""
+	left := ""
+	if throttled {
+		left = gh.ThrottledFor(until)
 	}
+	m.notice = quotaLine(m.notice, throttled, left)
 	return m
+}
+
+// quotaLine decides what the footer says next, given what it says now.
+//
+// Ambient means two things, and both are the reason this is not a plain
+// assignment: it must never overwrite a message about something the human just
+// did, and it must retire itself. A cockpit still saying the quota is spent
+// twenty minutes after it came back is the same kind of lie as an empty check
+// column — the screen asserting something it stopped knowing.
+func quotaLine(notice string, throttled bool, left string) string {
+	mine := strings.HasPrefix(notice, quotaNotice)
+	switch {
+	case throttled && (notice == "" || mine):
+		return quotaNotice + left
+	case !throttled && mine:
+		return ""
+	}
+	return notice
 }

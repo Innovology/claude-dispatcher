@@ -40,3 +40,30 @@ func TestForgeTTLsOutlastThePoll(t *testing.T) {
 		}
 	}
 }
+
+// The lockout line is ambient: it fills a silent footer, never talks over what
+// the human just did, and clears itself when the quota comes back. A cockpit
+// still reporting a spent quota after the window reset is asserting something
+// it stopped knowing — the same failure as the empty check column it exists to
+// explain.
+func TestTheQuotaLineYieldsAndRetires(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		notice    string
+		throttled bool
+		want      string
+	}{
+		{"fills a silent footer", "", true, quotaNotice + "12m"},
+		{"never talks over the human", "merging login-fix…", true, "merging login-fix…"},
+		{"refreshes its own countdown", quotaNotice + "30m", true, quotaNotice + "12m"},
+		{"retires itself on recovery", quotaNotice + "12m", false, ""},
+		{"leaves other messages alone", "attach failed: no session", false, "attach failed: no session"},
+		{"says nothing when there is nothing to say", "", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := quotaLine(tc.notice, tc.throttled, "12m"); got != tc.want {
+				t.Errorf("quotaLine(%q, %v) = %q, want %q", tc.notice, tc.throttled, got, tc.want)
+			}
+		})
+	}
+}
