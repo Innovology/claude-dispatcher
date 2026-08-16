@@ -7,6 +7,7 @@ package gh
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,18 @@ func fakeGH(t *testing.T, body string) func() []string {
 	}
 }
 
+// perPR drops the batched repo read from a call list, leaving the per-pull-
+// request work the batch is meant to make unnecessary.
+func perPR(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if !strings.HasPrefix(c, "pr list --state open") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // `gh pr checks` reports its answer in the exit code as well as on stdout: 1
 // when a check has failed, 8 while any is still pending. Those are exactly the
 // two states worth polling, so treating the exit code as "no answer" and
@@ -65,9 +78,9 @@ esac`)
 			if got := PRChecksFor(t.TempDir(), 7); got != tc.want {
 				t.Errorf("checks = %+v, want %+v", got, tc.want)
 			}
-			got := calls()
+			got := perPR(calls())
 			if len(got) != 1 {
-				t.Fatalf("wanted one request, got %d: %v", len(got), got)
+				t.Fatalf("wanted one per-PR request, got %d: %v", len(got), got)
 			}
 			if strings.Contains(got[0], "pr view") {
 				t.Errorf("fell back to the rollup with a usable answer in hand: %q", got[0])
@@ -88,7 +101,7 @@ esac`)
 	if got := (PRChecksFor(t.TempDir(), 7)); got != (Checks{Total: 1, Passed: 1}) {
 		t.Errorf("checks = %+v, want the rollup's answer", got)
 	}
-	if got := calls(); len(got) != 2 || !strings.Contains(got[1], "pr view") {
+	if got := perPR(calls()); len(got) != 2 || !strings.Contains(got[1], "pr view") {
 		t.Errorf("wanted a rollup fallback, got %v", got)
 	}
 }
@@ -131,5 +144,58 @@ esac`)
 	}
 	if runLists != 1 {
 		t.Errorf("listed the deploy runs %d times, want 1: %v", runLists, calls())
+	}
+}
+
+// The whole point of the batch: a repo's open PRs arrive with their check
+// rollups and review posture attached, so asking about ten of them costs one
+// request rather than twenty. Per-PR reads used to be the largest line in a
+// bill that came to 5,409 GraphQL requests an hour against a limit of 5,000.
+func TestOpenPRSignalsCostOneRequestPerRepo(t *testing.T) {
+	var prs []string
+	for n := 1; n <= 10; n++ {
+		prs = append(prs, `{"number":`+strconv.Itoa(n)+`,"headRefName":"feature/x",`+
+			`"reviewDecision":"APPROVED","additions":3,"deletions":1,`+
+			`"reviews":[{"author":{"login":"a"},"state":"APPROVED","submittedAt":"2026-08-16T10:00:00Z"}],`+
+			`"statusCheckRollup":[{"state":"SUCCESS"},{"state":"PENDING"}]}`)
+	}
+	calls := fakeGH(t, `case "$*" in
+  *"pr list --state open"*) echo '[`+strings.Join(prs, ",")+`]' ;;
+  *) echo '[]' ;;
+esac`)
+
+	repo := t.TempDir()
+	for n := 1; n <= 10; n++ {
+		if got := PRChecksFor(repo, n); got != (Checks{Total: 2, Passed: 1, Running: 1}) {
+			t.Fatalf("PR %d checks = %+v", n, got)
+		}
+		if got := PRReviewFor(repo, n); got.Approvals != 1 || got.Decision != "APPROVED" {
+			t.Fatalf("PR %d review = %+v", n, got)
+		}
+	}
+	if got := perPR(calls()); len(got) != 0 {
+		t.Errorf("asked about individual PRs the batch already answered: %v", got)
+	}
+	if got := calls(); len(got) != 1 {
+		t.Errorf("wanted one repo read for twenty signals, got %d: %v", len(got), got)
+	}
+}
+
+// The head branch and the diff size come back filled in now. They did not
+// before: the products lens took its open PRs from a search, which does not
+// return either, so the review queue sized every pull request at zero and could
+// never tell one of ours from anyone else's.
+func TestBatchedPRsCarryTheFieldsTheSearchNeverReturned(t *testing.T) {
+	fakeGH(t, `case "$*" in
+  *"pr list --state open"*) echo '[{"number":4,"headRefName":"feature/x","additions":120,"deletions":7}]' ;;
+  *) echo '[]' ;;
+esac`)
+
+	d, ok := RepoPRs(t.TempDir())[4]
+	if !ok {
+		t.Fatal("PR 4 missing from the batch")
+	}
+	if d.HeadRefName != "feature/x" || d.Additions != 120 || d.Deletions != 7 {
+		t.Errorf("got %+v, want the head branch and diff size filled in", d.OpenPR)
 	}
 }

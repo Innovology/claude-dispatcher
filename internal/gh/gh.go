@@ -40,8 +40,8 @@ func PRForBranch(repoPath, branch string) *PR {
 }
 
 func prForBranchUncached(repoPath, branch string) *PR {
-	out, err := command(repoPath, "pr", "list", "--head", branch, "--state", "all",
-		"--json", "number,state,url,mergedAt").Output()
+	out, err := run(command(repoPath, "pr", "list", "--head", branch, "--state", "all",
+		"--json", "number,state,url,mergedAt"))
 	if err != nil {
 		return nil
 	}
@@ -74,7 +74,7 @@ func workflows(repoPath string) []string {
 		return cached
 	}
 	var names []string
-	if out, err := command(repoPath, "workflow", "list", "--json", "name").Output(); err == nil {
+	if out, err := run(command(repoPath, "workflow", "list", "--json", "name")); err == nil {
 		var rows []struct {
 			Name string `json:"name"`
 		}
@@ -118,8 +118,8 @@ type deployRun struct {
 // request and the only way the two could ever disagree about a deploy.
 func deployRuns(repoPath, target string) []deployRun {
 	return memo("deployruns:"+repoPath+":"+target, RepoTTL, func() []deployRun {
-		out, err := command(repoPath, "run", "list", "--workflow", target,
-			"--json", "conclusion,createdAt,status", "--limit", "20").Output()
+		out, err := run(command(repoPath, "run", "list", "--workflow", target,
+			"--json", "conclusion,createdAt,status", "--limit", "20"))
 		if err != nil {
 			return nil
 		}
@@ -153,9 +153,9 @@ func PRsCreatedToday() (count int, ok bool) {
 	if !Available() {
 		return 0, false
 	}
-	out, err := exec.Command("gh", "search", "prs",
+	out, err := run(exec.Command("gh", "search", "prs",
 		"--author=@me", "--created="+time.Now().Format("2006-01-02"),
-		"--json", "url", "--limit", "200").Output()
+		"--json", "url", "--limit", "200"))
 	if err != nil {
 		return 0, false
 	}

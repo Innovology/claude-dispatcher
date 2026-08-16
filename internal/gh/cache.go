@@ -81,7 +81,17 @@ func memo[T any](key string, ttl time.Duration, fetch func() T) T {
 	val := fetch()
 
 	mu.Lock()
-	cache[key] = &entry{val: val, at: time.Now()}
+	if _, parked := Throttled(); parked {
+		// What comes back from a locked-out read is not an answer, and caching
+		// it would outlive the lockout: the quota would come back and the
+		// cockpit would go on showing the nothing it collected while refused,
+		// for a whole TTL, with no request in flight to correct it. Drop it —
+		// a caller that arrives while still parked pays nothing to be told the
+		// same thing, because run spawns no process while the park holds.
+		delete(cache, key)
+	} else {
+		cache[key] = &entry{val: val, at: time.Now()}
+	}
 	mu.Unlock()
 	close(pending.ready)
 	return val

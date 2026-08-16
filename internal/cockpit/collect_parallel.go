@@ -12,14 +12,7 @@ package cockpit
 import (
 	"runtime"
 	"sync"
-
-	"claude-dispatcher/internal/gh"
 )
-
-// maxCheckedPRs bounds how many of a repo's open PRs we fetch check runs for.
-// The CI badge only needs to know whether anything is failing, running or
-// green, and the newest PRs decide that in practice.
-const maxCheckedPRs = 8
 
 // fanOut caps concurrent subprocesses. Collectors are I/O bound, so this sits
 // above core count, but low enough to stay a well-behaved API client.
@@ -52,21 +45,4 @@ func forEach[T any](items []T, fn func(int, T)) {
 		}(i, it)
 	}
 	wg.Wait()
-}
-
-// prChecksFor fetches check runs for up to limit of the given PRs, in parallel,
-// returning them keyed by PR number.
-func prChecksFor(repoPath string, prs []gh.OpenPR, limit int) map[int]gh.Checks {
-	if len(prs) > limit {
-		prs = prs[:limit]
-	}
-	out := make(map[int]gh.Checks, len(prs))
-	var mu sync.Mutex
-	forEach(prs, func(_ int, pr gh.OpenPR) {
-		c := gh.PRChecksFor(repoPath, pr.Number)
-		mu.Lock()
-		out[pr.Number] = c
-		mu.Unlock()
-	})
-	return out
 }

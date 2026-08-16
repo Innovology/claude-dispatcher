@@ -259,6 +259,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case snapshotMsg:
 		applySnapshot(snapshot(msg))
 		m.loading = false
+		m = m.noteQuota()
 		// The load the opening screen was narrating is over: settle the
 		// sequence and start the countdown that hands the terminal over.
 		var boot tea.Cmd

@@ -108,9 +108,11 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		ci      string
 		ciColor string
 	}
-	// Open PRs for every repo come from one search rather than one list call
-	// per repo; openPRs is empty when the search fails, which reads as "no
-	// open PRs" only after gh has actually answered.
+	// Which repos have open PRs at all comes from one search rather than one
+	// list call per repo; openPRs is empty when the search fails, which reads
+	// as "no open PRs" only after gh has actually answered. It decides who is
+	// worth asking, and gh.RepoPRs then asks those repos for the detail — the
+	// search cannot carry a check rollup, a head branch or a diff size.
 	openPRs, _ := gh.OpenPRs()
 	// Merged PRs are a fact about the repository whoever opened them, which is
 	// how work done outside the dispatcher still registers.
@@ -123,14 +125,17 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		}
 		v := repoGHData{ci: "—", ciColor: cDim, checks: map[int]gh.Checks{}}
 		r, ok := discByName[name]
-		if ghUp && ok && r.Path != "" {
-			v.prs = openPRs[name]
-			// Check runs are per PR and cannot be batched, so fetch them
-			// concurrently and cap the fan-out: a repo with forty open PRs
-			// must not cost forty serial round-trips on every refresh.
-			for num, c := range prChecksFor(r.Path, v.prs, maxCheckedPRs) {
-				v.checks[num] = c
+		if ghUp && ok && r.Path != "" && len(openPRs[name]) > 0 {
+			// One read per repo brings back every open PR with its rollup and
+			// review posture attached. It used to be one request per PR for the
+			// checks and another for the review, capped at the newest eight so a
+			// busy repo would not cost forty round-trips — a cap that is gone
+			// now, because the cost no longer counts pull requests.
+			for num, d := range gh.RepoPRs(r.Path) {
+				v.prs = append(v.prs, d.OpenPR)
+				v.checks[num] = d.Checks
 			}
+			sort.Slice(v.prs, func(i, j int) bool { return v.prs[i].Number > v.prs[j].Number })
 			anyFail, anyRun, anyPass := false, false, false
 			for _, c := range v.checks {
 				switch {
