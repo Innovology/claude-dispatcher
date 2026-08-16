@@ -40,6 +40,23 @@
   `~/.claude/settings.json` (hooks cannot be injected at launch time). The
   `CLAUDE_DISPATCHER_ID` env var is the join key from session to record.
   Transcript JSONL parsing is best-effort preview only (format is internal).
+  The one thing no hook can report is a session dying without getting a
+  `SessionEnd` out (SIGKILL, an outside `tmux kill-session`, a tmux server
+  that went down with the machine), so `dispatch.ReconcileSessions` sweeps
+  working/needs-input/blocked records whose session is gone and marks them
+  exited. It never sweeps `launching`: no hook has fired for one, so its
+  session may simply not exist *yet* — absence is only evidence where a hook
+  proved the session once existed.
+- **Coming back from a jump-in rechecks, it does not redraw.** The human has
+  just spent minutes driving the session by hand, so `cockpit.recheckCmd`
+  drops the gh cache, sweeps session liveness, reconciles PR/deploy and only
+  then rebuilds the snapshot — the ordinary poll reload would serve forge
+  state cached from before they went in and take the record's status at its
+  word. Where the handover exits on the way *out* rather than on the way home
+  (`switch-client` inside tmux, the raised console window on Windows —
+  `supervisor.AttachSwitches`), the recheck waits for the terminal focus
+  event instead. Focus alone never triggers it: a full forge re-read on every
+  alt-tab is how the gh quota gets burned.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main

@@ -146,8 +146,62 @@ func liveDispatch(slug string) *state.Dispatch {
 	return nil
 }
 
-// sessionAlive is a seam: tests swap it rather than stand up real sessions.
-var sessionAlive = supervisor.HasSession
+// sessionAlive and supervisorReady are seams: tests swap them rather than
+// stand up real sessions.
+var (
+	sessionAlive    = supervisor.HasSession
+	supervisorReady = supervisor.Available
+)
+
+// ReconcileSessions re-derives status from the one fact the lifecycle hook
+// cannot report — whether the session behind a record still exists — and marks
+// every stray record exited. It returns how many it changed.
+//
+// Status normally comes from Claude Code hooks, and they are truth right up to
+// the moment a session dies without getting to say so: a SIGKILL, a
+// `tmux kill-session` from another terminal, a tmux server that went down with
+// the machine. No SessionEnd fires for any of those, so the record goes on
+// claiming "working" or "waiting on you" forever and the triage table carries a
+// dispatcher that is not there. The live session, not the record's status, is
+// ground truth — the same call liveDispatch makes.
+//
+// Note what does NOT strand a record: claude merely exiting. launchCommand
+// drops to a login shell so the session survives for inspection, and SessionEnd
+// fires on the way out. A missing session means something took it away.
+//
+// The three statuses swept are a boundary, not caution. Each is reachable only
+// through a hook fired from inside the session, so the session provably
+// existed and its absence now proves it ended. A launching record has had no
+// hook at all, and there is a window — between Launch saving it and NewSession
+// returning — where its session does not exist yet and never did; absence
+// there proves nothing, so nothing is claimed. Likewise a supervisor we cannot
+// even reach is not evidence that every session is gone, which is why an
+// unavailable backend sweeps nothing rather than retiring the whole fleet.
+func ReconcileSessions(ds []*state.Dispatch) int {
+	if !supervisorReady() {
+		return 0
+	}
+	n := 0
+	for _, d := range ds {
+		if d.TmuxSession == "" {
+			continue
+		}
+		switch d.Status {
+		case state.StatusWorking, state.StatusNeedsInput, state.StatusBlocked:
+		default:
+			continue
+		}
+		if sessionAlive(d.TmuxSession) {
+			continue
+		}
+		d.Status = state.StatusExited
+		d.StatusReason = "its " + supervisor.Backend() + " session is gone"
+		if state.Save(d) == nil {
+			n++
+		}
+	}
+	return n
+}
 
 // fetchTimeout bounds the pre-dispatch fetch. Refreshing the base is a
 // courtesy; a slow or unreachable remote must never stall a launch.

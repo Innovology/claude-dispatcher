@@ -19,4 +19,6 @@
 //	UniqueName(base) string                  — a session name not already taken
 //	SetStatusHint(name)                      — show the way back in its status line
 //	EnsureBackKey()                          — bind the prefix-free "back" key
+//	EnsureFocusEvents()                      — have the host report focus changes
+//	AttachSwitches() bool                    — does AttachCmd exit on the way out
 package supervisor

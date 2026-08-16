@@ -46,6 +46,22 @@ func EnsureDetachKey() {
 	_ = exec.Command("tmux", "bind-key", "-n", `C-\`, "detach-client").Run()
 }
 
+// EnsureFocusEvents asks tmux to pass focus in and out through to the programs
+// it hosts. tmux ships with it off, and without it a cockpit running inside
+// tmux is never told when its own pane comes back to the front — which is the
+// only notice it gets that the human has returned from a session it switched
+// them to, because switch-client exits at the moment they leave rather than the
+// moment they come back (see AttachSwitches). Set server-wide, like the detach
+// key, so it covers the cockpit's client and not just the sessions we start.
+func EnsureFocusEvents() {
+	_ = exec.Command("tmux", "set-option", "-g", "focus-events", "on").Run()
+}
+
+// AttachSwitches reports whether AttachCmd moves the human to another client
+// instead of taking this terminal over until they detach — which decides
+// whether that command's exit means "they are back" or "they have just left".
+func AttachSwitches() bool { return os.Getenv("TMUX") != "" }
+
 func KillSession(name string) error {
 	return exec.Command("tmux", "kill-session", "-t", "="+name).Run()
 }
@@ -53,7 +69,7 @@ func KillSession(name string) error {
 // AttachCmd returns the command that hands the terminal over to a session.
 // Inside an existing tmux client we switch rather than nest.
 func AttachCmd(name string) *exec.Cmd {
-	if os.Getenv("TMUX") != "" {
+	if AttachSwitches() {
 		return exec.Command("tmux", "switch-client", "-t", "="+name)
 	}
 	return exec.Command("tmux", "attach-session", "-t", "="+name)

@@ -40,7 +40,16 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		return m, nil
 	}
 	supervisor.EnsureBackKey()
+	supervisor.EnsureFocusEvents()
 	supervisor.SetStatusHint(rec.TmuxSession)
+	// Whether this command's exit means "they are back" depends on how the
+	// handover works. A plain attach owns the terminal until they detach, so it
+	// exits on the way home. A switch-client (inside tmux) or a raised console
+	// window (Windows) exits the instant they leave, and the only notice of
+	// their return is the focus their pane or window regains — so record that
+	// they are away and let that close the loop. See the attachReturnedMsg and
+	// tea.FocusMsg cases in model.go.
+	m.away = supervisor.AttachSwitches()
 	return m, tea.ExecProcess(supervisor.AttachCmd(rec.TmuxSession), func(err error) tea.Msg {
 		return attachReturnedMsg{err: err}
 	})

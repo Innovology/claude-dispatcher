@@ -54,7 +54,13 @@ func Run() error {
 		m.notice = "no config — showing demo data · run `claude-dispatcher init`"
 	}
 
-	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	// Focus reporting is what tells the cockpit the human has come back from a
+	// session it switched them to rather than attached them to — the handover
+	// there exits on the way out, so nothing else marks the return. Terminals
+	// that do not report focus simply never send the message; see the
+	// tea.FocusMsg case in model.go, which ignores it unless we handed someone
+	// over in the first place.
+	final, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithReportFocus()).Run()
 	if err != nil {
 		return err
 	}
