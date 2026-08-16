@@ -213,7 +213,34 @@ func (m model) dxBranch() string {
 
 // ---- what the dispatcher is actually told -------------------------------------
 
-// dxPrompt composes the prompt. AUTO and DONE WHEN have no plumbing behind
+// dxDispatch turns the form into the two strings a launch needs: the name the
+// dispatch is filed under, and the prompt the dispatcher actually receives.
+//
+// They come from the same field and must never be the same string. WHAT is
+// asked for once and read twice: as a name it has to be short, because the slug
+// it makes names the branch, the worktree directory and the tmux session; as a
+// brief it has to be whole, because it is the only description of the work that
+// ever reaches the session.
+//
+// Submitting used to name the feature from the capped slug and then compose the
+// prompt from that *same capped value*, so the cap meant to bound three
+// filesystem-facing names silently truncated the brief as well. Everything past
+// the fifth word was discarded at the form, before the record was written and
+// before claude was started — the sentence had no other copy, so it was gone.
+// The dispatcher then received its own de-hyphenated branch name as its
+// instructions: real records carry the prompt "dispatching immediate look up
+// when", which stops mid-clause on the word the condition was about to follow.
+//
+// Two returns, from two readings of one field, is what keeps that honest: the
+// cap applies to the name and stops there.
+func dxDispatch(what, goal string, auto bool) (feature, prompt string) {
+	what = strings.TrimSpace(what)
+	return dxFeatureName(what), dxPrompt(what, goal, auto)
+}
+
+// dxPrompt composes the prompt. what is the sentence as it was typed, in full:
+// the feature name is an abbreviation of it, and abbreviating a brief is not the
+// same thing as abbreviating a name. AUTO and DONE WHEN have no plumbing behind
 // them — the launch command is claude with a prompt, with no permission flags
 // and no watchdog — so they are instructions, and this is the only place they
 // exist. Keep the copy inside what a prompt can promise.
@@ -363,14 +390,13 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		m.notice = "nothing matches — widen the filter"
 		return m, nil
 	}
-	feature := dxFeatureName(m.dxWhat)
+	goal := strings.TrimSpace(m.dxGoal)
+	feature, prompt := dxDispatch(m.dxWhat, goal, m.dxAuto)
 	if feature == "" {
 		m.dxField = dxWhatF
 		m.notice = "say what it should do"
 		return m, nil
 	}
-	goal := strings.TrimSpace(m.dxGoal)
-	prompt := dxPrompt(feature, goal, m.dxAuto)
 	branch, auto := m.dxBranch(), m.dxAuto
 
 	m = m.dxReset()
@@ -386,8 +412,17 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		notice += " · auto"
 	}
 	m.notice = notice
-	return m, launchCmd(m.cfg, row.repo, feature, prompt)
+	return m, dxLaunch(m.cfg, row.repo, feature, prompt)
 }
+
+// dxLaunch is the launch dxSubmit hands off to, named as a variable so a test
+// can read what the form actually passes without starting a real dispatcher.
+//
+// The hand-off is where the truncated prompt got out, and it was invisible to
+// every test the form had: those assert the form's own state, and the form's
+// state was correct — m.dxWhat held the whole sentence the entire time. Only the
+// two arguments leaving this function were wrong, and nothing looked at them.
+var dxLaunch = launchCmd
 
 // ---- view strings -------------------------------------------------------------
 
@@ -660,8 +695,11 @@ func dxRepoLine(inner int, r dxRepoRow, on bool) string {
 // WHAT used to become the feature name whole, so a pasted paragraph produced a
 // 75-word name, a 91-character slug and a 96-character tmux session. Naming the
 // feature from the same capped slug the branch uses keeps all four in agreement
-// — name, branch, worktree and session — and nothing is lost: the full sentence
-// is the first line of the prompt (see dxPrompt).
+// — name, branch, worktree and session — and nothing is lost, because the full
+// sentence is the first line of the prompt. That last clause is only true while
+// the prompt is composed from WHAT rather than from this function's return: it
+// was written when both came off one variable, and was false for as long as
+// that lasted. dxDispatch is where the two readings part company.
 func dxFeatureName(what string) string {
 	slug := dispatchpkg.Slugify(strings.TrimSpace(what))
 	if slug == "" {
