@@ -4,6 +4,9 @@ package cockpit
 // and whether it is behind the published one.
 
 import (
+	"os/exec"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/version"
@@ -23,16 +26,73 @@ func upgradeCheckCmd() tea.Cmd {
 	return func() tea.Msg { return upgradeMsg{latest: version.Latest()} }
 }
 
+// upgradeRanMsg reports how the package manager got on, once the terminal
+// comes back.
+type upgradeRanMsg struct{ err error }
+
 // versionForms is the bottom-right version, widest rendering first. The footer
 // takes the first one that fits, so a cramped terminal keeps the version number
-// and drops the upgrade command rather than losing both.
+// and drops the upgrade offer rather than losing both.
+//
+// The offer names the key, not the command: the key is the shorter string and
+// the one that does the work. An install we cannot upgrade in place still gets
+// its clause — the version gap is worth knowing even when we have nothing to
+// press — but it says why instead ("nix-managed · upgrade it where it is
+// declared").
 func (m model) versionForms() []string {
 	if m.upgradeTo == "" {
 		return []string{fg(cFaint, version.Display())}
 	}
 	behind := fg(cAmber, version.Display()+" → "+version.Label(m.upgradeTo))
+	tail := m.install.Note
+	if m.install.CanUpgrade() {
+		tail = "U upgrades"
+	}
 	return []string{
-		behind + fg(cDim, " · "+version.UpgradeHint()),
+		behind + fg(cDim, " · "+tail),
 		behind,
 	}
+}
+
+// startUpgrade is the U key: it asks before running anything. The confirm bar
+// spells out the exact command, because this is the one act in the cockpit
+// that reaches outside the state dir and changes the machine.
+func (m model) startUpgrade() (model, tea.Cmd) {
+	if !version.IsRelease() {
+		m.notice = "dev build — nothing to upgrade to"
+		return m, nil
+	}
+	if m.upgradeTo == "" {
+		m.notice = version.Display() + " is the latest"
+		return m, nil
+	}
+	if !m.install.CanUpgrade() {
+		m.notice = m.install.Note
+		return m, nil
+	}
+	m.confirm = &confirmState{
+		kind:  "upgrade",
+		label: m.install.Hint() + "  →  " + version.Label(m.upgradeTo),
+	}
+	return m, nil
+}
+
+// upgradeRunCmd hands the terminal to the package manager, the same way `enter`
+// hands it to tmux. Its output is the human's — a cask download has its own
+// progress to show, and hiding it behind a spinner would mean inventing a
+// summary of a process we do not control.
+func upgradeRunCmd(in version.Install) tea.Cmd {
+	if !in.CanUpgrade() {
+		return nil
+	}
+	c := exec.Command(in.Cmd[0], in.Cmd[1:]...)
+	c.Env = in.Env()
+	return tea.ExecProcess(c, func(err error) tea.Msg { return upgradeRanMsg{err: err} })
+}
+
+// upgradeFailed is the notice for a package manager that exited non-zero. Its
+// own output is already on screen above the cockpit's redraw, so this says
+// which command failed rather than repeating a reason it did not give us.
+func upgradeFailed(in version.Install, err error) string {
+	return "upgrade failed (" + strings.Join(in.Cmd, " ") + "): " + err.Error()
 }

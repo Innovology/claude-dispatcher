@@ -52,6 +52,15 @@ func main() {
 		os.Exit(hookcmd.Run(args[1:]))
 	case "version", "--version", "-v":
 		fmt.Println("claude-dispatcher", version.Display())
+		// How this build was installed, and what would replace it. This is the
+		// second line because it is the answer to "why is the cockpit not
+		// offering me the upgrade key?" — an install we cannot place says so
+		// here rather than staying silent about it.
+		if in := version.Detect(); in.CanUpgrade() {
+			fmt.Println(string(in.Method), "·", in.Hint())
+		} else {
+			fmt.Println(in.Hint())
+		}
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:

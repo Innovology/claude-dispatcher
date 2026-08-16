@@ -151,6 +151,7 @@ var commands = []command{
 	{name: "dispatch", hint: "repo → feature → prompt, or paste a batch"},
 	{name: "new dispatch", hint: "open the repo → feature → prompt form"},
 	{name: "product", hint: "open the product under the cursor"},
+	{name: "upgrade", hint: "install the published build and come straight back"},
 	{name: "reply", hint: "answer the selected dispatcher without attaching"},
 	{name: "attach", hint: "tmux attach at full fidelity · ctrl+\\ to come back"},
 	{name: "merge", hint: "gh pr merge --squash --auto on the selected feature"},

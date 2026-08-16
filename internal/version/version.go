@@ -7,7 +7,6 @@
 package version
 
 import (
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -41,15 +40,6 @@ func IsRelease() bool {
 // Anything it cannot parse — a dev build, an empty or malformed latest —
 // answers false: a version it does not understand must never nag the user.
 func IsOutdated(latest string) bool { return newer(Version, latest) }
-
-// UpgradeHint is the command that upgrades this build in place. macOS and
-// Linux ship through the Homebrew tap, Windows through the scoop bucket.
-func UpgradeHint() string {
-	if runtime.GOOS == "windows" {
-		return "scoop update claude-dispatcher"
-	}
-	return "brew upgrade claude-dispatcher"
-}
 
 // semver is a version parsed far enough to order two of them.
 type semver struct {
