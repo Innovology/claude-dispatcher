@@ -110,8 +110,22 @@ type collectCtx struct {
 	forges  map[string]string
 }
 
-// productFor maps a record onto the same product key collectProducts uses,
-// folding anything unmapped into "unassigned".
+// productFor maps a record onto a product key, folding anything unmapped into
+// "unassigned". It is the ONE rule the whole cockpit groups records by — triage
+// and the products lens both call it, so the two can never disagree about where
+// a dispatch belongs.
+//
+// The config decides, not the record. rec.Product is a copy of this same lookup
+// taken when the dispatch went out (dispatch.go), so the moment the human
+// reassigns a repo the two disagree — and the record is the one that is out of
+// date. Preferring it meant an assignment landed on the products lens (which
+// reads the config) while every dispatch of that repo stayed where it was on
+// triage, or fell out into "unassigned" when the product it named had since been
+// renamed away. The config is what the human just edited; it wins, and a repo it
+// maps to nothing is unassigned because that is what unassigning it means.
+//
+// The record is still the fallback when there is no config to ask at all — with
+// nothing loaded, what the dispatch was launched under is the only thing known.
 //
 // It reads the config rather than the package's productOrder/reposByProduct
 // vars on purpose. Collectors run in order and applySnapshot only publishes
@@ -120,19 +134,16 @@ type collectCtx struct {
 // up empty while work was in flight. A collector must derive from its ctx, not
 // from the state a later collector will produce.
 func (c *collectCtx) productFor(rec *state.Dispatch) string {
-	p := rec.Product
-	if p == "" && c.cfg != nil {
-		p = c.cfg.ProductFor(rec.RepoName)
-	}
-	if p == "" {
-		return "unassigned"
-	}
-	if c.cfg != nil {
-		if _, ok := c.cfg.Products[p]; !ok {
+	if c.cfg == nil {
+		if rec.Product == "" {
 			return "unassigned"
 		}
+		return rec.Product
 	}
-	return p
+	if p := c.cfg.ProductFor(rec.RepoName); p != "" {
+		return p
+	}
+	return "unassigned"
 }
 
 // forge reports the forge a repo path belongs to: "ado" for Azure DevOps
