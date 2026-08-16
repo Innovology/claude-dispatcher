@@ -104,7 +104,7 @@ func (m model) viewProducts(w, h int) string {
 	// panel is the thing the human just asked for: it takes the whole width and
 	// the portfolio table waits behind esc.
 	if panelOpen && !fitv.showDetail {
-		return clampLines(productsPane(m.productPanel(maxi(w-2*pad, 1)), w), h)
+		return clampLines(productsPane(m.productPanel(maxi(w-2*pad, 1), h), w), h)
 	}
 
 	// Pane geometry: the open product panel is flex:0 0 46%, the focus summary
@@ -138,7 +138,7 @@ func (m model) viewProducts(w, h int) string {
 	rightInner := maxi(rightW-2*pad, 1)
 	right := m.productsRight(rightInner, pc)
 	if panelOpen {
-		right = m.productPanel(rightInner)
+		right = m.productPanel(rightInner, h)
 	}
 	rightBlock := productsPane(right, rightW)
 

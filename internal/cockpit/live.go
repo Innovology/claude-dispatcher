@@ -58,6 +58,7 @@ type snapshot struct {
 	teamVerdict     map[string]string
 	shipped         map[string][]shippedDay
 	productHistory  map[string][]historyItem
+	historyOlder    map[string]int
 	productVelocity map[string][]velTile
 
 	decisions         map[string][]decision
@@ -451,6 +452,9 @@ func applySnapshot(s snapshot) {
 	}
 	if s.productHistory != nil {
 		productHistory = s.productHistory
+	}
+	if s.historyOlder != nil {
+		historyOlder = s.historyOlder
 	}
 }
 

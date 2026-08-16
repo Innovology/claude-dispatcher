@@ -70,6 +70,7 @@ var (
 	teamVerdict     = map[string]string{}
 	shipped         = map[string][]shippedDay{}
 	productHistory  = map[string][]historyItem{}
+	historyOlder    = map[string]int{}
 	productVelocity = map[string][]velTile{}
 )
 

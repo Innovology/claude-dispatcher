@@ -326,3 +326,153 @@ func TestResumeOverlayIsHonestWithoutASession(t *testing.T) {
 		t.Errorf("notice = %q", empty.notice)
 	}
 }
+
+// ---- fitting the tab into the screen it has ---------------------------------
+
+// The list grows with the product's whole past and the detail block sits under
+// it, so on a real portfolio the session id and `enter resume it` — the way
+// back into a session, which is the point of the tab — went off the bottom
+// first. Nineteen finished dispatchers already did it at 28 rows.
+func TestHistoryDetailSurvivesAShortTerminal(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	products = []product{{name: "acme"}}
+	var items []historyItem
+	for i := 0; i < 30; i++ {
+		items = append(items, historyItem{
+			id: itoa(i), feature: "feature " + itoa(i), repo: "acme-hq",
+			ended: "stopped", at: itoa(i) + "h ago", session: "sess-" + itoa(i),
+			prompt: "do the thing",
+		})
+	}
+	productHistory = map[string][]historyItem{"acme": items}
+
+	for _, h := range []int{50, 34, 28, 24, 20} {
+		m := newModel()
+		m.width, m.height = 200, h
+		m.lens, m.rightTab = "product", "history"
+		out := m.View()
+		if !strings.Contains(out, "enter resume it") {
+			t.Errorf("at %d rows the way back into a session is off screen", h)
+		}
+		if !strings.Contains(out, "sess-0") {
+			t.Errorf("at %d rows the selected row's session is not shown", h)
+		}
+	}
+}
+
+// And the cursor has to stay with the reader. j moving a selection off a list
+// that never scrolls is worse than a short list: the row acted on is one nobody
+// can see.
+func TestHistoryWindowFollowsTheCursor(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	products = []product{{name: "acme"}}
+	var items []historyItem
+	for i := 0; i < 30; i++ {
+		items = append(items, historyItem{
+			id: itoa(i), feature: "feature " + itoa(i), repo: "acme-hq",
+			ended: "stopped", at: "1h ago", session: "sess-" + itoa(i), prompt: "p",
+		})
+	}
+	productHistory = map[string][]historyItem{"acme": items}
+
+	m := newModel()
+	m.width, m.height = 200, 26
+	m.lens, m.rightTab = "product", "history"
+	for _, want := range []int{0, 12, 29} {
+		m.historyCursor = want
+		out := m.View()
+		if !strings.Contains(out, "feature "+itoa(want)+" ") && !strings.Contains(out, "sess-"+itoa(want)) {
+			t.Errorf("cursor at %d is not on screen", want)
+		}
+		if !strings.Contains(out, "enter resume it") {
+			t.Errorf("cursor at %d pushed the resume key off screen", want)
+		}
+	}
+	// What is scrolled past is counted, not silently dropped.
+	m.historyCursor = 29
+	if out := m.View(); !strings.Contains(out, "more above") {
+		t.Error("rows above the window are hidden without a count")
+	}
+	m.historyCursor = 0
+	if out := m.View(); !strings.Contains(out, "more below") {
+		t.Error("rows below the window are hidden without a count")
+	}
+}
+
+// historyWindow's own edges, where the off-by-ones live.
+func TestHistoryWindow(t *testing.T) {
+	rows := make([]string, 20)
+	for i := range rows {
+		rows[i] = "row " + itoa(i)
+	}
+	if got := historyWindow(rows, 0, 20); len(got) != 20 || got[0] != "row 0" {
+		t.Errorf("a list that fits was windowed anyway: %d rows", len(got))
+	}
+	top := historyWindow(rows, 0, 6)
+	if len(top) != 6 || top[0] != "row 0" {
+		t.Errorf("top window = %v", top)
+	}
+	if !strings.Contains(top[5], "15 more below") {
+		t.Errorf("bottom marker = %q, want the 15 rows it hides", top[5])
+	}
+	end := historyWindow(rows, 19, 6)
+	if end[len(end)-1] != "row 19" {
+		t.Errorf("the last row is not shown when it is selected: %q", end[len(end)-1])
+	}
+	if !strings.Contains(end[0], "more above") {
+		t.Errorf("top marker = %q", end[0])
+	}
+	if got := historyWindow(rows, 5, 0); len(got) != 3 {
+		t.Errorf("a zero budget produced %d rows, want the 3-line floor", len(got))
+	}
+}
+
+// The collection is bounded, because the tab rebuilds every row on every frame
+// and a product's past only grows. What is dropped is counted and said.
+func TestHistoryIsCappedAndSaysWhatItCut(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	saved := captureVars()
+	defer restoreVars(saved)
+
+	now := time.Now()
+	total := historyMax + 7
+	var recs []*state.Dispatch
+	for i := 0; i < total; i++ {
+		recs = append(recs, &state.Dispatch{
+			ID: itoa(i), Feature: "feature " + itoa(i), RepoName: "acme-hq", Product: "acme",
+			Status: state.StatusExited, StatusReason: "killed from cockpit",
+			CreatedAt: now.Add(-time.Duration(i+1) * time.Hour),
+			UpdatedAt: now.Add(-time.Duration(i) * time.Hour),
+		})
+	}
+	var s snapshot
+	cfg := &config.Config{Products: map[string][]string{"acme": {"acme-hq"}}}
+	collectProducts(&collectCtx{cfg: cfg, records: recs}, &s)
+
+	if got := len(s.productHistory["acme"]); got != historyMax {
+		t.Errorf("history carries %d rows, want the cap of %d", got, historyMax)
+	}
+	if got := s.historyOlder["acme"]; got != total-historyMax {
+		t.Errorf("older count = %d, want %d", got, total-historyMax)
+	}
+	// The cap drops the oldest, never the newest.
+	if s.productHistory["acme"][0].feature != "feature 0" {
+		t.Errorf("history starts at %q, want the most recent", s.productHistory["acme"][0].feature)
+	}
+
+	products, productHistory, historyOlder = s.products, s.productHistory, s.historyOlder
+	m := newModel()
+	m.width, m.height = 200, 50
+	m.lens, m.rightTab = "product", "history"
+	for i, p := range products {
+		if p.name == "acme" {
+			m.productCursor = i
+		}
+	}
+	m.historyCursor = historyMax - 1
+	if out := m.View(); !strings.Contains(out, "and 7 older") {
+		t.Error("the tab stops without saying how much older history there is")
+	}
+}

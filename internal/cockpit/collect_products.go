@@ -23,6 +23,12 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
+// historyMax bounds how many finished dispatchers one product's history tab
+// carries. The tab is a fixed-height column and the list is as long as the
+// product's whole past, so it has to stop somewhere; what it drops is counted
+// and said out loud rather than left to read as the whole story.
+const historyMax = 40
+
 func collectProducts(ctx *collectCtx, s *snapshot) {
 	cfg := ctx.cfg
 	ghUp := gh.Available()
@@ -150,6 +156,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 	s.productStats = map[string]productStat{}
 	s.shipped = map[string][]shippedDay{}
 	s.productHistory = map[string][]historyItem{}
+	s.historyOlder = map[string]int{}
 	s.productVelocity = map[string][]velTile{}
 	s.team = map[string][]teamRow{}
 	s.teamVerdict = map[string]string{}
@@ -379,11 +386,19 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			}
 			return hist[i].it.id < hist[j].it.id
 		})
-		items := make([]historyItem, 0, len(hist))
+		// Bounded, because the panel is a fixed-height column and this list is as
+		// long as the product's whole past — a portfolio a year old would rebuild
+		// hundreds of rows on every frame to show a dozen. What is dropped is
+		// counted, so the tab can say so instead of stopping without comment.
+		items := make([]historyItem, 0, mini(len(hist), historyMax))
 		for _, h := range hist {
+			if len(items) == historyMax {
+				break
+			}
 			items = append(items, h.it)
 		}
 		s.productHistory[p] = items
+		s.historyOlder[p] = len(hist) - len(items)
 
 		// ---- velocity tiles ------------------------------------------------
 		deploys7 := 0
@@ -426,7 +441,26 @@ func prodLiveAt(rec *state.Dispatch) (time.Time, bool) {
 }
 
 // prodDay truncates t to local midnight.
+//
+// The conversion to local is load-bearing, not tidiness. Timestamps arrive here
+// in two zones — the forge's merge and deploy times are UTC (gh hands them over
+// that way), the clock's are local — and Date() reads whichever zone the value
+// carries. A UTC midnight and a local midnight are different INSTANTS
+// everywhere but Greenwich, so every comparison built on this was between two
+// days that could never be equal:
+//
+//   - prodSameDay(liveAt, now) decides "live today" in the portfolio table.
+//     liveAt is always UTC, now is always local, so off UTC the column read 0
+//     however much had shipped — 0 for all fourteen products on the portfolio
+//     this was found on, against a real 9 and 1.
+//   - the same subtraction indexes the 7d sparkline, sliding every bar by the
+//     offset and dropping the oldest day off the end of the window.
+//   - prodDayLabel groups the shipped tab, so one afternoon's features could
+//     land under both "today" and their own date.
+//
+// A day is the human's day. Normalising here fixes all three at their source.
 func prodDay(t time.Time) time.Time {
+	t = t.Local()
 	y, m, d := t.Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
