@@ -90,6 +90,12 @@ type fleetRow struct {
 	model     string
 	ctxKnown  bool
 
+	// mode is the permission mode this dispatcher was launched in, straight off
+	// the record. Empty for a record written before the mode was a choice: those
+	// ran in whatever the human's own Claude Code defaults to, and reporting
+	// that as "auto" would be inventing the one fact nobody recorded.
+	mode string
+
 	acts []cqAct
 
 	// moved is the freshest of the transcript's mtime and the record's
@@ -313,6 +319,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		ctxTokens: u.Tokens,
 		model:     cqShortModel(u.Model),
 		ctxKnown:  ctxKnown,
+		mode:      rec.Mode,
 		acts:      cqActs(rec, ask),
 		moved:     fleetMoved(rec),
 		started:   rec.CreatedAt,
@@ -376,6 +383,7 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		ctxTokens: u.Tokens,
 		model:     cqShortModel(u.Model),
 		ctxKnown:  ctxKnown,
+		mode:      rec.Mode,
 		acts:      cqActs(rec, "running"),
 		moved:     moved,
 		started:   rec.CreatedAt,
@@ -410,6 +418,7 @@ func fleetPastRow(ctx *collectCtx, passes map[string]int, rec *state.Dispatch) f
 		why:       cqSentence(rec.StatusReason),
 		goal:      goal,
 		goalLabel: goalLabel,
+		mode:      rec.Mode,
 		acts:      cqActs(rec, "past"),
 		moved:     fleetMoved(rec),
 		started:   rec.CreatedAt,

@@ -211,7 +211,7 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
 	}()
 
-	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go")
+	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto)
 	if err == nil {
 		t.Fatal("expected a duplicate of a live feature to be refused")
 	}

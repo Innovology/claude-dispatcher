@@ -11,7 +11,7 @@ package cockpit
 //	TITLE      what it is called: the feature name, and the branch
 //	WHAT       the work itself, wrapped over as many rows as it takes
 //	DONE WHEN  the completion condition, optional
-//	AUTO       whether it runs unattended or checks in between steps
+//	MODE       auto, manual or plan — what it may do without asking
 //
 // TITLE and WHAT used to be one field, and the branch was named from it. That
 // asked one line to be two things at once: a name short enough to live in
@@ -20,9 +20,16 @@ package cockpit
 // — the only field with room — and the completion condition was lost. Naming
 // and describing are separate now, and only TITLE reaches the branch.
 //
-// Two of the five are honest about their reach. There is no permission plumbing
-// behind AUTO and no supervisor watching DONE WHEN: the only thing that reaches
-// a session is the prompt, so both are sentences in the prompt and the copy
+// MODE was AUTO, a two-position switch with nothing behind it: the launch
+// command was claude with a prompt and no flags, so "unattended" was a sentence
+// in the prompt and the session still opened in whatever mode the human's own
+// Claude Code defaults to — and stopped on its first permission prompt with
+// nobody watching. It reaches the process now, as --permission-mode (see
+// dispatch/mode.go), which is also what lets it offer plan mode: plan is not
+// something a sentence can ask for.
+//
+// DONE WHEN is still honest about its reach in the other direction: no
+// supervisor watches it, so it is a sentence in the prompt and the copy
 // promises nothing more (see dxPrompt).
 //
 // Everything on screen comes from the same real collector data the products
@@ -51,7 +58,7 @@ const (
 	dxTitleF
 	dxWhatF
 	dxGoalF
-	dxAutoF
+	dxModeF
 	dxFieldCount
 )
 
@@ -77,7 +84,7 @@ func (m model) dxReset() model {
 	m.cqDispatch = false
 	m.dxField, m.dxRepo = dxWhereF, 0
 	m.dxFilter, m.dxTitle, m.dxWhat, m.dxGoal = "", "", "", ""
-	m.dxAuto = true
+	m.dxMode = dispatchpkg.DefaultMode
 	return m
 }
 
@@ -94,8 +101,8 @@ func (m model) dxOpen(filter string) model {
 // dxTouched reports whether anything has been typed into the four text fields.
 // It is what decides whether a navigation key is navigation or text: an
 // untouched form is not a trap, so 1–6, ':', 'd' and 'h' still leave it, but the
-// moment there is a filter or a sentence they are letters again. dxAuto and
-// dxField deliberately do not count — toggling auto or tabbing about is not
+// moment there is a filter or a sentence they are letters again. dxMode and
+// dxField deliberately do not count — cycling the mode or tabbing about is not
 // typing, and must not strand the human on this screen.
 func (m model) dxTouched() bool {
 	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != ""
@@ -245,22 +252,30 @@ func (m model) dxBranch() string {
 // The two returns stay: a caller that reconstructs the brief from the feature
 // name is precisely the bug, and one function returning both is what stops the
 // next one from trying.
-func dxDispatch(title, what, goal string, auto bool) (feature, prompt string) {
+func dxDispatch(title, what, goal string, mode dispatchpkg.Mode) (feature, prompt string) {
 	title, what = strings.TrimSpace(title), strings.TrimSpace(what)
-	return dxFeatureName(title), dxPrompt(title, what, goal, auto)
+	return dxFeatureName(title), dxPrompt(title, what, goal, mode)
 }
 
 // dxPrompt composes the prompt. what is the sentence as it was typed, in full:
 // the feature name is an abbreviation of it, and abbreviating a brief is not the
-// same thing as abbreviating a name. AUTO and DONE WHEN have no plumbing behind
-// them — the launch command is claude with a prompt, with no permission flags
-// and no watchdog — so they are instructions, and this is the only place they
-// exist. Keep the copy inside what a prompt can promise.
+// same thing as abbreviating a name.
+//
+// DONE WHEN has no plumbing behind it — nothing watches a dispatcher to see
+// whether its condition came true — so it is an instruction, and this is the
+// only place it exists. Keep the copy inside what a prompt can promise.
+//
+// MODE does reach the process, as --permission-mode, and still gets a sentence
+// here: the flag says what claude may do without asking, and the sentence says
+// how far to take the work. "May edit without asking" is not "commit, push and
+// open the PR", and a session given the first and not the second stops with the
+// work uncommitted — which is exactly the unattended dispatch that never
+// shipped. The two lines have to agree, so they are chosen together.
 //
 // TITLE leads, on its own line, because it is the name the branch, the worktree
 // and every screen file this work under: the session should know what it is
 // building before it reads the brief. WHAT follows as the body.
-func dxPrompt(title, what, goal string, auto bool) string {
+func dxPrompt(title, what, goal string, mode dispatchpkg.Mode) string {
 	lines := []string{title}
 	if what != "" {
 		lines = append(lines, "", what)
@@ -268,12 +283,22 @@ func dxPrompt(title, what, goal string, auto bool) string {
 	if goal != "" {
 		lines = append(lines, "", "done when: "+goal, "Keep working until that is true.")
 	}
-	if auto {
-		lines = append(lines, "", "Commit as you go, open the PR, and fix your own CI failures without stopping to ask.")
-	} else {
-		lines = append(lines, "", "Do one pass, then stop and check in before committing, pushing or opening a PR.")
+	return strings.Join(append(lines, "", dxModeInstruction(mode)), "\n")
+}
+
+// dxModeInstruction is the sentence that tells the session how far to take the
+// work, matched to the mode its permissions were set to.
+func dxModeInstruction(mode dispatchpkg.Mode) string {
+	switch mode.Normalize() {
+	case dispatchpkg.ModeManual:
+		return "Do one pass, then stop and check in before committing, pushing or opening a PR."
+	case dispatchpkg.ModePlan:
+		// Plan mode already stops claude from changing anything; the sentence
+		// says what to spend the read-only pass on, so the plan that comes back
+		// is about this work rather than a summary of the repo.
+		return "Work out how you would do this and put the plan up for approval before changing anything."
 	}
-	return strings.Join(lines, "\n")
+	return "Commit as you go, open the PR, and fix your own CI failures without stopping to ask."
 }
 
 // ---- keys ---------------------------------------------------------------------
@@ -285,8 +310,8 @@ func dxPrompt(title, what, goal string, auto bool) string {
 // carrying every rune, and rebuilding from the name would keep only the first
 // (or the brackets a paste is reported inside).
 //
-// The branch order is load-bearing. AUTO is tested before backspace and before
-// text, so on that line space is a toggle rather than a character; and the
+// The branch order is load-bearing. MODE is tested before backspace and before
+// text, so on that line space cycles rather than typing a character; and the
 // text branch is last, so nothing typeable can shadow a navigation key.
 func (m model) dxKey(k string) (model, tea.Cmd) {
 	rows := m.dxRows()
@@ -313,7 +338,7 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		if field == dxAutoF {
+		if field == dxModeF {
 			return m.dxSubmit()
 		}
 		m.dxField = field + 1
@@ -324,7 +349,7 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxRepo = mini(m.dxRepo+1, maxi(len(rows)-1, 0))
 			return m, nil
 		}
-		m.dxField = mini2(field+1, dxAutoF)
+		m.dxField = mini2(field+1, dxModeF)
 		return m, nil
 
 	case "up":
@@ -336,12 +361,23 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 
-	// AUTO is a switch, not a field: space and `a` flip it, and nothing else on
-	// that line types. This has to sit above the text branch, because typedText
-	// turns a space into " ".
-	if field == dxAutoF {
-		if k == " " || k == "space" || k == "a" {
-			m.dxAuto = !m.dxAuto
+	// MODE is a switch, not a field: space and `a` walk the three positions,
+	// left/right steer within the line, and nothing else on it types. This has
+	// to sit above the text branch, because typedText turns a space into " ".
+	//
+	// `a` survives from when this line was AUTO and had two positions; it is
+	// still the letter the field is reached for, and cycling is what it now
+	// does. left/right are here because a three-way switch is a list, and a
+	// list you can only walk one way makes the third choice three keypresses.
+	// The vim pair is deliberately not bound: `h` leaves this lens from an
+	// untouched form, and one key that navigates on an empty form and edits on
+	// a filled one is the kind of thing nobody remembers under pressure.
+	if field == dxModeF {
+		switch k {
+		case " ", "space", "a", "right":
+			m.dxMode = dispatchpkg.Next(m.dxMode.Normalize())
+		case "left":
+			m.dxMode = dispatchpkg.Prev(m.dxMode.Normalize())
 		}
 		return m, nil
 	}
@@ -414,7 +450,8 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		return m, nil
 	}
 	goal := strings.TrimSpace(m.dxGoal)
-	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal, m.dxAuto)
+	mode := m.dxMode.Normalize()
+	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal, mode)
 	if feature == "" {
 		// Empty *or* unslugabble: a title of nothing but punctuation passes a
 		// plain "is it blank" test and then fails inside Launch, where the human
@@ -427,7 +464,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		m.notice = "say what it should do — the title alone is not a brief"
 		return m, nil
 	}
-	branch, auto := m.dxBranch(), m.dxAuto
+	branch := m.dxBranch()
 
 	m = m.dxReset()
 	// Present tense: nothing has launched yet. launchCmd's actionMsg replaces
@@ -438,9 +475,10 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	} else {
 		notice += " · one pass, then waits"
 	}
-	if auto {
-		notice += " · auto"
-	}
+	// The mode is always named, not only when it is the interesting one: it now
+	// configures the session rather than describing it, and a launch flag the
+	// notice stayed quiet about would be a setting the human never saw applied.
+	notice += " · " + string(mode)
 	m.notice = notice
 	// The row goes on the table now, not when the launch comes back. The form is
 	// closing over the table it was drawn on top of, and without this the human
@@ -449,7 +487,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	// table is empty. fleetSync re-keys the cursor over the row that just moved
 	// down; on an empty table it lands the cursor on the new row itself.
 	m = m.markPending(m.pendingFor(row.repo, feature, prompt)).fleetSync()
-	return m, dxLaunch(m.cfg, row.repo, feature, prompt)
+	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode)
 }
 
 // dxLaunch is the launch dxSubmit hands off to, named as a variable so a test
@@ -513,21 +551,51 @@ func (m model) dxGoalHint() string {
 	return "optional · leave empty and it does one pass, then waits for you"
 }
 
-// dxAutoValue is the switch's position and its colour.
-func (m model) dxAutoValue() (string, string) {
-	if m.dxAuto {
-		return "on", cGreen
+// dxModeGap separates the positions on the MODE line.
+const dxModeGap = "  "
+
+// dxModeValue is the switch: all three positions, with a caret on the chosen
+// one.
+//
+// They are drawn together rather than as a single word because a two-position
+// switch could say "on" and be understood as "off is the other one", while a
+// three-way one showing only its current value hides two thirds of the offer
+// behind a key nobody knows to press.
+//
+// The caret is what marks the selection; the colour only reinforces it. Colour
+// alone is not a marker here — the three positions read identically without it,
+// unlike the old on/off whose word changed — so a terminal with no colour, or
+// an eye that cannot separate green from grey, would have no way to tell which
+// one is armed.
+func (m model) dxModeValue() string {
+	cur := m.dxMode.Normalize()
+	parts := make([]string, 0, len(dispatchpkg.Modes()))
+	for _, k := range dispatchpkg.Modes() {
+		if k == cur {
+			parts = append(parts, fg(cGreen, "▸"+string(k)))
+			continue
+		}
+		parts = append(parts, fg(cFaint, " "+string(k)))
 	}
-	return "off", cFaint
+	return strings.Join(parts, dxModeGap)
 }
 
-// dxAutoHint describes what the prompt will actually instruct.
-func (m model) dxAutoHint() string {
-	if m.dxAuto {
-		return "commits, opens the pr, retries its own failures"
+// dxModeWidth is what dxModeValue occupies on screen — the words, their carets
+// and the gaps, without the colour escapes dispWidth would have to see through.
+func dxModeWidth() int {
+	w := 0
+	for i, k := range dispatchpkg.Modes() {
+		if i > 0 {
+			w += dispWidth(dxModeGap)
+		}
+		w += dispWidth("▸" + string(k))
 	}
-	return "stops and asks after every step · space toggles"
+	return w
 }
+
+// dxModeHint describes what the chosen mode actually does to the session, and
+// — this being a switch on a line rather than a list — which key moves it.
+func (m model) dxModeHint() string { return m.dxMode.Hint() + " · space cycles" }
 
 // dxSummary is the whole form in one line: where it lands, what it will be
 // called, and whether it needs you.
@@ -541,11 +609,7 @@ func (m model) dxSummary() string {
 	if !ok {
 		return "pick a repo to dispatch into"
 	}
-	s := row.repo + " · " + m.dxBranch() + " · "
-	if m.dxAuto {
-		return s + "auto"
-	}
-	return s + "asks each step"
+	return row.repo + " · " + m.dxBranch() + " · " + m.dxMode.Summary()
 }
 
 // dxFooterHelp is the chrome row while the form is open. It advertises only
@@ -593,7 +657,6 @@ func (m model) dxView(w, h int) string {
 		cqFixed(m.dxFieldRow(inner, "WHERE", m.dxFilter, m.dxField == dxWhereF, m.dxRepoCount())),
 	}
 
-	autoVal, autoHex := m.dxAutoValue()
 	// The gap under TITLE is order 10: the last spacer to go, because the two
 	// fields either side of it are the two the human types into, and a title
 	// touching its brief reads as one run-on sentence.
@@ -609,7 +672,7 @@ func (m model) dxView(w, h int) string {
 		cqFixed(m.dxFieldRow(inner, "DONE WHEN", m.dxGoal, m.dxField == dxGoalF, "")),
 		cqFixed(dxHintRow(inner, m.dxGoalHint())),
 		cqGap(8),
-		cqFixed(dxAutoRow(inner, m.dxField == dxAutoF, autoVal, autoHex, m.dxAutoHint())),
+		cqFixed(dxModeRow(inner, m.dxField == dxModeF, m.dxModeValue(), m.dxModeHint())),
 		cqGap(6),
 		cqFixed(dxHintRow(inner, m.dxSummary())),
 	}
@@ -674,12 +737,17 @@ func dxHintRow(inner int, s string) string {
 	return flG(blank(dxIndent) + fg(cFaint, truncate(s, maxi(1, inner-dxIndent))))
 }
 
-// dxAutoRow is the AUTO switch. It has no caret: there is nothing to type into
-// it, and a caret would say otherwise.
-func dxAutoRow(inner int, active bool, value, hex, hint string) string {
-	lbl := fg(dxLabelColor(active), padTo("AUTO", dxLabelW, alignLeft))
-	room := maxi(1, inner-dxLabelW-dxGapW-dispWidth(value)-dxGapW)
-	return flG(lbl + blank(dxGapW) + fg(hex, value) + blank(dxGapW) + fg(cFaint, truncate(hint, room)))
+// dxModeRow is the MODE switch: the three positions with the chosen one lit,
+// then what it means. It has no caret: there is nothing to type into it, and a
+// caret would say otherwise.
+//
+// value arrives already coloured, so its width comes from dxModeWidth rather
+// than from measuring the string — the colour escapes are not columns, and
+// budgeting the hint against them would leave the line short.
+func dxModeRow(inner int, active bool, value, hint string) string {
+	lbl := fg(dxLabelColor(active), padTo("MODE", dxLabelW, alignLeft))
+	room := maxi(1, inner-dxLabelW-dxGapW-dxModeWidth()-dxGapW)
+	return flG(lbl + blank(dxGapW) + value + blank(dxGapW) + fg(cFaint, truncate(hint, room)))
 }
 
 // dxLabelColor lifts the label of the field that owns the keyboard, which is

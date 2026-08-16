@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 )
 
 // dxFormModel is the dx form open over a repo list that actually has a repo in
@@ -90,10 +93,10 @@ func TestDXSubmitAsksForTitleThenWhat(t *testing.T) {
 	}
 }
 
-// The prompt leads with the title, then the brief, then the two sentences that
-// are the whole of DONE WHEN and AUTO.
+// The prompt leads with the title, then the brief, then DONE WHEN's sentence
+// and the one that matches the mode.
 func TestDXPromptLeadsWithTheTitle(t *testing.T) {
-	got := dxPrompt("payment retries", "retry declined cards on a backoff", "ci is green", true)
+	got := dxPrompt("payment retries", "retry declined cards on a backoff", "ci is green", dispatchpkg.ModeAuto)
 	want := strings.Join([]string{
 		"payment retries",
 		"",
@@ -110,8 +113,77 @@ func TestDXPromptLeadsWithTheTitle(t *testing.T) {
 
 	// With no brief the title stands alone rather than leaving a hole where the
 	// body would be.
-	if got := dxPrompt("payment retries", "", "", false); !strings.HasPrefix(got, "payment retries\n\nDo one pass") {
+	if got := dxPrompt("payment retries", "", "", dispatchpkg.ModeManual); !strings.HasPrefix(got, "payment retries\n\nDo one pass") {
 		t.Errorf("prompt with no WHAT =\n%s", got)
+	}
+
+	// Plan mode gets its own closing sentence: telling a session that cannot
+	// change anything to commit as it goes would be an instruction it has to
+	// disobey, and the mode is not a two-position switch any more.
+	plan := dxPrompt("payment retries", "retry declined cards", "", dispatchpkg.ModePlan)
+	if strings.Contains(plan, "Commit as you go") || !strings.Contains(plan, "put the plan up for approval") {
+		t.Errorf("plan mode's prompt =\n%s", plan)
+	}
+}
+
+// The MODE line shows all three positions and marks the armed one with a
+// caret rather than with colour alone.
+//
+// The three words read identically without colour — unlike the on/off switch
+// this replaced, whose word changed — so a terminal with no colour, or an eye
+// that cannot separate green from grey, would have no way to tell which one is
+// armed. The test renders through the view, which is where lipgloss strips the
+// escapes when there is no terminal, so it is asserting exactly what such a
+// terminal shows.
+func TestDXModeLineMarksTheArmedModeWithoutColour(t *testing.T) {
+	m := dxFormModel(t)
+	m.dxField = dxModeF
+	for _, want := range dispatchpkg.Modes() {
+		m.dxMode = want
+		out := m.dxView(120, 34)
+		if !strings.Contains(out, "▸"+string(want)) {
+			t.Errorf("MODE %q is not marked as armed:\n%s", want, out)
+		}
+		for _, other := range dispatchpkg.Modes() {
+			if other == want {
+				continue
+			}
+			if strings.Contains(out, "▸"+string(other)) {
+				t.Errorf("MODE %q is armed but %q also carries the caret", want, other)
+			}
+			// Still on offer, though — a three-way switch that showed only its
+			// current value would hide two thirds of itself.
+			if !strings.Contains(out, string(other)) {
+				t.Errorf("MODE %q is not on offer while %q is armed", other, want)
+			}
+		}
+	}
+}
+
+// The mode reaches the launch, not just the prompt: it is what claude is
+// started with (--permission-mode), and a form that composed a sentence about
+// being unattended and then left the flag off is the defect this field had.
+func TestDXSubmitPassesTheMode(t *testing.T) {
+	var got dispatchpkg.Mode
+	prev := dxLaunch
+	dxLaunch = func(_ *config.Config, _, _, _ string, mode dispatchpkg.Mode) tea.Cmd {
+		got = mode
+		return nil
+	}
+	t.Cleanup(func() { dxLaunch = prev })
+
+	m := dxFormModel(t)
+	m.dxTitle, m.dxWhat, m.dxMode = "payment retries", "retry declined cards", dispatchpkg.ModePlan
+	if _, _ = m.dxSubmit(); got != dispatchpkg.ModePlan {
+		t.Errorf("the launch got mode %q, want plan", got)
+	}
+
+	// And the default is auto: a dispatcher is work sent somewhere else to
+	// happen, and the form must not open on a mode that stops on step one.
+	m = dxFormModel(t)
+	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
+	if _, _ = m.dxSubmit(); got != dispatchpkg.ModeAuto {
+		t.Errorf("an untouched MODE launched as %q, want auto", got)
 	}
 }
 

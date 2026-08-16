@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 )
 
 // seedRepoRoot creates a scan root with the given repo dirs (each a fake git
@@ -72,7 +73,8 @@ func TestDispatchFormAcceptsBurstTyping(t *testing.T) {
 	if got := m.dispatchForm.feature.Value(); got != "payment retry flow" {
 		t.Fatalf("feature = %q", got)
 	}
-	m = press(m, "enter")
+	m = press(m, "enter") // → mode
+	m = press(m, "enter") // take the default and go on to the prompt
 	m = typeBurst(m, "retry failed charges with backoff")
 	if got := m.dispatchForm.prompt.Value(); got != "retry failed charges with backoff" {
 		t.Fatalf("prompt = %q", got)
@@ -168,14 +170,40 @@ func TestDispatchFormFlow(t *testing.T) {
 	}
 	m = typeStr(m, "csv export")
 	m = press(m, "enter")
+	if m.dispatchForm.step != dispatchMode {
+		t.Fatalf("after feature name, step = %d, want mode", m.dispatchForm.step)
+	}
+
+	// Step 3: the mode list opens on the default and every mode is on screen —
+	// a three-way choice shown one value at a time hides two thirds of itself.
+	if got := m.dispatchForm.mode(); got != dispatchpkg.DefaultMode {
+		t.Fatalf("mode opened on %q, want the default", got)
+	}
+	out = m.View()
+	for _, k := range dispatchpkg.Modes() {
+		if !strings.Contains(out, string(k)) {
+			t.Errorf("the mode step does not offer %q", k)
+		}
+	}
+	// Down walks to manual, and up comes back — the picked mode is what reaches
+	// the launch.
+	m = press(m, "down")
+	if got := m.dispatchForm.mode(); got != dispatchpkg.ModeManual {
+		t.Fatalf("down → %q, want manual", got)
+	}
+	m = press(m, "up")
+	if got := m.dispatchForm.mode(); got != dispatchpkg.ModeAuto {
+		t.Fatalf("up → %q, want auto", got)
+	}
+	m = press(m, "enter")
 	if m.dispatchForm.step != dispatchPrompt {
-		t.Fatalf("after feature name, step = %d, want prompt", m.dispatchForm.step)
+		t.Fatalf("after mode, step = %d, want prompt", m.dispatchForm.step)
 	}
 	if strings.TrimSpace(strings.Join(strings.Fields(m.View()), " ")) == "" {
 		t.Fatal("prompt step render empty")
 	}
 
-	// Step 3: empty prompt is rejected, then submitting launches and closes.
+	// Step 4: empty prompt is rejected, then submitting launches and closes.
 	m = press(m, "enter")
 	if m.dispatchForm == nil || m.dispatchForm.errMsg == "" {
 		t.Fatal("empty prompt should be rejected and keep the form open")
@@ -194,8 +222,8 @@ func TestDispatchFormFlow(t *testing.T) {
 	}
 }
 
-// TestDispatchFormEscBacksOut walks the esc chain: prompt → feature → repo →
-// closed, mirroring the classic form's back navigation.
+// TestDispatchFormEscBacksOut walks the esc chain: prompt → mode → feature →
+// repo → closed, mirroring the classic form's back navigation.
 func TestDispatchFormEscBacksOut(t *testing.T) {
 	root := seedRepoRoot(t, "api")
 	cfg := &config.Config{Roots: []string{root}}
@@ -208,13 +236,18 @@ func TestDispatchFormEscBacksOut(t *testing.T) {
 	m = press(m, "+")
 	m = press(m, "enter") // pick the only repo
 	m = typeStr(m, "thing")
+	m = press(m, "enter") // → mode
 	m = press(m, "enter") // → prompt
 	if m.dispatchForm.step != dispatchPrompt {
 		t.Fatalf("expected prompt step, got %d", m.dispatchForm.step)
 	}
 	m = press(m, "esc")
+	if m.dispatchForm.step != dispatchMode {
+		t.Fatal("esc from prompt should go back to mode")
+	}
+	m = press(m, "esc")
 	if m.dispatchForm.step != dispatchFeature {
-		t.Fatal("esc from prompt should go back to feature")
+		t.Fatal("esc from mode should go back to feature")
 	}
 	if got := strings.TrimSpace(m.dispatchForm.feature.Value()); got != "thing" {
 		t.Fatalf("feature value lost on back-nav: %q", got)
