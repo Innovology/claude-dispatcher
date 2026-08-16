@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 )
 
@@ -223,7 +224,7 @@ func TestReplyCmdNoSession(t *testing.T) {
 }
 
 func TestLaunchCmdNoConfig(t *testing.T) {
-	msg := launchCmd(nil, "repo", "feature", "prompt")()
+	msg := launchCmd(nil, "repo", "feature", "prompt", dispatchpkg.ModeAuto)()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || lm.feature != "feature" || !strings.Contains(lm.notice, "no config") {
 		t.Errorf("launchCmd(nil cfg) = %#v", msg)
@@ -233,7 +234,7 @@ func TestLaunchCmdNoConfig(t *testing.T) {
 func TestLaunchCmdRepoNotFound(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{Roots: []string{dir}}
-	msg := launchCmd(cfg, "nonexistent-repo", "feature", "prompt")()
+	msg := launchCmd(cfg, "nonexistent-repo", "feature", "prompt", dispatchpkg.ModeAuto)()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || lm.feature != "feature" || !strings.Contains(lm.notice, "repo not found") {
 		t.Errorf("launchCmd(repo not found) = %#v", msg)
@@ -253,7 +254,7 @@ func TestLaunchCmdEnsureBranchFails(t *testing.T) {
 	}
 	cfg := &config.Config{Roots: []string{root}}
 
-	msg := launchCmd(cfg, "fake-repo", "new feature", "do something")()
+	msg := launchCmd(cfg, "fake-repo", "new feature", "do something", dispatchpkg.ModeAuto)()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || lm.feature != "new feature" || !strings.Contains(lm.notice, "launch failed") {
 		t.Errorf("launchCmd(broken repo) = %#v", msg)

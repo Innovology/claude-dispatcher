@@ -118,8 +118,13 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	if base == "disp-" {
 		base = "disp-" + d.ID
 	}
+	// The mode it was dispatched in, so reopening a dispatcher does not quietly
+	// change what it may do without asking. A record from before the mode was a
+	// choice normalises to the default rather than inheriting nothing: --resume
+	// still has to be given some mode, and the default is the one the form
+	// would offer.
 	name := uniqueName(base)
-	if err := newSession(name, dir, resumeCommand(d.ID, sid, prompt)); err != nil {
+	if err := newSession(name, dir, resumeCommand(d.ID, sid, prompt, Mode(d.Mode))); err != nil {
 		return "", "", err
 	}
 

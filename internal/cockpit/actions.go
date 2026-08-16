@@ -207,8 +207,9 @@ func resumeCmd(id, prompt string) tea.Cmd {
 	}
 }
 
-// launchCmd dispatches a new feature into repoName with prompt.
-func launchCmd(cfg *config.Config, repoName, feature, prompt string) tea.Cmd {
+// launchCmd dispatches a new feature into repoName with prompt, in the
+// permission mode the form chose.
+func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
 			return launchedMsg{feature: feature, notice: "no config — cannot dispatch", failed: true}
@@ -224,7 +225,7 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string) tea.Cmd {
 		if found == nil {
 			return launchedMsg{feature: feature, notice: "repo not found: " + repoName, failed: true}
 		}
-		d, err := dispatchpkg.Launch(*found, feature, prompt)
+		d, err := dispatchpkg.Launch(*found, feature, prompt, mode)
 		if err != nil {
 			return launchedMsg{feature: feature, notice: "launch failed: " + err.Error(), failed: true}
 		}

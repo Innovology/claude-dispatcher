@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 )
 
@@ -21,7 +22,7 @@ func stubLaunch(t *testing.T) *struct{ repo, feature, prompt string } {
 	t.Helper()
 	got := &struct{ repo, feature, prompt string }{}
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, repo, feature, prompt string) tea.Cmd {
+	dxLaunch = func(_ *config.Config, repo, feature, prompt string, _ dispatchpkg.Mode) tea.Cmd {
 		got.repo, got.feature, got.prompt = repo, feature, prompt
 		return nil
 	}

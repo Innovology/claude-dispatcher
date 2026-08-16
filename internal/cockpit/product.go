@@ -15,6 +15,7 @@ package cockpit
 import (
 	"strings"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 
@@ -711,7 +712,12 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 				return m, nil
 			}
 			m.notice = "dispatching \"" + t.feature + "\" again…"
-			return m, launchCmd(m.cfg, t.repo, t.feature, text)
+			// Same reading as the backlog's enter: this panel asks for a line of
+			// text, not for a mode, so the re-dispatch takes the default rather
+			// than inheriting the finished dispatcher's — the human typed a new
+			// brief, and a mode chosen for the last run is not consent for this
+			// one.
+			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode)
 		}
 		m.resumeText = next
 		return m, nil
