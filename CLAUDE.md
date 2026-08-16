@@ -79,8 +79,13 @@
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited).
 - `internal/dispatch` — branch + tmux + record creation.
-- `internal/ui` — Bubble Tea cockpit; responsive tiling breakpoints at 110
+- `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
+  `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
+  the first `loadSnapshot`, which reports each stage as it runs. Every line is
+  a real stage and every figure is what it found — the list is a description of
+  that function, not decoration over it, so a stage added there gets a step here
+  (a test asserts the two sets match). Any key skips it; the load continues.
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort

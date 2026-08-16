@@ -35,6 +35,15 @@ func TestClassify(t *testing.T) {
 			want: MethodBrewFormula, cmd: "brew upgrade claude-dispatcher", canUpg: true,
 		},
 		{
+			// What a WSL2 install actually is: the tap ships one cask, and
+			// goreleaser gives it an `on_linux` block, so Linuxbrew stages it
+			// under its own Caskroom and `U` must offer the cask command there
+			// too — not the formula one it would get by guessing from GOOS.
+			name: "linuxbrew cask",
+			path: "/home/linuxbrew/.linuxbrew/Caskroom/claude-dispatcher/3.1.2/claude-dispatcher",
+			want: MethodBrewCask, cmd: "brew upgrade --cask claude-dispatcher", canUpg: true,
+		},
+		{
 			name: "linuxbrew formula",
 			path: "/home/linuxbrew/.linuxbrew/Cellar/claude-dispatcher/3.1.2/bin/claude-dispatcher",
 			want: MethodBrewFormula, cmd: "brew upgrade claude-dispatcher", canUpg: true,

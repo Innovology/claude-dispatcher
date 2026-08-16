@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"syscall"
 
@@ -133,6 +134,27 @@ func HasSession(name string) bool {
 	delete(reg, name)
 	_ = saveRegistry(reg)
 	return false
+}
+
+// Sessions names every tracked process still alive, pruning the ones that have
+// exited in the same pass. It is the whole-registry form of HasSession.
+func Sessions() []string {
+	reg := loadRegistry()
+	var live []string
+	changed := false
+	for name, pid := range reg {
+		if processAlive(pid) {
+			live = append(live, name)
+			continue
+		}
+		delete(reg, name)
+		changed = true
+	}
+	if changed {
+		_ = saveRegistry(reg)
+	}
+	sort.Strings(live)
+	return live
 }
 
 // KillSession terminates name's tracked process tree and drops it from the

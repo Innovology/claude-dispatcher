@@ -13,6 +13,7 @@
 //	Backend() string                         — its name, for messages ("tmux")
 //	NewSession(name, dir, shellCommand) error — start a detached session
 //	HasSession(name) bool                    — is that session still alive
+//	Sessions() []string                      — every live session, in one call
 //	AttachCmd(name) *exec.Cmd                — hand the terminal to it
 //	KillSession(name) error                  — end it
 //	SendKeys(name, text) error               — type text at its prompt + Enter
