@@ -18,13 +18,23 @@ import (
 )
 
 // TTLs are per query class: issue/PR lists move slowly, check runs move fast.
+//
+// Every one of them must be at least the cockpit's poll interval. A TTL shorter
+// than the poll does not buy the human fresher data — the poll is what asks —
+// it only lets the rebuilds *between* polls pay for the same answer again, and
+// the cockpit rebuilds on every dispatch-record write, which with a handful of
+// live sessions is far more often than once a minute. PRTTL was 45s against a
+// 60s poll, so the busiest class in the cache was guaranteed to be cold on
+// arrival at every poll and to refetch a second time in between. See
+// cockpit.TestForgeTTLsOutlastThePoll, which holds this the right way round.
 const (
 	// SearchTTL covers the whole-account searches (assigned issues, open PRs).
 	SearchTTL = 3 * time.Minute
 	// RepoTTL covers per-repo lists.
 	RepoTTL = 2 * time.Minute
-	// PRTTL covers per-PR checks and reviews, which change while CI runs.
-	PRTTL = 45 * time.Second
+	// PRTTL covers per-PR checks and reviews, which change while CI runs, so
+	// it sits exactly on the poll: fresh once per poll, free in between.
+	PRTTL = 60 * time.Second
 )
 
 type entry struct {

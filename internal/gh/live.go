@@ -103,18 +103,23 @@ func prChecksUncached(repoPath string, number int) Checks {
 	if !Available() {
 		return c
 	}
-	out, err := command(repoPath, "pr", "checks", strconv.Itoa(number),
+	// `gh pr checks` answers in its exit code as well as on stdout: 1 when a
+	// check has failed, 8 while any is still pending. Those are precisely the
+	// two states the cockpit polls hardest, so reading a non-zero exit as "no
+	// answer" threw away the JSON we had already paid a request for and bought
+	// the same answer again from the rollup — two GraphQL requests per running
+	// or red PR, on every refresh, on the largest key class there is. Read
+	// stdout first; the exit code only decides what to do when it is empty.
+	out, _ := command(repoPath, "pr", "checks", strconv.Itoa(number),
 		"--json", "state").Output()
-	if err != nil {
-		// Fall back to the rollup view, which is populated even before
-		// checks are queryable via `pr checks`.
-		return prChecksRollup(repoPath, number)
-	}
 	var rows []struct {
 		State string `json:"state"`
 	}
-	if json.Unmarshal(out, &rows) != nil {
-		return c
+	if json.Unmarshal(out, &rows) != nil || len(rows) == 0 {
+		// No checks reported (gh exits 1 and prints nothing), or gh failed
+		// outright. Fall back to the rollup view, which is populated even
+		// before checks are queryable via `pr checks`.
+		return prChecksRollup(repoPath, number)
 	}
 	for _, r := range rows {
 		c.Total++
