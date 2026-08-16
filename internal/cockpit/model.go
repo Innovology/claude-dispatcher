@@ -105,6 +105,12 @@ type model struct {
 	// it — see version.Detect.
 	install version.Install
 
+	// away says the human is inside a dispatcher session this cockpit handed
+	// them to and has not come back from yet. It is only ever set when the
+	// handover exits on the way OUT rather than on the way back — see attach —
+	// and it is what earns the return trip a full recheck rather than a redraw.
+	away bool
+
 	// relaunch says the cockpit is quitting only to come back as the build it
 	// just installed. Run reads it after the program returns — the terminal has
 	// to be handed back before we exec, or the new process inherits an alt
@@ -270,12 +276,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case attachReturnedMsg:
 		m.notice = ""
 		if msg.err != nil {
+			// The handover never happened, so nobody went anywhere and there is
+			// no return trip to wait for.
 			m.notice = "attach failed: " + msg.err.Error()
+			m.away = false
 		}
-		if m.cfg != nil {
+		if m.cfg == nil {
+			return m, nil
+		}
+		// A handover that exits on the way out has not returned anyone yet:
+		// rechecking here would read the world at the instant the human left and
+		// then have nothing to say when they actually come back, which is the
+		// staleness this is meant to end. Wait for focus. Everywhere else this
+		// message IS the return, so recheck now.
+		if m.away {
 			return m, loadSnapshotCmd(m.cfg)
 		}
-		return m, nil
+		return m, recheckCmd(m.cfg)
+
+	case tea.FocusMsg:
+		// Only a jump-in earns a recheck; focus on its own must not. A full
+		// forge re-read every time the human alt-tabs back to the terminal is
+		// how the gh quota gets burned (see internal/gh/cache.go), and a cockpit
+		// that never left has nothing to catch up on.
+		if !m.away {
+			return m, nil
+		}
+		m.away = false
+		if m.cfg == nil {
+			return m, nil
+		}
+		return m, recheckCmd(m.cfg)
 
 	case cqFlashMsg:
 		// A stale timer must not clear a newer item — same guard as undoSeq.

@@ -67,7 +67,7 @@ There is no API for a Claude subscription's limits — so the cockpit **learns**
 
 Every act the table offers is wired to the live session — the key hints show only what the selected dispatcher can actually do:
 
-- **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back)
+- **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back). Coming back **rechecks** rather than redraws: you have just spent minutes driving that session by hand, so the forge is read again instead of replayed from cache, and any session that died without getting a `SessionEnd` out stops being reported as working
 - **`y`** on a PR waiting to merge: `gh pr merge --squash --auto`, then mark live. Elsewhere it marks the record shipped, and it is hidden entirely when the dispatcher has produced no commits
 - **`x`** kill the session · **`s`** skip to the back of the table · **`u`** undo
 - **`d`** open the prompt · **`f`** / **`w`** filter the table · **`enter` on a backlog ticket** dispatches it

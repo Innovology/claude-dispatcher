@@ -33,6 +33,7 @@ func TestNonMutatingCallsAreSafe(t *testing.T) {
 	}
 	SetStatusHint("definitely-not-a-real-session-xyz")
 	EnsureBackKey()
+	EnsureFocusEvents()
 	if cmd := AttachCmd("x"); cmd == nil {
 		t.Error("AttachCmd returned nil")
 	}
@@ -40,4 +41,30 @@ func TestNonMutatingCallsAreSafe(t *testing.T) {
 	// is fine — we only require they return without panicking.
 	_ = SendKeys("definitely-not-a-real-session-xyz", "hello")
 	_ = KillSession("definitely-not-a-real-session-xyz")
+}
+
+// AttachSwitches answers one question — does AttachCmd's exit mean the human is
+// back, or that they have just left — and the cockpit's return-trip recheck
+// hangs off it. It must agree with the command AttachCmd actually builds, or
+// the cockpit waits for a return that already happened (or rechecks one that
+// has not).
+func TestAttachSwitchesMatchesTheCommandBuilt(t *testing.T) {
+	for _, tc := range []struct {
+		name, tmux, wantArg string
+		wantSwitches        bool
+	}{
+		{name: "inside tmux", tmux: "/tmp/tmux-501/default,1,0", wantArg: "switch-client", wantSwitches: true},
+		{name: "bare terminal", tmux: "", wantArg: "attach-session", wantSwitches: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TMUX", tc.tmux)
+			if got := AttachSwitches(); got != tc.wantSwitches {
+				t.Errorf("AttachSwitches() = %v, want %v", got, tc.wantSwitches)
+			}
+			args := AttachCmd("some-session").Args
+			if len(args) < 2 || args[1] != tc.wantArg {
+				t.Errorf("AttachCmd args = %v, want %q — it disagrees with AttachSwitches", args, tc.wantArg)
+			}
+		})
+	}
 }

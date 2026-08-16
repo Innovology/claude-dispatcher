@@ -191,6 +191,16 @@ func UniqueName(base string) string {
 }
 
 // SetStatusHint and EnsureBackKey are tmux status-line / key-binding concerns
-// with no console-window analogue; they are no-ops on Windows.
+// with no console-window analogue; they are no-ops on Windows. Focus reporting
+// is the console's own business rather than something we can switch on for it,
+// so EnsureFocusEvents is a no-op too.
 func SetStatusHint(name string) {}
 func EnsureBackKey()            {}
+func EnsureFocusEvents()        {}
+
+// AttachSwitches is true here for the same reason it is true inside tmux: the
+// Windows handover raises the session's own console window and returns at once,
+// so the human is over there and this command's exit is not their return. The
+// cockpit therefore waits for focus rather than rechecking on that exit — see
+// the attachReturnedMsg case in internal/cockpit.
+func AttachSwitches() bool { return true }

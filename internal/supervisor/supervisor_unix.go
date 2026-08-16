@@ -23,6 +23,14 @@ func SetStatusHint(name string)                   { tmux.SetStatusHint(name) }
 // EnsureBackKey binds the prefix-free "back to the cockpit" key (Ctrl-\).
 func EnsureBackKey() { tmux.EnsureDetachKey() }
 
+// EnsureFocusEvents turns on tmux's focus reporting, which is what tells a
+// cockpit hosted in tmux that its pane has come back to the front.
+func EnsureFocusEvents() { tmux.EnsureFocusEvents() }
+
+// AttachSwitches is true inside tmux, where the handover is a switch-client
+// that exits as the human leaves rather than when they come back.
+func AttachSwitches() bool { return tmux.AttachSwitches() }
+
 // SendKeys types text into the session and presses Enter, as if at the prompt.
 func SendKeys(name, text string) error {
 	return exec.Command("tmux", "send-keys", "-t", "="+name, text, "Enter").Run()
