@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/state"
 )
@@ -344,6 +346,72 @@ func TestCQFormSubmitWithoutARepo(t *testing.T) {
 	}
 	if !m.cqDispatch || m.dxWhat != "fix" {
 		t.Error("a failed submit must keep the form and what was typed")
+	}
+}
+
+// The dispatcher must be told what was typed, not what the branch is called.
+//
+// WHAT is read twice — as a name, which is capped to five slug words because it
+// names the branch, the worktree and the tmux session, and as the brief, which
+// is the only description of the work that ever reaches the session. Submit
+// composed the brief from the capped name, so every word past the fifth was
+// dropped at the form: before the record, before claude started, and with no
+// other copy of the sentence anywhere. Real records carry the prompt
+// "dispatching immediate look up when", cut mid-clause.
+func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
+	const what = "dispatching immediate look up when the branch already has a dispatcher"
+
+	var gotFeature, gotPrompt string
+	prev := dxLaunch
+	dxLaunch = func(_ *config.Config, _, feature, prompt string) tea.Cmd {
+		gotFeature, gotPrompt = feature, prompt
+		return nil
+	}
+	t.Cleanup(func() { dxLaunch = prev })
+
+	m := cqModel(t)
+	m.cfg = &config.Config{Roots: []string{seedRepoRoot(t, "alpha-api")}}
+	m = press(m, "d")
+	m.dxField, m.dxWhat, m.dxGoal = dxWhatF, what, "the pr is merged"
+	m, _ = m.dxSubmit()
+
+	// The name is still the branch's own words: that is what keeps the record,
+	// the branch, the worktree and the session saying one thing.
+	if want := "dispatching immediate look up when"; gotFeature != want {
+		t.Errorf("feature = %q, want %q", gotFeature, want)
+	}
+	// The brief is not.
+	if first := strings.SplitN(gotPrompt, "\n", 2)[0]; first != what {
+		t.Errorf("prompt line 1 = %q\nwant %q", first, what)
+	}
+	if !strings.Contains(gotPrompt, "done when: the pr is merged") {
+		t.Errorf("prompt lost DONE WHEN:\n%s", gotPrompt)
+	}
+}
+
+// dxDispatch is the seam the two readings part at: cap the name, never the
+// brief. A sentence inside the cap must come back whole from both.
+func TestDXDispatchCapsTheNameOnly(t *testing.T) {
+	long := "rebuild the deploy watcher so it stops polling a workflow that already finished"
+	feature, prompt := dxDispatch("  "+long+"  ", "", true)
+	if words := strings.Fields(feature); len(words) != 5 {
+		t.Errorf("feature = %q, want 5 words", feature)
+	}
+	if !strings.HasPrefix(prompt, long+"\n") {
+		t.Errorf("prompt = %q, want it to open with the whole sentence", prompt)
+	}
+
+	// Short enough to survive the cap: both readings agree, and neither invents
+	// punctuation or drops a word.
+	feature, prompt = dxDispatch("retry backoff", "", true)
+	if feature != "retry backoff" || !strings.HasPrefix(prompt, "retry backoff\n") {
+		t.Errorf("short WHAT: feature = %q, prompt = %q", feature, prompt)
+	}
+
+	// Nothing typed is still nothing: submit's "say what it should do" test
+	// reads the feature, so it must stay empty rather than become whitespace.
+	if feature, _ := dxDispatch("   ", "", true); feature != "" {
+		t.Errorf("blank WHAT gave feature %q", feature)
 	}
 }
 
