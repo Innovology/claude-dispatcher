@@ -47,11 +47,24 @@ homebrew_casks:
       status hook.
     # Unsigned binary: clear the quarantine attribute so Gatekeeper does not
     # block first run.
+    #
+    # The guard is `OS.mac?` — a Ruby question, answered without running
+    # anything — and not a probe for xattr itself, because the cask ships the
+    # Linux build too (goreleaser emits an `on_linux` block, and Homebrew
+    # installs casks on Linux), so this postflight also runs on Linuxbrew,
+    # which is how the README tells a Windows user to install under WSL2.
+    # There, /usr/bin/xattr does not exist; a cask's `system_command` is
+    # SystemCommand.run! (must_succeed), so the missing binary comes back as
+    # exit 127 and raises — the probe that was meant to be the guard was
+    # itself what failed the install, and every WSL install died in
+    # postflight. must_succeed: false keeps the same promise on macOS: a
+    # quarantine we could not strip is a first-run warning, never a failed
+    # install.
     hooks:
       post:
         install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/claude-dispatcher"]
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/claude-dispatcher"], must_succeed: false
           end
 
 # Windows native package managers. Both mirror the Homebrew tap pattern: a

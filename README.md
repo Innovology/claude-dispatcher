@@ -176,7 +176,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 
 ## Windows
 
-**Recommended: run under WSL2.** The full experience — real `tmux`, in-place attach, reply-without-attaching, the whole cockpit — depends on `tmux` as the process supervisor, and `tmux` is a Linux tool. Install a WSL2 distro (Ubuntu is fine), then use the **Linux** build exactly as documented above (`brew` via Linuxbrew, or `make install`). This is the recommended way to run the dispatcher on a Windows machine.
+**Recommended: run under WSL2.** The full experience — real `tmux`, in-place attach, reply-without-attaching, the whole cockpit — depends on `tmux` as the process supervisor, and `tmux` is a Linux tool. Install a WSL2 distro (Ubuntu is fine), then use the **Linux** build exactly as documented above (`brew` via Linuxbrew, or `make install`). Inside the distro, `brew install innovology/tap/claude-dispatcher` is the same command as on a Mac and installs the same cask — Homebrew installs casks on Linux, and the tap's cask carries the Linux build alongside the macOS one, so `U` upgrades it in place there too. This is the recommended way to run the dispatcher on a Windows machine.
 
 **Native preview (winget / scoop).** A native Windows build is published for early access once the publishers below are configured. It is honestly a preview: without `tmux` there is no shared session multiplexer, so **each dispatch opens in its own console window**, and **in-place attach (window focus) and reply (console input injection) are best-effort and still being hardened** — the `tmux`-grade session model for Windows is still being built. For the real cockpit experience today, use WSL2, and watch the cockpit as the native session model lands.
 
