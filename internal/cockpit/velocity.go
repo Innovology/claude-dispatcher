@@ -80,10 +80,14 @@ type velCol struct {
 // columns from each other.
 const velCellW = 12
 
-// HAND-CODED ranks third — above FAIL, 1st PASS, DEPLOYS and RESTORE — because
-// the first two of those have no incident or repair data behind them and render
-// as "—" on every row. A column with a figure in it beats one that is
-// structurally empty, whatever the design's original ordering said.
+// HAND-CODED ranks third, behind only WAIT ON YOU and LEAD.
+//
+// It goes above FAIL, RESTORE and 1st PASS because those three have no incident
+// or repair data behind them and render "—" on every row: a column with a
+// figure in it beats one that is structurally empty, whatever the design's
+// original ordering said. It goes above DEPLOYS because the output pane's
+// shipped-of-dispatched table already states that week by week, and this is the
+// one thing on the lens that says how big those deploys were.
 var velColsAll = []velCol{
 	{"deploys", "DEPLOYS", 7},
 	{"lead", "LEAD", 2},
