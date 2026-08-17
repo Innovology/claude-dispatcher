@@ -166,7 +166,7 @@ func TestDXModeLineMarksTheArmedModeWithoutColour(t *testing.T) {
 func TestDXSubmitPassesTheMode(t *testing.T) {
 	var got dispatchpkg.Mode
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, _, _ string, mode dispatchpkg.Mode) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, _, _ string, mode dispatchpkg.Mode, _ dispatchpkg.Model, _ bool) tea.Cmd {
 		got = mode
 		return nil
 	}
@@ -184,6 +184,38 @@ func TestDXSubmitPassesTheMode(t *testing.T) {
 	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
 	if _, _ = m.dxSubmit(); got != dispatchpkg.ModeAuto {
 		t.Errorf("an untouched MODE launched as %q, want auto", got)
+	}
+}
+
+// MODEL and FAN OUT reach the launch the same way MODE does. The model is
+// asserted against whatever this machine's claude offers (dispatchpkg.Models),
+// because the offer is read from the installed help and a hard-coded alias
+// would only pass on machines that advertise it.
+func TestDXSubmitPassesModelAndFanOut(t *testing.T) {
+	var gotModel dispatchpkg.Model
+	var gotFan bool
+	prev := dxLaunch
+	dxLaunch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, mdl dispatchpkg.Model, fanOut bool) tea.Cmd {
+		gotModel, gotFan = mdl, fanOut
+		return nil
+	}
+	t.Cleanup(func() { dxLaunch = prev })
+
+	all := dispatchpkg.Models()
+	pick := all[len(all)-1]
+
+	m := dxFormModel(t)
+	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
+	m.dxModel, m.dxFanOut = pick, true
+	if _, _ = m.dxSubmit(); gotModel != pick || !gotFan {
+		t.Errorf("the launch got model %q fanOut %v, want %q and true", gotModel, gotFan, pick)
+	}
+
+	// And untouched switches launch as the defaults: no flag, no fan-out.
+	m = dxFormModel(t)
+	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
+	if _, _ = m.dxSubmit(); gotModel != dispatchpkg.DefaultModel || gotFan {
+		t.Errorf("untouched switches launched as model %q fanOut %v, want the defaults", gotModel, gotFan)
 	}
 }
 

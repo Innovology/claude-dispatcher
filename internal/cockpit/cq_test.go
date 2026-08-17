@@ -402,7 +402,7 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 
 	var gotFeature, gotPrompt string
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ bool) tea.Cmd {
 		gotFeature, gotPrompt = feature, prompt
 		return nil
 	}

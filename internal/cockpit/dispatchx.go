@@ -5,13 +5,15 @@ package cockpit
 // It replaces the freeform draft (`cqDraft`) that used to sit under "what
 // should we build?". A draft answered only half the question: it said what to
 // build and then handed off to a three-step overlay to say where. The form asks
-// the five things a dispatch actually needs, on one screen:
+// the things a dispatch actually needs, on one screen:
 //
 //	WHERE      which repo it lands in — filtered, not scrolled through
 //	TITLE      what it is called: the feature name, and the branch
 //	WHAT       the work itself, wrapped over as many rows as it takes
 //	DONE WHEN  the completion condition, optional
 //	MODE       auto, manual or plan — what it may do without asking
+//	MODEL      default, or an alias the installed claude advertises
+//	FAN OUT    whether it may spread across agents when the task splits
 //
 // TITLE and WHAT used to be one field, and the branch was named from it. That
 // asked one line to be two things at once: a name short enough to live in
@@ -27,6 +29,14 @@ package cockpit
 // nobody watching. It reaches the process now, as --permission-mode (see
 // dispatch/mode.go), which is also what lets it offer plan mode: plan is not
 // something a sentence can ask for.
+//
+// MODEL reaches the process the same way MODE does — as a launch flag
+// (--model, see dispatch/model.go) — and its offer comes from the claude
+// actually installed, because a model name we invented is a session erroring
+// with nobody watching. FAN OUT is the other kind of switch: Claude Code's
+// opt-in for multi-agent work is the keyword "ultracode" in the prompt, not a
+// flag, so on it becomes one closing sentence (dispatch/fanout.go) and off it
+// changes nothing.
 //
 // DONE WHEN is still honest about its reach in the other direction: no
 // supervisor watches it, so it is a sentence in the prompt and the copy
@@ -59,6 +69,8 @@ const (
 	dxWhatF
 	dxGoalF
 	dxModeF
+	dxModelF
+	dxFanoutF
 	dxFieldCount
 )
 
@@ -85,6 +97,7 @@ func (m model) dxReset() model {
 	m.dxField, m.dxRepo = dxWhereF, 0
 	m.dxFilter, m.dxTitle, m.dxWhat, m.dxGoal = "", "", "", ""
 	m.dxMode = dispatchpkg.DefaultMode
+	m.dxModel, m.dxFanOut = dispatchpkg.DefaultModel, false
 	return m
 }
 
@@ -101,9 +114,9 @@ func (m model) dxOpen(filter string) model {
 // dxTouched reports whether anything has been typed into the four text fields.
 // It is what decides whether a navigation key is navigation or text: an
 // untouched form is not a trap, so 1–6, ':', 'd' and 'h' still leave it, but the
-// moment there is a filter or a sentence they are letters again. dxMode and
-// dxField deliberately do not count — cycling the mode or tabbing about is not
-// typing, and must not strand the human on this screen.
+// moment there is a filter or a sentence they are letters again. dxMode,
+// dxModel, dxFanOut and dxField deliberately do not count — cycling a switch or
+// tabbing about is not typing, and must not strand the human on this screen.
 func (m model) dxTouched() bool {
 	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != ""
 }
@@ -338,7 +351,7 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		if field == dxModeF {
+		if field == dxFanoutF {
 			return m.dxSubmit()
 		}
 		m.dxField = field + 1
@@ -349,7 +362,7 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxRepo = mini(m.dxRepo+1, maxi(len(rows)-1, 0))
 			return m, nil
 		}
-		m.dxField = mini2(field+1, dxModeF)
+		m.dxField = mini2(field+1, dxFanoutF)
 		return m, nil
 
 	case "up":
@@ -361,23 +374,41 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 
-	// MODE is a switch, not a field: space and `a` walk the three positions,
-	// left/right steer within the line, and nothing else on it types. This has
-	// to sit above the text branch, because typedText turns a space into " ".
+	// MODE, MODEL and FAN OUT are switches, not fields: space walks the
+	// positions, left/right steer within the line, and nothing else on them
+	// types. These have to sit above the text branch, because typedText turns
+	// a space into " ".
 	//
-	// `a` survives from when this line was AUTO and had two positions; it is
-	// still the letter the field is reached for, and cycling is what it now
-	// does. left/right are here because a three-way switch is a list, and a
-	// list you can only walk one way makes the third choice three keypresses.
-	// The vim pair is deliberately not bound: `h` leaves this lens from an
-	// untouched form, and one key that navigates on an empty form and edits on
-	// a filled one is the kind of thing nobody remembers under pressure.
+	// `a` survives on MODE from when that line was AUTO and had two positions;
+	// it is still the letter the field is reached for, and cycling is what it
+	// now does. left/right are here because a switch is a list, and a list you
+	// can only walk one way makes the far choice that many keypresses. The vim
+	// pair is deliberately not bound: `h` leaves this lens from an untouched
+	// form, and one key that navigates on an empty form and edits on a filled
+	// one is the kind of thing nobody remembers under pressure.
 	if field == dxModeF {
 		switch k {
 		case " ", "space", "a", "right":
 			m.dxMode = dispatchpkg.Next(m.dxMode.Normalize())
 		case "left":
 			m.dxMode = dispatchpkg.Prev(m.dxMode.Normalize())
+		}
+		return m, nil
+	}
+	if field == dxModelF {
+		switch k {
+		case " ", "space", "right":
+			m.dxModel = dispatchpkg.NextModel(m.dxModel.Normalize())
+		case "left":
+			m.dxModel = dispatchpkg.PrevModel(m.dxModel.Normalize())
+		}
+		return m, nil
+	}
+	if field == dxFanoutF {
+		switch k {
+		case " ", "space", "left", "right":
+			// Two positions: every direction is the other one.
+			m.dxFanOut = !m.dxFanOut
 		}
 		return m, nil
 	}
@@ -451,6 +482,8 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	}
 	goal := strings.TrimSpace(m.dxGoal)
 	mode := m.dxMode.Normalize()
+	mdl := m.dxModel.Normalize()
+	fanOut := m.dxFanOut
 	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal, mode)
 	if feature == "" {
 		// Empty *or* unslugabble: a title of nothing but punctuation passes a
@@ -478,7 +511,15 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	// The mode is always named, not only when it is the interesting one: it now
 	// configures the session rather than describing it, and a launch flag the
 	// notice stayed quiet about would be a setting the human never saw applied.
+	// The model is named only when one was chosen — "default" is the absence of
+	// a flag, and naming a model we did not pass would be a fabricated fact.
 	notice += " · " + string(mode)
+	if mdl != dispatchpkg.DefaultModel {
+		notice += " · " + string(mdl)
+	}
+	if fanOut {
+		notice += " · fans out"
+	}
 	m.notice = notice
 	// The row goes on the table now, not when the launch comes back. The form is
 	// closing over the table it was drawn on top of, and without this the human
@@ -487,7 +528,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	// table is empty. fleetSync re-keys the cursor over the row that just moved
 	// down; on an empty table it lands the cursor on the new row itself.
 	m = m.markPending(m.pendingFor(row.repo, feature, prompt)).fleetSync()
-	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode)
+	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, fanOut)
 }
 
 // dxLaunch is the launch dxSubmit hands off to, named as a variable so a test
@@ -551,65 +592,137 @@ func (m model) dxGoalHint() string {
 	return "optional · leave empty and it does one pass, then waits for you"
 }
 
-// dxModeGap separates the positions on the MODE line.
+// dxModeGap separates the positions on a switch line.
 const dxModeGap = "  "
 
-// dxModeValue is the switch: all three positions, with a caret on the chosen
+// dxSwitchValue is a switch: every position drawn, with a caret on the chosen
 // one.
 //
 // They are drawn together rather than as a single word because a two-position
 // switch could say "on" and be understood as "off is the other one", while a
-// three-way one showing only its current value hides two thirds of the offer
-// behind a key nobody knows to press.
+// wider one showing only its current value hides most of the offer behind a
+// key nobody knows to press.
 //
 // The caret is what marks the selection; the colour only reinforces it. Colour
-// alone is not a marker here — the three positions read identically without it,
-// unlike the old on/off whose word changed — so a terminal with no colour, or
-// an eye that cannot separate green from grey, would have no way to tell which
-// one is armed.
-func (m model) dxModeValue() string {
-	cur := m.dxMode.Normalize()
-	parts := make([]string, 0, len(dispatchpkg.Modes()))
-	for _, k := range dispatchpkg.Modes() {
-		if k == cur {
-			parts = append(parts, fg(cGreen, "▸"+string(k)))
+// alone is not a marker here — the positions read identically without it — so
+// a terminal with no colour, or an eye that cannot separate green from grey,
+// would have no way to tell which one is armed.
+func dxSwitchValue(words []string, sel int) string {
+	parts := make([]string, 0, len(words))
+	for i, w := range words {
+		if i == sel {
+			parts = append(parts, fg(cGreen, "▸"+w))
 			continue
 		}
-		parts = append(parts, fg(cFaint, " "+string(k)))
+		parts = append(parts, fg(cFaint, " "+w))
 	}
 	return strings.Join(parts, dxModeGap)
 }
 
-// dxModeWidth is what dxModeValue occupies on screen — the words, their carets
-// and the gaps, without the colour escapes dispWidth would have to see through.
-func dxModeWidth() int {
+// dxSwitchWidth is what dxSwitchValue occupies on screen — the words, their
+// carets and the gaps, without the colour escapes dispWidth would have to see
+// through.
+func dxSwitchWidth(words []string) int {
 	w := 0
-	for i, k := range dispatchpkg.Modes() {
+	for i, word := range words {
 		if i > 0 {
 			w += dispWidth(dxModeGap)
 		}
-		w += dispWidth("▸" + string(k))
+		w += dispWidth("▸" + word)
 	}
 	return w
+}
+
+// dxModeWords are MODE's positions, in the offer order the switch cycles in.
+func dxModeWords() []string {
+	out := make([]string, 0, len(dispatchpkg.Modes()))
+	for _, k := range dispatchpkg.Modes() {
+		out = append(out, string(k))
+	}
+	return out
+}
+
+// dxModeSel is the position the caret sits on.
+func (m model) dxModeSel() int {
+	cur := m.dxMode.Normalize()
+	for i, k := range dispatchpkg.Modes() {
+		if k == cur {
+			return i
+		}
+	}
+	return 0
 }
 
 // dxModeHint describes what the chosen mode actually does to the session, and
 // — this being a switch on a line rather than a list — which key moves it.
 func (m model) dxModeHint() string { return m.dxMode.Hint() + " · space cycles" }
 
+// dxModelWords are MODEL's positions: the default, then whatever aliases the
+// installed claude advertises (see dispatch/model.go). On a machine whose help
+// we cannot read this is one word, and the switch is honest about having
+// nothing else to offer.
+func dxModelWords() []string {
+	out := make([]string, 0, len(dispatchpkg.Models()))
+	for _, k := range dispatchpkg.Models() {
+		out = append(out, string(k))
+	}
+	return out
+}
+
+func (m model) dxModelSel() int {
+	cur := m.dxModel.Normalize()
+	for i, k := range dispatchpkg.Models() {
+		if k == cur {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m model) dxModelHint() string { return m.dxModel.Hint() + " · space cycles" }
+
+// dxFanoutWords are FAN OUT's two positions. "solo" rather than "off" because
+// the switch is about who does the work, and the off state is a working state,
+// not an absence.
+func dxFanoutWords() []string { return []string{"solo", "fan out"} }
+
+func (m model) dxFanoutSel() int {
+	if m.dxFanOut {
+		return 1
+	}
+	return 0
+}
+
+// dxFanoutHint says what the chosen position actually does: on adds the
+// ultracode sentence to the prompt (see dispatch/fanout.go), off adds nothing.
+func (m model) dxFanoutHint() string {
+	if m.dxFanOut {
+		return "may spread across multiple agents where the task splits · space flips"
+	}
+	return "one session does all the work itself · space flips"
+}
+
 // dxSummary is the whole form in one line: where it lands, what it will be
-// called, and whether it needs you.
+// called, whether it needs you, and — only when they were chosen — what it
+// runs on and whether it may fan out.
 //
-// The design also prints a model name here. This does not: the launch command
-// passes no --model, so the session runs whatever the user's Claude Code
-// default is, and naming one we did not choose would be a fabricated fact on
-// the most-read line of the screen.
+// The model appears only when one was picked: "default" passes no --model, so
+// the session runs whatever the user's Claude Code default is, and naming a
+// model we did not choose would be a fabricated fact on the most-read line of
+// the screen.
 func (m model) dxSummary() string {
 	row, ok := m.dxPicked()
 	if !ok {
 		return "pick a repo to dispatch into"
 	}
-	return row.repo + " · " + m.dxBranch() + " · " + m.dxMode.Summary()
+	s := row.repo + " · " + m.dxBranch() + " · " + m.dxMode.Summary()
+	if mdl := m.dxModel.Normalize(); mdl != dispatchpkg.DefaultModel {
+		s += " · " + string(mdl)
+	}
+	if m.dxFanOut {
+		s += " · fans out"
+	}
+	return s
 }
 
 // dxFooterHelp is the chrome row while the form is open. It advertises only
@@ -672,7 +785,9 @@ func (m model) dxView(w, h int) string {
 		cqFixed(m.dxFieldRow(inner, "DONE WHEN", m.dxGoal, m.dxField == dxGoalF, "")),
 		cqFixed(dxHintRow(inner, m.dxGoalHint())),
 		cqGap(8),
-		cqFixed(dxModeRow(inner, m.dxField == dxModeF, m.dxModeValue(), m.dxModeHint())),
+		cqFixed(dxSwitchRow(inner, m.dxField == dxModeF, "MODE", dxModeWords(), m.dxModeSel(), m.dxModeHint())),
+		cqFixed(dxSwitchRow(inner, m.dxField == dxModelF, "MODEL", dxModelWords(), m.dxModelSel(), m.dxModelHint())),
+		cqFixed(dxSwitchRow(inner, m.dxField == dxFanoutF, "FAN OUT", dxFanoutWords(), m.dxFanoutSel(), m.dxFanoutHint())),
 		cqGap(6),
 		cqFixed(dxHintRow(inner, m.dxSummary())),
 	}
@@ -737,17 +852,17 @@ func dxHintRow(inner int, s string) string {
 	return flG(blank(dxIndent) + fg(cFaint, truncate(s, maxi(1, inner-dxIndent))))
 }
 
-// dxModeRow is the MODE switch: the three positions with the chosen one lit,
-// then what it means. It has no caret: there is nothing to type into it, and a
-// caret would say otherwise.
+// dxSwitchRow is one switch line — MODE, MODEL or FAN OUT: the positions with
+// the chosen one lit, then what it means. It has no caret: there is nothing to
+// type into it, and a caret would say otherwise.
 //
-// value arrives already coloured, so its width comes from dxModeWidth rather
-// than from measuring the string — the colour escapes are not columns, and
-// budgeting the hint against them would leave the line short.
-func dxModeRow(inner int, active bool, value, hint string) string {
-	lbl := fg(dxLabelColor(active), padTo("MODE", dxLabelW, alignLeft))
-	room := maxi(1, inner-dxLabelW-dxGapW-dxModeWidth()-dxGapW)
-	return flG(lbl + blank(dxGapW) + value + blank(dxGapW) + fg(cFaint, truncate(hint, room)))
+// The value is drawn here from its words, because it arrives coloured and its
+// width has to come from the words themselves — the colour escapes are not
+// columns, and budgeting the hint against them would leave the line short.
+func dxSwitchRow(inner int, active bool, label string, words []string, sel int, hint string) string {
+	lbl := fg(dxLabelColor(active), padTo(label, dxLabelW, alignLeft))
+	room := maxi(1, inner-dxLabelW-dxGapW-dxSwitchWidth(words)-dxGapW)
+	return flG(lbl + blank(dxGapW) + dxSwitchValue(words, sel) + blank(dxGapW) + fg(cFaint, truncate(hint, room)))
 }
 
 // dxLabelColor lifts the label of the field that owns the keyboard, which is
