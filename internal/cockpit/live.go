@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/effort"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
@@ -190,6 +191,11 @@ func readForge(repoPath string) string {
 	return "gh"
 }
 
+// reconcileSessions is the stray-session sweep, as a seam: the rule about what
+// a missing session proves belongs to internal/dispatch, and a test swaps this
+// to assert that the load runs it at all without standing up a tmux server.
+var reconcileSessions = dispatchpkg.ReconcileSessions
+
 // loadSnapshot assembles a full snapshot from the real backends. Each collector
 // fills its own fields; collectors live in collect_*.go.
 func loadSnapshot(cfg *config.Config) snapshot { return loadSnapshotReporting(cfg, nil) }
@@ -213,8 +219,19 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	r.done(bootRecords, countOf(len(records), "dispatch", "dispatches"), false)
 
 	r.begin(bootSessions, "asking "+supervisor.Backend()+" what is still running…")
-	live := liveSessions(records)
-	r.done(bootSessions, countOf(live, "session", "sessions")+" live of "+itoa(len(records)), false)
+	// Asking is also answering: the sweep runs here, on every load, so a record
+	// whose session died without getting a SessionEnd out stops claiming to be
+	// working the moment the cockpit next looks. See ReconcileSessions for what
+	// counts as evidence, and the "a ghost can only be cleared by attaching to
+	// it" decision in CLAUDE.md for why this cannot be left to the jump-in.
+	// The sweep writes to the records in this slice, so every collector below
+	// reads the corrected status rather than the one on disk when it was read.
+	retired, live := reconcileSessions(records)
+	sessionsFound := countOf(live, "session", "sessions") + " live of " + itoa(len(records))
+	if retired > 0 {
+		sessionsFound += " · " + countOf(retired, "ghost", "ghosts") + " retired"
+	}
+	r.done(bootSessions, sessionsFound, false)
 
 	roots := cfg.ExpandedRoots()
 	r.begin(bootRepos, "scanning "+countOf(len(roots), "root", "roots")+"…")
@@ -285,27 +302,13 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	return s
 }
 
-// liveSessions counts the recorded dispatches whose supervisor session is still
-// running, from one listing rather than a probe per record.
-//
-// It is read for the opening screen alone. The cockpit's own notion of what is
-// live comes from the records the lifecycle hook writes, and replacing that
-// with a session probe would be a different change with different consequences
-// — a session can outlive the work in it, and the work can outlive a session
-// the human killed by hand.
-func liveSessions(records []*state.Dispatch) int {
-	alive := map[string]bool{}
-	for _, name := range supervisor.Sessions() {
-		alive[name] = true
-	}
-	n := 0
-	for _, rec := range records {
-		if rec.TmuxSession != "" && alive[rec.TmuxSession] {
-			n++
-		}
-	}
-	return n
-}
+// The count of live sessions used to be read here, by a listing of its own, for
+// the opening screen alone. ReconcileSessions returns it now: it takes the same
+// listing for the sweep, and two callers asking the supervisor the same
+// question in the same load is one subprocess for nothing. Nothing else about
+// what the cockpit treats as live has moved — the sweep still only touches the
+// three statuses a hook proved a session behind, because a session can outlive
+// the work in it, and the work can outlive a session the human killed by hand.
 
 // namedProducts counts real products, excluding the bucket every unmapped repo
 // is folded into — the same distinction the header's portfolio line makes.

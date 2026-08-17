@@ -53,6 +53,23 @@
   exited. It never sweeps `launching`: no hook has fired for one, so its
   session may simply not exist *yet* — absence is only evidence where a hook
   proved the session once existed.
+- **A ghost cannot clear itself, so every load looks.** That sweep ran in one
+  place — `recheckCmd`, the reload after a jump-in — so a record whose session
+  had been taken away claimed *working* for as long as the cockpit stayed open
+  and its row went on offering ⏎ attach, which found no session, said so and
+  changed nothing: the only thing that would have retired it was coming back
+  from an attach that could never happen. It is swept on every `loadSnapshot`
+  now, in the boot stage that already asks the supervisor what is running (and
+  reports what it retired), off ONE `supervisor.Sessions` listing rather than a
+  probe per record, because a load happens on every poll and every state-file
+  change. The listing only screens: a record it does not name is asked about
+  directly before anything is written, since a failed listing comes back empty
+  and an empty listing must never retire a fleet. ⏎ on a ghost runs the same
+  sweep on that record and points at history, where ⏎ resumes — the human
+  pressing the key is how a ghost gets found. Reported from WSL, where the
+  distro shuts down with its last console and takes tmux with it; a suspended
+  laptop or a reboot makes the same row anywhere. The full record is
+  `docs/adr/0004-a-ghost-cannot-clear-itself.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only

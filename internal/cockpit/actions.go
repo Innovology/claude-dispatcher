@@ -29,6 +29,18 @@ type actionMsg struct{ notice string }
 type attachReturnedMsg struct{ err error }
 
 // attach hands the terminal to the feature's tmux session.
+//
+// A row offering "attach" whose session is not there is a ghost: the record
+// still claims a status only a hook could have written, and the session that
+// wrote it has since been taken away. Pressing ⏎ on one is how the human finds
+// out, so this does not merely refuse — it retires the record on the spot,
+// through the same sweep the load runs, and says where the dispatcher went. A
+// notice alone would leave the row on the table saying "working", offering the
+// same key, forever.
+//
+// The sweep is what decides, not this function, because the rule about what
+// absence proves lives there: a launching record has had no hook at all, so its
+// session may simply not exist yet and nothing is claimed about it.
 func (m model) attach(feature string) (model, tea.Cmd) {
 	rec := recordFor(feature)
 	if rec == nil {
@@ -36,7 +48,21 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		return m, nil
 	}
 	if !supervisor.HasSession(rec.TmuxSession) {
-		m.notice = "no live tmux session for \"" + feature + "\""
+		if retired, _ := reconcileSessions([]*state.Dispatch{rec}); retired > 0 {
+			m.notice = "\"" + feature + "\" lost its " + supervisor.Backend() +
+				" session — retired · h for history, where ⏎ resumes it"
+			if m.cfg != nil {
+				return m, loadSnapshotCmd(m.cfg)
+			}
+			return m, nil
+		}
+		if rec.Status == state.StatusLaunching {
+			// Nothing has fired a hook for it, so its session may not exist yet
+			// rather than not exist at all — the one absence that proves nothing.
+			m.notice = "\"" + feature + "\" is still starting — no " + supervisor.Backend() + " session yet"
+			return m, nil
+		}
+		m.notice = "no live " + supervisor.Backend() + " session for \"" + feature + "\""
 		return m, nil
 	}
 	return m.attachSession(rec.TmuxSession)

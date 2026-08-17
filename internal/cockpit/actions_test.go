@@ -69,6 +69,68 @@ func TestAttachNoTmuxSession(t *testing.T) {
 	}
 }
 
+// withFakeSweep swaps the stray-session sweep for one that answers from the
+// test, so these cases do not need a real tmux server (CI has none) and can
+// still say what the sweep found.
+func withFakeSweep(t *testing.T, retired, live int) *int {
+	t.Helper()
+	prev := reconcileSessions
+	t.Cleanup(func() { reconcileSessions = prev })
+	calls := 0
+	reconcileSessions = func([]*state.Dispatch) (int, int) {
+		calls++
+		return retired, live
+	}
+	return &calls
+}
+
+// A row offering "attach" whose session is gone is a ghost: the record claims a
+// status only a hook could have written, and the session that wrote it has been
+// taken away. Pressing ⏎ is how the human meets one, so it must retire the
+// record and name the way on — not refuse and leave the same dead key on the
+// same row.
+func TestAttachRetiresAGhostAndSaysWhereItWent(t *testing.T) {
+	withFakeRecord(t, "phantom", &state.Dispatch{
+		Feature: "phantom", TmuxSession: "cockpit-test-does-not-exist-8231",
+		Status: state.StatusWorking,
+	})
+	calls := withFakeSweep(t, 1, 0)
+
+	m := newModel()
+	m.cfg = &config.Config{}
+	mm, cmd := m.attach("phantom")
+	if *calls != 1 {
+		t.Fatalf("the sweep ran %d times, want 1 — attach must not decide this itself", *calls)
+	}
+	if cmd == nil {
+		t.Error("a retired record must be reloaded, or the table keeps showing it as working")
+	}
+	if !strings.Contains(mm.notice, "retired") || !strings.Contains(mm.notice, "history") {
+		t.Errorf("notice = %q, want the retirement and where the dispatcher went", mm.notice)
+	}
+}
+
+// The one absence that proves nothing: a launching record has had no hook, so
+// its session may not exist YET. The sweep declines to retire it, and attach
+// must say that rather than reporting a dispatcher as lost mid-launch.
+func TestAttachDoesNotRetireADispatcherStillStarting(t *testing.T) {
+	withFakeRecord(t, "starting", &state.Dispatch{
+		Feature: "starting", TmuxSession: "cockpit-test-does-not-exist-8232",
+		Status: state.StatusLaunching,
+	})
+	withFakeSweep(t, 0, 0)
+
+	m := newModel()
+	m.cfg = &config.Config{}
+	mm, cmd := m.attach("starting")
+	if cmd != nil {
+		t.Error("nothing changed, so nothing to reload")
+	}
+	if !strings.Contains(mm.notice, "still starting") {
+		t.Errorf("notice = %q, want the launch window named", mm.notice)
+	}
+}
+
 func TestKillCmdNothingToKill(t *testing.T) {
 	saved := captureVars()
 	defer restoreVars(saved)

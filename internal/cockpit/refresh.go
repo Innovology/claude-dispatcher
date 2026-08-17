@@ -86,7 +86,11 @@ func loadSnapshotCmd(cfg *config.Config) tea.Cmd {
 //     rather than replayed from before the jump (shipCmd invalidates for the
 //     same reason after a merge — a hand at the wheel is no less of a change);
 //  2. re-check session liveness, so a session that died without getting a
-//     SessionEnd out stops being reported as working;
+//     SessionEnd out stops being reported as working. loadSnapshot sweeps too,
+//     on every load; this one is here for the order below it, not because the
+//     sweep is this path's alone — it was, and a fleet of dispatchers whose
+//     sessions had died could not raise it, because the only way in was the
+//     jump-in they could no longer make;
 //  3. reconcile PRs and deploys against that, and in that order — track.midWork
 //     reads status, so a record the sweep just retired can still be flipped to
 //     done by its merge, where the reverse order would hold it open;
