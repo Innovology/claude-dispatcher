@@ -90,3 +90,29 @@ func TestLoadAllSkipsCorruptRecords(t *testing.T) {
 		t.Fatalf("expected only the valid record, got %d", len(got))
 	}
 }
+
+// The shelf has to survive the round trip: the cockpit that reads the record
+// back may be a different process days later, and Resume, the fleet and the
+// hooks all read Parked() off what was persisted.
+func TestSaveLoadKeepsThePark(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	at := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := Save(&Dispatch{ID: "p", Status: StatusNeedsInput,
+		ParkedReason: "waiting on legal", ParkedAt: &at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(&Dispatch{ID: "q", Status: StatusNeedsInput}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*Dispatch{}
+	for _, d := range LoadAll() {
+		got[d.ID] = d
+	}
+	p := got["p"]
+	if !p.Parked() || p.ParkedReason != "waiting on legal" || p.ParkedAt == nil || !p.ParkedAt.Equal(at) {
+		t.Errorf("the park did not survive the round trip: %+v", p)
+	}
+	if got["q"].Parked() {
+		t.Error("a record nobody parked came back parked")
+	}
+}

@@ -212,10 +212,8 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 // be: it needs a check result sampled twice over time, and gh.Checks is a point
 // sample. See cqShipDetail.
 //
-// Rank 4 is parked                        ‖  the human shelved it, with a
-//                                            reason — it shares the table,
-//                                            below everything that is live,
-//                                            under its own divider line
+// Rank 4 is parked (glyph ‖): the human shelved it, with a reason. It shares
+// the table — below everything that is live, under its own divider line.
 //
 // Rank 5 is history. It is below every live row and never shares a table with
 // one, so it needs no glyph or colour of its own: both fall through to the
