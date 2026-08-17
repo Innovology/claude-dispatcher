@@ -71,7 +71,7 @@ func TestDispatchAppearsBeforeItHasLaunched(t *testing.T) {
 	}
 	// It is not asking for anything, so it must not be counted among the rows
 	// that are — the headline above the table is read as a count of demands.
-	if wants, _, _, _ := fleetCount(rows); wants != 0 {
+	if wants, _, _ := fleetCount(rows); wants != 0 {
 		t.Errorf("a starting dispatcher wants you %d times", wants)
 	}
 	// And it offers no keys, because there is nothing behind them yet.
@@ -130,7 +130,7 @@ func TestSuccessfulLaunchKeepsTheRowUntilTheRecordLands(t *testing.T) {
 	m.fleetSelID = pendingID("retry backoff")
 
 	// The record lands: the table now carries a real row for the same feature.
-	fleet = []fleetRow{{id: "rec-1", kind: "run", rank: 3, feature: "retry backoff", repo: "alpha-api", signal: startingSignal}}
+	fleet = []fleetRow{{id: "rec-1", kind: "run", rank: 2, feature: "retry backoff", repo: "alpha-api", signal: startingSignal}}
 	m = m.prunePending().fleetSync()
 
 	rows := m.fleetRows()

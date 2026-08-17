@@ -18,15 +18,14 @@ var helpSections = []struct {
 	{section: "the fleet · lens 1", keys: []struct{ k, d string }{
 		{"●", "blocking — it cannot move until you answer"},
 		{"○", "waiting on you, not blocking anything else"},
-		{"◆", "green in ci and still not merged"},
-		{"·", "running clean · nothing there needs you"},
+		{"·", "running · nothing there needs you yet"},
 		{"‖", "parked · you shelved it, its row keeps your reason"},
 		{"", "sorted by what needs you, not by product — the top row is next"},
 	}},
 	{section: "work the fleet", keys: []struct{ k, d string }{
 		{"j / k", "move the cursor — the panel and the key hints follow it"},
 		{"g / G", "first row · last row"},
-		{"f", "filter: all → wants you → needs a look → running → history"},
+		{"f", "filter: all → wants you → running → history"},
 		{"⏎", "attach the session"},
 		{"y", "approve the merge, or mark it shipped once it has commits"},
 		{"x", "kill it · the branch and any dirty worktree survive"},

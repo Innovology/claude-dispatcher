@@ -204,21 +204,27 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 //	                                           requested, or a file two
 //	                                           dispatchers are both editing
 //	1  it wants you                         ○
-//	2  it is drifting                       ◆  green checks on a PR nobody
-//	                                           has merged
-//	3  it is running clean                  ·
+//	2  it is running                        ·
 //
-// The design's other rank-2 trigger, thrash, is not implemented and must not
-// be: it needs a check result sampled twice over time, and gh.Checks is a point
-// sample. See cqShipDetail.
+// There is deliberately no tier between "wants you" and "running". The design
+// had one — ◆ "drifting", amber, for green checks on a PR nobody has merged —
+// but the only rows that could earn it were running sessions, and a running
+// session with a green PR is not waiting on anyone: it is mid-task, often
+// verifying the very change it pushed, and has not asked for the merge. The
+// true version of that state — the session stopped with the PR still open — is
+// a queue row by construction (floorState "review"), so the drifting tier
+// could only ever mark the false positive, and it is gone. The design's other
+// escalation, thrash, is not implemented and must not be: it needs a check
+// result sampled twice over time, and gh.Checks is a point sample. See
+// cqShipDetail.
 //
-// Rank 4 is parked (glyph ‖): the human shelved it, with a reason. It shares
+// Rank 3 is parked (glyph ‖): the human shelved it, with a reason. It shares
 // the table — below everything that is live, under its own divider line.
 //
-// Rank 5 is history. It is below every live row and never shares a table with
+// Rank 4 is history. It is below every live row and never shares a table with
 // one, so it needs no glyph or colour of its own: both fall through to the
-// rank-3 defaults, and the SIGNAL cell says how the session ended.
-func fleetRank(kind, tone string, stalled bool) int {
+// rank-2 defaults, and the SIGNAL cell says how the session ended.
+func fleetRank(kind, tone string) int {
 	if kind == "past" {
 		return fleetPastRank
 	}
@@ -231,10 +237,7 @@ func fleetRank(kind, tone string, stalled bool) int {
 		}
 		return 1
 	}
-	if stalled {
-		return 2
-	}
-	return 3
+	return 2
 }
 
 // fleetSort orders the table: rank first, then — within a rank — the tie-break
@@ -340,7 +343,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	return fleetRow{
 		id:         rec.ID,
 		kind:       "queue",
-		rank:       fleetRank("queue", tone, false),
+		rank:       fleetRank("queue", tone),
 		ask:        ask,
 		product:    ctx.productFor(rec),
 		feature:    rec.Feature,
@@ -371,11 +374,16 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 // freshest output across the fleet.
 //
 // A running row is not asking for anything, so most of the queue row's
-// composition has nothing to say here: there is no want, no tone beyond the one
-// drift we can demonstrate, and no lead sentence unless the session actually
-// said something. The design fills those gaps with prose ("Working through its
-// loop", "Worth a look before it burns more context"); none of it has a source,
-// so none of it is written.
+// composition has nothing to say here: there is no want, no tone, and no lead
+// sentence unless the session actually said something. In particular an open
+// PR with green checks earns no tone and no glyph: this session is still
+// working — doing manual verification, or partway through its next step — and
+// a merge it has not yet asked for is not a human being waited on. When it
+// does stop with that PR open, floorState turns the record into a "review"
+// queue row, and that is where "waiting on you" is claimed (see fleetRank).
+// The design fills those gaps with prose ("Working through its loop", "Worth a
+// look before it burns more context"); none of it has a source, so none of it
+// is written.
 func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	passes map[string]int, rec *state.Dispatch) (fleetRow, time.Time) {
 
@@ -383,7 +391,7 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	// The forge comes from the floor row rather than a second `git remote
 	// get-url`: collectFloor resolved it for this record moments ago.
 	forge := floorBy[rec.Feature].forge
-	signal, stalled := cqShipDetail(forge, rec)
+	signal := cqShipDetail(forge, rec)
 	// The record exists and no hook has fired for it: it was launched, and
 	// nothing has been heard from the session since. cqShipDetail has nothing to
 	// say about a dispatcher with no PR, so the cell would be blank — which on
@@ -395,11 +403,6 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	}
 
 	tone, why := "normal", s.saidBy[rec.Feature]
-	if stalled {
-		// The one sentence a running row earns: a restatement of gh.Checks and
-		// rec.PRState, not a reading of them.
-		tone, why = "amber", "Its checks are green and the PR is not merged."
-	}
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
 	est, codedKnown := s.effortBy[rec.Feature]
 
@@ -410,7 +413,7 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	return fleetRow{
 		id:         rec.ID,
 		kind:       "run",
-		rank:       fleetRank("run", tone, stalled),
+		rank:       fleetRank("run", tone),
 		product:    ctx.productFor(rec),
 		feature:    rec.Feature,
 		repo:       rec.RepoName,
@@ -436,10 +439,10 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 // fleetParkedRank is where the human's shelf sits: below everything asking or
 // running — parking exists to get an ask you cannot answer out of the live
 // table's way — and above history, because a parked dispatcher is not over.
-const fleetParkedRank = 4
+const fleetParkedRank = 3
 
 // fleetPastRank is where history sits: below everything alive.
-const fleetPastRank = 5
+const fleetPastRank = 4
 
 // fleetParkedRow builds a row for a dispatcher the human has shelved.
 //
@@ -463,7 +466,7 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 	return fleetRow{
 		id:         rec.ID,
 		kind:       "parked",
-		rank:       fleetRank("parked", "normal", false),
+		rank:       fleetRank("parked", "normal"),
 		product:    ctx.productFor(rec),
 		feature:    rec.Feature,
 		repo:       rec.RepoName,
@@ -506,7 +509,7 @@ func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *stat
 	return fleetRow{
 		id:         rec.ID,
 		kind:       "past",
-		rank:       fleetRank("past", "normal", false),
+		rank:       fleetRank("past", "normal"),
 		product:    ctx.productFor(rec),
 		feature:    rec.Feature,
 		repo:       rec.RepoName,
@@ -582,9 +585,13 @@ func fleetRepo(repo, product string) string {
 const fleetHistory = "history"
 
 // fleetFilters is the cycle `f` walks. "all" is the resting state; the next
-// three each narrow to a question the human might be asking, and the last
-// leaves the fleet entirely for what it used to be — see fleetPast.
-var fleetFilters = []string{"all", "wants you", "needs a look", "running", fleetHistory}
+// two each narrow to a question the human might be asking, and the last
+// leaves the fleet entirely for what it used to be — see fleetPast. The
+// design's fourth stop, "needs a look", left with the drifting tier (see
+// fleetRank): with no rank between the queue and running it matched exactly
+// the queue rows, and a filter that answers the same question twice is one
+// more `f` press between the human and history.
+var fleetFilters = []string{"all", "wants you", "running", fleetHistory}
 
 // fleetKeep reports whether a row survives a filter.
 //
@@ -595,8 +602,6 @@ func fleetKeep(filter string, r fleetRow) bool {
 	switch filter {
 	case "wants you":
 		return r.kind == "queue"
-	case "needs a look":
-		return r.rank <= 2
 	case "running":
 		return r.kind == "run"
 	case fleetHistory:
@@ -704,25 +709,23 @@ func (m model) fleetSel() (fleetRow, bool) {
 }
 
 // fleetCount tallies the headline numbers over the rows on screen: what wants
-// you, what is drifting, what the human shelved, and what is simply running.
-// They count the FILTERED set on purpose — the line sits above the table and
-// describes it. Parked is its own tally because it is neither of the others:
-// it does want you (later), and calling it "running clean" would hide the
-// shelf inside the healthiest number on the line.
-func fleetCount(rows []fleetRow) (wants, warn, parked, clean int) {
+// you, what the human shelved, and what is simply running. They count the
+// FILTERED set on purpose — the line sits above the table and describes it.
+// Parked is its own tally because it is neither of the others: it does want
+// you (later), and calling it "running clean" would hide the shelf inside the
+// healthiest number on the line.
+func fleetCount(rows []fleetRow) (wants, parked, clean int) {
 	for _, r := range rows {
 		switch {
 		case r.kind == "queue":
 			wants++
 		case r.kind == "parked":
 			parked++
-		case r.rank == 2:
-			warn++
 		default:
 			clean++
 		}
 	}
-	return wants, warn, parked, clean
+	return wants, parked, clean
 }
 
 // fleetRunning is how many dispatchers are getting on with it, across the whole

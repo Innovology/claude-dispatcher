@@ -210,7 +210,7 @@ func pendingRow(p pendingDispatch) fleetRow {
 	return fleetRow{
 		id:        pendingID(p.feature),
 		kind:      "run",
-		rank:      fleetRank("run", "normal", false),
+		rank:      fleetRank("run", "normal"),
 		product:   p.product,
 		feature:   p.feature,
 		repo:      p.repo,

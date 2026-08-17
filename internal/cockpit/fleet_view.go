@@ -194,8 +194,6 @@ func fleetGlyph(rank int) string {
 		return "●"
 	case 1:
 		return "○"
-	case 2:
-		return "◆"
 	case fleetParkedRank:
 		// The pause bars: shelved by the human, waiting for later.
 		return "‖"
@@ -206,11 +204,8 @@ func fleetGlyph(rank int) string {
 // fleetRankColor colours the glyph and the signal. Both ● and ○ are red: the
 // tone decides which glyph, the rank decides the colour.
 func fleetRankColor(rank int) string {
-	switch {
-	case rank <= 1:
+	if rank <= 1 {
 		return cRed
-	case rank == 2:
-		return cAmber
 	}
 	return cFaint
 }
@@ -223,10 +218,6 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 	}
 	if on {
 		bg, featHex = cSel, cWhite
-	}
-	turnHex := cFaint
-	if r.rank == 2 {
-		turnHex = cAmber
 	}
 	// A dispatcher launched without CLAUDE_DISPATCHER_ID has no attributed
 	// events; the cell is empty rather than a zero, which would read as a
@@ -254,7 +245,7 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flFeature: featHex,
 		flRepo:    cFaint,
 		flStage:   stageHex,
-		flTurn:    turnHex,
+		flTurn:    cFaint,
 		flSignal:  rank,
 		flSeen:    cFaint,
 		flAge:     cFaint,
@@ -280,25 +271,21 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	if f == fleetHistory {
 		return m.fleetHistoryHeadline(inner, rows)
 	}
-	wants, warn, parked, clean := fleetCount(rows)
+	wants, parked, clean := fleetCount(rows)
 
 	title, right := itoa(len(rows))+" in flight", "f filters · h history · sorted by urgency"
 	if f != fleetFilters[0] {
 		title, right = itoa(len(rows))+" · "+f, "showing "+f+" · f cycles"
 	}
-	blockHex, warnHex := cFaint, cFaint
+	blockHex := cFaint
 	if wants > 0 {
 		blockHex = cRed
 	}
-	if warn > 0 {
-		warnHex = cAmber
-	}
-	// The design's gap:3ch between four `flex:none` cells, then the filter line
+	// The design's gap:3ch between `flex:none` cells, then the filter line
 	// pinned right; flSpread drops the right side when they collide, which is
 	// the terminal answer to its text-overflow:ellipsis.
 	left := fg(cFg, title) + "   " +
 		fg(blockHex, itoa(wants)+" want you") + "   " +
-		fg(warnHex, itoa(warn)+" need a look") + "   " +
 		fg(cFaint, itoa(clean)+" running clean")
 	// The shelf only earns a clause when something is on it: "0 parked" would
 	// advertise a group the table is not showing.

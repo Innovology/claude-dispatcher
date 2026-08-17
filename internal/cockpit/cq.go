@@ -470,31 +470,35 @@ var (
 
 // ---- running dispatchers -------------------------------------------------------------
 
-// cqShipDetail says where a dispatcher's PR stands, and whether that amounts to
-// "green and not merging" — the one non-convergence this cockpit can actually
-// demonstrate.
+// cqShipDetail says where a running dispatcher's PR stands. It is the SIGNAL
+// cell's fact and never an escalation: the row it feeds exists because the hook
+// state machine says the session is still working — often verifying the very
+// change it just pushed — so an open green PR here is not evidence that anyone
+// is being waited on. The moment the session actually stops with that PR open,
+// hookcmd flips the record to needs-input, floorState reads "review", and the
+// dispatcher moves to the queue half of the table; that row, not this one, is
+// the merge ask.
 //
 // The design's other trigger, thrash, needs a check result sampled twice over
-// time; gh.Checks is a point sample, so no trend is claimed, no arrow is drawn
-// and no row is glyphed ◆ for it. A row with no PR has no detail rather than a
-// filler one.
-func cqShipDetail(forge string, rec *state.Dispatch) (detail string, stalled bool) {
+// time; gh.Checks is a point sample, so no trend is claimed and no arrow is
+// drawn. A row with no PR has no detail rather than a filler one.
+func cqShipDetail(forge string, rec *state.Dispatch) string {
 	if rec.PRNumber > 0 && rec.PRState == "MERGED" {
-		return "merged, deploying", false
+		return "merged, deploying"
 	}
 	if rec.PRNumber == 0 || rec.PRState != "OPEN" || forge != "gh" {
-		return "", false
+		return ""
 	}
 	c := gh.PRChecksFor(rec.RepoPath, rec.PRNumber)
 	switch {
 	case c.Total == 0:
-		return "pr open, no checks", false
+		return "pr open, no checks"
 	case c.Failing > 0:
-		return "ci · " + itoa(c.Failing) + " of " + itoa(c.Total) + " red", false
+		return "ci · " + itoa(c.Failing) + " of " + itoa(c.Total) + " red"
 	case c.Running > 0:
-		return "ci · " + itoa(c.Passed) + " of " + itoa(c.Total) + " green", false
+		return "ci · " + itoa(c.Passed) + " of " + itoa(c.Total) + " green"
 	}
-	return "green, unmerged", true
+	return "green, unmerged"
 }
 
 // cqLastWrite is when a session last emitted anything, taken from its
