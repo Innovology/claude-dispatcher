@@ -113,7 +113,9 @@
   (`UserPromptSubmit` in hookcmd), because someone just answered the question
   it was parked on. Shipping retires it like any other row: "live" outranks
   the shelf. Parked rows sit out the `s`-rotation ordering so they can never
-  be dragged above the live table.
+  be dragged above the live table. The full record is
+  `docs/adr/0001-parking-is-an-annotation-never-a-status.md` — this repo's
+  first ADR, in the folder the DECISIONS lens reads.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
