@@ -89,6 +89,18 @@
   must not be one slipped shift from upgrading the machine in place, so it is
   a chord. That also frees `u` for the editor's unassign, which the global
   undo used to steal whenever a triage act had left something undoable.
+- **Amber is a claim about the human, not about CI.** The triage table used to
+  mark a *running* dispatcher amber (◆, "green in ci and still not merged")
+  the moment its PR's checks went green — while the session was busy doing
+  manual verification and had asked nobody to merge anything. The tier could
+  only ever fire on that false positive: the state it meant to name — green PR,
+  session stopped — is a "review" queue row by construction (floorState), so
+  every dispatcher truly waiting on a human was already in the table's top
+  half. The ◆ rank is gone; a running row keeps "green, unmerged" as SIGNAL
+  text and nothing louder, and the merge ask is claimed on the queue row the
+  record becomes when the session actually stops. The "needs a look" filter,
+  which matched exactly that tier plus the queue it duplicated, left with it.
+  The full record is `docs/adr/0003-amber-is-a-claim-about-the-human.md`.
 - **Decisions are read where they were written, never invented.** The
   DECISIONS lens has two sources: an adr-tools folder, and a heading that
   names a set of decisions in the repo's own markdown (`CLAUDE.md`,

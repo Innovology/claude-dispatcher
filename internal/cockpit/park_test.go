@@ -84,10 +84,10 @@ func TestCollectFleetGroupsParkedRecords(t *testing.T) {
 // ---- rank and order ---------------------------------------------------------
 
 func TestParkedRankSitsBetweenRunAndHistory(t *testing.T) {
-	if got := fleetRank("parked", "normal", false); got != fleetParkedRank {
+	if got := fleetRank("parked", "normal"); got != fleetParkedRank {
 		t.Fatalf("fleetRank(parked) = %d, want %d", got, fleetParkedRank)
 	}
-	if fleetParkedRank <= fleetRank("run", "normal", false) || fleetParkedRank >= fleetPastRank {
+	if fleetParkedRank <= fleetRank("run", "normal") || fleetParkedRank >= fleetPastRank {
 		t.Error("parked must sort below every live row and above history")
 	}
 	if fleetGlyph(fleetParkedRank) != "‖" {
@@ -102,7 +102,7 @@ func TestFleetSortPutsParkedAfterRunNewestFirst(t *testing.T) {
 	now := time.Now()
 	rows := []fleetRow{
 		{id: "old-park", kind: "parked", rank: fleetParkedRank, parked: now.Add(-3 * time.Hour)},
-		{id: "run", kind: "run", rank: 3, moved: now},
+		{id: "run", kind: "run", rank: 2, moved: now},
 		{id: "new-park", kind: "parked", rank: fleetParkedRank, parked: now.Add(-time.Minute)},
 		{id: "ask", kind: "queue", ask: "needs", rank: 1, waited: now},
 		{id: "gone", kind: "past", rank: fleetPastRank, moved: now},
@@ -144,12 +144,12 @@ func TestFleetAllKeepsParkedBelowTheUserOrdering(t *testing.T) {
 func TestFleetCountSeparatesParkedFromClean(t *testing.T) {
 	rows := []fleetRow{
 		{kind: "queue"},
-		{kind: "run", rank: 3},
+		{kind: "run", rank: 2},
 		{kind: "parked", rank: fleetParkedRank},
 	}
-	wants, warn, parked, clean := fleetCount(rows)
-	if wants != 1 || warn != 0 || parked != 1 || clean != 1 {
-		t.Errorf("fleetCount = %d,%d,%d,%d — a shelved row is not running clean", wants, warn, parked, clean)
+	wants, parked, clean := fleetCount(rows)
+	if wants != 1 || parked != 1 || clean != 1 {
+		t.Errorf("fleetCount = %d,%d,%d — a shelved row is not running clean", wants, parked, clean)
 	}
 }
 

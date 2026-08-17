@@ -52,7 +52,7 @@ func installFleetFixture(t *testing.T) {
 			started: now.Add(-time.Hour),
 		},
 		{
-			id: "id-three", kind: "run", rank: 3, product: "alpha",
+			id: "id-three", kind: "run", rank: 2, product: "alpha",
 			feature: "three", repo: "alpha-web", stage: "observe", pass: 2,
 			tone: "normal",
 			acts: []cqAct{
@@ -260,7 +260,6 @@ func TestFleetFilterCycles(t *testing.T) {
 	m := cqModel(t)
 	want := []struct{ filter, rows string }{
 		{"wants you", "one,two"},
-		{"needs a look", "one,two"},
 		{"running", "three"},
 		{fleetHistory, "four"},
 		{"all", "one,two,three"},

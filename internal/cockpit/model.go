@@ -160,7 +160,7 @@ type model struct {
 	// The table's cursor. fleetSelID is the id of the row it is on: the fleet is
 	// rebuilt on every poll, so an index alone would move the selection under
 	// the reader's hands whenever a rank changed (see fleetSync).
-	cqFilter    string // "" (all) | "wants you" | "needs a look" | "running"
+	cqFilter    string // "" (all) | "wants you" | "running" | "history"
 	fleetCursor int
 	fleetSelID  string
 

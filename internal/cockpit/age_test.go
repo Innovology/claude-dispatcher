@@ -46,7 +46,7 @@ func TestAgesAreReadFromTheClockOnEveryRender(t *testing.T) {
 
 	start := time.Now()
 	fleet = []fleetRow{{
-		id: "id-tick", kind: "run", rank: 3, product: "alpha",
+		id: "id-tick", kind: "run", rank: 2, product: "alpha",
 		feature: "ticker", repo: "alpha-api", signal: "working", tone: "normal",
 		moved: start, started: start.Add(-90 * time.Minute),
 	}}

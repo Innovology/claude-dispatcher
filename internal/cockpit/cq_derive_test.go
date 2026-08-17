@@ -79,13 +79,13 @@ func TestFleetSortOrder(t *testing.T) {
 	q := func(feature, ask, tone string, waited time.Time) fleetRow {
 		return fleetRow{
 			id: feature, kind: "queue", ask: ask, tone: tone, waited: waited,
-			rank: fleetRank("queue", tone, false),
+			rank: fleetRank("queue", tone),
 		}
 	}
 	rows := []fleetRow{
-		{id: "clean", kind: "run", rank: fleetRank("run", "normal", false), moved: now},
+		{id: "clean", kind: "run", rank: fleetRank("run", "normal"), moved: now},
 		q("normal-new", "needs", "normal", now.Add(-time.Minute)),
-		{id: "stalled", kind: "run", rank: fleetRank("run", "amber", true), moved: now.Add(-time.Hour)},
+		{id: "quiet", kind: "run", rank: fleetRank("run", "normal"), moved: now.Add(-time.Hour)},
 		q("red-old", "needs", "red", now.Add(-2*time.Hour)),
 		q("permission", "permission", "normal", now),
 		q("normal-old", "needs", "normal", now.Add(-3*time.Hour)),
@@ -97,7 +97,7 @@ func TestFleetSortOrder(t *testing.T) {
 	for _, r := range rows {
 		order = append(order, r.id)
 	}
-	want := []string{"red-old", "permission", "amber", "normal-old", "normal-new", "stalled", "clean"}
+	want := []string{"red-old", "permission", "amber", "normal-old", "normal-new", "quiet", "clean"}
 	for i := range want {
 		if order[i] != want[i] {
 			t.Fatalf("fleetSort order = %v, want %v", order, want)
@@ -113,8 +113,8 @@ func TestFleetSortIsTotal(t *testing.T) {
 	rows := []fleetRow{
 		{id: "c", kind: "queue", ask: "needs", tone: "normal", rank: 1, waited: at},
 		{id: "a", kind: "queue", ask: "needs", tone: "normal", rank: 1, waited: at},
-		{id: "b", kind: "run", rank: 3, moved: at},
-		{id: "d", kind: "run", rank: 3, moved: at},
+		{id: "b", kind: "run", rank: 2, moved: at},
+		{id: "d", kind: "run", rank: 2, moved: at},
 	}
 	rev := []fleetRow{rows[3], rows[2], rows[1], rows[0]}
 	fleetSort(rows)
@@ -129,30 +129,35 @@ func TestFleetSortIsTotal(t *testing.T) {
 	}
 }
 
-// The glyph legend in the help sheet is written against these four ranks.
-func TestFleetRankNamesTheFourStates(t *testing.T) {
+// The glyph legend in the help sheet is written against these ranks. There is
+// deliberately no rank between the queue and running: the old ◆ "drifting"
+// tier could only ever mark a running session whose green PR nobody had asked
+// it to merge — a session that is busy, not waiting on a human. The state it
+// meant to name (green PR, session stopped) is a "review" queue row by
+// construction, so a running row is never anything louder than rank 2.
+func TestFleetRankNamesTheThreeLiveStates(t *testing.T) {
 	cases := []struct {
 		name, kind, tone string
-		stalled          bool
 		want             int
 	}{
-		{"blocking", "queue", "red", false, 0},
-		{"waiting", "queue", "amber", false, 1},
-		{"green and unmerged", "run", "amber", true, 2},
-		{"running clean", "run", "normal", false, 3},
+		{"blocking", "queue", "red", 0},
+		{"waiting", "queue", "amber", 1},
+		{"running with a green unmerged PR", "run", "normal", 2},
+		{"running clean", "run", "normal", 2},
+		{"history", "past", "normal", fleetPastRank},
 	}
 	for _, c := range cases {
-		if got := fleetRank(c.kind, c.tone, c.stalled); got != c.want {
+		if got := fleetRank(c.kind, c.tone); got != c.want {
 			t.Errorf("%s: fleetRank = %d, want %d", c.name, got, c.want)
 		}
 	}
 	// The glyph and its colour are read off the rank, never off the record's
 	// status, so the two can never disagree with the legend.
-	if fleetGlyph(0) != "●" || fleetGlyph(1) != "○" || fleetGlyph(2) != "◆" || fleetGlyph(3) != "·" {
+	if fleetGlyph(0) != "●" || fleetGlyph(1) != "○" || fleetGlyph(2) != "·" || fleetGlyph(fleetPastRank) != "·" {
 		t.Error("the rank glyphs do not match the help sheet's legend")
 	}
 	if fleetRankColor(0) != cRed || fleetRankColor(1) != cRed ||
-		fleetRankColor(2) != cAmber || fleetRankColor(3) != cFaint {
+		fleetRankColor(2) != cFaint || fleetRankColor(fleetPastRank) != cFaint {
 		t.Error("rank colours: tone picks the glyph, rank picks the colour")
 	}
 }
