@@ -716,10 +716,10 @@ func (m model) fleetSel() (fleetRow, bool) {
 // healthiest number on the line.
 func fleetCount(rows []fleetRow) (wants, parked, clean int) {
 	for _, r := range rows {
-		switch {
-		case r.kind == "queue":
+		switch r.kind {
+		case "queue":
 			wants++
-		case r.kind == "parked":
+		case "parked":
 			parked++
 		default:
 			clean++
