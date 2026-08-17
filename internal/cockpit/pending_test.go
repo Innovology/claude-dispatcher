@@ -22,7 +22,7 @@ func stubLaunch(t *testing.T) *struct{ repo, feature, prompt string } {
 	t.Helper()
 	got := &struct{ repo, feature, prompt string }{}
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, repo, feature, prompt string, _ dispatchpkg.Mode) tea.Cmd {
+	dxLaunch = func(_ *config.Config, repo, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ bool) tea.Cmd {
 		got.repo, got.feature, got.prompt = repo, feature, prompt
 		return nil
 	}

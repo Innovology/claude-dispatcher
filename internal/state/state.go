@@ -73,7 +73,20 @@ type Dispatch struct {
 	// reading the mode it was actually launched with. Empty on records written
 	// before the mode was a choice: those ran in whatever claude defaulted to,
 	// which is not the same fact as "auto".
-	Mode           string `json:"mode,omitempty"`
+	Mode string `json:"mode,omitempty"`
+	// Model is the model the session was asked to run — one of
+	// dispatch.Models(): "default" for "no --model passed", or a claude alias
+	// like "opus". On the record for the same reason Mode is: Resume reopens
+	// the session the way it went out. Empty on records written before the
+	// model was a choice — those sessions ran whatever claude defaulted to,
+	// which is the same behaviour as "default" but not the same fact.
+	Model string `json:"model,omitempty"`
+	// FanOut records that the prompt closed with the ultracode fan-out
+	// sentence (see dispatch/fanout.go): the session was invited to spread the
+	// work across multiple agents where the task warranted it. The sentence
+	// itself lives in Prompt; this flag is what lets screens say so without
+	// grepping the prompt for a keyword.
+	FanOut         bool   `json:"fan_out,omitempty"`
 	TmuxSession    string `json:"tmux_session"`
 	SessionID      string `json:"session_id,omitempty"`
 	TranscriptPath string `json:"transcript_path,omitempty"`

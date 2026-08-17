@@ -142,6 +142,23 @@
   spelling is given the older one (`acceptEdits`/`default`) and one with no
   such flag gets none, because a rejected flag is not a degraded session —
   it is a launch that never happens.
+- **The dispatch form's MODEL is a flag read from claude's own help; FAN OUT
+  is a sentence in the prompt.** Both forms offer them beside MODE. MODEL is
+  `--model`, and its offer is "default" (no flag at all — the human's own
+  Claude Code decides) plus exactly the aliases the installed claude's help
+  names, parsed the way the mode's choices are: an alias we cannot vouch for
+  is never offered and never passed, because a rejected value is a launch that
+  dies or a session erroring unattended. Resume passes `--model` again;
+  "default" is recorded as the word, distinct from the "" of records that
+  never chose. FAN OUT has no flag to pass — Claude Code's multi-agent opt-in
+  is the keyword "ultracode" in the prompt — so on, the launch appends one
+  closing sentence carrying it (skipped if the human already typed the
+  keyword), records the composed prompt, and sets `FanOut` on the record so
+  screens need not grep for it. Not re-applied on resume: the transcript
+  already carries it, and a resume prompt is the human's own message. The
+  ask-nothing paths (backlog enter/ctrl+d, product-panel re-dispatch) launch
+  on the defaults. Full record:
+  `docs/adr/0002-model-is-a-flag-fan-out-is-a-sentence.md`.
 - Commit attribution is by provenance (dispatch records its branch SHAs),
   NEVER by Co-Authored-By trailers — the user strips those from commits.
 - User is on a Claude subscription (not API billing): portfolio roll-up

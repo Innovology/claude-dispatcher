@@ -713,11 +713,11 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			}
 			m.notice = "dispatching \"" + t.feature + "\" again…"
 			// Same reading as the backlog's enter: this panel asks for a line of
-			// text, not for a mode, so the re-dispatch takes the default rather
-			// than inheriting the finished dispatcher's — the human typed a new
-			// brief, and a mode chosen for the last run is not consent for this
-			// one.
-			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode)
+			// text, not for a mode, a model or a fan-out, so the re-dispatch
+			// takes the defaults rather than inheriting the finished
+			// dispatcher's — the human typed a new brief, and choices made for
+			// the last run are not consent for this one.
+			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, false)
 		}
 		m.resumeText = next
 		return m, nil

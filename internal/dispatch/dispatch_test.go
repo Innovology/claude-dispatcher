@@ -211,7 +211,7 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
 	}()
 
-	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto)
+	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto, DefaultModel, false)
 	if err == nil {
 		t.Fatal("expected a duplicate of a live feature to be refused")
 	}
@@ -235,15 +235,27 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 	if got := liveDispatch("payment-retry"); got != nil {
 		t.Errorf("a leftover login shell reported as a live dispatcher: %#v", got)
 	}
-	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModePlan)
+	withAliases(t, []string{"fable", "opus", "sonnet"})
+	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModePlan, Model("opus"), true)
 	if err != nil {
 		t.Errorf("re-dispatching a finished feature was refused: %v", err)
 	}
 	// The only Launch in the suite that runs to completion, so it is where the
-	// mode reaching the record is provable: Resume reads it back to reopen the
-	// dispatcher the way it went out.
+	// choices reaching the record are provable: Resume reads them back to
+	// reopen the dispatcher the way it went out.
 	if d != nil && d.Mode != string(ModePlan) {
 		t.Errorf("the record kept mode %q, want plan", d.Mode)
+	}
+	if d != nil && d.Model != "opus" {
+		t.Errorf("the record kept model %q, want opus", d.Model)
+	}
+	// Fan-out is a sentence in the prompt, not a flag, so the record has to
+	// carry both the flag for screens and the sentence the session was given.
+	if d != nil && !d.FanOut {
+		t.Error("the record lost the fan-out choice")
+	}
+	if d != nil && !strings.Contains(d.Prompt, "ultracode") {
+		t.Errorf("a fan-out dispatch's prompt carries no ultracode opt-in:\n%s", d.Prompt)
 	}
 }
 

@@ -74,6 +74,8 @@ func TestDispatchFormAcceptsBurstTyping(t *testing.T) {
 		t.Fatalf("feature = %q", got)
 	}
 	m = press(m, "enter") // → mode
+	m = press(m, "enter") // take the default → model
+	m = press(m, "enter") // take the default → fan out
 	m = press(m, "enter") // take the default and go on to the prompt
 	m = typeBurst(m, "retry failed charges with backoff")
 	if got := m.dispatchForm.prompt.Value(); got != "retry failed charges with backoff" {
@@ -196,14 +198,45 @@ func TestDispatchFormFlow(t *testing.T) {
 		t.Fatalf("up → %q, want auto", got)
 	}
 	m = press(m, "enter")
+	if m.dispatchForm.step != dispatchModel {
+		t.Fatalf("after mode, step = %d, want model", m.dispatchForm.step)
+	}
+
+	// Step 4: the model list opens on the default — no flag at all — and every
+	// offered model is on screen.
+	if got := m.dispatchForm.mdl(); got != dispatchpkg.DefaultModel {
+		t.Fatalf("model opened on %q, want the default", got)
+	}
+	out = m.View()
+	for _, k := range dispatchpkg.Models() {
+		if !strings.Contains(out, string(k)) {
+			t.Errorf("the model step does not offer %q", k)
+		}
+	}
+	m = press(m, "enter")
+	if m.dispatchForm.step != dispatchFanout {
+		t.Fatalf("after model, step = %d, want fan out", m.dispatchForm.step)
+	}
+
+	// Step 5: fan out opens on solo, and down arms it — the choice is what
+	// reaches the launch.
+	if m.dispatchForm.fanOut() {
+		t.Fatal("fan out opened armed, want solo")
+	}
+	m = press(m, "down")
+	if !m.dispatchForm.fanOut() {
+		t.Fatal("down did not arm fan out")
+	}
+	m = press(m, "up")
+	m = press(m, "enter")
 	if m.dispatchForm.step != dispatchPrompt {
-		t.Fatalf("after mode, step = %d, want prompt", m.dispatchForm.step)
+		t.Fatalf("after fan out, step = %d, want prompt", m.dispatchForm.step)
 	}
 	if strings.TrimSpace(strings.Join(strings.Fields(m.View()), " ")) == "" {
 		t.Fatal("prompt step render empty")
 	}
 
-	// Step 4: empty prompt is rejected, then submitting launches and closes.
+	// Step 6: empty prompt is rejected, then submitting launches and closes.
 	m = press(m, "enter")
 	if m.dispatchForm == nil || m.dispatchForm.errMsg == "" {
 		t.Fatal("empty prompt should be rejected and keep the form open")
@@ -222,8 +255,9 @@ func TestDispatchFormFlow(t *testing.T) {
 	}
 }
 
-// TestDispatchFormEscBacksOut walks the esc chain: prompt → mode → feature →
-// repo → closed, mirroring the classic form's back navigation.
+// TestDispatchFormEscBacksOut walks the esc chain: prompt → fan out → model →
+// mode → feature → repo → closed, mirroring the classic form's back
+// navigation.
 func TestDispatchFormEscBacksOut(t *testing.T) {
 	root := seedRepoRoot(t, "api")
 	cfg := &config.Config{Roots: []string{root}}
@@ -237,13 +271,23 @@ func TestDispatchFormEscBacksOut(t *testing.T) {
 	m = press(m, "enter") // pick the only repo
 	m = typeStr(m, "thing")
 	m = press(m, "enter") // → mode
+	m = press(m, "enter") // → model
+	m = press(m, "enter") // → fan out
 	m = press(m, "enter") // → prompt
 	if m.dispatchForm.step != dispatchPrompt {
 		t.Fatalf("expected prompt step, got %d", m.dispatchForm.step)
 	}
 	m = press(m, "esc")
+	if m.dispatchForm.step != dispatchFanout {
+		t.Fatal("esc from prompt should go back to fan out")
+	}
+	m = press(m, "esc")
+	if m.dispatchForm.step != dispatchModel {
+		t.Fatal("esc from fan out should go back to model")
+	}
+	m = press(m, "esc")
 	if m.dispatchForm.step != dispatchMode {
-		t.Fatal("esc from prompt should go back to mode")
+		t.Fatal("esc from model should go back to mode")
 	}
 	m = press(m, "esc")
 	if m.dispatchForm.step != dispatchFeature {

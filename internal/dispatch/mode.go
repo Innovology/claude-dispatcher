@@ -178,6 +178,13 @@ var modeChoiceRe = regexp.MustCompile(`"([A-Za-z]+)"`)
 // the wrapped description without reaching the next option's own choices.
 const modeHelpWindow = 400
 
+// claudeHelp reads the installed claude's --help output, once per process:
+// it answers for the permission modes here and the model aliases in model.go,
+// and one subprocess is enough for both.
+var claudeHelp = sync.OnceValues(func() ([]byte, error) {
+	return exec.Command("claude", "--help").Output()
+})
+
 // readClaudeModeNames asks claude which permission modes it takes.
 //
 // Reading the help text is the only way to ask: there is no capability
@@ -186,7 +193,7 @@ const modeHelpWindow = 400
 // one spelling every version that ever had this flag accepts — is reported as
 // "nothing known", and PermissionArgs then passes no flag rather than a guess.
 func readClaudeModeNames() map[string]bool {
-	out, err := exec.Command("claude", "--help").Output()
+	out, err := claudeHelp()
 	if err != nil {
 		return nil
 	}

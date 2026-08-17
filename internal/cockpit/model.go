@@ -176,13 +176,15 @@ type model struct {
 	// The floor's freeform draft became five fields: where it lands, what it is
 	// called, what it does, when it is done, and how much it may do without
 	// asking. See dispatchx.go — cqDispatch is what says the form is open.
-	dxField  dxFieldID        // which line owns the keyboard
-	dxFilter string           // WHERE: repo filter (runes from the key message)
-	dxRepo   int              // cursor into dxRows(); clamped on read, reset by filtering
-	dxTitle  string           // TITLE: the feature name, and the branch
-	dxWhat   string           // WHAT: the work — the prompt's body, wrapped as it is typed
-	dxGoal   string           // DONE WHEN: completion condition, optional
-	dxMode   dispatchpkg.Mode // MODE: auto / manual / plan — the session's permission mode
+	dxField  dxFieldID         // which line owns the keyboard
+	dxFilter string            // WHERE: repo filter (runes from the key message)
+	dxRepo   int               // cursor into dxRows(); clamped on read, reset by filtering
+	dxTitle  string            // TITLE: the feature name, and the branch
+	dxWhat   string            // WHAT: the work — the prompt's body, wrapped as it is typed
+	dxGoal   string            // DONE WHEN: completion condition, optional
+	dxMode   dispatchpkg.Mode  // MODE: auto / manual / plan — the session's permission mode
+	dxModel  dispatchpkg.Model // MODEL: default, or a claude alias — what the session runs
+	dxFanOut bool              // FAN OUT: may the session spread across agents when the task splits
 }
 
 func newModel() model {
@@ -206,6 +208,10 @@ func newModel() model {
 		// would open a session asking about every step, which is not the
 		// product's default posture.
 		dxMode: dispatchpkg.DefaultMode,
+		// Same reasoning for the model: the zero value is not a choice, and the
+		// default — no --model at all — is the only answer that cannot be wrong
+		// on a machine we have not asked yet.
+		dxModel: dispatchpkg.DefaultModel,
 	}
 }
 

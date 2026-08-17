@@ -387,11 +387,12 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 			// to go and look — see pending.go.
 			m = m.markPending(m.pendingFor(t.repo, backlogFeature(t), t.prompt))
 			// The backlog asks no questions — enter on a ticket is the whole
-			// interaction — so it dispatches in the default mode. That is the
-			// posture the ticket implies: work handed off to happen elsewhere,
-			// with nobody sitting on its permission prompt. Anything else is
-			// dispatched from a form that asks.
-			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt, dispatchpkg.DefaultMode)
+			// interaction — so it dispatches in the default mode, on the default
+			// model, without fan-out. That is the posture the ticket implies:
+			// work handed off to happen elsewhere, with nobody sitting on its
+			// permission prompt. Anything else is dispatched from a form that
+			// asks.
+			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, false)
 		}
 	case "ctrl+d":
 		// This used to announce a dispatch and launch nothing — the worst kind
@@ -412,7 +413,7 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 				continue
 			}
 			m = m.markPending(m.pendingFor(bt.repo, backlogFeature(bt), bt.prompt))
-			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt, dispatchpkg.DefaultMode))
+			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, false))
 		}
 		m.picked = map[string]bool{}
 		var why []string

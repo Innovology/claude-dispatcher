@@ -1,18 +1,20 @@
 package cockpit
 
 // dispatchform.go is the in-cockpit "new dispatch" overlay: the classic
-// cockpit's repo → feature → mode → prompt flow, ported into v2 so ad-hoc work
-// can be dispatched without a backlog ticket. Open it with `+` or the palette's
-// "dispatch" / "new dispatch" command. Like settings, it lives behind a pointer
-// on the model so its textinputs keep focus state across value-receiver Update
-// copies. Submitting hands off to launchCmd, which does the real dispatch.
+// cockpit's repo → feature → mode → model → fan out → prompt flow, ported into
+// v2 so ad-hoc work can be dispatched without a backlog ticket. Open it with
+// `+` or the palette's "dispatch" / "new dispatch" command. Like settings, it
+// lives behind a pointer on the model so its textinputs keep focus state
+// across value-receiver Update copies. Submitting hands off to launchCmd,
+// which does the real dispatch.
 //
-// MODE is a step of its own rather than a default this overlay picks quietly.
-// It is the session's permission mode — what a dispatcher may do without
-// asking — and it reaches the process as --permission-mode, so a form that
-// chose it on the human's behalf would be deciding that silently every time.
-// It opens on the default with the list in view, so taking the default is one
-// keypress and changing it is two.
+// MODE, MODEL and FAN OUT are steps of their own rather than defaults this
+// overlay picks quietly. The first two reach the process as launch flags
+// (--permission-mode and --model), and fan-out reaches it as the ultracode
+// sentence in the prompt (see dispatch/fanout.go) — so a form that chose any
+// of them on the human's behalf would be deciding that silently every time.
+// Each opens on its default with the list in view, so taking the default is
+// one keypress and changing it is two.
 
 import (
 	"strings"
@@ -31,6 +33,8 @@ const (
 	dispatchRepo dispatchStep = iota
 	dispatchFeature
 	dispatchMode
+	dispatchModel
+	dispatchFanout
 	dispatchPrompt
 	dispatchStepCount
 )
@@ -44,10 +48,12 @@ type dispatchForm struct {
 	cursor int
 	repo   repos.Repo
 
-	filter  textinput.Model // step 1: filter repos by name/product
-	feature textinput.Model // step 2: feature name
-	modeSel int             // step 3: cursor into dispatchpkg.Modes()
-	prompt  textinput.Model // step 4: the prompt
+	filter    textinput.Model // step 1: filter repos by name/product
+	feature   textinput.Model // step 2: feature name
+	modeSel   int             // step 3: cursor into dispatchpkg.Modes()
+	modelSel  int             // step 4: cursor into dispatchpkg.Models()
+	fanoutSel int             // step 5: cursor into dispatchFanoutOptions
+	prompt    textinput.Model // step 6: the prompt
 
 	errMsg string
 }
@@ -57,6 +63,23 @@ type dispatchForm struct {
 func (df *dispatchForm) mode() dispatchpkg.Mode {
 	all := dispatchpkg.Modes()
 	return all[clampCursor(df.modeSel, len(all))]
+}
+
+// mdl is the model step 4 has landed on — same cursor-is-the-state shape.
+func (df *dispatchForm) mdl() dispatchpkg.Model {
+	all := dispatchpkg.Models()
+	return all[clampCursor(df.modelSel, len(all))]
+}
+
+// fanOut is whether step 5 chose fanning out.
+func (df *dispatchForm) fanOut() bool { return df.fanoutSel == 1 }
+
+// dispatchFanoutOptions are FAN OUT's two answers, in offer order: staying
+// solo is the default. The labels match the dx form's switch, and the hints
+// say what each position actually does.
+var dispatchFanoutOptions = []struct{ label, hint string }{
+	{"solo", "one session does all the work itself"},
+	{"fan out", "may spread across multiple agents where the task splits"},
 }
 
 // newDispatchForm builds the overlay, discovering repos from cfg. It focuses
@@ -79,16 +102,22 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 	prompt.Placeholder = "describe the work to dispatch…"
 	prompt.CharLimit = 500
 
-	// modeSel opens on the default's own index rather than on 0, so the offer
-	// order in dispatchpkg.Modes() can change without silently changing what a
-	// dispatch that took the default runs as.
+	// modeSel and modelSel open on their default's own index rather than on 0,
+	// so the offer order in dispatchpkg can change without silently changing
+	// what a dispatch that took the default runs as.
 	sel := 0
 	for i, k := range dispatchpkg.Modes() {
 		if k == dispatchpkg.DefaultMode {
 			sel = i
 		}
 	}
-	return &dispatchForm{step: dispatchRepo, repos: rs, modeSel: sel, filter: filter, feature: feature, prompt: prompt}
+	mdlSel := 0
+	for i, k := range dispatchpkg.Models() {
+		if k == dispatchpkg.DefaultModel {
+			mdlSel = i
+		}
+	}
+	return &dispatchForm{step: dispatchRepo, repos: rs, modeSel: sel, modelSel: mdlSel, filter: filter, feature: feature, prompt: prompt}
 }
 
 // filtered returns the repos matching the current filter (by name or product).
@@ -173,7 +202,8 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 
 	case dispatchMode:
 		// Nothing on this step types, so every key is navigation and anything
-		// unrecognised is swallowed rather than treated as text.
+		// unrecognised is swallowed rather than treated as text. The same goes
+		// for the model and fan-out steps below.
 		switch k {
 		case "esc":
 			df.step = dispatchFeature
@@ -189,6 +219,48 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
+			df.step = dispatchModel
+			return m, nil
+		}
+		return m, nil
+
+	case dispatchModel:
+		switch k {
+		case "esc":
+			df.step = dispatchMode
+			return m, nil
+		case "up", "ctrl+k", "left":
+			if df.modelSel > 0 {
+				df.modelSel--
+			}
+			return m, nil
+		case "down", "ctrl+j", "right":
+			if df.modelSel < len(dispatchpkg.Models())-1 {
+				df.modelSel++
+			}
+			return m, nil
+		case "enter":
+			df.step = dispatchFanout
+			return m, nil
+		}
+		return m, nil
+
+	case dispatchFanout:
+		switch k {
+		case "esc":
+			df.step = dispatchModel
+			return m, nil
+		case "up", "ctrl+k", "left":
+			if df.fanoutSel > 0 {
+				df.fanoutSel--
+			}
+			return m, nil
+		case "down", "ctrl+j", "right":
+			if df.fanoutSel < len(dispatchFanoutOptions)-1 {
+				df.fanoutSel++
+			}
+			return m, nil
+		case "enter":
 			df.step = dispatchPrompt
 			return m, df.prompt.Focus()
 		}
@@ -197,7 +269,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 	case dispatchPrompt:
 		switch k {
 		case "esc":
-			df.step = dispatchMode
+			df.step = dispatchFanout
 			df.prompt.Blur()
 			return m, nil
 		case "enter", "ctrl+d":
@@ -209,13 +281,22 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			feature := strings.TrimSpace(df.feature.Value())
 			prompt := strings.TrimSpace(df.prompt.Value())
 			mode := df.mode()
+			mdl := df.mdl()
+			fanOut := df.fanOut()
 			m.dispatchForm = nil
-			m.notice = "dispatching \"" + feature + "\" · " + string(mode) + "…"
+			notice := "dispatching \"" + feature + "\" · " + string(mode)
+			if mdl != dispatchpkg.DefaultModel {
+				notice += " · " + string(mdl)
+			}
+			if fanOut {
+				notice += " · fans out"
+			}
+			m.notice = notice + "…"
 			// This overlay closes onto whichever lens was behind it, so the
 			// dispatch has to be on the triage table by the time the human gets
 			// there — see pending.go.
 			m = m.markPending(m.pendingFor(repo, feature, prompt)).fleetSync()
-			return m, launchCmd(m.cfg, repo, feature, prompt, mode)
+			return m, launchCmd(m.cfg, repo, feature, prompt, mode, mdl, fanOut)
 		default:
 			var cmd tea.Cmd
 			df.prompt, cmd = df.prompt.Update(m.inputMsg(k))
@@ -272,7 +353,7 @@ func (m model) viewDispatchForm(w, h int) string {
 	var lines []string
 	lines = append(lines, fg(cWhite, "new dispatch"))
 	lines = append(lines, fg(cDim, "step "+itoa(int(df.step)+1)+" of "+itoa(int(dispatchStepCount))+
-		" · repo → feature → mode → prompt · esc backs out"))
+		" · repo → feature → mode → model → fan out → prompt · esc backs out"))
 	lines = append(lines, "")
 
 	// Breadcrumb of what's already been chosen.
@@ -288,6 +369,12 @@ func (m model) viewDispatchForm(w, h int) string {
 	}
 	if df.step > dispatchMode {
 		lines = append(lines, row(iw, "", c("mode", 10, cFaint), flexc(string(df.mode()), cMid)))
+	}
+	if df.step > dispatchModel {
+		lines = append(lines, row(iw, "", c("model", 10, cFaint), flexc(string(df.mdl()), cMid)))
+	}
+	if df.step > dispatchFanout {
+		lines = append(lines, row(iw, "", c("fan out", 10, cFaint), flexc(dispatchFanoutOptions[clampCursor(df.fanoutSel, len(dispatchFanoutOptions))].label, cMid)))
 	}
 	if df.step > dispatchRepo {
 		lines = append(lines, "")
@@ -348,14 +435,51 @@ func (m model) viewDispatchForm(w, h int) string {
 			))
 		}
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "enter → prompt · esc → feature"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter → model · esc → feature"))
+
+	case dispatchModel:
+		lines = append(lines, fg(cMid, "model")+fg(cFaint, "  what the session runs — default passes no flag"))
+		lines = append(lines, "")
+		all := dispatchpkg.Models()
+		sel := clampCursor(df.modelSel, len(all))
+		for i, k := range all {
+			bg, marker, nameColor := cTransparent, " ", cFg
+			if i == sel {
+				bg, marker, nameColor = cSel, "▸", cWhite
+			}
+			lines = append(lines, row(iw, bg,
+				c(marker, 2, cMid),
+				c(string(k), 10, nameColor),
+				flexc(k.Hint(), cDim),
+			))
+		}
+		lines = append(lines, "")
+		lines = append(lines, blank(2)+fg(cFaint, "enter → fan out · esc → mode"))
+
+	case dispatchFanout:
+		lines = append(lines, fg(cMid, "fan out")+fg(cFaint, "  may it spread across agents when the task splits"))
+		lines = append(lines, "")
+		sel := clampCursor(df.fanoutSel, len(dispatchFanoutOptions))
+		for i, opt := range dispatchFanoutOptions {
+			bg, marker, nameColor := cTransparent, " ", cFg
+			if i == sel {
+				bg, marker, nameColor = cSel, "▸", cWhite
+			}
+			lines = append(lines, row(iw, bg,
+				c(marker, 2, cMid),
+				c(opt.label, 10, nameColor),
+				flexc(opt.hint, cDim),
+			))
+		}
+		lines = append(lines, "")
+		lines = append(lines, blank(2)+fg(cFaint, "enter → prompt · esc → model"))
 
 	case dispatchPrompt:
 		lines = append(lines, fg(cFaint, "prompt")+"  "+fg(cMid, df.repo.Name)+fg(cFaint, " · ")+fg(cMid, strings.TrimSpace(df.feature.Value())))
 		lines = append(lines, "")
 		lines = append(lines, df.prompt.View())
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "enter or ctrl+d dispatches · esc → mode"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter or ctrl+d dispatches · esc → fan out"))
 	}
 
 	if df.errMsg != "" {

@@ -69,10 +69,14 @@ func capSlug(s string) string {
 // CLAUDE_DISPATCHER_ID environment variable is the join key that lets the
 // lifecycle hook attribute events back to this record.
 //
-// mode is the permission mode the session opens in; it goes on the record as
-// well as on the command line, because Resume has to reopen the session the way
-// it was dispatched and the transcript does not carry it.
-func Launch(r repos.Repo, feature, prompt string, mode Mode) (*state.Dispatch, error) {
+// mode is the permission mode the session opens in and model is the model it
+// runs; both go on the record as well as on the command line, because Resume
+// has to reopen the session the way it was dispatched and the transcript does
+// not carry either. fanOut is the third form choice, and it travels in the
+// prompt rather than as a flag (see fanout.go): when set, the prompt gains the
+// ultracode sentence before anything records or runs it, so the record's
+// Prompt is the prompt the session actually received.
+func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut bool) (*state.Dispatch, error) {
 	slug := Slugify(feature)
 	if slug == "" {
 		return nil, fmt.Errorf("feature name %q produces an empty slug", feature)
@@ -97,6 +101,8 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode) (*state.Dispatch, e
 	}
 
 	mode = mode.Normalize()
+	model = model.Normalize()
+	prompt = withFanOut(prompt, fanOut)
 	d := &state.Dispatch{
 		ID:           state.NewID(),
 		Feature:      feature,
@@ -109,6 +115,8 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode) (*state.Dispatch, e
 		BaseSHA:      baseSHA,
 		Prompt:       prompt,
 		Mode:         string(mode),
+		Model:        string(model),
+		FanOut:       fanOut,
 		TmuxSession:  uniqueName("disp-" + slug),
 		Status:       state.StatusLaunching,
 		CreatedAt:    time.Now(),
@@ -120,7 +128,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode) (*state.Dispatch, e
 	// launchCommand is OS-specific (bash on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := launchCommand(d.ID, prompt, mode)
+	cmd := launchCommand(d.ID, prompt, mode, model)
 	if err := newSession(d.TmuxSession, worktree, cmd); err != nil {
 		d.Status = state.StatusExited
 		d.StatusReason = "tmux launch failed"
