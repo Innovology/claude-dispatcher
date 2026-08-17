@@ -84,6 +84,12 @@ type model struct {
 	// resume a different dispatcher than the one the human is reading about.
 	resumeAt *resumeTarget
 
+	// The park-reason input over the triage lens. parkAt is the row it is
+	// about, captured when it opened — see parkTarget.
+	parkOpen bool
+	parkText string
+	parkAt   *parkTarget
+
 	backlogCursor int
 	picked        map[string]bool
 	srcFilter     string

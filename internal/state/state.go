@@ -93,10 +93,23 @@ type Dispatch struct {
 	// background tasks: the session is paused, not waiting on the human, and
 	// will wake itself. Guards against a later idle_prompt notification (whose
 	// payload has no task info) downgrading the status to needs-input.
-	WaitingOnTasks bool      `json:"waiting_on_tasks,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	WaitingOnTasks bool `json:"waiting_on_tasks,omitempty"`
+	// ParkedReason and ParkedAt are the human's shelf, not the machine's truth:
+	// the session asked something they cannot answer right now, and they said
+	// why. Parking is an annotation rather than a Status because Status belongs
+	// to the lifecycle hooks — a "parked" status would be overwritten by the
+	// next event the session emitted, and guarded everywhere one is applied.
+	// The cockpit sets and clears the pair together; hookcmd clears it on
+	// UserPromptSubmit, because a prompt reaching the session means the
+	// question it was parked on got its answer.
+	ParkedReason string     `json:"parked_reason,omitempty"`
+	ParkedAt     *time.Time `json:"parked_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
+
+// Parked reports whether the human has shelved this dispatch — see ParkedReason.
+func (d *Dispatch) Parked() bool { return d.ParkedAt != nil || d.ParkedReason != "" }
 
 func Dir() string {
 	if d := os.Getenv("CLAUDE_DISPATCHER_STATE"); d != "" {

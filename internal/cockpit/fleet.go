@@ -46,9 +46,10 @@ type fleetRow struct {
 	// has to survive the rebuild.
 	id string
 	// kind is "queue" — it is waiting on you — "run", it is getting on with it,
-	// or "past", its session is over. rank orders the table and picks the glyph;
-	// see fleetRank. Past rows are not part of the in-flight table at all: they
-	// are what `h` and the history filter show, and what resume acts on.
+	// "parked", the human shelved it with a reason, or "past", its session is
+	// over. rank orders the table and picks the glyph; see fleetRank. Past rows
+	// are not part of the in-flight table at all: they are what `h` and the
+	// history filter show, and what resume acts on.
 	kind string
 	rank int
 	// ask classifies what a queue row wants: permission | review | turn-done |
@@ -121,6 +122,9 @@ type fleetRow struct {
 	// waited is the record's UpdatedAt, kept as the queue rows' tie-break sort
 	// key so the ask that has waited longest surfaces first.
 	waited time.Time
+	// parked is when the human shelved it — the parked group's sort key, zero
+	// on every other kind.
+	parked time.Time
 }
 
 // ---- collector ------------------------------------------------------------------
@@ -149,7 +153,17 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 	var lastOut time.Time // freshest transcript write across everything running
 
 	for _, rec := range ctx.records {
-		switch floorState(rec) {
+		st := floorState(rec)
+		// A parked record is on the human's shelf whatever its machine status
+		// says — waiting, still working, or a session the reboot took (the
+		// shelf must survive a dead tmux, or a machine restart silently empties
+		// it). Only shipping moves it on: "live" means the work is done, and
+		// the shelf entry with it.
+		if rec.Parked() && st != "live" {
+			rows = append(rows, fleetParkedRow(ctx, s, passes, rec))
+			continue
+		}
+		switch st {
 		// "review" belongs in the table's top half, not outside it: a finished
 		// turn with a green unreviewed PR is the single most actionable thing the
 		// cockpit can show. Omitting it made those dispatchers vanish from triage
@@ -198,12 +212,20 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 // be: it needs a check result sampled twice over time, and gh.Checks is a point
 // sample. See cqShipDetail.
 //
-// Rank 4 is history. It is below every live row and never shares a table with
+// Rank 4 is parked                        ‖  the human shelved it, with a
+//                                            reason — it shares the table,
+//                                            below everything that is live,
+//                                            under its own divider line
+//
+// Rank 5 is history. It is below every live row and never shares a table with
 // one, so it needs no glyph or colour of its own: both fall through to the
 // rank-3 defaults, and the SIGNAL cell says how the session ended.
 func fleetRank(kind, tone string, stalled bool) int {
 	if kind == "past" {
 		return fleetPastRank
+	}
+	if kind == "parked" {
+		return fleetParkedRank
 	}
 	if kind == "queue" {
 		if tone == "red" {
@@ -238,6 +260,14 @@ func fleetSort(rows []fleetRow) {
 			// newest sits at the top.
 			if !a.moved.Equal(b.moved) {
 				return a.moved.After(b.moved)
+			}
+			return a.id < b.id
+		}
+		if a.kind == "parked" {
+			// The shelf reads like history: the thing most recently put down
+			// is the one most likely to be picked back up.
+			if !a.parked.Equal(b.parked) {
+				return a.parked.After(b.parked)
 			}
 			return a.id < b.id
 		}
@@ -405,8 +435,57 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	}, mt
 }
 
+// fleetParkedRank is where the human's shelf sits: below everything asking or
+// running — parking exists to get an ask you cannot answer out of the live
+// table's way — and above history, because a parked dispatcher is not over.
+const fleetParkedRank = 4
+
 // fleetPastRank is where history sits: below everything alive.
-const fleetPastRank = 4
+const fleetPastRank = 5
+
+// fleetParkedRow builds a row for a dispatcher the human has shelved.
+//
+// It is deliberately as cheap as a past row — no gh request, no transcript
+// tail — because a shelf is somewhere things sit for days. The SIGNAL cell
+// carries the one fact the group exists for: the reason the human typed when
+// they parked it. The record's own status keeps moving underneath (the session
+// may still be working, or may have died with the machine); the acts read it,
+// the grouping does not.
+func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *state.Dispatch) fleetRow {
+	goal, goalLabel := cqGoal(rec)
+	est, codedKnown := s.effortBy[rec.Feature]
+	signal := "parked"
+	if rec.ParkedReason != "" {
+		signal += " · " + rec.ParkedReason
+	}
+	var at time.Time
+	if rec.ParkedAt != nil {
+		at = *rec.ParkedAt
+	}
+	return fleetRow{
+		id:         rec.ID,
+		kind:       "parked",
+		rank:       fleetRank("parked", "normal", false),
+		product:    ctx.productFor(rec),
+		feature:    rec.Feature,
+		repo:       rec.RepoName,
+		ref:        cqRef(ctx.forge(rec.RepoPath), rec),
+		pass:       passes[rec.ID],
+		signal:     signal,
+		tone:       "normal",
+		why:        cqSentence(rec.ParkedReason),
+		goal:       goal,
+		goalLabel:  goalLabel,
+		coded:      est.Dur,
+		codedKnown: codedKnown,
+		mode:       rec.Mode,
+		acts:       cqActs(rec, "parked"),
+		parked:     at,
+		moved:      fleetMoved(rec),
+		started:    rec.CreatedAt,
+		waited:     rec.UpdatedAt,
+	}
+}
 
 // fleetPastRow builds a row for a dispatcher whose session is over.
 //
@@ -557,7 +636,11 @@ func (m model) fleetAll() []fleetRow {
 	out := make([]fleetRow, 0, len(fleet))
 	placed := make(map[string]bool, len(fleet))
 	for _, id := range m.cqOrder {
-		if r, ok := byID[id]; ok && !placed[id] && !m.cqSuppressed[id] {
+		// Parked rows sit out the user's ordering: the shelf is always below
+		// the live table, and an id `s` ordered while it was still a queue row
+		// must not drag its parked self back to the top. They fall through to
+		// the collector segment, whose rank sort keeps them last.
+		if r, ok := byID[id]; ok && r.kind != "parked" && !placed[id] && !m.cqSuppressed[id] {
 			out = append(out, r)
 			placed[id] = true
 		}
@@ -622,21 +705,26 @@ func (m model) fleetSel() (fleetRow, bool) {
 	return rows[clampCursor(m.fleetCursor, len(rows))], true
 }
 
-// fleetCount tallies the three headline numbers over the rows on screen: what
-// wants you, what is drifting, and what is simply running. They count the
-// FILTERED set on purpose — the line sits above the table and describes it.
-func fleetCount(rows []fleetRow) (wants, warn, clean int) {
+// fleetCount tallies the headline numbers over the rows on screen: what wants
+// you, what is drifting, what the human shelved, and what is simply running.
+// They count the FILTERED set on purpose — the line sits above the table and
+// describes it. Parked is its own tally because it is neither of the others:
+// it does want you (later), and calling it "running clean" would hide the
+// shelf inside the healthiest number on the line.
+func fleetCount(rows []fleetRow) (wants, warn, parked, clean int) {
 	for _, r := range rows {
 		switch {
 		case r.kind == "queue":
 			wants++
+		case r.kind == "parked":
+			parked++
 		case r.rank == 2:
 			warn++
 		default:
 			clean++
 		}
 	}
-	return wants, warn, clean
+	return wants, warn, parked, clean
 }
 
 // fleetRunning is how many dispatchers are getting on with it, across the whole

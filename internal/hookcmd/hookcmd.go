@@ -181,6 +181,12 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "processing your prompt"
 		d.WaitingOnTasks = false
+		// A prompt reaching the session answers the question it was parked on:
+		// the park said "I cannot answer that right now", and someone just did.
+		// No other event clears the shelf — a Stop, an idle prompt or a session
+		// dying with the machine are all things a parked dispatcher is allowed
+		// to do while it waits.
+		d.ParkedReason, d.ParkedAt = "", nil
 	case "PostToolUse":
 		// A tool completing means any permission prompt was approved.
 		if d.Status != state.StatusBlocked {

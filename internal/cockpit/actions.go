@@ -78,9 +78,15 @@ func killCmd(features []string) tea.Cmd {
 				continue
 			}
 			_ = supervisor.KillSession(rec.TmuxSession)
-			if rec.Status != state.StatusDone {
-				rec.Status = state.StatusExited
-				rec.StatusReason = "killed from cockpit"
+			if rec.Parked() || rec.Status != state.StatusDone {
+				// A kill is abandonment, not shelving: clear the park so the
+				// record cannot haunt the parked group, whose whole claim is
+				// "you will come back to this".
+				rec.ParkedReason, rec.ParkedAt = "", nil
+				if rec.Status != state.StatusDone {
+					rec.Status = state.StatusExited
+					rec.StatusReason = "killed from cockpit"
+				}
 				_ = state.Save(rec)
 			}
 			if rec.WorktreePath != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {

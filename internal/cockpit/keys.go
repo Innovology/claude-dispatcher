@@ -184,6 +184,13 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateProduct(k)
 		return mm, cmd
 	}
+	// The park-reason input is text entry and owns the keyboard like the other
+	// overlays — resolved before the triage lens, which would otherwise swallow
+	// every letter as a fleet key.
+	if m.parkOpen {
+		mm, cmd := m.updatePark(k)
+		return mm, cmd
+	}
 	if m.paletteOpen {
 		switch k {
 		case "esc":

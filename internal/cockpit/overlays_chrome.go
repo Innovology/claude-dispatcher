@@ -20,6 +20,7 @@ var helpSections = []struct {
 		{"○", "waiting on you, not blocking anything else"},
 		{"◆", "green in ci and still not merged"},
 		{"·", "running clean · nothing there needs you"},
+		{"‖", "parked · you shelved it, its row keeps your reason"},
 		{"", "sorted by what needs you, not by product — the top row is next"},
 	}},
 	{section: "work the fleet", keys: []struct{ k, d string }{
@@ -30,6 +31,7 @@ var helpSections = []struct {
 		{"y", "approve the merge, or mark it shipped once it has commits"},
 		{"x", "kill it · the branch and any dirty worktree survive"},
 		{"s", "skip · send it to the back, it comes round again"},
+		{"p", "park it · say why, it waits below the fleet · p unparks"},
 		{"d", "dispatch · pick a repo, say what it does"},
 		{"ctrl+z", "put back the last thing you cleared"},
 	}},

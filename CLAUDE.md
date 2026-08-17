@@ -98,6 +98,22 @@
   inventing records is worse than an empty pane. It shipped reading only
   `doc/adr/`, which no repo in the fleet keeps, so the lens was empty for
   every repo while decisions sat in plain sight one file away.
+- **Parking is an annotation, never a status.** A session reaches a point
+  where it asks something the human cannot answer right now; `p` on that queue
+  row shelves it under a required, human-typed reason
+  (`ParkedReason`/`ParkedAt` on the record) and it drops to a *parked* group
+  at the bottom of the fleet — its own divider, its own rank between running
+  and history, out of the "want you" counts. It is not a `Status` because
+  status belongs to the hooks: a parked status would be flipped back by the
+  next lifecycle event, or need a guard everywhere one is applied. The shelf
+  therefore survives everything the machine does — including a reboot killing
+  tmux; a parked row whose session died offers resume instead of attach — and
+  clears on exactly three human acts: `p` again (unpark), a kill (`x` is
+  abandonment, not shelving), and a prompt reaching the session
+  (`UserPromptSubmit` in hookcmd), because someone just answered the question
+  it was parked on. Shipping retires it like any other row: "live" outranks
+  the shelf. Parked rows sit out the `s`-rotation ordering so they can never
+  be dragged above the live table.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main

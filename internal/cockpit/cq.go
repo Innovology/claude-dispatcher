@@ -280,6 +280,27 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		}
 		return acts
 	}
+	// A parked dispatcher's session may be long gone — a reboot takes tmux
+	// with it and the shelf survives — so ⏎ resumes when the record says
+	// exited and attaches otherwise; cqRun tells the two apart by the act's
+	// own verb. p takes it back up. Unparking is not undo: it puts the ask
+	// back on the live table, where the collector re-ranks it like any other.
+	if kind == "parked" {
+		acts := []cqAct{}
+		if rec.Status == state.StatusExited {
+			acts = append(acts,
+				cqAct{k: "⏎", d: "resume", ok: "resuming \"" + rec.Feature + "\"…", keep: true})
+		} else {
+			acts = append(acts,
+				cqAct{k: "⏎", d: "attach", ok: "attaching to " + rec.RepoName + " session…", keep: true})
+		}
+		acts = append(acts, cqAct{k: "p", d: "unpark",
+			ok: "\"" + rec.Feature + "\" back on the fleet", keep: true})
+		if rec.Status != state.StatusExited {
+			acts = append(acts, cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+		}
+		return acts
+	}
 	acts := []cqAct{
 		{k: "⏎", d: "attach", ok: "attaching to " + rec.RepoName + " session…", keep: true},
 	}
@@ -305,6 +326,11 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 	}
 	acts = append(acts,
 		cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""},
+		// Park and skip carry no ok on purpose: neither is an act that has
+		// happened by the time the key lands. Skip is table rotation; park
+		// opens the reason input, and nothing is parked until the reason is
+		// entered — both are handled by the key machine, not cqRun.
+		cqAct{k: "p", d: "park"},
 		cqAct{k: "s", d: "skip"})
 	return acts
 }
