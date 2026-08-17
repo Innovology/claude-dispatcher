@@ -100,6 +100,7 @@
   text and nothing louder, and the merge ask is claimed on the queue row the
   record becomes when the session actually stops. The "needs a look" filter,
   which matched exactly that tier plus the queue it duplicated, left with it.
+  The full record is `docs/adr/0003-amber-is-a-claim-about-the-human.md`.
 - **Decisions are read where they were written, never invented.** The
   DECISIONS lens has two sources: an adr-tools folder, and a heading that
   names a set of decisions in the repo's own markdown (`CLAUDE.md`,
