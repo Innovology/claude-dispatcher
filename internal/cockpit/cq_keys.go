@@ -135,11 +135,18 @@ func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
 	case "⏎":
 		// On a history row ⏎ means resume: there is no live session to attach
 		// to, and the record is addressed by id because a feature name can
-		// belong to several finished dispatchers.
-		if r.kind == "past" {
+		// belong to several finished dispatchers. A parked row can be either —
+		// its session survives a park but not a reboot — and cqActs already
+		// decided which from the record, so the act's own verb is the answer.
+		if r.kind == "past" || (r.kind == "parked" && a.d == "resume") {
 			return m, resumeCmd(r.id, "")
 		}
 		return m.attach(r.feature)
+	case "p":
+		// Only the parked row's unpark reaches here: the queue rows' park act
+		// carries no ok, so the act loop never fires it — updateFloorQueue
+		// opens the reason input instead.
+		return m, unparkCmd(r.id)
 	case "o":
 		return m, openPRCmd(r.repo, r.ref)
 	case "y":
@@ -280,6 +287,16 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 	}
 
 	if r, ok := m.fleetSel(); ok {
+		// Park wants a reason before anything is written, so the key opens the
+		// input rather than firing a command — a flash is a promise the act
+		// already ran, and nothing has yet. Only a queue row can be parked:
+		// parking answers "it asked me something I cannot answer right now",
+		// and a running dispatcher has not asked anything.
+		if k == "p" && r.kind == "queue" {
+			m.parkOpen, m.parkText = true, ""
+			m.parkAt = &parkTarget{id: r.id, feature: r.feature}
+			return m, nil, true
+		}
 		// Skip sends a row to the back so the next thing comes up under the
 		// cursor; it is queue rotation, not work. A running dispatcher is not
 		// asking for anything, so there is nothing to skip past.

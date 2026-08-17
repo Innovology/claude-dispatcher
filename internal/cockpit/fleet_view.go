@@ -196,6 +196,9 @@ func fleetGlyph(rank int) string {
 		return "○"
 	case 2:
 		return "◆"
+	case fleetParkedRank:
+		// The pause bars: shelved by the human, waiting for later.
+		return "‖"
 	}
 	return "·"
 }
@@ -277,7 +280,7 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	if f == fleetHistory {
 		return m.fleetHistoryHeadline(inner, rows)
 	}
-	wants, warn, clean := fleetCount(rows)
+	wants, warn, parked, clean := fleetCount(rows)
 
 	title, right := itoa(len(rows))+" in flight", "f filters · h history · sorted by urgency"
 	if f != fleetFilters[0] {
@@ -297,6 +300,11 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 		fg(blockHex, itoa(wants)+" want you") + "   " +
 		fg(warnHex, itoa(warn)+" need a look") + "   " +
 		fg(cFaint, itoa(clean)+" running clean")
+	// The shelf only earns a clause when something is on it: "0 parked" would
+	// advertise a group the table is not showing.
+	if parked > 0 {
+		left += "   " + fg(cFaint, itoa(parked)+" parked")
+	}
 	// Appended only when the whole cell fits. flSpread's overflow answer is to
 	// truncate the left side, which would leave "≈10h t…" hanging off the end of
 	// a narrow terminal — a clause half-said is worse than one not said, and it
@@ -533,6 +541,13 @@ func (m model) viewFleet(w, h int) string {
 // There is no "↑ N more" / "↓ N more" sacrificial row: window() keeps the
 // cursor on screen and j/k move the cursor rather than a scroll offset, so no
 // row is unreachable and none of the height needs spending to say so.
+//
+// The parked group gets the one header the table has: a divider line naming
+// the shelf, drawn above the first parked row. It is a display line, never a
+// row — the cursor cannot land on it — so the window is computed over lines
+// and the selection mapped across the divider. fleetSort and fleetAll keep the
+// parked rows contiguous at the bottom, which is what lets one divider be the
+// whole boundary.
 func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string) []string {
 	if h <= 0 {
 		return nil
@@ -544,14 +559,46 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string)
 		// reading as "nothing is running".
 		out = append(out, flG(fg(cFaint, empty)))
 	}
-	start, end := window(sel, len(rows), h)
-	for i := start; i < end; i++ {
+	div := -1
+	for i, r := range rows {
+		if r.kind == "parked" {
+			div = i
+			break
+		}
+	}
+	lines, selLine := len(rows), sel
+	if div >= 0 {
+		lines++
+		if sel >= div {
+			selLine++
+		}
+	}
+	start, end := window(selLine, lines, h)
+	for ln := start; ln < end; ln++ {
+		i := ln
+		if div >= 0 {
+			if ln == div {
+				out = append(out, fleetParkedDivider(w))
+				continue
+			}
+			if ln > div {
+				i = ln - 1
+			}
+		}
 		out = append(out, fleetDataLine(w, cols, rows[i], i == sel))
 	}
 	for len(out) < h {
 		out = append(out, "")
 	}
 	return out[:h]
+}
+
+// fleetParkedDivider is the line above the parked group: the group's name, set
+// into a rule so it reads as a boundary rather than as a row.
+func fleetParkedDivider(w int) string {
+	lead, label := "── ", "parked "
+	rest := maxi(0, cqInner(w)-dispWidth(lead)-dispWidth(label))
+	return flG(fg(cRule, lead) + fg(cFaint, label) + fg(cRule, strings.Repeat("─", rest)))
 }
 
 // ---- footer -----------------------------------------------------------------
@@ -564,6 +611,9 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string)
 // without attaching to it, so it is not advertised here, in the help sheet or
 // in the key handler.
 func (m model) cqFooterHelp() string {
+	if m.parkOpen {
+		return "type the reason · enter parks it · esc cancels"
+	}
 	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}

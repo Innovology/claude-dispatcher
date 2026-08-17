@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/state"
 )
@@ -194,5 +195,29 @@ func TestSamePath(t *testing.T) {
 	}
 	if samePath("/a", "/b") {
 		t.Error("different paths should not match")
+	}
+}
+
+// Parking is the human saying "I cannot answer that right now". The one event
+// that dissolves it is a prompt reaching the session — someone just answered —
+// and nothing else the session does may empty the shelf: a parked dispatcher
+// is allowed to sit at its prompt, go idle, and even die with the machine.
+func TestApplyOnlyAPromptClearsThePark(t *testing.T) {
+	at := time.Now().Add(-time.Hour)
+	parked := func(st state.Status) *state.Dispatch {
+		return &state.Dispatch{Status: st, ParkedReason: "waiting on legal", ParkedAt: &at}
+	}
+
+	d := parked(state.StatusNeedsInput)
+	if !apply(d, "UserPromptSubmit", hookInput{}) || d.Parked() {
+		t.Errorf("a submitted prompt must clear the park, got parked=%v", d.Parked())
+	}
+
+	for _, ev := range []string{"Stop", "Notification:idle_prompt", "SessionEnd", "SessionStart"} {
+		d := parked(state.StatusWorking)
+		apply(d, ev, hookInput{})
+		if !d.Parked() {
+			t.Errorf("%s cleared the park — only the human, a kill or a prompt may", ev)
+		}
 	}
 }
