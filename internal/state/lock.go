@@ -26,11 +26,11 @@ func Lock() (release func()) {
 		return func() {}
 	}
 	if err := lockFile(f); err != nil {
-		f.Close()
+		_ = f.Close()
 		return func() {}
 	}
 	return func() {
 		unlockFile(f)
-		f.Close()
+		_ = f.Close()
 	}
 }
