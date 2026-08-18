@@ -145,6 +145,23 @@
   be dragged above the live table. The full record is
   `docs/adr/0001-parking-is-an-annotation-never-a-status.md` — this repo's
   first ADR, in the folder the DECISIONS lens reads.
+- **A fan-out is hook truth, reported like ci, swept with the turn.** When a
+  session spins out subagents, the cockpit sees them the way it sees checks:
+  from the source that already carries every status fact. `SubagentStart`/
+  `SubagentStop` hooks (installed by `init`; payload fields verified against
+  the installed claude before building on them) append to and settle a
+  `Subagents` list on the record — an annotation like parking, never a
+  status: a start arriving on a blocked record leaves it blocked. The turn
+  is the story: SessionStart clears the list, a new prompt drops the
+  finished entries and keeps live ones (background agents cross turns), and
+  a Stop with no background tasks sweeps anything still marked live,
+  because at that point a "running" entry is a missed stop event, not a
+  running agent — a count that can only go up is a ghost in miniature. The
+  running row's SIGNAL says `fan-out · 3 live` beside the ci clause; the
+  detail meta counts the turn and one further line names the types; the FAN
+  OUT switch itself shows as config beside the mode. Existing installs
+  re-run `init` to get the two new hook entries. Full record:
+  `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main

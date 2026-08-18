@@ -10,6 +10,8 @@
 //	Notification:idle_prompt       -> needs-input (unless waiting on tasks)
 //	Notification:permission_prompt -> blocked
 //	SessionEnd                     -> exited (unless already done)
+//	SubagentStart/SubagentStop     -> no status change; the fan-out is an
+//	                                  annotation on the record (state.Subagent)
 //
 // A Stop with a non-empty background_tasks payload means the session is
 // paused waiting for background work to wake it, not waiting on the human;
@@ -37,6 +39,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"claude-dispatcher/internal/state"
 )
@@ -49,6 +52,11 @@ type hookInput struct {
 	// Stop/SubagentStop only; item shape is Claude Code's business — only the
 	// count matters here.
 	BackgroundTasks []json.RawMessage `json:"background_tasks"`
+	// SubagentStart/SubagentStop carry which agent the event is about; other
+	// events fired from within a subagent carry them too, and are handled the
+	// same as from the main thread.
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type"`
 }
 
 func Run(args []string) int {
@@ -177,6 +185,9 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "session started"
 		d.WaitingOnTasks = false
+		// A new session starts with no fan-out: no subagent survives the
+		// session that spun it out.
+		d.Subagents = nil
 	case "UserPromptSubmit":
 		d.Status = state.StatusWorking
 		d.StatusReason = "processing your prompt"
@@ -187,6 +198,9 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		// dying with the machine are all things a parked dispatcher is allowed
 		// to do while it waits.
 		d.ParkedReason, d.ParkedAt = "", nil
+		// Each turn tells its own fan-out story: the finished subagents of the
+		// last turn go, background ones still running carry over.
+		d.DropStoppedSubagents()
 	case "PostToolUse":
 		// A tool completing means any permission prompt was approved.
 		if d.Status != state.StatusBlocked {
@@ -204,6 +218,20 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		}
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "turn complete — waiting on you"
+		// The turn is over and nothing is in flight, so a subagent still
+		// marked live is a SubagentStop that never arrived, not a subagent
+		// still running — swept here so a missed event cannot claim a fan-out
+		// forever. With background tasks above, the sweep does not run: a
+		// background agent legitimately outlives the turn.
+		d.SweepSubagents(time.Now())
+	case "SubagentStart":
+		// An annotation, never a status: what the session is doing with its
+		// subagents changes nothing about whether it is working or waiting.
+		// (On a done record the guard above drops this, like every event that
+		// is not proof the human is being waited on.)
+		return d.SubagentStarted(in.AgentID, in.AgentType, time.Now())
+	case "SubagentStop":
+		return d.SubagentStopped(in.AgentID, in.AgentType, time.Now())
 	case "Notification:idle_prompt":
 		if d.WaitingOnTasks {
 			return false // paused on background work, not on the human
