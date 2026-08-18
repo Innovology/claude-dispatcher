@@ -117,12 +117,150 @@ type Dispatch struct {
 	// question it was parked on got its answer.
 	ParkedReason string     `json:"parked_reason,omitempty"`
 	ParkedAt     *time.Time `json:"parked_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// Subagents is the session's fan-out as the SubagentStart/SubagentStop
+	// hooks reported it: the agents the session has spun out through its Agent
+	// tool, each with the type name Claude Code gave it. Like parking it is an
+	// annotation, never a Status — a fleet of subagents changes nothing about
+	// whether the session is working or waiting. hookcmd owns the lifecycle:
+	// cleared on SessionStart, stopped entries dropped on UserPromptSubmit
+	// (each turn tells its own story), and any entry still live at a Stop with
+	// no background tasks is swept, because a subagent cannot outlive the turn
+	// unless it is one of those tasks.
+	Subagents []Subagent `json:"subagents,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // Parked reports whether the human has shelved this dispatch — see ParkedReason.
 func (d *Dispatch) Parked() bool { return d.ParkedAt != nil || d.ParkedReason != "" }
+
+// Subagent is one agent the session fanned out, as the hooks named it. The
+// hooks are the source, not the transcript: transcript JSONL is best-effort
+// preview only, and a count read from an internal format would be a guess
+// wearing a number.
+type Subagent struct {
+	ID   string `json:"id"`
+	Type string `json:"type,omitempty"` // e.g. "Explore", "general-purpose"
+	// StartedAt/StoppedAt are stamped at hook receipt. A nil StoppedAt is a
+	// subagent still running.
+	StartedAt time.Time  `json:"started_at"`
+	StoppedAt *time.Time `json:"stopped_at,omitempty"`
+}
+
+// maxSubagents bounds the annotation. The record is rewritten on every hook
+// event and a runaway loop can spawn agents by the hundred; past the cap the
+// oldest stopped entry makes room, so the live picture stays exact and only
+// deep history is shed. The done count then reads low, which the cap accepts:
+// a bounded record that undercounts a marathon beats an unbounded one.
+const maxSubagents = 256
+
+// SubagentStarted records a subagent spinning up. A restarted id is reset
+// rather than duplicated. It reports whether anything changed.
+func (d *Dispatch) SubagentStarted(id, typ string, at time.Time) bool {
+	if id == "" {
+		return false // cannot track what nothing names
+	}
+	for i := range d.Subagents {
+		if d.Subagents[i].ID == id {
+			d.Subagents[i] = Subagent{ID: id, Type: typ, StartedAt: at}
+			return true
+		}
+	}
+	if len(d.Subagents) >= maxSubagents && !d.shedStoppedSubagent() {
+		return false // cap reached and everything is live; drop the event
+	}
+	d.Subagents = append(d.Subagents, Subagent{ID: id, Type: typ, StartedAt: at})
+	return true
+}
+
+// SubagentStopped records a subagent finishing. A stop whose start was never
+// seen (the hook landed mid-turn) still appends, already stopped, so the done
+// count stays honest. It reports whether anything changed.
+func (d *Dispatch) SubagentStopped(id, typ string, at time.Time) bool {
+	if id == "" {
+		return false
+	}
+	for i := range d.Subagents {
+		if d.Subagents[i].ID == id {
+			if d.Subagents[i].StoppedAt != nil {
+				return false
+			}
+			d.Subagents[i].StoppedAt = &at
+			return true
+		}
+	}
+	if len(d.Subagents) >= maxSubagents && !d.shedStoppedSubagent() {
+		return false
+	}
+	d.Subagents = append(d.Subagents, Subagent{ID: id, Type: typ, StartedAt: at, StoppedAt: &at})
+	return true
+}
+
+// SweepSubagents marks every still-live subagent stopped. hookcmd calls it on
+// a Stop with no background tasks: the turn is over and nothing is in flight,
+// so an entry still claiming to run is a stop event that never arrived.
+func (d *Dispatch) SweepSubagents(at time.Time) bool {
+	changed := false
+	for i := range d.Subagents {
+		if d.Subagents[i].StoppedAt == nil {
+			t := at
+			d.Subagents[i].StoppedAt = &t
+			changed = true
+		}
+	}
+	return changed
+}
+
+// DropStoppedSubagents clears the finished entries; live ones (background
+// agents crossing the turn boundary) stay. hookcmd calls it on
+// UserPromptSubmit so each turn reports its own fan-out.
+func (d *Dispatch) DropStoppedSubagents() bool {
+	kept := d.Subagents[:0]
+	for _, a := range d.Subagents {
+		if a.StoppedAt == nil {
+			kept = append(kept, a)
+		}
+	}
+	changed := len(kept) != len(d.Subagents)
+	d.Subagents = kept
+	if len(d.Subagents) == 0 {
+		d.Subagents = nil
+	}
+	return changed
+}
+
+// shedStoppedSubagent drops the oldest stopped entry to make room at the cap.
+func (d *Dispatch) shedStoppedSubagent() bool {
+	for i := range d.Subagents {
+		if d.Subagents[i].StoppedAt != nil {
+			d.Subagents = append(d.Subagents[:i], d.Subagents[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// SubagentsLive counts the fan-out still running.
+func (d *Dispatch) SubagentsLive() int {
+	n := 0
+	for _, a := range d.Subagents {
+		if a.StoppedAt == nil {
+			n++
+		}
+	}
+	return n
+}
+
+// SubagentsDone counts the fan-out that has finished this turn.
+func (d *Dispatch) SubagentsDone() int {
+	n := 0
+	for _, a := range d.Subagents {
+		if a.StoppedAt != nil {
+			n++
+		}
+	}
+	return n
+}
 
 func Dir() string {
 	if d := os.Getenv("CLAUDE_DISPATCHER_STATE"); d != "" {
@@ -156,11 +294,29 @@ func Save(d *Dispatch) error {
 		return err
 	}
 	final := filepath.Join(DispatchesDir(), d.ID+".json")
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	// A per-call temp name, not final+".tmp": concurrent savers sharing one
+	// temp path can interleave write and rename and install a torn file. With
+	// unique names the loser only overwrites the winner whole — last-writer-
+	// wins, never half-of-each. (Subagent hook events made concurrent savers
+	// the routine case; see Lock.)
+	tmp, err := os.CreateTemp(DispatchesDir(), d.ID+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, final)
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), final)
 }
 
 // LoadAll returns every dispatch record, most urgent first, most recent within

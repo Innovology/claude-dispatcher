@@ -391,9 +391,10 @@ const fleetWhyLines = 2
 // knowable from a model id) and the design's check trend (one sample cannot
 // make a trend).
 func fleetMeta(r fleetRow) string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 6)
 	for _, p := range []string{
-		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode), cqCodedLine(r),
+		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode),
+		fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
 	} {
 		if p != "" {
 			parts = append(parts, p)
@@ -409,6 +410,18 @@ func fleetModeLine(mode string) string {
 		return ""
 	}
 	return mode
+}
+
+// fleetFanLine says the dispatch went out with the FAN OUT switch on. It sits
+// with the mode because it is the same kind of fact — how the dispatch was
+// configured, not what the session has done; the subagent clause beside it
+// (cqAgentsLine) is the measurement. A record from before the switch existed
+// says nothing.
+func fleetFanLine(fanOut bool) string {
+	if !fanOut {
+		return ""
+	}
+	return "fan-out"
 }
 
 // fleetDetail is everything under the table about the selected row: what it is
@@ -445,6 +458,13 @@ func (m model) fleetDetail(w int, r fleetRow) []cqRow {
 	segs = append(segs, cqChainSegs(r.stage)...)
 	segs = append(segs, c("", 2, ""), flexc(fleetMeta(r), cFaint), c("", pad, ""))
 	out = append(out, cqFixed(row(w, "", segs...)))
+
+	// The fan-out by name — "seeing them", where the meta clause above only
+	// counts them. One line, present only while there is a fan-out to name.
+	if ag := cqAgentsDetail(r); ag != "" {
+		out = append(out, cqFixed(flG(fg(cFaint,
+			truncate("subagents · "+ag, inner)))))
+	}
 
 	if m.cqFlash != "" {
 		// A keep act (attach) did not clear anything, so it reports in mid grey

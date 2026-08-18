@@ -237,6 +237,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 
 - Each dispatcher is an interactive `claude` session inside its own tmux session (`disp-<slug>`), started on a `feature/<slug>` branch. Sessions survive cockpit restarts; the cockpit is a stateless viewer over `~/.local/state/claude-dispatcher/`.
 - Status comes from **one** global Claude Code lifecycle hook (installed by `init` into `~/.claude/settings.json`). It maps events to states: working, needs you, blocked, done, exited.
+- **Fan-outs are visible.** When a session spins out subagents, the same hooks report each one starting and stopping. The dispatcher's row says `fan-out · 3 live` beside its CI signal while they run; the detail panel counts the turn (`fanned out 12 subagents` once they are home) and names the agent types. Installed with the other hooks; existing installs re-run `init` to get it.
 - Commits are attributed to dispatchers by **provenance** — each dispatch records the SHAs its feature branch produced (base tip at launch → branch tip). No trailers in your git history.
 - The **hand-coding equivalent** comes off that same provenance diff, read once per load and shared by every screen that shows it, so triage, history and velocity can never quote different hours for one branch. A branch whose diff cannot be read (no base SHA, or a branch since deleted by hand) is left out of the totals rather than counted as zero, and velocity says how many of its live features it could actually price.
 - **Nothing disappears:** a session that ends — shipped, killed or simply exited — moves to history rather than off the screen. `h` on triage and the product panel's `H` tab both list them, and `enter` resumes one: its worktree is put back if it was reclaimed and `claude --resume` picks the same conversation up where it stopped.
@@ -299,4 +300,5 @@ Each publisher's `skip_upload` is templated on its token, so an unset token mean
 - **Everything stuck on "launching"** — the hook isn't firing. Re-run `claude-dispatcher init`; confirm `~/.claude/settings.json` points at the installed binary.
 - **`needs you` vs `blocked` lag** — those rely on the `Notification` hook matchers (`idle_prompt` / `permission_prompt`); `Stop` covers turn completion regardless.
 - **Backlog empty** — set a Linear key / Azure org in settings, and check `gh auth status` for GitHub Issues.
+- **Fan-outs invisible** — the `SubagentStart`/`SubagentStop` hook entries are newer than your install. Re-run `claude-dispatcher init` to add them.
 - Rebuilds must go to the same path (`make install`) because the hook embeds the absolute binary path.

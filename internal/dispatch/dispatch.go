@@ -249,6 +249,10 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 		}
 		d.Status = state.StatusExited
 		d.StatusReason = "its " + supervisor.Backend() + " session is gone"
+		// The session died without a SessionEnd, so its fan-out died without
+		// SubagentStops: settle the annotation here, where the death is
+		// proven, or the history row claims live subagents forever.
+		d.SweepSubagents(time.Now())
 		if state.Save(d) == nil {
 			retired++
 		}

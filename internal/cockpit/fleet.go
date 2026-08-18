@@ -104,6 +104,15 @@ type fleetRow struct {
 	// ran in whatever the human's own Claude Code defaults to, and reporting
 	// that as "auto" would be inventing the one fact nobody recorded.
 	mode string
+	// fanOut is the dispatch form's FAN OUT switch, straight off the record:
+	// the session was invited to spread across agents. subLive and subDone are
+	// what it actually did — the type names of the subagents the hooks have
+	// seen this turn, split by whether each is still running. The counts are
+	// the lengths; the names are for the detail panel's breakdown. Facts only:
+	// cq.go composes the sentences (cqFanSignal, cqAgentsLine, cqAgentsDetail).
+	fanOut  bool
+	subLive []string
+	subDone []string
 
 	acts []cqAct
 
@@ -339,6 +348,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	goal, goalLabel := cqGoal(rec)
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
 	est, codedKnown := s.effortBy[rec.Feature]
+	subLive, subDone := fleetSubagents(rec)
 
 	return fleetRow{
 		id:         rec.ID,
@@ -362,6 +372,9 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		fanOut:     rec.FanOut,
+		subLive:    subLive,
+		subDone:    subDone,
 		acts:       cqActs(rec, ask),
 		moved:      fleetMoved(rec),
 		started:    rec.CreatedAt,
@@ -391,7 +404,12 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	// The forge comes from the floor row rather than a second `git remote
 	// get-url`: collectFloor resolved it for this record moments ago.
 	forge := floorBy[rec.Feature].forge
-	signal := cqShipDetail(forge, rec)
+	subLive, subDone := fleetSubagents(rec)
+	// The SIGNAL cell reports the fan-out beside where the PR stands, the way
+	// the checks are reported: a count the hooks measured, no louder than the
+	// ci clause it sits with. Live subagents come first — they are what the
+	// session is doing now; the PR is where what it did stands.
+	signal := cqJoin(cqFanSignal(len(subLive)), cqShipDetail(forge, rec))
 	// The record exists and no hook has fired for it: it was launched, and
 	// nothing has been heard from the session since. cqShipDetail has nothing to
 	// say about a dispatcher with no PR, so the cell would be blank — which on
@@ -429,11 +447,34 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		fanOut:     rec.FanOut,
+		subLive:    subLive,
+		subDone:    subDone,
 		acts:       cqActs(rec, "running"),
 		moved:      moved,
 		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
 	}, mt
+}
+
+// fleetSubagents splits the record's fan-out into the type names of the
+// subagents still running and the ones finished this turn. The hooks always
+// name a type; "subagent" stands in on the rare payload that does not,
+// because a blank in a breakdown reads as a rendering bug rather than a
+// missing fact — and "agent" alone is a word this product reserves against.
+func fleetSubagents(rec *state.Dispatch) (live, done []string) {
+	for _, a := range rec.Subagents {
+		name := a.Type
+		if name == "" {
+			name = "subagent"
+		}
+		if a.StoppedAt == nil {
+			live = append(live, name)
+		} else {
+			done = append(done, name)
+		}
+	}
+	return live, done
 }
 
 // fleetParkedRank is where the human's shelf sits: below everything asking or
@@ -455,6 +496,7 @@ const fleetPastRank = 4
 func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *state.Dispatch) fleetRow {
 	goal, goalLabel := cqGoal(rec)
 	est, codedKnown := s.effortBy[rec.Feature]
+	subLive, subDone := fleetSubagents(rec)
 	signal := "parked"
 	if rec.ParkedReason != "" {
 		signal += " · " + rec.ParkedReason
@@ -480,6 +522,9 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		fanOut:     rec.FanOut,
+		subLive:    subLive,
+		subDone:    subDone,
 		acts:       cqActs(rec, "parked"),
 		parked:     at,
 		moved:      fleetMoved(rec),
@@ -506,6 +551,9 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *state.Dispatch) fleetRow {
 	goal, goalLabel := cqGoal(rec)
 	est, codedKnown := s.effortBy[rec.Feature]
+	// A record slice, not a read: the fan-out rides the record, so history
+	// stays constant work.
+	subLive, subDone := fleetSubagents(rec)
 	return fleetRow{
 		id:         rec.ID,
 		kind:       "past",
@@ -523,6 +571,9 @@ func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *stat
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		fanOut:     rec.FanOut,
+		subLive:    subLive,
+		subDone:    subDone,
 		acts:       cqActs(rec, "past"),
 		moved:      fleetMoved(rec),
 		started:    rec.CreatedAt,

@@ -501,6 +501,82 @@ func cqShipDetail(forge string, rec *state.Dispatch) string {
 	return "green, unmerged"
 }
 
+// cqFanSignal is the fan-out's SIGNAL clause: how many subagents the session
+// is running right now, shaped like the ci clause it sits beside. Live only —
+// the cell reports what is happening, and the finished count is the meta
+// line's fact (cqAgentsLine). Silence, not "0 live", when there is none.
+func cqFanSignal(live int) string {
+	if live <= 0 {
+		return ""
+	}
+	return "fan-out · " + itoa(live) + " live"
+}
+
+// cqJoin glues signal clauses with the cell's separator, dropping the empty
+// ones so a missing fact costs no punctuation.
+func cqJoin(parts ...string) string {
+	kept := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, " · ")
+}
+
+// cqAgentsLine is the detail panel's subagent clause: the fan-out this turn,
+// counted. While any run it leads with them; once they are all home it says
+// what the turn used. A row with no fan-out says nothing — most dispatchers
+// never spread, and "0 subagents" would be noise on every one of them.
+func cqAgentsLine(r fleetRow) string {
+	live, done := len(r.subLive), len(r.subDone)
+	switch {
+	case live > 0 && done > 0:
+		return itoa(live) + " " + cqPluralAgents(live) + " live, " + itoa(done) + " done"
+	case live > 0:
+		return itoa(live) + " " + cqPluralAgents(live) + " live"
+	case done > 0:
+		return "fanned out " + itoa(done) + " " + cqPluralAgents(done)
+	}
+	return ""
+}
+
+func cqPluralAgents(n int) string {
+	if n == 1 {
+		return "subagent"
+	}
+	return "subagents"
+}
+
+// cqAgentsDetail is the fan-out by name for the detail panel: which agent
+// types are out and which came home, e.g. "Explore ×2, Plan live ·
+// code-reviewer ×3 done". Types are counted in first-seen order — the order
+// the session spun them out.
+func cqAgentsDetail(r fleetRow) string {
+	return cqJoin(cqAgentsGroup(r.subLive, "live"), cqAgentsGroup(r.subDone, "done"))
+}
+
+// cqAgentsGroup folds a name list into "a ×2, b <state>".
+func cqAgentsGroup(names []string, state string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	order := make([]string, 0, len(names))
+	count := map[string]int{}
+	for _, n := range names {
+		if count[n] == 0 {
+			order = append(order, n)
+		}
+		count[n]++
+	}
+	for i, n := range order {
+		if count[n] > 1 {
+			order[i] = n + " ×" + itoa(count[n])
+		}
+	}
+	return strings.Join(order, ", ") + " " + state
+}
+
 // cqLastWrite is when a session last emitted anything, taken from its
 // transcript's mtime.
 //

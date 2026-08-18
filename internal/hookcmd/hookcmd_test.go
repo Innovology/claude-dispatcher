@@ -221,3 +221,112 @@ func TestApplyOnlyAPromptClearsThePark(t *testing.T) {
 		}
 	}
 }
+
+// The fan-out is an annotation, never a status: subagent events record which
+// agents the session spun out and change nothing about whether it is working
+// or waiting — a SubagentStart arriving while blocked must not un-block it.
+func TestApplySubagentEventsNeverTouchStatus(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusBlocked, StatusReason: "waiting on a permission approval"}
+	if !apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"}) {
+		t.Fatal("a named start must record")
+	}
+	if d.Status != state.StatusBlocked || d.StatusReason != "waiting on a permission approval" {
+		t.Fatalf("subagent events must leave status alone, got %s (%s)", d.Status, d.StatusReason)
+	}
+	if !apply(d, "SubagentStop", hookInput{AgentID: "a1", AgentType: "Explore"}) {
+		t.Fatal("a stop for a known id must record")
+	}
+	if d.Status != state.StatusBlocked {
+		t.Fatalf("subagent events must leave status alone, got %s", d.Status)
+	}
+	if d.SubagentsLive() != 0 || d.SubagentsDone() != 1 {
+		t.Fatalf("live=%d done=%d, want 0 and 1", d.SubagentsLive(), d.SubagentsDone())
+	}
+	// A payload naming no agent records nothing.
+	if apply(d, "SubagentStart", hookInput{}) {
+		t.Fatal("an unnameable subagent cannot be tracked")
+	}
+}
+
+// A Stop with nothing in flight ends the turn, and with it the fan-out: an
+// entry still live at that point is a SubagentStop that never arrived, and
+// must not claim a running fan-out forever. With background tasks in the
+// payload the sweep must NOT run — a background agent outlives the turn.
+func TestApplyStopSweepsTheFanOut(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"})
+	apply(d, "SubagentStart", hookInput{AgentID: "a2", AgentType: "Plan"})
+
+	tasks := []json.RawMessage{json.RawMessage(`{"task_id":"t1"}`)}
+	apply(d, "Stop", hookInput{BackgroundTasks: tasks})
+	if d.SubagentsLive() != 2 {
+		t.Fatalf("background tasks in flight — live subagents must survive the Stop, got %d", d.SubagentsLive())
+	}
+
+	apply(d, "Stop", hookInput{})
+	if d.SubagentsLive() != 0 || d.SubagentsDone() != 2 {
+		t.Fatalf("live=%d done=%d after a bare Stop, want 0 and 2", d.SubagentsLive(), d.SubagentsDone())
+	}
+}
+
+// A SessionEnd settles the fan-out unconditionally — background agents do not
+// survive their session either. Without this, a session exited while waiting
+// on background work kept "live" entries on its history row forever.
+func TestApplySessionEndSweepsTheFanOut(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"})
+	tasks := []json.RawMessage{json.RawMessage(`{"task_id":"t1"}`)}
+	apply(d, "Stop", hookInput{BackgroundTasks: tasks})
+
+	apply(d, "SessionEnd", hookInput{})
+	if d.Status != state.StatusExited {
+		t.Fatalf("status = %s, want exited", d.Status)
+	}
+	if d.SubagentsLive() != 0 || d.SubagentsDone() != 1 {
+		t.Fatalf("live=%d done=%d after SessionEnd, want 0 and 1 — no subagent outlives its session",
+			d.SubagentsLive(), d.SubagentsDone())
+	}
+}
+
+// Each turn tells its own fan-out story: a new prompt drops the finished
+// entries, while a background agent still running carries over. A new session
+// starts with no fan-out at all.
+func TestApplyPromptAndSessionStartResetTheFanOut(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusNeedsInput}
+	apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"})
+	apply(d, "SubagentStart", hookInput{AgentID: "a2", AgentType: "Plan"})
+	apply(d, "SubagentStop", hookInput{AgentID: "a1", AgentType: "Explore"})
+
+	apply(d, "UserPromptSubmit", hookInput{})
+	if d.SubagentsLive() != 1 || d.SubagentsDone() != 0 {
+		t.Fatalf("live=%d done=%d after a prompt, want the live one kept and the done one dropped",
+			d.SubagentsLive(), d.SubagentsDone())
+	}
+
+	apply(d, "SessionStart", hookInput{SessionID: "s1"})
+	if len(d.Subagents) != 0 {
+		t.Fatalf("no subagent survives the session that spun it out, got %+v", d.Subagents)
+	}
+}
+
+// Done means live, and the guard protects STATUS — the fan-out is
+// bookkeeping, recorded on a done record the same way refreshCommits keeps
+// attributing commits to one. track routinely flips a record to done while
+// its session is mid-fan-out; dropping the events there would freeze a
+// "live" count no Stop could ever settle.
+func TestApplyDoneRecordStillRecordsTheFanOut(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusDone}
+	if !apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"}) {
+		t.Fatal("the annotation must record on a done record")
+	}
+	if d.Status != state.StatusDone {
+		t.Fatalf("status = %s — the guard must still hold done", d.Status)
+	}
+	if !apply(d, "Stop", hookInput{}) {
+		t.Fatal("the Stop must still sweep a done record's fan-out")
+	}
+	if d.Status != state.StatusDone || d.SubagentsLive() != 0 || d.SubagentsDone() != 1 {
+		t.Fatalf("status=%s live=%d done=%d — want done kept, fan-out settled",
+			d.Status, d.SubagentsLive(), d.SubagentsDone())
+	}
+}
