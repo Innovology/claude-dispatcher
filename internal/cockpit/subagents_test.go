@@ -83,7 +83,7 @@ func TestFleetSubagentsSplitsTheRecord(t *testing.T) {
 		{ID: "a3", Type: "Plan", StartedAt: at, StoppedAt: &at},
 	}}
 	live, done := fleetSubagents(rec)
-	if len(live) != 2 || live[0] != "Explore" || live[1] != "agent" {
+	if len(live) != 2 || live[0] != "Explore" || live[1] != "subagent" {
 		t.Errorf("live = %v", live)
 	}
 	if len(done) != 1 || done[0] != "Plan" {

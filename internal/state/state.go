@@ -294,11 +294,29 @@ func Save(d *Dispatch) error {
 		return err
 	}
 	final := filepath.Join(DispatchesDir(), d.ID+".json")
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	// A per-call temp name, not final+".tmp": concurrent savers sharing one
+	// temp path can interleave write and rename and install a torn file. With
+	// unique names the loser only overwrites the winner whole — last-writer-
+	// wins, never half-of-each. (Subagent hook events made concurrent savers
+	// the routine case; see Lock.)
+	tmp, err := os.CreateTemp(DispatchesDir(), d.ID+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, final)
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), final)
 }
 
 // LoadAll returns every dispatch record, most urgent first, most recent within

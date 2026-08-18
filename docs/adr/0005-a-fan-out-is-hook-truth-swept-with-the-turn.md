@@ -51,6 +51,29 @@ payload the sweep does not run, because those legitimately outlive the
 turn. The list is capped (256); at the cap the oldest stopped entry makes
 room, so the live picture stays exact and only deep history is shed.
 
+**Every way a session ends settles the fan-out.** The `Stop` sweep alone
+would leave the motivating ghost alive on every other exit: `SessionEnd`
+sweeps unconditionally (background agents do not survive their session
+either), and the two ways a session dies without a hook firing sweep at
+their own retirement sites — the cockpit's `x` kill, and
+`dispatch.ReconcileSessions` when it retires a record whose tmux is gone
+(ADR 0004 runs that on every load). The annotation is bookkeeping, not
+status, so it also records through the "done means live" guard, the way
+`refreshCommits` keeps attributing commits to a shipped record — track
+routinely flips a record to done mid-run, and dropping the events there
+would freeze a "live" count nothing could settle.
+
+**Parallel events get a lock.** Hook events used to arrive one at a time —
+the session's main thread emits them serially — but a fan-out fires
+subagent events from parallel agents, and two unserialised hookcmds doing
+load→apply→save would last-writer-wins each other's events away (a
+straggler could even resurrect entries a `Stop` just swept, status and
+all). `state.Lock` (flock on Unix, `LockFileEx` on Windows) serialises the
+hook path, best-effort: a lock that cannot be taken must never stall a
+live session. `state.Save` also writes through a per-call temp file rather
+than a shared `.tmp` name, so concurrent savers can no longer install a
+torn record.
+
 **Reported like ci, in the same places.** The running row's SIGNAL cell
 says `fan-out · 3 live` beside `ci · 2 of 5 green` — a count the hooks
 measured, no louder than the checks clause it sits with. The detail panel's
@@ -71,9 +94,12 @@ are measurement, and the panel keeps them distinct.
   reload turns into a snapshot rebuild. The gh cache discipline (ask a repo
   once, never poll below the poll) already exists to make rebuilds cheap;
   the cap bounds the record's size.
-- History keeps the last turn's fan-out: an exited dispatcher's row can say
-  `fanned out 12 subagents`, read straight off the record at map-lookup
-  cost, so `fleetPastRow` stays the cheapest row there is.
+- History keeps the last turn's fan-out: an exited dispatcher's detail
+  panel can say `fanned out 12 subagents`, read straight off the record at
+  map-lookup cost, so `fleetPastRow` stays the cheapest row there is.
 - Workflow-tool agents fire the same hooks, so ultracode runs report
   without any extra plumbing. Background tasks remain a separate fact
   (`WaitingOnTasks`), untouched by this.
+- The velocity lens's dwell accounting treats subagent events as "working"
+  — without that, every gap inside a fan-out turn was billed to nobody and
+  the split collapsed for exactly the turns with the most work in them.

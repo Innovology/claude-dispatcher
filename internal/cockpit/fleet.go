@@ -459,13 +459,14 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 
 // fleetSubagents splits the record's fan-out into the type names of the
 // subagents still running and the ones finished this turn. The hooks always
-// name a type; "agent" stands in on the rare payload that does not, because a
-// blank in a breakdown reads as a rendering bug rather than a missing fact.
+// name a type; "subagent" stands in on the rare payload that does not,
+// because a blank in a breakdown reads as a rendering bug rather than a
+// missing fact — and "agent" alone is a word this product reserves against.
 func fleetSubagents(rec *state.Dispatch) (live, done []string) {
 	for _, a := range rec.Subagents {
 		name := a.Type
 		if name == "" {
-			name = "agent"
+			name = "subagent"
 		}
 		if a.StoppedAt == nil {
 			live = append(live, name)

@@ -105,6 +105,12 @@ func velDwellState(event string) string {
 	switch event {
 	case "SessionStart", "UserPromptSubmit":
 		return "working"
+	// A session fanning out is a session working: without these, every gap
+	// inside a fan-out turn — first SubagentStart to the closing Stop — was
+	// billed to nobody, and the velocity split collapsed for exactly the
+	// turns with the most work in them.
+	case "SubagentStart", "SubagentStop":
+		return "working"
 	case "Stop", "Notification:idle_prompt":
 		return "waiting"
 	case "Notification:permission_prompt":

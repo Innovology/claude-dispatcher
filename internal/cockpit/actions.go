@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -104,6 +105,9 @@ func killCmd(features []string) tea.Cmd {
 				continue
 			}
 			_ = supervisor.KillSession(rec.TmuxSession)
+			// The kill takes the session's subagents with it, and no hook
+			// will fire to say so: settle the fan-out with the record.
+			swept := rec.SweepSubagents(time.Now())
 			if rec.Parked() || rec.Status != state.StatusDone {
 				// A kill is abandonment, not shelving: clear the park so the
 				// record cannot haunt the parked group, whose whole claim is
@@ -113,6 +117,8 @@ func killCmd(features []string) tea.Cmd {
 					rec.Status = state.StatusExited
 					rec.StatusReason = "killed from cockpit"
 				}
+				_ = state.Save(rec)
+			} else if swept {
 				_ = state.Save(rec)
 			}
 			if rec.WorktreePath != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {

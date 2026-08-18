@@ -156,7 +156,13 @@
   finished entries and keeps live ones (background agents cross turns), and
   a Stop with no background tasks sweeps anything still marked live,
   because at that point a "running" entry is a missed stop event, not a
-  running agent — a count that can only go up is a ghost in miniature. The
+  running agent — a count that can only go up is a ghost in miniature.
+  Every other way a session ends settles it too: SessionEnd sweeps
+  unconditionally, and the two hookless deaths sweep at their retirement
+  sites (cockpit kill, `ReconcileSessions`). The annotation records through
+  the done guard the way refreshCommits does, and `state.Lock` serialises
+  the hook path — subagent events are the first that arrive in parallel,
+  and unserialised load-modify-saves would drop each other's writes. The
   running row's SIGNAL says `fan-out · 3 live` beside the ci clause; the
   detail meta counts the turn and one further line names the types; the FAN
   OUT switch itself shows as config beside the mode. Existing installs

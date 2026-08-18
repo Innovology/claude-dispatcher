@@ -78,6 +78,13 @@ func Run(args []string) int {
 		})
 	}
 
+	// A fan-out fires subagent events from parallel agents, so two hookcmds
+	// routinely race the same record; unserialised, the loser's whole-record
+	// save wins and the winner's event is gone. The lock is best-effort — a
+	// lock that cannot be taken must never stall the session.
+	release := state.Lock()
+	defer release()
+
 	d := resolve(dispatcherID, event, in)
 	if d == nil {
 		return 0
@@ -171,9 +178,62 @@ func reopensDone(event string) bool {
 // apply mutates the dispatch for the event; it reports whether anything
 // changed and a save is warranted.
 func apply(d *state.Dispatch, event string, in hookInput) bool {
+	// The fan-out annotation is bookkeeping, not status, so it applies even
+	// where the guard below holds a done record still — the same way
+	// refreshCommits keeps attributing commits to a shipped record.
+	changed := applyFanOut(d, event, in)
 	if d.Status == state.StatusDone && !reopensDone(event) {
-		return false // done means live; only proof of life downgrades it
+		return changed // done means live; only proof of life downgrades it
 	}
+	return applyStatus(d, event, in) || changed
+}
+
+// applyFanOut keeps the Subagents annotation current. Every path a session
+// can end a turn — or end — settles the fan-out, because a subagent cannot
+// outlive the turn (unless it is a background task) and cannot outlive the
+// session at all; an entry left claiming to run would be a ghost in
+// miniature, a row saying "3 live" forever with nothing behind it. The two
+// non-hook ways a session dies (a cockpit kill, a tmux taken down with the
+// machine) sweep at their own retirement sites: cockpit killCmd and
+// dispatch.ReconcileSessions.
+func applyFanOut(d *state.Dispatch, event string, in hookInput) bool {
+	switch event {
+	case "SubagentStart":
+		return d.SubagentStarted(in.AgentID, in.AgentType, time.Now())
+	case "SubagentStop":
+		return d.SubagentStopped(in.AgentID, in.AgentType, time.Now())
+	case "SessionStart":
+		// A new session starts with no fan-out: no subagent survives the
+		// session that spun it out.
+		if len(d.Subagents) == 0 {
+			return false
+		}
+		d.Subagents = nil
+		return true
+	case "UserPromptSubmit":
+		// Each turn tells its own fan-out story: the finished subagents of
+		// the last turn go, background ones still running carry over.
+		return d.DropStoppedSubagents()
+	case "Stop":
+		if len(in.BackgroundTasks) > 0 {
+			return false // background agents legitimately outlive the turn
+		}
+		// The turn is over and nothing is in flight, so a subagent still
+		// marked live is a SubagentStop that never arrived, not a subagent
+		// still running.
+		return d.SweepSubagents(time.Now())
+	case "SessionEnd":
+		// Background tasks do not survive their session either: whatever the
+		// last Stop said, the process everything ran in is gone.
+		return d.SweepSubagents(time.Now())
+	}
+	return false
+}
+
+// applyStatus is the status state machine; it reports whether the record
+// changed. The fan-out never appears here — what a session does with its
+// subagents changes nothing about whether it is working or waiting.
+func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 	switch event {
 	case "SessionStart":
 		if in.SessionID != "" {
@@ -185,9 +245,6 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "session started"
 		d.WaitingOnTasks = false
-		// A new session starts with no fan-out: no subagent survives the
-		// session that spun it out.
-		d.Subagents = nil
 	case "UserPromptSubmit":
 		d.Status = state.StatusWorking
 		d.StatusReason = "processing your prompt"
@@ -198,9 +255,6 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		// dying with the machine are all things a parked dispatcher is allowed
 		// to do while it waits.
 		d.ParkedReason, d.ParkedAt = "", nil
-		// Each turn tells its own fan-out story: the finished subagents of the
-		// last turn go, background ones still running carry over.
-		d.DropStoppedSubagents()
 	case "PostToolUse":
 		// A tool completing means any permission prompt was approved.
 		if d.Status != state.StatusBlocked {
@@ -218,20 +272,6 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 		}
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "turn complete — waiting on you"
-		// The turn is over and nothing is in flight, so a subagent still
-		// marked live is a SubagentStop that never arrived, not a subagent
-		// still running — swept here so a missed event cannot claim a fan-out
-		// forever. With background tasks above, the sweep does not run: a
-		// background agent legitimately outlives the turn.
-		d.SweepSubagents(time.Now())
-	case "SubagentStart":
-		// An annotation, never a status: what the session is doing with its
-		// subagents changes nothing about whether it is working or waiting.
-		// (On a done record the guard above drops this, like every event that
-		// is not proof the human is being waited on.)
-		return d.SubagentStarted(in.AgentID, in.AgentType, time.Now())
-	case "SubagentStop":
-		return d.SubagentStopped(in.AgentID, in.AgentType, time.Now())
 	case "Notification:idle_prompt":
 		if d.WaitingOnTasks {
 			return false // paused on background work, not on the human

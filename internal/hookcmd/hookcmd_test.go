@@ -269,6 +269,25 @@ func TestApplyStopSweepsTheFanOut(t *testing.T) {
 	}
 }
 
+// A SessionEnd settles the fan-out unconditionally — background agents do not
+// survive their session either. Without this, a session exited while waiting
+// on background work kept "live" entries on its history row forever.
+func TestApplySessionEndSweepsTheFanOut(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"})
+	tasks := []json.RawMessage{json.RawMessage(`{"task_id":"t1"}`)}
+	apply(d, "Stop", hookInput{BackgroundTasks: tasks})
+
+	apply(d, "SessionEnd", hookInput{})
+	if d.Status != state.StatusExited {
+		t.Fatalf("status = %s, want exited", d.Status)
+	}
+	if d.SubagentsLive() != 0 || d.SubagentsDone() != 1 {
+		t.Fatalf("live=%d done=%d after SessionEnd, want 0 and 1 — no subagent outlives its session",
+			d.SubagentsLive(), d.SubagentsDone())
+	}
+}
+
 // Each turn tells its own fan-out story: a new prompt drops the finished
 // entries, while a background agent still running carries over. A new session
 // starts with no fan-out at all.
@@ -290,14 +309,24 @@ func TestApplyPromptAndSessionStartResetTheFanOut(t *testing.T) {
 	}
 }
 
-// Done means live: like every event that is not proof the human is being
-// waited on, subagent events on a done record are dropped.
-func TestApplyDoneRecordIgnoresSubagentEvents(t *testing.T) {
+// Done means live, and the guard protects STATUS — the fan-out is
+// bookkeeping, recorded on a done record the same way refreshCommits keeps
+// attributing commits to one. track routinely flips a record to done while
+// its session is mid-fan-out; dropping the events there would freeze a
+// "live" count no Stop could ever settle.
+func TestApplyDoneRecordStillRecordsTheFanOut(t *testing.T) {
 	d := &state.Dispatch{Status: state.StatusDone}
-	if apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"}) {
-		t.Fatal("a done record takes no subagent events")
+	if !apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"}) {
+		t.Fatal("the annotation must record on a done record")
 	}
-	if len(d.Subagents) != 0 {
-		t.Fatalf("recorded %d entries on a done record", len(d.Subagents))
+	if d.Status != state.StatusDone {
+		t.Fatalf("status = %s — the guard must still hold done", d.Status)
+	}
+	if !apply(d, "Stop", hookInput{}) {
+		t.Fatal("the Stop must still sweep a done record's fan-out")
+	}
+	if d.Status != state.StatusDone || d.SubagentsLive() != 0 || d.SubagentsDone() != 1 {
+		t.Fatalf("status=%s live=%d done=%d — want done kept, fan-out settled",
+			d.Status, d.SubagentsLive(), d.SubagentsDone())
 	}
 }
