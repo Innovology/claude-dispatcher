@@ -141,3 +141,48 @@ func TestLiveSnapshotEmpty(t *testing.T) {
 		}
 	}
 }
+
+// The sweep that retires a dispatcher whose session is gone has to run on the
+// ORDINARY load, not only on the reload that follows a jump-in.
+//
+// It shipped in one place: recheckCmd, which runs when the human comes back
+// from a session. So a record whose session died without getting a SessionEnd
+// out — a machine that slept the tmux server away, a WSL distro shut down with
+// the last console, a reboot — kept claiming "working" for as long as the
+// cockpit was open, and the row went on offering ⏎ attach. Attach found no
+// session, said so, and changed nothing; the only thing that would have
+// retired the record was coming back from an attach that could never happen.
+// A ghost could only be cleared by attaching to it, which is the one thing it
+// could not do.
+func TestEveryLoadSweepsStraySessions(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	defer restoreVars(captureVars())
+
+	if err := state.Save(&state.Dispatch{
+		ID: "ghost", Feature: "ghost", Status: state.StatusWorking,
+		TmuxSession: "disp-ghost",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	prev := reconcileSessions
+	defer func() { reconcileSessions = prev }()
+	swept := 0
+	var saw []string
+	reconcileSessions = func(ds []*state.Dispatch) (int, int) {
+		swept++
+		for _, d := range ds {
+			saw = append(saw, d.ID)
+		}
+		return 0, 0
+	}
+
+	loadSnapshot(&config.Config{})
+
+	if swept != 1 {
+		t.Fatalf("the load swept %d times, want 1", swept)
+	}
+	if len(saw) != 1 || saw[0] != "ghost" {
+		t.Errorf("the sweep was handed %v, want the records this load read", saw)
+	}
+}

@@ -7,12 +7,28 @@ import (
 )
 
 // withFakeSessions swaps the supervisor seams so the sweep runs against a
-// hand-written liveness map instead of a real tmux server.
+// hand-written liveness map instead of a real tmux server. The listing and the
+// per-name probe answer from the same map, which is what a working supervisor
+// does; withSessionSeams is how a test pulls the two apart.
 func withFakeSessions(t *testing.T, alive map[string]bool, ready bool) {
 	t.Helper()
-	prevAlive, prevReady := sessionAlive, supervisorReady
-	t.Cleanup(func() { sessionAlive, supervisorReady = prevAlive, prevReady })
-	sessionAlive = func(name string) bool { return alive[name] }
+	names := make([]string, 0, len(alive))
+	for name, ok := range alive {
+		if ok {
+			names = append(names, name)
+		}
+	}
+	withSessionSeams(t, func() []string { return names }, func(name string) bool { return alive[name] }, ready)
+}
+
+// withSessionSeams is withFakeSessions with the listing and the probe given
+// separately, for the cases where they do not agree.
+func withSessionSeams(t *testing.T, list func() []string, probe func(string) bool, ready bool) {
+	t.Helper()
+	prevAlive, prevNames, prevReady := sessionAlive, sessionNames, supervisorReady
+	t.Cleanup(func() { sessionAlive, sessionNames, supervisorReady = prevAlive, prevNames, prevReady })
+	sessionNames = list
+	sessionAlive = probe
 	supervisorReady = func() bool { return ready }
 }
 
@@ -59,8 +75,14 @@ func TestReconcileSessionsRetiresOnlyProvableStrays(t *testing.T) {
 
 	withFakeSessions(t, map[string]bool{"disp-live": true}, true)
 
-	if n := ReconcileSessions(state.LoadAll()); n != 3 {
-		t.Errorf("ReconcileSessions retired %d records, want 3 (gone, needs, blocked)", n)
+	retired, stillRunning := ReconcileSessions(state.LoadAll())
+	if retired != 3 {
+		t.Errorf("ReconcileSessions retired %d records, want 3 (gone, needs, blocked)", retired)
+	}
+	// The second figure is the one the opening screen prints, and it counts
+	// records with a session rather than statuses: only "live" still has one.
+	if stillRunning != 1 {
+		t.Errorf("ReconcileSessions counted %d live sessions, want 1", stillRunning)
 	}
 
 	for _, id := range []string{"gone", "needs", "blocked"} {
@@ -122,7 +144,7 @@ func TestReconcileSessionsSweepsNothingWithoutASupervisor(t *testing.T) {
 	})
 	withFakeSessions(t, nil, false)
 
-	if n := ReconcileSessions(state.LoadAll()); n != 0 {
+	if n, _ := ReconcileSessions(state.LoadAll()); n != 0 {
 		t.Errorf("ReconcileSessions retired %d records with no supervisor, want 0", n)
 	}
 	if got := statusOnDisk(t, "orphan"); got != state.StatusWorking {
@@ -141,10 +163,66 @@ func TestReconcileSessionsIsIdempotent(t *testing.T) {
 	})
 	withFakeSessions(t, nil, true)
 
-	if n := ReconcileSessions(state.LoadAll()); n != 1 {
+	if n, _ := ReconcileSessions(state.LoadAll()); n != 1 {
 		t.Fatalf("first pass retired %d, want 1", n)
 	}
-	if n := ReconcileSessions(state.LoadAll()); n != 0 {
+	if n, _ := ReconcileSessions(state.LoadAll()); n != 0 {
 		t.Errorf("second pass retired %d, want 0", n)
+	}
+}
+
+// The listing screens; it never convicts on its own. A listing that came back
+// empty because tmux failed — rather than because nothing is running — would
+// otherwise retire every working dispatcher on the machine in one pass, which
+// is the same mass-retirement an unreachable supervisor is guarded against
+// above. The direct probe is what has to agree before anything is written.
+func TestReconcileSessionsConfirmsAnEmptyListingBeforeRetiring(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	saveAll(t, &state.Dispatch{
+		ID: "busy", Feature: "busy", Status: state.StatusWorking,
+		TmuxSession: "disp-busy",
+	})
+	probes := 0
+	withSessionSeams(t,
+		func() []string { return nil }, // the listing failed and said nothing
+		func(name string) bool { probes++; return name == "disp-busy" },
+		true)
+
+	retired, live := ReconcileSessions(state.LoadAll())
+	if retired != 0 {
+		t.Errorf("retired %d records the listing missed, want 0 — the probe says it is there", retired)
+	}
+	if live != 1 {
+		t.Errorf("counted %d live, want 1 — the probe found the session the listing did not list", live)
+	}
+	if probes != 1 {
+		t.Errorf("probed %d times, want 1 — only a record about to be retired is worth a subprocess", probes)
+	}
+	if got := statusOnDisk(t, "busy"); got != state.StatusWorking {
+		t.Errorf("busy: status = %q, want working", got)
+	}
+}
+
+// A record the listing already accounts for is never probed. The sweep runs on
+// every cockpit load now, so a probe per record would be a subprocess per
+// record on every poll and every state-file change.
+func TestReconcileSessionsProbesOnlyWhatTheListingMissed(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	saveAll(t,
+		&state.Dispatch{ID: "a", Feature: "a", Status: state.StatusWorking, TmuxSession: "disp-a"},
+		&state.Dispatch{ID: "b", Feature: "b", Status: state.StatusNeedsInput, TmuxSession: "disp-b"},
+		&state.Dispatch{ID: "old", Feature: "old", Status: state.StatusDone, TmuxSession: "disp-old"},
+	)
+	probes := 0
+	withSessionSeams(t,
+		func() []string { return []string{"disp-a", "disp-b"} },
+		func(string) bool { probes++; return false },
+		true)
+
+	if _, live := ReconcileSessions(state.LoadAll()); live != 2 {
+		t.Errorf("counted %d live, want 2", live)
+	}
+	if probes != 0 {
+		t.Errorf("probed %d times, want 0 — the listing already answered for every record", probes)
 	}
 }

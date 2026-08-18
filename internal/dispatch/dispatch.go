@@ -177,16 +177,20 @@ func liveDispatch(slug string) *state.Dispatch {
 	return nil
 }
 
-// sessionAlive and supervisorReady are seams: tests swap them rather than
-// stand up real sessions.
+// sessionAlive, sessionNames and supervisorReady are seams: tests swap them
+// rather than stand up real sessions.
 var (
 	sessionAlive    = supervisor.HasSession
+	sessionNames    = supervisor.Sessions
 	supervisorReady = supervisor.Available
 )
 
 // ReconcileSessions re-derives status from the one fact the lifecycle hook
 // cannot report — whether the session behind a record still exists — and marks
-// every stray record exited. It returns how many it changed.
+// every stray record exited. It returns how many it retired, and how many
+// records still have a session of their own; the second figure is a byproduct
+// of the same listing, and the caller that draws it would otherwise ask the
+// supervisor the same question twice.
 //
 // Status normally comes from Claude Code hooks, and they are truth right up to
 // the moment a session dies without getting to say so: a SIGKILL, a
@@ -208,13 +212,30 @@ var (
 // there proves nothing, so nothing is claimed. Likewise a supervisor we cannot
 // even reach is not evidence that every session is gone, which is why an
 // unavailable backend sweeps nothing rather than retiring the whole fleet.
-func ReconcileSessions(ds []*state.Dispatch) int {
+//
+// It reads the whole fleet's liveness from ONE listing, because the cockpit now
+// runs it on every load rather than once per jump-in: a probe per record would
+// be a subprocess per record on every poll and every state-file change. The
+// listing screens; it never convicts on its own. A record it says is missing is
+// asked about directly before anything is written, since a listing that failed
+// for any reason comes back empty and an empty listing must never be read as
+// "the whole fleet died" — the same reason an unreachable supervisor sweeps
+// nothing. The extra probe costs one subprocess per record about to be retired,
+// and a retired record is skipped on every pass after this one.
+func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 	if !supervisorReady() {
-		return 0
+		return 0, 0
 	}
-	n := 0
+	listed := make(map[string]bool)
+	for _, name := range sessionNames() {
+		listed[name] = true
+	}
 	for _, d := range ds {
 		if d.TmuxSession == "" {
+			continue
+		}
+		if listed[d.TmuxSession] {
+			live++
 			continue
 		}
 		switch d.Status {
@@ -223,15 +244,16 @@ func ReconcileSessions(ds []*state.Dispatch) int {
 			continue
 		}
 		if sessionAlive(d.TmuxSession) {
+			live++
 			continue
 		}
 		d.Status = state.StatusExited
 		d.StatusReason = "its " + supervisor.Backend() + " session is gone"
 		if state.Save(d) == nil {
-			n++
+			retired++
 		}
 	}
-	return n
+	return retired, live
 }
 
 // fetchTimeout bounds the pre-dispatch fetch. Refreshing the base is a
