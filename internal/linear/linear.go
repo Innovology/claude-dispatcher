@@ -14,7 +14,13 @@ import (
 	"time"
 )
 
-const endpoint = "https://api.linear.app/graphql"
+// endpoint is a var rather than a const so a test can point a read at an
+// httptest server. Everything this package does that is worth testing happens
+// on the far side of one HTTP call — the decode, the GraphQL error, the
+// field mapping — and with a compiled-in URL none of it was reachable: the
+// package sat at 9.5% covered with only "an empty key reads nothing" behind it.
+// Nothing writes to it outside tests.
+var endpoint = "https://api.linear.app/graphql"
 
 // Key is the unscoped API key: the ambient LINEAR_API_KEY, which the cockpit
 // seeds from config at start-up. It is what a product whose source names no key

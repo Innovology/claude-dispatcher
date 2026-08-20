@@ -255,3 +255,37 @@ func TestClLinearKeyDoesNotPublishAFailedSave(t *testing.T) {
 		t.Errorf("a failed save was published anyway: %v", mm.cfg.Linear)
 	}
 }
+
+// A cockpit with no config loaded must not write a token into nothing and say
+// it saved. The editor is reachable in that state — clPersist guards it the
+// same way — and the notice is the only thing that tells the human the token
+// they just pasted went nowhere.
+func TestClLinearKeyWithoutAConfig(t *testing.T) {
+	m := clFixture(t)
+	m.cfg = nil
+
+	if got := m.clLinearKey("acme"); got != "" {
+		t.Errorf("no config can name no token, got %q", got)
+	}
+	mm, cmd := m.clSetLinearKey("acme", "lin_api_new")
+	if cmd == nil {
+		t.Fatal("a save with nowhere to go must still report")
+	}
+	msg, ok := cmd().(actionMsg)
+	if !ok || !strings.Contains(msg.notice, "nothing saved") {
+		t.Errorf("notice = %+v, want one saying it did not save", msg)
+	}
+	if mm.cfg != nil {
+		t.Error("no config was invented to save into")
+	}
+
+	// A product with no name is not a product. Nothing is written and nothing
+	// is claimed — the pane has no row to have meant.
+	m2 := clFixture(t)
+	if _, cmd := m2.clSetLinearKey("", "lin_api_new"); cmd != nil {
+		t.Error("an unnamed product must not produce a save at all")
+	}
+	if got := m2.clLinearKey(""); got != "" {
+		t.Errorf("got %q", got)
+	}
+}
