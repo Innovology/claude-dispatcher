@@ -106,8 +106,24 @@ func (m model) clPaneLabel() string {
 	return "repos · tab to products"
 }
 
-// clRight is the product list, the new-product affordance, the naming prompt
-// when it is up, and the explanation pinned to the bottom.
+// clHint is a prompt's explanatory line, wrapped to the pane.
+//
+// These are full sentences in a column a third of the terminal wide, so they
+// were drawn wider than the pane they sit in: the over-long line pushes past
+// the vertical rule and the terminal wraps it, breaking the two-pane layout at
+// exactly the moment the human has a half-typed buffer on screen. The tail
+// explanation below has always gone through productsWrap for this reason; the
+// prompts are the same prose in the same column.
+func clHint(s string, cw int) []string {
+	var out []string
+	for _, ln := range productsWrap(s, cw) {
+		out = append(out, fg(cFaint, ln))
+	}
+	return out
+}
+
+// clRight is the product list, the new-product affordance, the naming and token
+// prompts when one is up, and the explanation pinned to the bottom.
 func (m model) clRight(cw, h int) []string {
 	prods := m.clProducts()
 	counts := map[string]int{}
@@ -132,14 +148,24 @@ func (m model) clRight(cw, h int) []string {
 		if n != 1 {
 			word = "repos"
 		}
+		// A product's own Linear token is said, never shown: the sub-line is
+		// already the product's summary, and whether its backlog is read with a
+		// key of its own is the other thing about it that is configured. The
+		// token itself never reaches the screen — it is a secret, and this pane
+		// is what a shoulder reads.
+		meta := itoa(n) + " " + word
+		if m.clLinearKey(p) != "" {
+			meta += " · linear token"
+		}
 		out = append(out,
 			row(cw, bg, c(mark, 3, cMid), flexc(p, cFg)),
-			row(cw, bg, c("", 3, ""), flexc(itoa(n)+" "+word, cFaint)),
+			row(cw, bg, c("", 3, ""), flexc(meta, cFaint)),
 		)
 	}
 
 	out = append(out, "", fg(cRule, strings.Repeat("─", cw)))
 	out = append(out, row(cw, "", c("n", 3, cFg), flexc("new product…", cDim)))
+	out = append(out, row(cw, "", c("l", 3, cFg), flexc("linear token…", cDim)))
 
 	if m.clNaming {
 		out = append(out, "", fg(cDim, "new product"))
@@ -148,7 +174,31 @@ func (m model) clRight(cw, h int) []string {
 		if len(m.clTargets()) == 1 {
 			hint = "enter creates it and moves this repo in"
 		}
-		out = append(out, "", fg(cFaint, hint))
+		out = append(out, "")
+		out = append(out, clHint(hint, cw)...)
+	}
+
+	if m.clKeying {
+		out = append(out, "", fg(cDim, "linear token · "+m.clKeyFor))
+		// Masked as it is typed, like the settings editor's secret field: a
+		// pasted key is not read back off the screen, and a screen-shared
+		// cockpit must not be how it leaks.
+		//
+		// Capped at the pane. A Linear key runs to about fifty characters and
+		// this pane is a third of the terminal, so one dot per rune is a line
+		// wider than the column it is drawn in — which pushes the pane past its
+		// own rule and wraps the whole editor. The dots are a sign that the
+		// field is receiving, not a character count, so there is nothing to lose
+		// by stopping at the edge.
+		dots := mini(len([]rune(m.clKeyText)), maxi(cw-1, 0))
+		out = append(out, fg(cWhite, strings.Repeat("•", dots))+paint(cFg, cFg, " "))
+		hint := "enter saves it · this product's backlog is read with it"
+		if m.clLinearKey(m.clKeyFor) != "" {
+			hint = "enter replaces the token · empty clears it"
+		}
+		out = append(out, "")
+		out = append(out, clHint(hint, cw)...)
+		out = append(out, clHint("scope the key to this product's teams in Linear", cw)...)
 	}
 
 	// Pin the explanation to the bottom, as the design does with flex:1.

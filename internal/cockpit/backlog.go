@@ -121,8 +121,9 @@ func backlogWrap(s string, w int) []string {
 
 // backlogWhere is the ticket's "product / repo · labels" line, with the clauses
 // it does not have left out. Only GitHub issues resolve to a repo (they are
-// found per repo); a Linear or Azure ticket has neither product nor repo, and
-// the line used to render as " / · In Progress".
+// found per repo); a Linear ticket names the product whose token it came back
+// on and no repo, an Azure one neither, and the line used to render as
+// " / · In Progress".
 func backlogWhere(t ticket) string {
 	var parts []string
 	switch {

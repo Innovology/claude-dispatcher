@@ -52,6 +52,7 @@ var helpSections = []struct {
 		{"esc", "close the panel"},
 		{"a", "assign repos to products"},
 		{"n", "new product — names it and moves the marked repos in"},
+		{"l", "the Linear token this product's backlog is read with"},
 		{"space", "mark a repo · enter moves every marked one"},
 		{"tab", "between the repo list and the products"},
 		{"u / ctrl+u", "take repos back out of a product · start over"},

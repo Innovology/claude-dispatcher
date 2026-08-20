@@ -45,7 +45,7 @@ type settingsState struct {
 
 var settingsFields = []settingsField{
 	{key: "roots", label: "scan roots", hint: "comma-separated dirs scanned for repos", kind: setRoots},
-	{key: "linear_api_key", label: "Linear API key", hint: "enables the Linear backlog source", kind: setSecret},
+	{key: "linear_api_key", label: "Linear API key", hint: "the unscoped Linear read · a token per product on 2, a, l", kind: setSecret},
 	{key: "azure_org", label: "Azure DevOps org", hint: "org URL, e.g. https://dev.azure.com/acme", kind: setString},
 	{key: "azure_project", label: "Azure project", hint: "Azure Boards project name", kind: setString},
 	{key: "weekly_token_limit", label: "weekly token budget", hint: "0 = unknown → usage shows raw tokens", kind: setInt},

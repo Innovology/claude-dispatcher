@@ -172,6 +172,67 @@ func (m model) clPersist() tea.Cmd {
 	return func() tea.Msg { return actionMsg{notice: ""} } // reloads the snapshot so every lens regroups
 }
 
+// clLinearKey is the Linear token a product's backlog is read with, or "" when
+// it names none and reads with the unscoped key.
+func (m model) clLinearKey(product string) string {
+	if m.cfg == nil || product == "" {
+		return ""
+	}
+	return m.cfg.Linear[product]
+}
+
+// clSetLinearKey writes product's Linear token into `[linear]` and persists.
+//
+// The token belongs on this screen because `[linear]` is keyed by product NAME,
+// and product names are minted here — `n` is the only place in the product that
+// creates one. Asked to hand-write the table, the human has to retype a string
+// that must match a name in another file exactly, and a mismatch fails silently
+// in the worst possible way: the token authenticates, the read succeeds, and
+// its tickets are filed under a product that groups nowhere. Typed against the
+// row that holds the name, it cannot be mistyped at all.
+//
+// An empty token removes the entry rather than storing a blank, because those
+// are two different states: no entry is "read this product with the unscoped
+// key", and `product = ""` in the file would say the same thing in a way that
+// makes the product look configured on this screen when it is not.
+//
+// Same write discipline as clPersist, for the same reason: a copy is saved
+// first and only a save that worked is published into the cockpit's own config,
+// so the file on disk and the config every collector reads are never two
+// different things.
+func (m model) clSetLinearKey(product, key string) (model, tea.Cmd) {
+	if product == "" {
+		return m, nil
+	}
+	if m.cfg == nil {
+		return m, func() tea.Msg { return actionMsg{notice: "no config — nothing saved"} }
+	}
+	next := map[string]string{}
+	for p, k := range m.cfg.Linear {
+		next[p] = k
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		delete(next, product)
+	} else {
+		next[product] = key
+	}
+	cfg := *m.cfg
+	cfg.Linear = next
+	if err := config.Save(&cfg); err != nil {
+		return m, func() tea.Msg { return actionMsg{notice: "could not save the token: " + err.Error()} }
+	}
+	m.cfg.Linear = next
+	notice := product + " reads Linear with its own token"
+	if key == "" {
+		notice = product + " reads with the unscoped Linear key again"
+	}
+	// The notice rides the message rather than the model because the reload it
+	// queues sets one of its own — collectBacklog reads per token, so the next
+	// snapshot is already the one this changed.
+	return m, func() tea.Msg { return actionMsg{notice: notice} }
+}
+
 // ---- keys -------------------------------------------------------------------
 
 // updateCluster handles the editor's keys. handled is false only for the keys
@@ -215,6 +276,33 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 
+	// Typing a product's Linear token, likewise. A token is pasted far more
+	// often than it is typed, which is the whole reason text comes from the key
+	// message: a paste is one multi-rune message, and reading the key's *name*
+	// would turn "lin_api_xxx" into nothing at all.
+	if m.clKeying {
+		switch k {
+		case "esc":
+			m.clKeying, m.clKeyFor, m.clKeyText = false, "", ""
+			return m, nil, true
+		case "enter":
+			product, key := m.clKeyFor, m.clKeyText
+			m.clKeying, m.clKeyFor, m.clKeyText = false, "", ""
+			mm, cmd := m.clSetLinearKey(product, key)
+			return mm, cmd, true
+		case "backspace":
+			r := []rune(m.clKeyText)
+			if len(r) > 0 {
+				m.clKeyText = string(r[:len(r)-1])
+			}
+			return m, nil, true
+		}
+		if s, ok := typedTextFor(m.key, k); ok {
+			m.clKeyText += s
+		}
+		return m, nil, true
+	}
+
 	switch k {
 	case "esc", "a":
 		m.clOpen, m.clMarked = false, map[string]bool{}
@@ -228,6 +316,19 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		return m, nil, true
 	case "n":
 		m.clNaming, m.clNewName = true, ""
+		return m, nil, true
+	case "l":
+		// The token is a fact about a product, so it is entered against a
+		// product row and nowhere else — a repo does not have one. Starting from
+		// empty rather than from the stored token: it is masked on screen, and
+		// pre-filling a buffer with a secret the human cannot read is how you
+		// get a half-deleted key saved over a working one.
+		if len(prods) == 0 {
+			m.notice = "no product to hold a token — n names one"
+			return m, nil, true
+		}
+		m.clPane = "products"
+		m.clKeying, m.clKeyFor, m.clKeyText = true, prods[clampCursor(m.clProd, len(prods))], ""
 		return m, nil, true
 	case "j", "down":
 		if m.clPane == "products" {

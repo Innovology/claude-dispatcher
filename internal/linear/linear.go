@@ -1,7 +1,8 @@
-// Package linear is an env-gated, best-effort Linear API client for the
-// cockpit backlog. It is active only when LINEAR_API_KEY is set; every call
-// degrades cleanly on a transport, JSON, or GraphQL error, returning an error
-// the collector treats as "no signal" rather than surfacing it to the UI loop.
+// Package linear is a best-effort Linear API client for the cockpit backlog.
+// A read is scoped by its key: one token sees one workspace, and only the teams
+// Linear granted it. Every call degrades cleanly on a transport, JSON, or
+// GraphQL error, returning an error the collector treats as "no signal" rather
+// than surfacing it to the UI loop.
 package linear
 
 import (
@@ -15,9 +16,11 @@ import (
 
 const endpoint = "https://api.linear.app/graphql"
 
-// Configured reports whether a Linear API key is present in the environment.
-func Configured() bool {
-	return os.Getenv("LINEAR_API_KEY") != ""
+// Key is the unscoped API key: the ambient LINEAR_API_KEY, which the cockpit
+// seeds from config at start-up. It is what a product whose source names no key
+// of its own reads with, and the whole of the backlog when no product does.
+func Key() string {
+	return os.Getenv("LINEAR_API_KEY")
 }
 
 // Issue is a single Linear issue assigned to the current viewer.
@@ -36,26 +39,36 @@ const query = `query { viewer { assignedIssues(first: 50, filter: { state: { typ
     nodes { id identifier title description priority priorityLabel updatedAt
             state { name } team { key } } } } }`
 
-// Assigned returns the open issues assigned to the current Linear viewer.
-// It returns (nil, nil) when not Configured(), and (nil, err) on any
-// transport, JSON, or GraphQL error so the caller can degrade cleanly.
-func Assigned() ([]Issue, error) {
-	if !Configured() {
-		return nil, nil
-	}
-
+// newRequest builds the assigned-issues request, read with key. The key is the
+// whole of the scope — which workspace, and which of its teams — because Linear
+// grants that when the key is created, so nothing here narrows it further.
+func newRequest(key string) (*http.Request, error) {
 	body, err := json.Marshal(map[string]string{"query": query})
 	if err != nil {
 		return nil, err
 	}
-
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	// Linear uses the raw key as the Authorization header (no "Bearer").
-	req.Header.Set("Authorization", os.Getenv("LINEAR_API_KEY"))
+	req.Header.Set("Authorization", key)
 	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
+
+// Assigned returns the open issues assigned to key's viewer. It returns
+// (nil, nil) for an empty key, and (nil, err) on any transport, JSON, or
+// GraphQL error so the caller can degrade cleanly.
+func Assigned(key string) ([]Issue, error) {
+	if key == "" {
+		return nil, nil
+	}
+
+	req, err := newRequest(key)
+	if err != nil {
+		return nil, err
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
