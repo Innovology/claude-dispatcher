@@ -223,6 +223,21 @@ Press `,` in the cockpit (or `:settings`) to edit — written straight to `~/.co
 
 Environment variables override file values, so a secret can stay out of the file.
 
+### Linear, per product
+
+A Linear token sees one workspace, and only the teams Linear granted it — so a portfolio spanning several workspaces takes a token each. Name the token every product is read with in `~/.config/claude-dispatcher/config.toml`:
+
+```toml
+[linear]
+acme    = "lin_api_acme..."
+bluefin = "lin_api_blu..."
+cobalt  = "lin_api_cob..."
+```
+
+Each product is read separately, and its tickets carry it into the backlog. A product with no entry reads with `linear_api_key`, and a config naming no token at all behaves exactly as it always has: one key, one read, tickets with no product.
+
+**Two products in one workspace: give each a key.** Linear scopes an API key to the teams you pick when you create it, so mint one per product and paste it here. Bluefin's token then cannot read cobalt's team at all — the split is the one Linear enforces, not a filter applied to a list we were handed anyway.
+
 **Products** are edited on the products lens (`2`, then `a`), which writes the table below for you. You can still group them by hand in `~/.config/claude-dispatcher/config.toml`, using each repo's directory name:
 
 ```toml
@@ -299,6 +314,6 @@ Each publisher's `skip_upload` is templated on its token, so an unset token mean
 
 - **Everything stuck on "launching"** — the hook isn't firing. Re-run `claude-dispatcher init`; confirm `~/.claude/settings.json` points at the installed binary.
 - **`needs you` vs `blocked` lag** — those rely on the `Notification` hook matchers (`idle_prompt` / `permission_prompt`); `Stop` covers turn completion regardless.
-- **Backlog empty** — set a Linear key / Azure org in settings, and check `gh auth status` for GitHub Issues.
+- **Backlog empty** — set a Linear key / Azure org in settings, and check `gh auth status` for GitHub Issues. One product's Linear tickets missing is usually the scope of its own token: a key granted only some of that workspace's teams returns nothing for the rest, rather than an error.
 - **Fan-outs invisible** — the `SubagentStart`/`SubagentStop` hook entries are newer than your install. Re-run `claude-dispatcher init` to add them.
 - Rebuilds must go to the same path (`make install`) because the hook embeds the absolute binary path.

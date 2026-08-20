@@ -30,6 +30,13 @@ type Config struct {
 	LinearAPIKey string `toml:"linear_api_key,omitempty"` // Linear backlog source
 	AzureOrg     string `toml:"azure_org,omitempty"`      // Azure DevOps org URL
 	AzureProject string `toml:"azure_project,omitempty"`  // Azure DevOps project
+	// Linear maps a product name to the Linear token its backlog is read with.
+	// A token sees one workspace and only the teams Linear granted it, so a
+	// portfolio spanning several workspaces needs one each — as do two products
+	// in one workspace, who get a team-scoped key apiece. A product with no
+	// entry reads with LinearAPIKey. Written by hand; the settings editor holds
+	// LinearAPIKey.
+	Linear map[string]string `toml:"linear,omitempty"`
 	// WeeklyTokenLimit is the subscription's weekly token budget. There is no
 	// API to read it (Claude Code exposes usage only interactively), so it is a
 	// user setting; 0 means unknown and the usage lens shows raw tokens instead
@@ -113,7 +120,8 @@ func Save(c *Config) error {
 	b.WriteString("roots = " + tomlStrings(c.Roots) + "\n\n")
 	// Top-level integration keys must precede the first [table] in TOML.
 	b.WriteString("# Integrations (optional; edit in-app with `s`). Matching env vars override.\n")
-	b.WriteString("# linear_api_key enables the Linear backlog source.\n")
+	b.WriteString("# linear_api_key is the unscoped Linear key: the whole backlog when no\n")
+	b.WriteString("# product names one below, and what a product with no entry is read with.\n")
 	fmt.Fprintf(&b, "linear_api_key = %q\n", c.LinearAPIKey)
 	b.WriteString("# Azure Boards backlog (needs the az CLI logged in): the org URL and project.\n")
 	fmt.Fprintf(&b, "azure_org = %q\n", c.AzureOrg)
@@ -121,6 +129,16 @@ func Save(c *Config) error {
 	b.WriteString("# Your subscription's weekly token budget (no API exposes it, so set it here).\n")
 	b.WriteString("# 0 = unknown → the usage lens shows raw tokens instead of a percentage.\n")
 	fmt.Fprintf(&b, "weekly_token_limit = %d\n\n", c.WeeklyTokenLimit)
+	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
+	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")
+	b.WriteString("# two products in one workspace get a team-scoped key each — scope it where\n")
+	b.WriteString("# you create it. Products with no entry read with linear_api_key above.\n")
+	b.WriteString("# acme-shop = \"lin_api_...\"\n")
+	b.WriteString("[linear]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Linear)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Linear[k])
+	}
+	b.WriteString("\n")
 	b.WriteString("# Map product names to repo directory names for the portfolio roll-up.\n")
 	b.WriteString("# acme-shop = [\"shop-api\", \"shop-web\"]\n")
 	b.WriteString("[products]\n")

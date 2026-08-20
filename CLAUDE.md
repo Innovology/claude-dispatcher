@@ -98,6 +98,25 @@
   otherwise tell a quiet portfolio from a locked-out client. The cockpit says
   so — "—" in every check column is a claim about the repositories when it is
   a fact about us.
+- **The Linear backlog is one token per product, and team scope belongs on the
+  token.** A single `linear_api_key` was the whole of the Linear source:
+  everything one token could see, in one undifferentiated list, tagged with no
+  product — so two products in two workspaces could only ever show one of them.
+  `[linear]` maps a product to the token its backlog is read with
+  now, and every ticket carries the product its read came back on; a product
+  with no entry reads with the unscoped key, and a config naming none is the one
+  unscoped read it always was, so nothing that predates this has to know about
+  it. There is deliberately NO team filter here. A Linear key is granted its
+  teams when it is created, so two products sharing a workspace get a
+  team-scoped key each and the split is one the API enforces — a filter we
+  applied instead would be narrowing a list we had already been handed, and
+  narrowing it after `first: 50` had chosen which fifty. Two products naming
+  one token are one read; the reads go out together and merge in the order they
+  were named, so what a load produces never depends on which workspace answered
+  first. Tickets are deduped by identifier across reads, because two tokens can
+  still overlap on a team and the picked set is keyed by ticket id — one issue
+  on two rows would be ticked by a single `space` and dispatched twice by a
+  single `ctrl+d`.
 - **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
   a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
   a lens that wants its own capital U never sees the key — the assignment

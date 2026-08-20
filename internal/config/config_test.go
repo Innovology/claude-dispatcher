@@ -61,6 +61,40 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSaveLoadLinearTokens proves the per-product Linear table survives the
+// hand-written template Save regenerates, alongside the unscoped key every
+// product without an entry reads with.
+func TestSaveLoadLinearTokens(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	in := &Config{
+		Roots:        []string{"~/repos"},
+		LinearAPIKey: "lin_api_default",
+		Linear: map[string]string{
+			"acme shop": "lin_api_acme",
+			"bluefin":   "lin_api_bluefin",
+		},
+		Products: map[string][]string{"bluefin": {"bluefin-core"}},
+	}
+	if err := Save(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.LinearAPIKey != "lin_api_default" {
+		t.Errorf("linear_api_key = %q", out.LinearAPIKey)
+	}
+	if out.Linear["acme shop"] != "lin_api_acme" || out.Linear["bluefin"] != "lin_api_bluefin" {
+		t.Errorf("linear tokens = %v", out.Linear)
+	}
+	// The tables that follow it must still be readable — a table written in the
+	// wrong place swallows whatever comes next.
+	if !slices.Equal(out.Products["bluefin"], []string{"bluefin-core"}) {
+		t.Errorf("products after the linear table = %v", out.Products)
+	}
+}
+
 func TestWriteDefaultDoesNotOverwrite(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if _, created, err := WriteDefault(); err != nil || !created {

@@ -7,11 +7,14 @@ package cockpit
 // slice so the lens shows an honest state (empty when genuinely nothing).
 
 import (
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"claude-dispatcher/internal/azure"
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/linear"
 	"claude-dispatcher/internal/state"
@@ -50,22 +53,46 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 		}
 	}
 
-	// Linear assigned issues (only when configured).
-	if linear.Configured() {
-		if issues, err := linear.Assigned(); err == nil {
-			for _, is := range issues {
-				tickets = append(tickets, ticket{
-					id:     is.Identifier,
-					src:    "lin",
-					title:  is.Title,
-					pri:    blkPriFromLinear(is.Priority),
-					age:    blkAge(is.UpdatedAt),
-					labels: is.State,
-					body:   is.Description,
-					prompt: blkPrompt("Linear issue", is.Identifier, is.Title, is.Description),
-					taken:  blkTakenBy(ctx.records, is.Identifier, is.Title),
-				})
+	// Linear assigned issues, one read per configured token (see linearReads),
+	// each ticket carrying the product whose token it came back on. The reads go
+	// out together — five products would otherwise wait out five round-trips in
+	// a row on every refresh — but are merged back in the order linearReads
+	// named them, so what a load produces never depends on which workspace
+	// answered first. Tickets are deduped because two tokens can still overlap
+	// on a team: the picked set is keyed by ticket id, so one issue on two rows
+	// would tick both with one space.
+	//
+	// Deduped on the issue's id and NOT on its identifier: "ENG-124" is unique
+	// inside a workspace, and this is a list of several. Two workspaces that
+	// both key a team ENG really can both raise an ENG-124, and dropping the
+	// second as a duplicate would lose a ticket that was never seen — the one
+	// failure a backlog must not have.
+	reads := linearReads(ctx.cfg)
+	readIssues := make([][]linear.Issue, len(reads))
+	forEach(reads, func(i int, r linearRead) {
+		if issues, err := linear.Assigned(r.key); err == nil {
+			readIssues[i] = issues
+		}
+	})
+	linSeen := map[string]bool{}
+	for i, r := range reads {
+		for _, is := range readIssues[i] {
+			if linSeen[is.ID] {
+				continue
 			}
+			linSeen[is.ID] = true
+			tickets = append(tickets, ticket{
+				id:      is.Identifier,
+				src:     "lin",
+				title:   is.Title,
+				product: r.product,
+				pri:     blkPriFromLinear(is.Priority),
+				age:     blkAge(is.UpdatedAt),
+				labels:  is.State,
+				body:    is.Description,
+				prompt:  blkPrompt("Linear issue", is.Identifier, is.Title, is.Description),
+				taken:   blkTakenBy(ctx.records, is.Identifier, is.Title),
+			})
 		}
 	}
 
@@ -89,6 +116,55 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	}
 
 	s.backlogTickets = tickets
+}
+
+// linearRead is one call to Linear: the product whose backlog it fills, and the
+// token it reads with.
+type linearRead struct {
+	product string
+	key     string
+}
+
+// linearReads names the Linear calls a load makes. A token sees one workspace,
+// and only the teams Linear granted it when the key was created, so a portfolio
+// spanning several workspaces is several reads — one per product that names a
+// token, or the unscoped one for a product that names none. Nothing here
+// narrows a read further: two products in one workspace are separated by giving
+// each a team-scoped key, which is a split the API enforces rather than one we
+// apply to a list we were already handed. A config naming no token at all is
+// the one unscoped read the ambient key implies, which is every install
+// predating this.
+//
+// Products are visited in name order because map order is random: two products
+// naming one token are one read, and which of them keeps it must not change
+// between two loads of the same config.
+func linearReads(cfg *config.Config) []linearRead {
+	unscoped := linear.Key()
+	var out []linearRead
+	if cfg != nil {
+		seen := map[string]bool{}
+		for _, product := range slices.Sorted(maps.Keys(cfg.Linear)) {
+			key := cfg.Linear[product]
+			if key == "" {
+				key = unscoped
+			}
+			// A product naming no token, with no unscoped key to fall back on,
+			// has nothing to ask with. Skipping it says nothing about that
+			// product's backlog, which is the honest answer.
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, linearRead{product: product, key: key})
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	if unscoped == "" {
+		return nil
+	}
+	return []linearRead{{key: unscoped}}
 }
 
 // blkPrompt composes what the dispatcher is actually sent when a ticket is
