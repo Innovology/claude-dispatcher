@@ -5,6 +5,11 @@ package cockpit
 // teams Linear granted it, so which token reads a product is what scopes it.
 
 import (
+	"strings"
+	"time"
+
+	"claude-dispatcher/internal/linear"
+	"claude-dispatcher/internal/state"
 	"testing"
 
 	"claude-dispatcher/internal/config"
@@ -147,5 +152,134 @@ func TestLinearReadsSharedFallbackNamesNoProduct(t *testing.T) {
 	}
 	if got[0].key != "lin_api_ambient" || got[0].product != "" {
 		t.Errorf("read = %+v, want the ambient key under no product", got[0])
+	}
+}
+
+// ---- the merge --------------------------------------------------------------
+//
+// linearReads decides which calls to go and make; linearTickets is what happens
+// to the answers, and it holds the two rules this source is built on — dedupe by
+// issue id, and the product tag comes from the read. Both were behind an HTTP
+// call until linearTickets was split out, so neither had a test.
+
+func linIssue(id, identifier, title string) linear.Issue {
+	return linear.Issue{
+		ID: id, Identifier: identifier, Title: title,
+		Priority: "Medium", State: "Todo",
+		UpdatedAt: time.Now().Add(-2 * time.Hour),
+	}
+}
+
+// Every ticket carries the product of the read it came back on, and a read that
+// names no product (the unscoped one, or a token two products share) leaves it
+// blank rather than borrowing its neighbour's.
+func TestLinearTicketsCarryTheirRead(t *testing.T) {
+	reads := []linearRead{{product: "acme", key: "k1"}, {key: "k2"}}
+	got := linearTickets(reads, [][]linear.Issue{
+		{linIssue("uuid-1", "ENG-1", "scoped")},
+		{linIssue("uuid-2", "OPS-9", "unscoped")},
+	}, nil)
+
+	if len(got) != 2 {
+		t.Fatalf("got %d tickets, want 2", len(got))
+	}
+	if got[0].product != "acme" || got[0].id != "ENG-1" || got[0].src != "lin" {
+		t.Errorf("scoped ticket = %+v", got[0])
+	}
+	if got[1].product != "" {
+		t.Errorf("a read naming no product must not tag its tickets: %+v", got[1])
+	}
+	// The prompt is the ticket's own words, and the id is the identifier — which
+	// is what the picked set and the branch slug are keyed by.
+	if !strings.Contains(got[0].prompt, "ENG-1") || !strings.Contains(got[0].prompt, "scoped") {
+		t.Errorf("prompt = %q", got[0].prompt)
+	}
+}
+
+// Two team-scoped tokens can overlap on a team, so the same issue comes back
+// twice. It must appear once, and keep the product of the read that named it
+// first — reads are in product-name order, so that answer is stable.
+func TestLinearTicketsDedupeOnIssueID(t *testing.T) {
+	shared := linIssue("uuid-shared", "ENG-7", "one issue, two tokens")
+	reads := []linearRead{{product: "acme", key: "k1"}, {product: "bluefin", key: "k2"}}
+	got := linearTickets(reads, [][]linear.Issue{
+		{shared, linIssue("uuid-a", "ENG-8", "acme only")},
+		{shared, linIssue("uuid-b", "ENG-9", "bluefin only")},
+	}, nil)
+
+	if len(got) != 3 {
+		t.Fatalf("got %d tickets, want 3 — the shared issue must appear once: %+v", len(got), got)
+	}
+	if got[0].id != "ENG-7" || got[0].product != "acme" {
+		t.Errorf("the first read to name it keeps it: %+v", got[0])
+	}
+	for _, tk := range got[1:] {
+		if tk.id == "ENG-7" {
+			t.Errorf("ENG-7 appears twice: %+v", got)
+		}
+	}
+}
+
+// Deduped on the id and NOT the identifier: two workspaces both keying a team
+// ENG can each raise an ENG-124, and they are different tickets. Dropping the
+// second would lose one nobody ever saw, which is the one failure a backlog
+// must not have — even though keeping it means one `space` ticks both rows.
+func TestLinearTicketsKeepTwoWorkspacesSharingAnIdentifier(t *testing.T) {
+	reads := []linearRead{{product: "acme", key: "k1"}, {product: "bluefin", key: "k2"}}
+	got := linearTickets(reads, [][]linear.Issue{
+		{linIssue("uuid-acme", "ENG-124", "acme's ENG-124")},
+		{linIssue("uuid-blue", "ENG-124", "bluefin's ENG-124")},
+	}, nil)
+
+	if len(got) != 2 {
+		t.Fatalf("two workspaces' ENG-124s are two tickets, got %d: %+v", len(got), got)
+	}
+	if got[0].title == got[1].title {
+		t.Errorf("the wrong one was dropped: %+v", got)
+	}
+	if got[0].product != "acme" || got[1].product != "bluefin" {
+		t.Errorf("each keeps its own read's product: %+v", got)
+	}
+}
+
+// A read that failed left a nil row in readIssues — the collector drops the
+// error and keeps the slot — and contributes nothing rather than panicking.
+func TestLinearTicketsToleratesAFailedRead(t *testing.T) {
+	reads := []linearRead{{product: "acme", key: "k1"}, {product: "bluefin", key: "k2"}}
+	got := linearTickets(reads, [][]linear.Issue{
+		nil,
+		{linIssue("uuid-b", "ENG-9", "bluefin only")},
+	}, nil)
+	if len(got) != 1 || got[0].product != "bluefin" {
+		t.Fatalf("a failed read contributes nothing: %+v", got)
+	}
+
+	// And nothing at all is an empty backlog, not a crash.
+	if got := linearTickets(nil, nil, nil); len(got) != 0 {
+		t.Errorf("no reads = no tickets, got %+v", got)
+	}
+	// A short readIssues (never happens in the collector, but the two are
+	// separate arguments now) must not index past the end.
+	if got := linearTickets(reads, nil, nil); len(got) != 0 {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// An in-flight dispatch on a ticket's own branch marks the row taken, so the
+// backlog does not offer work that is already out. That join is by identifier.
+func TestLinearTicketsReportWhatIsAlreadyDispatched(t *testing.T) {
+	records := []*state.Dispatch{{
+		Feature: "eng-1", Branch: "feature/eng-1", Status: state.StatusWorking,
+	}}
+	got := linearTickets(
+		[]linearRead{{product: "acme", key: "k1"}},
+		[][]linear.Issue{{linIssue("uuid-1", "ENG-1", "already out")}},
+		records,
+	)
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].taken != "eng-1" {
+		t.Errorf("taken = %q, want the dispatch working it", got[0].taken)
 	}
 }

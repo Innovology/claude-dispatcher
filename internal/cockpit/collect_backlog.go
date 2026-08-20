@@ -82,27 +82,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 			readIssues[i] = issues
 		}
 	})
-	linSeen := map[string]bool{}
-	for i, r := range reads {
-		for _, is := range readIssues[i] {
-			if linSeen[is.ID] {
-				continue
-			}
-			linSeen[is.ID] = true
-			tickets = append(tickets, ticket{
-				id:      is.Identifier,
-				src:     "lin",
-				title:   is.Title,
-				product: r.product,
-				pri:     blkPriFromLinear(is.Priority),
-				age:     blkAge(is.UpdatedAt),
-				labels:  is.State,
-				body:    is.Description,
-				prompt:  blkPrompt("Linear issue", is.Identifier, is.Title, is.Description),
-				taken:   blkTakenBy(ctx.records, is.Identifier, is.Title),
-			})
-		}
-	}
+	tickets = append(tickets, linearTickets(reads, readIssues, ctx.records)...)
 
 	// Azure Boards work items (only when configured).
 	if azure.Configured() {
@@ -124,6 +104,48 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	}
 
 	s.backlogTickets = tickets
+}
+
+// linearTickets merges what the reads returned into backlog rows: readIssues[i]
+// is what reads[i] came back with, and the two are walked in step so a ticket
+// carries the product of the read that produced it.
+//
+// Split out of collectBacklog so it can be tested without a Linear behind it.
+// It is where the dedupe and the product tag live — the two pieces of this
+// source that are reasoned about hardest and were reachable only through an
+// HTTP call, so neither had a test while the function that merely *decides* the
+// calls had six.
+//
+// Merged in read order, which linearReads fixed to product-name order, so which
+// of two duplicate tickets survives never depends on which workspace answered
+// first.
+func linearTickets(reads []linearRead, readIssues [][]linear.Issue, records []*state.Dispatch) []ticket {
+	var out []ticket
+	seen := map[string]bool{}
+	for i, r := range reads {
+		if i >= len(readIssues) {
+			break
+		}
+		for _, is := range readIssues[i] {
+			if seen[is.ID] {
+				continue
+			}
+			seen[is.ID] = true
+			out = append(out, ticket{
+				id:      is.Identifier,
+				src:     "lin",
+				title:   is.Title,
+				product: r.product,
+				pri:     blkPriFromLinear(is.Priority),
+				age:     blkAge(is.UpdatedAt),
+				labels:  is.State,
+				body:    is.Description,
+				prompt:  blkPrompt("Linear issue", is.Identifier, is.Title, is.Description),
+				taken:   blkTakenBy(records, is.Identifier, is.Title),
+			})
+		}
+	}
+	return out
 }
 
 // linearRead is one call to Linear: the product whose backlog it fills, and the
