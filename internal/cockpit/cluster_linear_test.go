@@ -196,6 +196,38 @@ func TestClLinearKeyIsNeverRendered(t *testing.T) {
 	}
 }
 
+// A real Linear key is about fifty characters and this pane is a third of the
+// terminal, so a mask of one dot per rune is a line wider than the column it is
+// drawn in — which pushes the pane past its own rule and wraps the editor.
+func TestClLinearKeyMaskStaysInsideThePane(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := clFixture(t)
+	m.lens = "products"
+	m.cfg = &config.Config{Products: map[string][]string{"acme": {"acme-api"}}}
+
+	m, _ = clKey(m, "tab")
+	m, _ = clKey(m, "l")
+	m = clType(m, strings.Repeat("k", 60))
+
+	const cw = 30
+	for _, ln := range m.clRight(cw, 30) {
+		if w := dispWidth(ln); w > cw {
+			t.Errorf("line %d columns wide in a %d-column pane: %q", w, cw, ln)
+		}
+	}
+
+	// The naming prompt is the same prose in the same column, and was drawn
+	// past the rule the same way.
+	m, _ = clKey(m, "esc")
+	m, _ = clKey(m, "n")
+	m = clType(m, "a-product-with-a-long-name")
+	for _, ln := range m.clRight(cw, 30) {
+		if w := dispWidth(ln); w > cw {
+			t.Errorf("naming: line %d columns wide in a %d-column pane: %q", w, cw, ln)
+		}
+	}
+}
+
 // A save that fails must leave the cockpit reading with what is still on disk,
 // the same rule clPersist follows: publishing regardless would put the running
 // config and the file permanently at odds under a notice saying nothing saved.
