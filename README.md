@@ -225,7 +225,11 @@ Environment variables override file values, so a secret can stay out of the file
 
 ### Linear, per product
 
-A Linear token sees one workspace, and only the teams Linear granted it — so a portfolio spanning several workspaces takes a token each. Name the token every product is read with in `~/.config/claude-dispatcher/config.toml`:
+A Linear token sees one workspace, and only the teams Linear granted it — so a portfolio spanning several workspaces takes a token each.
+
+Press `2`, then `a` for the assignment editor, `tab` to the products, and `l` on a product to paste the token its backlog is read with. It is masked as you type and never shown again — the product's line just says `linear token` — and an empty entry clears it. That is the place to do it because a token is filed under a **product name**, and that screen is where product names are made.
+
+The same thing by hand, in `~/.config/claude-dispatcher/config.toml`:
 
 ```toml
 [linear]
@@ -236,7 +240,11 @@ cobalt  = "lin_api_cob..."
 
 Each product is read separately, and its tickets carry it into the backlog. A product with no entry reads with `linear_api_key`, and a config naming no token at all behaves exactly as it always has: one key, one read, tickets with no product.
 
+Adding an entry never takes anything away: `linear_api_key` keeps its own read alongside the scoped ones, so a backlog that was already reading stays whole. Two products naming the *same* token are one read, and its tickets carry no product — a shared token cannot say which of them an issue belongs to, and a wrong product is worse than none.
+
 **Two products in one workspace: give each a key.** Linear scopes an API key to the teams you pick when you create it, so mint one per product and paste it here. Bluefin's token then cannot read cobalt's team at all — the split is the one Linear enforces, not a filter applied to a list we were handed anyway.
+
+Unlike `linear_api_key`, these have no environment variable of their own — they live in the config file. `LINEAR_API_KEY` still overrides the unscoped one.
 
 **Products** are edited on the products lens (`2`, then `a`), which writes the table below for you. You can still group them by hand in `~/.config/claude-dispatcher/config.toml`, using each repo's directory name:
 

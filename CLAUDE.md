@@ -110,13 +110,28 @@
   teams when it is created, so two products sharing a workspace get a
   team-scoped key each and the split is one the API enforces — a filter we
   applied instead would be narrowing a list we had already been handed, and
-  narrowing it after `first: 50` had chosen which fifty. Two products naming
-  one token are one read; the reads go out together and merge in the order they
-  were named, so what a load produces never depends on which workspace answered
-  first. Tickets are deduped by identifier across reads, because two tokens can
-  still overlap on a team and the picked set is keyed by ticket id — one issue
-  on two rows would be ticked by a single `space` and dispatched twice by a
-  single `ctrl+d`.
+  narrowing it after `first: 50` had chosen which fifty. Two products naming one
+  token are one read, and that read names **neither** of them: a shared token
+  cannot say which product an issue it returns belongs to, and crediting
+  whichever product sorts first would be stable and wrong — every other sharer's
+  tickets filed under a product that is not theirs, which is the "—" rule again.
+  The unscoped key is likewise a read of its own, never a fallback the scoped
+  ones switch off: it is another workspace as easily as the same one, so naming
+  one product's token must not silently empty a backlog that had been reading
+  for months. It goes last, so a scoped read keeps the tag on any overlap. The
+  reads go out together and merge in the order they were named, so what a load
+  produces never depends on which workspace answered first. Tickets are deduped
+  on the issue **id**, not its identifier: "ENG-124" is unique inside a
+  workspace and this is a list of several, so dropping the second ENG-124 would
+  lose a ticket nobody ever saw. That keeps the identifier collision rather than
+  fixing it — `m.picked` is keyed by the identifier, so two workspaces' ENG-124s
+  tick together on one `space` — and keeping it is the cheaper failure: a row
+  you look at twice beats a ticket that was never on the page. The token is
+  typed where the product is named: `l` on the assignment editor's products
+  pane, masked, because the map is keyed by product *name* and hand-writing it
+  means retyping one exactly, in another file, with a silent read under a
+  product that groups nowhere as the failure. The full record is
+  `docs/adr/0006-a-linear-token-is-the-scope.md`.
 - **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
   a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
   a lens that wants its own capital U never sees the key — the assignment

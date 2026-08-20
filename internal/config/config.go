@@ -34,8 +34,11 @@ type Config struct {
 	// A token sees one workspace and only the teams Linear granted it, so a
 	// portfolio spanning several workspaces needs one each — as do two products
 	// in one workspace, who get a team-scoped key apiece. A product with no
-	// entry reads with LinearAPIKey. Written by hand; the settings editor holds
-	// LinearAPIKey.
+	// entry reads with LinearAPIKey, which the settings editor holds. Edited on
+	// the products lens's assignment editor (`l`), because this map is keyed by
+	// product NAME and that screen is where names are made — hand-writing it
+	// means retyping a key that has to match one exactly, in another file, with
+	// silence as the only feedback when it does not.
 	Linear map[string]string `toml:"linear,omitempty"`
 	// WeeklyTokenLimit is the subscription's weekly token budget. There is no
 	// API to read it (Claude Code exposes usage only interactively), so it is a

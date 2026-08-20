@@ -230,12 +230,13 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		}
 		m = mm
 	}
-	// Naming a product is text entry, so it belongs with the other modes that
-	// own the keyboard — settings, the dispatch form, the palette. Without this
-	// guard the global keys resolved first: `q` killed the cockpit mid-name and
-	// a digit switched lens, both discarding what had been typed, and the footer
-	// promised only "esc cancels".
-	if m.clNaming {
+	// Naming a product, or typing its Linear token, is text entry, so it belongs
+	// with the other modes that own the keyboard — settings, the dispatch form,
+	// the palette. Without this guard the global keys resolved first: `q` killed
+	// the cockpit mid-name and a digit switched lens, both discarding what had
+	// been typed, and the footer promised only "esc cancels". A token makes that
+	// worse, not better: `lin_api_1…` would switch lens on its first digit.
+	if m.clNaming || m.clKeying {
 		mm, cmd := m.updateProducts(k)
 		return mm, cmd
 	}
@@ -296,6 +297,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		// dxReset closes the form and clears all four fields.
 		m = m.dxReset()
 		m.clOpen, m.clNaming, m.clNewName = false, false, ""
+		m.clKeying, m.clKeyFor, m.clKeyText = false, "", ""
 		m.clMarked = map[string]bool{}
 		return m, nil
 	}

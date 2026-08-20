@@ -132,14 +132,24 @@ func (m model) clRight(cw, h int) []string {
 		if n != 1 {
 			word = "repos"
 		}
+		// A product's own Linear token is said, never shown: the sub-line is
+		// already the product's summary, and whether its backlog is read with a
+		// key of its own is the other thing about it that is configured. The
+		// token itself never reaches the screen — it is a secret, and this pane
+		// is what a shoulder reads.
+		meta := itoa(n) + " " + word
+		if m.clLinearKey(p) != "" {
+			meta += " · linear token"
+		}
 		out = append(out,
 			row(cw, bg, c(mark, 3, cMid), flexc(p, cFg)),
-			row(cw, bg, c("", 3, ""), flexc(itoa(n)+" "+word, cFaint)),
+			row(cw, bg, c("", 3, ""), flexc(meta, cFaint)),
 		)
 	}
 
 	out = append(out, "", fg(cRule, strings.Repeat("─", cw)))
 	out = append(out, row(cw, "", c("n", 3, cFg), flexc("new product…", cDim)))
+	out = append(out, row(cw, "", c("l", 3, cFg), flexc("linear token…", cDim)))
 
 	if m.clNaming {
 		out = append(out, "", fg(cDim, "new product"))
@@ -149,6 +159,20 @@ func (m model) clRight(cw, h int) []string {
 			hint = "enter creates it and moves this repo in"
 		}
 		out = append(out, "", fg(cFaint, hint))
+	}
+
+	if m.clKeying {
+		out = append(out, "", fg(cDim, "linear token · "+m.clKeyFor))
+		// Masked as it is typed, like the settings editor's secret field: a
+		// pasted key is not read back off the screen, and a screen-shared
+		// cockpit must not be how it leaks.
+		out = append(out, fg(cWhite, strings.Repeat("•", len([]rune(m.clKeyText))))+paint(cFg, cFg, " "))
+		hint := "enter saves it · this product's backlog is read with it"
+		if m.clLinearKey(m.clKeyFor) != "" {
+			hint = "enter replaces the token · empty clears it"
+		}
+		out = append(out, "", fg(cFaint, hint))
+		out = append(out, fg(cFaint, "scope the key to this product's teams in Linear"))
 	}
 
 	// Pin the explanation to the bottom, as the design does with flex:1.
