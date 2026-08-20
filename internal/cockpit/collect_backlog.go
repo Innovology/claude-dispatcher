@@ -58,15 +58,23 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	// out together — five products would otherwise wait out five round-trips in
 	// a row on every refresh — but are merged back in the order linearReads
 	// named them, so what a load produces never depends on which workspace
-	// answered first. Tickets are deduped because two tokens can still overlap
-	// on a team: the picked set is keyed by ticket id, so one issue on two rows
-	// would tick both with one space.
+	// answered first. Tickets are deduped because two team-scoped tokens can
+	// still overlap on a team, and one issue on two rows is one issue the human
+	// has to pick, dispatch and dismiss twice.
 	//
 	// Deduped on the issue's id and NOT on its identifier: "ENG-124" is unique
 	// inside a workspace, and this is a list of several. Two workspaces that
 	// both key a team ENG really can both raise an ENG-124, and dropping the
 	// second as a duplicate would lose a ticket that was never seen — the one
 	// failure a backlog must not have.
+	//
+	// Which means the identifier collision is kept, not fixed: `ticket.id` is
+	// the identifier, `m.picked` is keyed by it, and `blkTakenBy` matches off
+	// its slug, so two workspaces' ENG-124s are ticked together by one `space`
+	// and reported taken together. That is a known cost of showing both, and the
+	// cheaper of the two: a row you have to look twice at beats a ticket that
+	// was never on the page. (Neither can be dispatched from this lens anyway —
+	// a Linear ticket carries no repo, so `enter` and `ctrl+d` both refuse it.)
 	reads := linearReads(ctx.cfg)
 	readIssues := make([][]linear.Issue, len(reads))
 	forEach(reads, func(i int, r linearRead) {
@@ -135,36 +143,63 @@ type linearRead struct {
 // the one unscoped read the ambient key implies, which is every install
 // predating this.
 //
-// Products are visited in name order because map order is random: two products
-// naming one token are one read, and which of them keeps it must not change
-// between two loads of the same config.
+// Two products naming one token are one read, and that read names NEITHER of
+// them. A token shared by two products cannot say which of them an issue it
+// returns belongs to, so the product it carries is empty — the same blank the
+// unscoped read has always carried. Crediting the first claimant instead would
+// be stable and wrong: every other sharer's tickets would come back filed under
+// a product that is not theirs, and a wrong product is worse than none for
+// exactly the reason a repo with no check is "—" rather than a pass.
+//
+// The unscoped key is a read of its own whenever no product has claimed it,
+// never a fallback the scoped reads switch off. It is as likely to be another
+// workspace as the same one, and dropping it because some product named a token
+// would empty a backlog that had been reading for months, silently, the moment
+// its owner filled in one line of `[linear]`. An issue two reads both return is
+// dropped by id on the way in, and the unscoped read goes last, so the overlap
+// this could cause costs a comparison and never a duplicate row or a lost tag.
+//
+// Products are visited in name order because map order is random: which product
+// a read is filed under, and which of two duplicate tickets survives, must not
+// change between two loads of the same config.
 func linearReads(cfg *config.Config) []linearRead {
 	unscoped := linear.Key()
+	seen := map[string]bool{}
 	var out []linearRead
 	if cfg != nil {
-		seen := map[string]bool{}
-		for _, product := range slices.Sorted(maps.Keys(cfg.Linear)) {
-			key := cfg.Linear[product]
+		// Every product's token is resolved before any read is named: whether a
+		// token can name a product at all depends on how many products claim
+		// it, which is not knowable one product at a time.
+		keyFor, claims := map[string]string{}, map[string]int{}
+		for product, key := range cfg.Linear {
 			if key == "" {
 				key = unscoped
 			}
 			// A product naming no token, with no unscoped key to fall back on,
 			// has nothing to ask with. Skipping it says nothing about that
 			// product's backlog, which is the honest answer.
-			if key == "" || seen[key] {
+			if key == "" {
+				continue
+			}
+			keyFor[product] = key
+			claims[key]++
+		}
+		for _, product := range slices.Sorted(maps.Keys(keyFor)) {
+			key := keyFor[product]
+			if seen[key] {
 				continue
 			}
 			seen[key] = true
+			if claims[key] > 1 {
+				product = ""
+			}
 			out = append(out, linearRead{product: product, key: key})
 		}
 	}
-	if len(out) > 0 {
-		return out
+	if unscoped != "" && !seen[unscoped] {
+		out = append(out, linearRead{key: unscoped})
 	}
-	if unscoped == "" {
-		return nil
-	}
-	return []linearRead{{key: unscoped}}
+	return out
 }
 
 // blkPrompt composes what the dispatcher is actually sent when a ticket is
