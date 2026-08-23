@@ -84,15 +84,10 @@ func (m model) requestLoad(kind loadKind) (model, tea.Cmd) {
 	}
 	m.loadSeq++
 	m.loadBusy, m.loadStarted = true, time.Now()
-	return m, loadCmdFor(kind, m, m.loadSeq)
-}
-
-// loadCmdFor is the command behind a kind.
-func loadCmdFor(kind loadKind, m model, seq int) tea.Cmd {
 	if kind == loadRecheck {
-		return recheckCmd(m.cfg, seq)
+		return m, recheckCmd(m.cfg, m.loadSeq)
 	}
-	return loadSnapshotCmd(m.cfg, seq)
+	return m, loadSnapshotCmd(m.cfg, m.loadSeq)
 }
 
 // loadLanded books a snapshot in: it reports whether this one is fresh enough
