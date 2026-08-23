@@ -230,10 +230,16 @@ func resumeCmd(id, prompt string) tea.Cmd {
 			return actionMsg{notice: "resume failed: " + err.Error()}
 		}
 		if mode == dispatchpkg.ResumeLive {
-			return resumedMsg{
-				notice:  "\"" + rec.Feature + "\" is still running — attaching to it",
-				session: session,
+			// Its claude is still up, so the human lands in the conversation
+			// itself rather than in a second one reading the same transcript.
+			// Anything they typed here has not been said to it: sending keys
+			// into a session that may be mid-turn, or sitting on a permission
+			// prompt, would answer the wrong question.
+			notice := "\"" + rec.Feature + "\" is still running — attaching to it"
+			if strings.TrimSpace(prompt) != "" {
+				notice += " · say it there, it was not sent"
 			}
+			return resumedMsg{notice: notice, session: session}
 		}
 		return resumedMsg{
 			notice:  "resumed \"" + rec.Feature + "\" in " + rec.RepoName,

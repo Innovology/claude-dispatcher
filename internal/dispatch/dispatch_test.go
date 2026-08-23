@@ -363,3 +363,56 @@ func TestSlugifyCaps(t *testing.T) {
 		t.Error("an unnameable feature should still produce an empty slug")
 	}
 }
+
+// The third fact "live" takes, and the one that decides whether a name can be
+// used again: what the hooks say about the dispatcher itself.
+//
+// A finished dispatch keeps its session, and on a real machine it keeps its
+// claude too — the REPL sits at its prompt for days after the PR merged, so the
+// session probe alone answers "busy" for every feature that ever completed.
+// The record is what separates "still going" from "still open".
+func TestLiveDispatchReadsTheRecordAsWellAsTheSession(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+
+	rec := &state.Dispatch{
+		ID: state.NewID(), Feature: "Payment Retry", Slug: "payment-retry",
+		RepoName: "acme", Branch: "feature/payment-retry",
+		TmuxSession: "disp-payment-retry", Status: state.StatusWorking,
+	}
+	if err := state.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	prevAlive, prevIdle := sessionAlive, sessionIdle
+	sessionAlive = func(string) bool { return true }
+	sessionIdle = func(string) (bool, bool) { return false, true } // claude is up
+	defer func() { sessionAlive, sessionIdle = prevAlive, prevIdle }()
+
+	// Working, with claude running in its session: the collision the rule is
+	// for. Two of these in one worktree is two claudes editing one checkout.
+	if got := liveDispatch("payment-retry"); got == nil {
+		t.Error("a working dispatcher with a live claude was not reported live")
+	}
+	// Waiting on the human is still going: they can answer at any moment.
+	for _, st := range []state.Status{state.StatusNeedsInput, state.StatusBlocked, state.StatusLaunching} {
+		rec.Status = st
+		if err := state.Save(rec); err != nil {
+			t.Fatal(err)
+		}
+		if got := liveDispatch("payment-retry"); got == nil {
+			t.Errorf("a %s dispatcher was not reported live", st)
+		}
+	}
+	// Shipped and ended are over, whatever is still on screen in the session.
+	// Refusing here would block re-dispatching any name that had ever
+	// completed, with no key in the cockpit to clear it: history rows offer
+	// resume, not kill.
+	for _, st := range []state.Status{state.StatusDone, state.StatusExited} {
+		rec.Status = st
+		if err := state.Save(rec); err != nil {
+			t.Fatal(err)
+		}
+		if got := liveDispatch("payment-retry"); got != nil {
+			t.Errorf("a %s dispatcher blocked its own name from being used again", st)
+		}
+	}
+}

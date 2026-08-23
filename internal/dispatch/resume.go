@@ -88,6 +88,11 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// claude has ended and the name is free to take back; busy means the
 	// dispatcher is still going and resuming it would fork the transcript under
 	// a session that is still writing to it.
+	//
+	// This is why SessionIdle has to be right about a session it can only see a
+	// shell in (see tmux.SessionIdle): "idle" here kills the session, and a
+	// probe that called every live claude idle was killing the very dispatcher
+	// the human had just asked to reopen.
 	if d.TmuxSession != "" && sessionAlive(d.TmuxSession) {
 		idle, known := sessionIdle(d.TmuxSession)
 		switch {

@@ -152,21 +152,30 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut
 // The session, not the record's status, is the test: a record can be left stale
 // by a crash, but what is actually running is ground truth.
 //
-// It takes two facts about that session, and the second one was missing. A live
-// session is not a live dispatcher: launchCommand ends `; exec ${SHELL}` on
-// purpose, so the session outlives its claude by design and sits there as a
-// login shell for inspection. Every finished dispatch on a real machine still
-// had one, so this refused to re-dispatch any feature that had ever completed —
-// the exact case per-dispatch worktrees say is allowed, and the fallback the
-// history tab offers a row with no session left to resume.
+// It takes three facts, and each rules out a different way of being wrong.
 //
-// SessionIdle is what tells the two apart, and its "unknown" is neither: a
-// backend that cannot see into a session (the Windows console one) keeps the
-// conservative answer rather than letting a guess put two claudes in one
-// checkout.
+// The record's status is the hooks' own account of whether this dispatcher is
+// still going: a done or exited one has finished, and re-dispatching its name
+// is the case per-dispatch worktrees explicitly allow. Reading the session
+// alone refused every feature that had ever completed, because launchCommand
+// ends `; exec ${SHELL}` on purpose and the session outlives its claude by
+// design — and on a real machine the claude itself often outlives the work too,
+// sitting at its prompt for days after the PR merged.
+//
+// The live session is what catches a record the hooks could not correct: a
+// SIGKILL or a machine restart leaves one claiming "working" for ever, and a
+// status alone would then refuse a name whose dispatcher is long gone.
+//
+// SessionIdle is the third, for the session that outlived its claude, and its
+// "unknown" is neither: a backend that cannot see into a session (the Windows
+// console one) keeps the conservative answer rather than letting a guess put
+// two claudes in one checkout.
 func liveDispatch(slug string) *state.Dispatch {
 	for _, d := range state.LoadAll() {
-		if d.Slug != slug || d.TmuxSession == "" || !sessionAlive(d.TmuxSession) {
+		if d.Slug != slug || d.TmuxSession == "" || !unfinished(d.Status) {
+			continue
+		}
+		if !sessionAlive(d.TmuxSession) {
 			continue
 		}
 		if idle, known := sessionIdle(d.TmuxSession); known && idle {
@@ -175,6 +184,18 @@ func liveDispatch(slug string) *state.Dispatch {
 		return d
 	}
 	return nil
+}
+
+// unfinished names the statuses a dispatcher can still be working under. It is
+// the hooks' half of "live": everything a session reports while it is going,
+// and neither of the two it never reports for itself (done is the tracker's
+// word, exited is the end).
+func unfinished(s state.Status) bool {
+	switch s {
+	case state.StatusLaunching, state.StatusWorking, state.StatusNeedsInput, state.StatusBlocked:
+		return true
+	}
+	return false
 }
 
 // sessionAlive, sessionNames and supervisorReady are seams: tests swap them

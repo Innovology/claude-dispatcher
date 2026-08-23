@@ -98,28 +98,101 @@ var shellCommands = map[string]bool{
 // input rather than a process doing something.
 func paneIdle(cmd string) bool { return shellCommands[strings.TrimPrefix(cmd, "-")] }
 
-// SessionIdle reports whether every pane of a session is sitting at a shell —
-// that is, whether the claude process it was launched with has ended.
+// SessionIdle reports whether every pane of a session is sitting at a shell
+// with nothing running under it — that is, whether the claude process it was
+// launched with has ended.
 //
-// known is false when tmux could not answer (no such session, no tmux). The
-// distinction matters to the caller: "idle" licenses reusing the session, and
-// "unknown" must never be read as either — a session we cannot see into is one
-// we leave alone.
+// known is false when we could not answer (no such session, no tmux, no
+// readable process table). The distinction matters to the caller: "idle"
+// licenses reusing the session — Resume kills it, Launch stops treating the
+// record as live — and "unknown" must never be read as either.
+//
+// `#{pane_current_command}` alone cannot answer this, and reading it as if it
+// could is why every session we start looked idle while claude was running in
+// it. A session is launched as `<shell> -c "… claude …; exec $SHELL"`, and a
+// non-interactive shell has no job control, so claude never gets a process
+// group of its own: the pane's foreground group leader stays the shell, and
+// tmux dutifully reports "zsh". Measured on a live dispatcher — pane_pid 51122
+// reporting "zsh" with claude running as its child, pid 51136.
+//
+// The child is the answer. A shell-looking pane is idle only if nothing is
+// running under it; once claude exits, `exec` replaces that same shell with the
+// login shell, which sits there childless. A pane tmux can name a real command
+// for is still taken at its word (that is the same question, already answered),
+// so nothing is lost where job control does apply.
 func SessionIdle(name string) (idle, known bool) {
-	out, err := exec.Command("tmux", "list-panes", "-t", "="+name, "-F", "#{pane_current_command}").Output()
+	out, err := exec.Command("tmux", "list-panes", "-t", "="+name, "-F", "#{pane_pid} #{pane_current_command}").Output()
 	if err != nil {
 		return false, false
 	}
-	lines := strings.Fields(string(out))
-	if len(lines) == 0 {
+	return panesIdle(parsePanes(string(out)), processParents)
+}
+
+// panesIdle is SessionIdle's verdict, over what was read rather than over what
+// it took to read it — the seam the tests drive, since a real answer needs a
+// tmux server and a process of our own to be the child.
+func panesIdle(panes []pane, parentsOf func() map[string]bool) (idle, known bool) {
+	if len(panes) == 0 {
 		return false, false
 	}
-	for _, cmd := range lines {
-		if !paneIdle(cmd) {
+	var parents map[string]bool // read at most once, and only if it is needed
+	for _, p := range panes {
+		if !paneIdle(p.cmd) {
+			return false, true
+		}
+		if parents == nil {
+			if parents = parentsOf(); parents == nil {
+				// A shell in the foreground and no way to see what is under it
+				// is exactly the case this function must not guess at.
+				return false, false
+			}
+		}
+		if parents[p.pid] {
 			return false, true
 		}
 	}
 	return true, true
+}
+
+// pane is one line of the list-panes read: the process tmux started for the
+// pane, and what tmux believes is running in it.
+type pane struct{ pid, cmd string }
+
+func parsePanes(out string) []pane {
+	var ps []pane
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.Fields(ln)
+		if len(f) < 2 {
+			continue
+		}
+		ps = append(ps, pane{pid: f[0], cmd: f[1]})
+	}
+	return ps
+}
+
+// processParents is the set of pids that have at least one live child, read in
+// one pass over the process table. nil when the table could not be read, which
+// callers must treat as "unknown" rather than as "no children".
+//
+// `ps -ax -o pid=,ppid=` is the portable spelling: it is the same on macOS and
+// on the Linux distributions this runs under. pgrep -P would be shorter and is
+// not dependable — under a sandboxed process table it reports no children for a
+// parent that plainly has one, which is the exact wrong answer here.
+func processParents() map[string]bool {
+	out, err := exec.Command("ps", "-ax", "-o", "pid=,ppid=").Output()
+	if err != nil {
+		return nil
+	}
+	parents := make(map[string]bool)
+	for _, ln := range strings.Split(string(out), "\n") {
+		if f := strings.Fields(ln); len(f) >= 2 {
+			parents[f[1]] = true
+		}
+	}
+	if len(parents) == 0 {
+		return nil // a process table with no processes in it is a failed read
+	}
+	return parents
 }
 
 // AttachCmd returns the command that hands the terminal over to a session.
