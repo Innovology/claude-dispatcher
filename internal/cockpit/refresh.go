@@ -60,8 +60,16 @@ type (
 )
 
 // loadSnapshotCmd rebuilds the whole snapshot off the UI goroutine.
-func loadSnapshotCmd(cfg *config.Config) tea.Cmd {
-	return func() tea.Msg { return snapshotMsg(loadSnapshot(cfg)) }
+//
+// seq is the load's place in the queue, stamped onto the snapshot it produces
+// so the UI can tell a fresh answer from a late one — see load.go. Callers do
+// not pick it themselves: model.requestLoad hands it out.
+func loadSnapshotCmd(cfg *config.Config, seq int) tea.Cmd {
+	return func() tea.Msg {
+		s := loadSnapshot(cfg)
+		s.seq = seq
+		return snapshotMsg(s)
+	}
 }
 
 // recheckCmd is the reload for a cockpit that has not been looking.
@@ -99,12 +107,14 @@ func loadSnapshotCmd(cfg *config.Config) tea.Cmd {
 // One command rather than a chain of messages, because the sequence is the
 // point: a snapshot built before the sweep landed would show the stale status
 // this exists to clear.
-func recheckCmd(cfg *config.Config) tea.Cmd {
+func recheckCmd(cfg *config.Config, seq int) tea.Cmd {
 	return func() tea.Msg {
 		gh.InvalidateCache()
 		dispatchpkg.ReconcileSessions(state.LoadAll())
 		track.Refresh(state.LoadAll(), cfg)
-		return snapshotMsg(loadSnapshot(cfg))
+		s := loadSnapshot(cfg)
+		s.seq = seq
+		return snapshotMsg(s)
 	}
 }
 
@@ -114,7 +124,7 @@ func recheckCmd(cfg *config.Config) tea.Cmd {
 // Sends are non-blocking over a buffered channel, so a screen that has been
 // skipped — or a UI busy elsewhere — can never hold the load up waiting to be
 // watched. A dropped update costs one line's figure, never a step.
-func bootLoadCmd(cfg *config.Config, ch chan bootUpdate) tea.Cmd {
+func bootLoadCmd(cfg *config.Config, ch chan bootUpdate, seq int) tea.Cmd {
 	return func() tea.Msg {
 		report := func(u bootUpdate) {
 			select {
@@ -123,6 +133,7 @@ func bootLoadCmd(cfg *config.Config, ch chan bootUpdate) tea.Cmd {
 			}
 		}
 		s := loadSnapshotReporting(cfg, report)
+		s.seq = seq
 		// Every send happens inside the call above, on this goroutine, so the
 		// channel is safe to close here — and closing it is what releases the
 		// waitBoot that would otherwise sit on it for the life of the process.

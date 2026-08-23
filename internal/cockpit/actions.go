@@ -52,10 +52,7 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		if retired, _ := reconcileSessions([]*state.Dispatch{rec}); retired > 0 {
 			m.notice = "\"" + feature + "\" lost its " + supervisor.Backend() +
 				" session — retired · h for history, where ⏎ resumes it"
-			if m.cfg != nil {
-				return m, loadSnapshotCmd(m.cfg)
-			}
-			return m, nil
+			return m.requestLoad(loadPlain)
 		}
 		if rec.Status == state.StatusLaunching {
 			// Nothing has fired a hook for it, so its session may not exist yet

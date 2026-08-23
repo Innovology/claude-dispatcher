@@ -56,6 +56,10 @@ type pendingDispatch struct {
 	// settled says the launch has finished and reported success, so a record for
 	// it now exists. It does not mean the table has caught up — see prunePending.
 	settled bool
+	// settledAt is when it reported that, which is the instant the record was on
+	// disk. A snapshot only speaks for this dispatch if it read the records
+	// after it — see prunePending.
+	settledAt time.Time
 }
 
 // pendingID is the row id a pending dispatch carries. It is namespaced so it
@@ -125,27 +129,38 @@ func (m model) settlePending(feature string) model {
 	for i := range m.pending {
 		if m.pending[i].feature == feature {
 			m.pending[i].settled = true
+			m.pending[i].settledAt = time.Now()
 		}
 	}
 	return m
 }
 
 // prunePending retires the notes a fresh snapshot has made unnecessary. It runs
-// on every snapshot, before the cursor is re-keyed.
+// on every published snapshot, before the cursor is re-keyed. recordsAt is when
+// that snapshot read the dispatch records.
 //
 // Two things retire a note, and they are different questions:
 //
 //   - the table now carries a row for that feature — the record landed and is
 //     saying more than we could. The cursor moves across with it, because the
 //     human's selection was on this dispatcher, not on this row object;
-//   - the launch reported success and a snapshot has since been built. The
-//     records were re-read in that build, so whatever the table now shows for
-//     this feature (including nothing, for a session that ended immediately) is
-//     the record's own answer, and ours must stop competing with it.
+//   - the launch reported success, and a snapshot has since read the records.
+//     Whatever the table now shows for this feature (including nothing, for a
+//     session that ended immediately) is the record's own answer, and ours must
+//     stop competing with it.
+//
+// "Since" is the load of it, and it means since the record was written — not
+// since the snapshot landed. A load takes seconds; one that read the directory
+// before this dispatch existed can return long after it and know nothing about
+// it, and retiring the note on that would take the row away and leave nothing
+// in its place. That is the disappearance this file exists to prevent, in the
+// one gap the first version left open: the note went, the record's row was not
+// in the stale fleet that arrived, and on an otherwise empty table the lens fell
+// back to the dispatch form — the screen the human had just submitted, blank.
 //
 // A note whose launch has not reported yet survives every snapshot: nothing has
 // happened to make it untrue.
-func (m model) prunePending() model {
+func (m model) prunePending(recordsAt time.Time) model {
 	if len(m.pending) == 0 {
 		return m
 	}
@@ -156,12 +171,16 @@ func (m model) prunePending() model {
 	out := m.pending[:0:0]
 	for _, p := range m.pending {
 		id, onTable := rowFor[p.feature]
-		if !onTable && !p.settled {
+		switch {
+		case onTable:
+			if m.fleetSelID == pendingID(p.feature) {
+				m.fleetSelID = id
+			}
+		case p.settled && recordsAt.After(p.settledAt):
+			// The records were read after the launch wrote one. Nothing to hand
+			// the cursor to — this feature is genuinely not on the table.
+		default:
 			out = append(out, p)
-			continue
-		}
-		if onTable && m.fleetSelID == pendingID(p.feature) {
-			m.fleetSelID = id
 		}
 	}
 	m.pending = out

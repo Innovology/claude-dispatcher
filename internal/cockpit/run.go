@@ -2,6 +2,7 @@ package cockpit
 
 import (
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fsnotify/fsnotify"
@@ -50,6 +51,11 @@ func Run() error {
 			}
 		}
 		m.loading = true
+		// Init issues the first load but cannot record that it did — Bubble Tea
+		// gives it no model to write to. Reserve its place in the queue here, so
+		// the fsnotify event and the track pass that arrive during it wait for it
+		// rather than starting a second full load beside it. See load.go.
+		m.loadSeq, m.loadBusy, m.loadStarted = 1, true, time.Now()
 		// The opening screen belongs to the first load and only to it. Without
 		// a config nothing is loaded, so there is nothing to narrate and the
 		// cockpit opens straight onto its "run init" notice.

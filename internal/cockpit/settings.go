@@ -129,10 +129,7 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 			}
 			st.editing = false
 			st.input.Blur()
-			if m.cfg != nil {
-				return m, loadSnapshotCmd(m.cfg)
-			}
-			return m, nil
+			return m.requestLoad(loadPlain)
 		default:
 			var cmd tea.Cmd
 			st.input, cmd = st.input.Update(m.inputMsg(k))

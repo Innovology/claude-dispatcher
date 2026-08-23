@@ -131,7 +131,7 @@ func TestSuccessfulLaunchKeepsTheRowUntilTheRecordLands(t *testing.T) {
 
 	// The record lands: the table now carries a real row for the same feature.
 	fleet = []fleetRow{{id: "rec-1", kind: "run", rank: 2, feature: "retry backoff", repo: "alpha-api", signal: startingSignal}}
-	m = m.prunePending().fleetSync()
+	m = m.prunePending(time.Now()).fleetSync()
 
 	rows := m.fleetRows()
 	if len(rows) != 1 || rows[0].id != "rec-1" {
@@ -176,17 +176,95 @@ func TestUnreportedPendingSurvivesASnapshot(t *testing.T) {
 	fleet = nil
 
 	m := submitting(t)
-	m = m.prunePending()
+	m = m.prunePending(time.Now())
 	if len(m.pending) != 1 {
 		t.Error("a launch still in flight had its row pruned")
 	}
 
-	// Once it has reported success, the next snapshot is the hand-over: the
-	// records were re-read in it, so whatever the table says about this feature
-	// — including nothing — is the record's answer and outranks ours.
-	m = m.settlePending("retry backoff").prunePending()
+	// Once it has reported success, a snapshot that read the records after that
+	// is the hand-over: whatever the table says about this feature — including
+	// nothing — is the record's answer and outranks ours.
+	m = m.settlePending("retry backoff")
+	m = m.prunePending(time.Now())
 	if len(m.pending) != 0 {
 		t.Error("a launched dispatch is still being described by its placeholder")
+	}
+}
+
+// The disappearance itself, in the one gap the placeholder left open.
+//
+// A snapshot load takes seconds — measured at 4.5s warm and 61s cold on a real
+// portfolio — and one is very often already out when a dispatch lands, having
+// read the dispatch records before the record existed. It returns after the
+// launch reports success, carrying a fleet with no such dispatcher in it. The
+// placeholder used to retire on any snapshot at all, so the row went with it:
+// the dispatch the human had just made was gone from the screen, and with
+// nothing else in flight the lens fell back to the blank dispatch form.
+func TestAStaleSnapshotCannotTakeTheDispatchAway(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	fleet = nil
+
+	m := submitting(t)
+	before := time.Now() // a load that read the records before the launch landed
+	next, _ := m.Update(launchedMsg{feature: "retry backoff", notice: "dispatched"})
+	m = next.(model)
+
+	// It lands after the launch reported, and knows nothing about it.
+	m = m.prunePending(before).fleetSync()
+	if len(m.pending) != 1 {
+		t.Fatal("a snapshot that predates the record retired its placeholder")
+	}
+	rows := m.fleetRows()
+	if len(rows) != 1 || rows[0].feature != "retry backoff" {
+		t.Fatalf("the dispatch disappeared: %d rows", len(rows))
+	}
+	if m.cqPromptOn() {
+		t.Error("the lens fell back to the dispatch form over a dispatch that is still starting")
+	}
+
+	// And the first load that did read the disk after the record hands over.
+	fleet = []fleetRow{{id: "rec-1", kind: "run", rank: 2, feature: "retry backoff", repo: "alpha-api"}}
+	m = m.prunePending(time.Now()).fleetSync()
+	if len(m.pending) != 0 {
+		t.Error("the placeholder outlived the snapshot that could see the record")
+	}
+}
+
+// The same thing again, through Update, with the snapshot arriving the way a
+// real one does: the whole path from the key to the screen.
+func TestTheDispatchSurvivesAStaleSnapshotLanding(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	fleet = nil
+
+	m := submitting(t)
+	// A load that read the records before any of this — it is out, and will
+	// return knowing nothing about the dispatch about to be made.
+	stale := snapshot{seq: 1, dataMode: "live", fleet: []fleetRow{}, recordsAt: time.Now()}
+
+	next, _ := m.Update(launchedMsg{feature: "retry backoff", notice: "dispatched"})
+	next, _ = next.(model).Update(snapshotMsg(stale))
+	m = next.(model)
+
+	rows := m.fleetRows()
+	if len(rows) != 1 || rows[0].feature != "retry backoff" {
+		t.Fatalf("the dispatch vanished when a stale snapshot landed: %d rows", len(rows))
+	}
+
+	// The load that reads the records after the launch is the hand-over, and
+	// this one carries the record's own row.
+	fresh := snapshot{
+		seq: 2, dataMode: "live", recordsAt: time.Now(),
+		fleet: []fleetRow{{id: "rec-1", kind: "run", rank: 2, feature: "retry backoff", repo: "alpha-api"}},
+	}
+	next, _ = m.Update(snapshotMsg(fresh))
+	m = next.(model)
+	if len(m.pending) != 0 {
+		t.Error("the placeholder outlived the snapshot that could see the record")
+	}
+	if rows := m.fleetRows(); len(rows) != 1 || rows[0].id != "rec-1" {
+		t.Errorf("want the record's own row, got %+v", rows)
 	}
 }
 

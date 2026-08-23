@@ -343,8 +343,9 @@ func TestUpdateMessageBranches(t *testing.T) {
 		t.Error("snapshotMsg should clear loading")
 	}
 
-	// stateChangedMsg / refreshTickMsg / trackedMsg with nil cfg still return
-	// batched cmds without panicking.
+	// stateChangedMsg / refreshTickMsg with nil cfg still return batched cmds
+	// without panicking — the watch and the poll re-arm whether or not there is
+	// anything to load.
 	tm, cmd = tm.Update(stateChangedMsg{})
 	if cmd == nil {
 		t.Error("stateChangedMsg should return a cmd")
@@ -353,9 +354,11 @@ func TestUpdateMessageBranches(t *testing.T) {
 	if cmd == nil {
 		t.Error("refreshTickMsg should return a cmd")
 	}
+	// A reload, though, is only ever a reload of real data: a config-less
+	// cockpit is on demo seed and has nothing to re-read.
 	tm, cmd = tm.Update(trackedMsg{})
-	if cmd == nil {
-		t.Error("trackedMsg should return a cmd")
+	if cmd != nil {
+		t.Error("trackedMsg without cfg should not reload")
 	}
 
 	// actionMsg with nil cfg: sets notice, no reload cmd.
@@ -377,6 +380,10 @@ func TestUpdateMessageBranches(t *testing.T) {
 	}
 
 	// attachReturnedMsg both with and without an error, with and without cfg.
+	// The reload above is still out, and a second one does not start beside it
+	// (see load.go) — land it first, or what is being asserted here is the
+	// coalescing rather than the recheck.
+	tm, _ = tm.Update(snapshotMsg(snapshot{seq: 1}))
 	tm, cmd = tm.Update(attachReturnedMsg{err: nil})
 	if tm.(model).notice != "" {
 		t.Error("attachReturnedMsg without error should clear notice")
@@ -469,9 +476,18 @@ func TestRefreshCmds(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
 	cfg := &config.Config{}
 
-	msg := loadSnapshotCmd(cfg)()
-	if _, ok := msg.(snapshotMsg); !ok {
+	msg := loadSnapshotCmd(cfg, 7)()
+	s, ok := msg.(snapshotMsg)
+	if !ok {
 		t.Errorf("loadSnapshotCmd = %#v", msg)
+	}
+	// The number it was started with rides back on the snapshot, or the UI
+	// cannot tell a fresh answer from a late one. See load.go.
+	if s.seq != 7 {
+		t.Errorf("snapshot seq = %d, want the load's own number", s.seq)
+	}
+	if s.recordsAt.IsZero() {
+		t.Error("the snapshot does not say when it read the records")
 	}
 
 	msg = trackRefreshCmd(cfg)()
