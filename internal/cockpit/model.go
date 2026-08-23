@@ -44,6 +44,17 @@ type model struct {
 	settings     *settingsState
 	dispatchForm *dispatchForm
 
+	// The snapshot loader's queue. loadSeq numbers the loads this cockpit has
+	// started, loadApplied is the newest one that reached the screen, loadBusy
+	// and loadStarted are the one in flight, and loadNext is what was asked for
+	// while it was out. See load.go — a load lands seconds after it was asked
+	// for, and without this the last one to return won, whatever it knew.
+	loadSeq     int
+	loadApplied int
+	loadBusy    bool
+	loadStarted time.Time
+	loadNext    loadKind
+
 	// boot is the opening screen, non-nil only while the first load is running
 	// (and for a beat after it lands). It is a pointer because the loader's
 	// progress has to survive Bubble Tea copying the model on every message.
@@ -270,10 +281,15 @@ func (m model) Init() tea.Cmd {
 	// ageTick rides with the poll rather than with the demo path above: it keeps
 	// the printed ages of real dispatchers honest, and a cockpit with no config
 	// has none to age.
-	load := loadSnapshotCmd(m.cfg)
+	//
+	// Init cannot change the model, so the sequence number this first load
+	// carries is the one Run reserved for it (see Run, and load.go): the loader
+	// is already marked in flight, and every request that arrives while it runs
+	// queues behind it rather than racing it.
+	load := loadSnapshotCmd(m.cfg, m.loadSeq)
 	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), ageTick(), upgradeCheckCmd()}
 	if m.boot != nil {
-		load = bootLoadCmd(m.cfg, m.bootCh)
+		load = bootLoadCmd(m.cfg, m.bootCh, m.loadSeq)
 		cmds = append(cmds, waitBoot(m.bootCh), bootTick())
 	}
 	return tea.Batch(append([]tea.Cmd{load}, cmds...)...)
@@ -286,15 +302,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case snapshotMsg:
-		applySnapshot(snapshot(msg))
+		// Book the load in first: it decides whether this snapshot is still
+		// worth publishing, and starts whatever was asked for while it was out.
+		mm, fresh, queued := m.loadLanded(snapshot(msg))
+		m = mm
 		m.loading = false
-		m = m.noteQuota()
 		// The load the opening screen was narrating is over: settle the
-		// sequence and start the countdown that hands the terminal over.
+		// sequence and start the countdown that hands the terminal over. This
+		// happens whether or not the snapshot is published — the screen is
+		// narrating the load, and the load has finished either way.
 		var boot tea.Cmd
 		if m.boot != nil {
 			boot = m.boot.finish()
 		}
+		if !fresh {
+			// A load that started before one already on screen and finished
+			// after it. Publishing would put the older fleet back — which is
+			// how a dispatch that had just appeared disappeared again.
+			return m, tea.Batch(boot, queued)
+		}
+		applySnapshot(snapshot(msg))
+		m = m.noteQuota()
 		// The fleet is rebuilt from the fresh records; fold the user's ordering
 		// and cleared set back onto it before anything renders, then re-key the
 		// cursor onto the row it was on — a rank that changed in this refresh
@@ -302,8 +330,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		//
 		// The pending notes are retired first, because retiring one can hand the
 		// cursor over to the row that replaced it, and fleetSync is what acts on
-		// that. See prunePending.
-		return m.prunePending().cqReconcile().fleetSync(), boot
+		// that. They are judged against when this load read the records, not
+		// against when it landed. See prunePending.
+		return m.prunePending(msg.recordsAt).cqReconcile().fleetSync(), tea.Batch(boot, queued)
 
 	case bootProgressMsg:
 		// Re-arming only while the screen is up is what stops a skipped boot
@@ -326,7 +355,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case stateChangedMsg:
-		return m, tea.Batch(loadSnapshotCmd(m.cfg), waitState(m.stateCh))
+		// The watcher fires on every record write, which on a busy fleet is
+		// several a second; requestLoad collapses them into one reload behind
+		// whatever is already running. Re-arming the watch is not conditional on
+		// that — a coalesced event must still leave someone listening.
+		mm, load := m.requestLoad(loadPlain)
+		return mm, tea.Batch(load, waitState(m.stateCh))
 
 	case refreshTickMsg:
 		// Re-checked on the poll so a cockpit left open for days still notices
@@ -382,14 +416,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case trackedMsg:
-		return m, loadSnapshotCmd(m.cfg)
+		return m.requestLoad(loadPlain)
 
 	case actionMsg:
 		m.notice = msg.notice
-		if m.cfg != nil {
-			return m, loadSnapshotCmd(m.cfg)
-		}
-		return m, nil
+		return m.requestLoad(loadPlain)
 
 	case launchedMsg:
 		// A launch is the one action whose row was on screen before the action
@@ -404,10 +435,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m = m.settlePending(msg.feature)
 		}
-		if m.cfg != nil {
-			return m.fleetSync(), loadSnapshotCmd(m.cfg)
-		}
-		return m.fleetSync(), nil
+		mm, load := m.fleetSync().requestLoad(loadPlain)
+		return mm, load
 
 	case resumedMsg:
 		// The resumed session is the thing the human asked for, so they land in
@@ -420,10 +449,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// own "no live session", which would describe the handover instead of the
 		// resume) and pick the record's new state up on the next load.
 		m.notice = msg.notice
-		if m.cfg != nil {
-			return m, loadSnapshotCmd(m.cfg)
-		}
-		return m, nil
+		return m.requestLoad(loadPlain)
 
 	case attachReturnedMsg:
 		m.notice = ""
@@ -442,9 +468,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// staleness this is meant to end. Wait for focus. Everywhere else this
 		// message IS the return, so recheck now.
 		if m.away {
-			return m, loadSnapshotCmd(m.cfg)
+			return m.requestLoad(loadPlain)
 		}
-		return m, recheckCmd(m.cfg)
+		return m.requestLoad(loadRecheck)
 
 	case tea.FocusMsg:
 		// Only a jump-in earns a recheck; focus on its own must not. A full
@@ -455,10 +481,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.away = false
-		if m.cfg == nil {
-			return m, nil
-		}
-		return m, recheckCmd(m.cfg)
+		return m.requestLoad(loadRecheck)
 
 	case cqFlashMsg:
 		// A stale timer must not clear a newer item — same guard as undoSeq.

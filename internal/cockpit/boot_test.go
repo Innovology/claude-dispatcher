@@ -70,7 +70,7 @@ func TestBootLoadCmdReportsThenCloses(t *testing.T) {
 	defer restoreVars(captureVars())
 
 	ch := make(chan bootUpdate, bootChanBuffer)
-	msg := bootLoadCmd(&config.Config{}, ch)()
+	msg := bootLoadCmd(&config.Config{}, ch, 1)()
 	if snapshot(msg.(snapshotMsg)).dataMode != "live" {
 		t.Error("bootLoadCmd did not produce a live snapshot")
 	}

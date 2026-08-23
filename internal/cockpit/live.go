@@ -90,6 +90,18 @@ type snapshot struct {
 	outputCodedNote string
 	notVelocity     []notVelocityRow
 
+	// seq is the load that produced this snapshot, from the cockpit's own
+	// counter (see load.go). It is what lets a late snapshot be recognised as
+	// late: loads run off the UI goroutine and a slow one must never overwrite
+	// the table a newer one has already published.
+	//
+	// recordsAt is when that load read the dispatch records. It is the only
+	// honest answer to "does this snapshot know about the dispatch I just
+	// made?" — a load that started before the record was written can land long
+	// after it and still know nothing about it. See prunePending.
+	seq       int
+	recordsAt time.Time
+
 	// records maps a view dispatch's feature to its live record, so an action
 	// on the selected row reaches the real tmux session / branch / PR.
 	records map[string]*state.Dispatch
@@ -216,6 +228,12 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 
 	r.begin(bootRecords, "reading "+state.DispatchesDir()+"…")
 	records := state.LoadAll()
+	// Stamped at the read, not at the return: this load takes seconds (minutes,
+	// on a cold portfolio) and everything it says about the fleet is a claim
+	// about the directory as it was at THIS instant, not as it is when the
+	// snapshot lands. The cockpit compares it against the launches it is
+	// waiting on — see prunePending.
+	recordsAt := time.Now()
 	r.done(bootRecords, countOf(len(records), "dispatch", "dispatches"), false)
 
 	r.begin(bootSessions, "asking "+supervisor.Backend()+" what is still running…")
@@ -258,6 +276,7 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	ctx := &collectCtx{cfg: cfg, records: records, repos: found}
 	var s snapshot
 	s.dataMode = "live"
+	s.recordsAt = recordsAt
 	s.discovered = ctx.repos
 	s.recordsByID = make(map[string]*state.Dispatch, len(ctx.records))
 	for _, rec := range ctx.records {

@@ -29,13 +29,16 @@
       worktree path and the cockpit's record map are both keyed by it, so a
       second concurrent dispatch of a live name would put two sessions in one
       checkout. Launch refuses it; re-dispatching a *finished* feature is
-      still fine and reuses the worktree left behind. "Live" is two facts
-      (`liveDispatch`), and the second is the one that bites: a live tmux
-      session is **not** a live dispatcher, because `launchCommand` ends
-      `; exec ${SHELL}` on purpose and every finished dispatch keeps its
-      session as an idle login shell. `supervisor.SessionIdle` tells them
-      apart; its *unknown* (a backend that cannot see into a session) is
-      neither, and keeps the refusal rather than guessing.
+      still fine and reuses the worktree left behind. "Live" is three facts
+      (`liveDispatch`), and none of them is the tmux session on its own: it
+      outlives its claude by design, because `launchCommand` ends
+      `; exec ${SHELL}`, and on a real machine the claude REPL outlives the
+      work too, sitting at its prompt for days after the merge. The record's
+      status is the hooks' account of whether the dispatcher is still going;
+      the live session catches a record they could not correct (a SIGKILL, a
+      reboot); `supervisor.SessionIdle` catches the session that outlived its
+      claude, and its *unknown* (a backend that cannot see into a session) is
+      neither, keeping the refusal rather than guessing.
   - *Product* is the grouping lens: the cockpit list and the dispatch form's
     repo picker group by the `[products]` config, most urgent group first;
     unmapped repos fall under "other". No separate group concept.
@@ -70,6 +73,47 @@
   distro shuts down with its last console and takes tmux with it; a suspended
   laptop or a reboot makes the same row anywhere. The full record is
   `docs/adr/0004-a-ghost-cannot-clear-itself.md`.
+- **The newest answer wins, not the last one back.** A dispatch went on the
+  table and vanished seconds later — sometimes returning, sometimes not, and
+  on an empty fleet leaving the blank dispatch form, which reads as "that did
+  not work". Loads were racing: an fsnotify event, the poll, a finished action
+  and a jump-in each started a full snapshot load of their own however many
+  were already out, and `applySnapshot` published whichever came back last. A
+  load is not quick — measured on a 94-record portfolio, 4.5s warm and 61s
+  cold — so when a dispatch lands, one that read the records *before* it
+  existed is routinely still in flight, and it returns carrying a fleet with no
+  such dispatcher in it. The placeholder that covers that window
+  (`pending.go`) then retired on it, because it retired on any snapshot at all
+  once the launch had reported: the rule meant "a snapshot has since read the
+  records" and tested "a snapshot has since landed". So: one load at a time
+  (`model.requestLoad`, `load.go`), requests collapsed into the next one rather
+  than started beside it — with a 5-minute escape so a wedged load cannot
+  freeze the data for good; every load numbered, and a snapshot older than the
+  one already on screen dropped rather than published; and a settled
+  placeholder retired only by a snapshot whose `recordsAt` (stamped at
+  `state.LoadAll`, not at the end of the load) is after the launch settled.
+  Reproduced and fixed against the real binary, capturing the pane once a
+  second through a dispatch. Full record:
+  `docs/adr/0007-the-newest-answer-wins-not-the-last-one-back.md`.
+- **A shell in the pane is not an idle session.** `tmux.SessionIdle` decides
+  whether claude has ended in a session, and `Resume` *kills* the session on
+  that answer while `liveDispatch` lets a second dispatch take the name. It
+  read `#{pane_current_command}`, which cannot answer it: a session runs
+  `<shell> -c "… claude …; exec ${SHELL}"`, and a non-interactive shell has no
+  job control, so claude shares the shell's process group and tmux reports the
+  leader — "zsh" — throughout. Measured on a working dispatcher: pane_pid
+  51122 reporting `zsh` with claude alive as its child. So every live session
+  read as idle: ⏎ on a running dispatcher killed the claude it was reopening,
+  and two dispatches of one name landed in one worktree (`dev-1812` and `dev
+  1812`, 88 seconds apart, same branch, the second dead in 26 seconds). It
+  asks what is running *under* the pane's shell now (one `ps -ax -o
+  pid=,ppid=`; an unreadable table is "unknown", never "idle"), and a pane tmux
+  can name a real command for is still taken at its word. `liveDispatch` reads
+  the record's status alongside it, because a finished dispatch keeps its
+  claude too — the REPL sits at its prompt for days after the merge — and the
+  session probe alone would refuse every name that had ever completed, with no
+  kill key on a history row to clear it. Full record:
+  `docs/adr/0008-a-shell-in-the-pane-is-not-an-idle-session.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only

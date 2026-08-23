@@ -113,7 +113,7 @@ func TestRecheckRetiresSessionsThatWentAway(t *testing.T) {
 		t.Fatalf("fixture changed: blocked=%q needs=%q", before["rec-blocked"], before["rec-needs"])
 	}
 
-	msg := recheckCmd(env.cfg)()
+	msg := recheckCmd(env.cfg, 1)()
 	if _, ok := msg.(snapshotMsg); !ok {
 		t.Fatalf("recheckCmd returned %T, want a snapshot", msg)
 	}
