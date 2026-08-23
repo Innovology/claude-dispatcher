@@ -149,8 +149,8 @@ func (m model) settlePending(feature string) model {
 //     session that ended immediately) is the record's own answer, and ours must
 //     stop competing with it.
 //
-// "Since" is the load of it, and it means since the record was written — not
-// since the snapshot landed. A load takes seconds; one that read the directory
+// "Since" is the load-bearing word, and it means since the record was written
+// — not since the snapshot landed. A load takes seconds; one that read the directory
 // before this dispatch existed can return long after it and know nothing about
 // it, and retiring the note on that would take the row away and leave nothing
 // in its place. That is the disappearance this file exists to prevent, in the
