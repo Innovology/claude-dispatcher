@@ -104,6 +104,12 @@ type fleetRow struct {
 	// ran in whatever the human's own Claude Code defaults to, and reporting
 	// that as "auto" would be inventing the one fact nobody recorded.
 	mode string
+	// root is the ref this dispatcher's branch was cut from, straight off the
+	// record — "origin/main". Empty when the branch already existed (nothing
+	// was cut) and on records written before a dispatch recorded where it
+	// started, and empty says nothing rather than naming the default: which
+	// branch that would have been is exactly what nobody wrote down.
+	root string
 	// fanOut is the dispatch form's FAN OUT switch, straight off the record:
 	// the session was invited to spread across agents. subLive and subDone are
 	// what it actually did — the type names of the subagents the hooks have
@@ -372,6 +378,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		root:       rec.Root,
 		fanOut:     rec.FanOut,
 		subLive:    subLive,
 		subDone:    subDone,
@@ -447,6 +454,7 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		root:       rec.Root,
 		fanOut:     rec.FanOut,
 		subLive:    subLive,
 		subDone:    subDone,
@@ -522,6 +530,7 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		root:       rec.Root,
 		fanOut:     rec.FanOut,
 		subLive:    subLive,
 		subDone:    subDone,
@@ -571,6 +580,7 @@ func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *stat
 		coded:      est.Dur,
 		codedKnown: codedKnown,
 		mode:       rec.Mode,
+		root:       rec.Root,
 		fanOut:     rec.FanOut,
 		subLive:    subLive,
 		subDone:    subDone,

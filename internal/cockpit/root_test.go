@@ -274,3 +274,25 @@ func TestDXDoesNotRefuseWhatItCannotCheck(t *testing.T) {
 		t.Error("a root was refused against a branch list that could not be read")
 	}
 }
+
+// The detail panel names the branch a dispatcher was cut from. Nothing could
+// show it before: the record kept the base commit, and a commit does not say
+// which branch it was the tip of — so a dispatcher quietly working on top of a
+// dead branch looked exactly like one on top of main.
+func TestFleetMetaNamesTheRoot(t *testing.T) {
+	if got := fleetRootLine("origin/main"); got != "from origin/main" {
+		t.Errorf("fleetRootLine = %q, want %q", got, "from origin/main")
+	}
+	// A re-dispatch cut nothing, and a record written before this recorded
+	// nothing. Neither is "cut from the default": which branch that would have
+	// been is the one fact nobody wrote down.
+	if got := fleetRootLine(""); got != "" {
+		t.Errorf("fleetRootLine(\"\") = %q, want silence", got)
+	}
+	if got := fleetMeta(fleetRow{root: "origin/trunk"}); !strings.Contains(got, "from origin/trunk") {
+		t.Errorf("fleetMeta = %q, want the root in it", got)
+	}
+	if got := fleetMeta(fleetRow{}); strings.Contains(got, "from ") {
+		t.Errorf("fleetMeta = %q, want no root clause", got)
+	}
+}
