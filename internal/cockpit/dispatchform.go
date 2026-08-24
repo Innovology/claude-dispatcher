@@ -100,7 +100,12 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 
 	prompt := textinput.New()
 	prompt.Placeholder = "describe the work to dispatch…"
-	prompt.CharLimit = 500
+	// No limit. A textinput silently drops everything past CharLimit, and at
+	// 500 that is most of any brief worth pasting: the human watched their
+	// prompt go in whole and dispatched a third of it, with nothing on screen
+	// saying so. The dispatch itself is what bounds a prompt now
+	// (dispatch.MaxPromptBytes), and it says so out loud when it refuses.
+	prompt.CharLimit = 0
 
 	// modeSel and modelSel open on their default's own index rather than on 0,
 	// so the offer order in dispatchpkg can change without silently changing

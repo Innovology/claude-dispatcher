@@ -425,13 +425,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case launchedMsg:
 		// A launch is the one action whose row was on screen before the action
 		// finished, so its outcome has a placeholder to answer to. A failure
-		// takes the row away with the notice that explains it — leaving a row
-		// saying "starting session" under a notice saying it did not start would
-		// be the screen contradicting itself. A success keeps the row and marks
-		// it launched; the snapshot this queues is what hands over to the record.
+		// turns the row into the report of it — a launch can fail before
+		// dispatch.Launch writes anything, so the row is then the only account
+		// of the dispatch there is, and taking it away (which is what this used
+		// to do) left a one-line notice against a table that looked untouched.
+		// A success keeps the row and marks it launched; the snapshot this
+		// queues is what hands over to the record.
 		m.notice = msg.notice
 		if msg.failed {
-			m = m.dropPending(msg.feature)
+			m = m.failPending(msg.feature, msg.reason)
 		} else {
 			m = m.settlePending(msg.feature)
 		}

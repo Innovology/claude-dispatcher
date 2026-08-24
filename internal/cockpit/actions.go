@@ -202,6 +202,12 @@ type launchedMsg struct {
 	feature string
 	notice  string
 	failed  bool
+	// reason is the failure in the launch's own words, without the "launch
+	// failed: " the notice wears. It is what the failed row says, and the row
+	// outlives the notice — a footer holds one line until the next thing the
+	// human does, and this is the only account of a dispatch that produced no
+	// record at all.
+	reason string
 }
 
 // resumedMsg carries a finished dispatcher's resume back to the UI: the notice
@@ -254,7 +260,7 @@ func resumeCmd(id, prompt string) tea.Cmd {
 func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, fanOut bool) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
-			return launchedMsg{feature: feature, notice: "no config — cannot dispatch", failed: true}
+			return launchFailed(feature, "no config — cannot dispatch")
 		}
 		var found *repos.Repo
 		for _, r := range repos.Discover(cfg) {
@@ -265,13 +271,25 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 			}
 		}
 		if found == nil {
-			return launchedMsg{feature: feature, notice: "repo not found: " + repoName, failed: true}
+			return launchFailed(feature, "repo not found: "+repoName)
 		}
 		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, fanOut)
 		if err != nil {
-			return launchedMsg{feature: feature, notice: "launch failed: " + err.Error(), failed: true}
+			return launchFailed(feature, err.Error())
 		}
 		return launchedMsg{feature: feature, notice: "dispatched \"" + d.Feature + "\" → " + d.RepoName}
+	}
+}
+
+// launchFailed is the one place a failed dispatch is reported from, so the
+// footer and the row it leaves behind can never say different things. The
+// notice wears the prefix; the row carries the reason as it was given.
+func launchFailed(feature, reason string) launchedMsg {
+	return launchedMsg{
+		feature: feature,
+		notice:  "launch failed: " + firstLine(reason),
+		failed:  true,
+		reason:  reason,
 	}
 }
 

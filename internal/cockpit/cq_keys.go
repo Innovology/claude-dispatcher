@@ -131,6 +131,16 @@ func (m model) cqReconcile() model {
 // command behind them (see cqActs), so anything unrecognised here is a display
 // row and does nothing.
 func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
+	// A note is not a record, so none of the record-keyed commands below can be
+	// fired on one. The only act it offers is dismissing a launch that failed,
+	// and dismissing it is forgetting the note — there is nothing on disk that
+	// could bring it back, which is why it carries no undo (see failPending).
+	if isPendingID(r.id) {
+		if a.k == "x" {
+			return m.dropPending(r.feature).fleetSync(), nil
+		}
+		return m, nil
+	}
 	switch a.k {
 	case "⏎":
 		// On a history row ⏎ means resume: there is no live session to attach
