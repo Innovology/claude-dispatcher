@@ -114,6 +114,39 @@
   session probe alone would refuse every name that had ever completed, with no
   kill key on a history row to clear it. Full record:
   `docs/adr/0008-a-shell-in-the-pane-is-not-an-idle-session.md`.
+- **A dispatch that did not happen is a thing that happened.** Reported as
+  "when the prompt is massive the dispatcher seems to just disappear", then
+  "it's not just long prompts — that last one failed with a one line prompt".
+  Two causes, and the reason they were indistinguishable is the worse defect:
+  `Launch` returns before `state.Save` for a refusal or any `ensureWorktree`
+  failure, so there was **no record, no worktree, no session and no log line** —
+  the entire account was one footer notice the next keypress replaces, and
+  `dropPending` *deleted* the placeholder row on purpose, leaving a table that
+  looked exactly as it had a second earlier. On an empty fleet the lens then
+  falls back to the dispatch form, so submitting put the blank form back up.
+  So: **every attempt is audited** (`DispatchAsked`/`DispatchLaunched`/
+  `DispatchFailed` in the event log, with the feature, the repo and the reason
+  verbatim — not lifecycle events, nothing derives status from them and
+  `velDwellState` leaves them unbilled); **a failed launch keeps its row**,
+  SIGNAL "did not start", the launch's own words in the detail lead, `x` to
+  dismiss, and no snapshot retires it because what it reports is that there is
+  nothing for a snapshot to find; and **a session that would not start keeps
+  its record**, carrying the supervisor's words instead of the "tmux launch
+  failed" that stood for every cause there is. The long-prompt cause was the
+  prompt travelling *inside* the launch command, which is one argument to the
+  supervisor and therefore capped: tmux carries a client command in a single
+  imsg (`MAX_IMSGSIZE`, 16KB) — measured on tmux 3.7b, 16313 bytes went through
+  and 16314 came back "command too long" — and cmd.exe caps at 8191 while
+  flattening every newline, because a cmd command line cannot have one. It
+  travels as a file now (`state/prompts/<id>.txt`, read by the session's own
+  shell), leaving a fixed ~300-byte command; resume's opening message goes the
+  same way under its own name, so reopening never overwrites the record of what
+  was originally sent. `MaxPromptBytes` (100KB) is then the only ceiling and the
+  refusal is ours, said at the moment of asking, because past the kernel's cap
+  on one argument the exec fails *inside* the session and no hook ever fires.
+  The `+` form's `CharLimit = 500` went with it: a silent truncation and a loud
+  refusal are not two settings of one dial. Full record:
+  `docs/adr/0009-a-dispatch-that-did-not-happen-is-a-thing-that-happened.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only
@@ -296,8 +329,10 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`.
-- `internal/state` — dispatch records + event log under
-  `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
+- `internal/state` — dispatch records, the event log (lifecycle hooks plus the
+  dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
+  with, under `~/.local/state/claude-dispatcher/` (override:
+  `CLAUDE_DISPATCHER_STATE`).
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited).
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
