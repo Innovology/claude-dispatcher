@@ -275,6 +275,35 @@ func DispatchesDir() string { return filepath.Join(Dir(), "dispatches") }
 // WorktreesDir holds per-dispatch git worktrees, worktrees/<repo>/<slug>.
 func WorktreesDir() string { return filepath.Join(Dir(), "worktrees") }
 
+// PromptsDir holds the prompt each dispatch was launched with, one file per
+// dispatch. The file is the transport, not a copy: the launch command reads it
+// rather than carrying the prompt inside itself, because the command is one
+// argument to the supervisor and every supervisor caps that (tmux at 16KB, a
+// Windows console at 8191 characters) — see dispatch.launchCommand.
+func PromptsDir() string { return filepath.Join(Dir(), "prompts") }
+
+// PromptPath is where a dispatch's prompt file lives. name is the dispatch id,
+// optionally suffixed for a prompt that is not the launch one (a resume's
+// opening message), so a resume can never overwrite the record of what the
+// dispatch was originally sent.
+func PromptPath(name string) string { return filepath.Join(PromptsDir(), name+".txt") }
+
+// WritePrompt puts prompt on disk and returns the path the launch command
+// should read it from. Unlike AppendEvent this does NOT swallow its error: the
+// prompt is the whole of what the dispatcher was asked to do, and a session
+// started against a file that is not there would open on an empty prompt and
+// sit waiting, which is worse than not starting at all.
+func WritePrompt(name, prompt string) (string, error) {
+	if err := os.MkdirAll(PromptsDir(), 0o755); err != nil {
+		return "", err
+	}
+	path := PromptPath(name)
+	if err := os.WriteFile(path, []byte(prompt), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 func EnsureDirs() error { return os.MkdirAll(DispatchesDir(), 0o755) }
 
 func NewID() string {
@@ -357,7 +386,34 @@ type Event struct {
 	DispatcherID string    `json:"dispatcher_id,omitempty"`
 	SessionID    string    `json:"session_id,omitempty"`
 	Cwd          string    `json:"cwd,omitempty"`
+
+	// Feature, Repo and Reason belong to the dispatch audit (the Dispatch*
+	// events below), which is the only writer that has no dispatcher id to
+	// offer: a launch that fails before the record is written has nothing else
+	// to name itself by. Reason is why it failed, verbatim.
+	Feature string `json:"feature,omitempty"`
+	Repo    string `json:"repo,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
+
+// The dispatch audit's event names. Every attempt to dispatch writes one of
+// these, whether or not it produces a record, because a launch that fails
+// before state.Save leaves nothing else behind — no record, no worktree, no
+// session — and "it disappeared" was the whole account the human got.
+//
+// They are deliberately not lifecycle events: nothing derives status from them,
+// and velDwellState leaves them unbilled, so they can be added to a log that
+// other readers already walk without changing a single figure.
+const (
+	// EventDispatchAsked is written before anything is created, so the log
+	// carries the ask even if the process dies in the middle of serving it.
+	EventDispatchAsked = "DispatchAsked"
+	// EventDispatchFailed is a launch that produced no running session, with
+	// the reason it gave.
+	EventDispatchFailed = "DispatchFailed"
+	// EventDispatchLaunched is a session actually started.
+	EventDispatchLaunched = "DispatchLaunched"
+)
 
 // AppendEvent appends one line to events.jsonl; failures are swallowed because
 // event logging must never disturb a live session.

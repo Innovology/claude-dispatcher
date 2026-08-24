@@ -128,8 +128,27 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// record from before either was a choice normalises to the default rather
 	// than inheriting nothing: --resume still has to be given some mode, and
 	// the default is the one the form would offer.
+	// The opening message travels the way a launch prompt does — as a file the
+	// session reads — because it is the same command line with the same
+	// supervisor ceiling on it, and the resume input is not capped either. It
+	// is written under its own name so reopening a dispatcher never overwrites
+	// the record of what it was originally sent.
+	promptPath := ""
+	prompt = strings.TrimRight(prompt, "\n")
+	if prompt != "" {
+		if len(prompt) > MaxPromptBytes {
+			return "", "", fmt.Errorf("the message is %d bytes and the limit is %d — say it in the session instead",
+				len(prompt), MaxPromptBytes)
+		}
+		p, err := state.WritePrompt(d.ID+"-resume", prompt)
+		if err != nil {
+			return "", "", fmt.Errorf("could not write the message for %q: %w", d.Feature, err)
+		}
+		promptPath = p
+	}
+
 	name := uniqueName(base)
-	if err := newSession(name, dir, resumeCommand(d.ID, sid, prompt, Mode(d.Mode), Model(d.Model))); err != nil {
+	if err := newSession(name, dir, resumeCommand(d.ID, sid, promptPath, Mode(d.Mode), Model(d.Model))); err != nil {
 		return "", "", err
 	}
 

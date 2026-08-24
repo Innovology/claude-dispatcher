@@ -90,10 +90,16 @@ func TestDispatchAppearsBeforeItHasLaunched(t *testing.T) {
 	}
 }
 
-// A launch that failed leaves no record and never will, so the row goes with
-// the notice that says so — a screen still promising "starting session" under
-// "launch failed" would be contradicting itself.
-func TestFailedLaunchTakesTheRowBack(t *testing.T) {
+// A launch that failed keeps its row, and the row says why.
+//
+// This used to delete it, which is the disappearance the whole file is named
+// after — in its worst form. A launch can fail before dispatch.Launch writes
+// anything at all (a feature already live, a worktree its last session left on
+// another branch, a supervisor that would not take the command), so there is no
+// record, no worktree and nothing in history: that row was the only thing on
+// screen that knew the dispatch had been asked for. Taking it away left a
+// one-line notice against a table that looked exactly as it had before.
+func TestFailedLaunchKeepsTheRowAndSaysWhy(t *testing.T) {
 	saved := captureVars()
 	defer restoreVars(saved)
 	fleet = nil
@@ -103,13 +109,62 @@ func TestFailedLaunchTakesTheRowBack(t *testing.T) {
 		t.Fatalf("pending = %d before the launch reports", len(m.pending))
 	}
 
-	next, _ := m.Update(launchedMsg{feature: "retry backoff", notice: "launch failed: no remote", failed: true})
+	next, _ := m.Update(launchedMsg{feature: "retry backoff",
+		notice: "launch failed: no remote", failed: true, reason: "no remote"})
 	m = next.(model)
-	if len(m.fleetRows()) != 0 || len(m.pending) != 0 {
-		t.Errorf("the row survived a failed launch: %d rows, %d pending", len(m.fleetRows()), len(m.pending))
+
+	rows := m.fleetRows()
+	if len(rows) != 1 || len(m.pending) != 1 {
+		t.Fatalf("the failed dispatch vanished: %d rows, %d pending", len(rows), len(m.pending))
+	}
+	if rows[0].signal != failedSignal {
+		t.Errorf("row signal = %q, want %q", rows[0].signal, failedSignal)
+	}
+	if rows[0].why != "no remote" {
+		t.Errorf("the row does not say why it failed: %q", rows[0].why)
+	}
+	if rows[0].tone != "red" {
+		t.Errorf("tone = %q — a dispatch that did not happen is not a normal row", rows[0].tone)
 	}
 	if m.notice != "launch failed: no remote" {
 		t.Errorf("notice = %q", m.notice)
+	}
+	// And it is on the screen, not merely in the model.
+	if !strings.Contains(m.viewCQ(m.width, 30), failedSignal) {
+		t.Error("the triage lens does not draw the launch that failed")
+	}
+
+	// No snapshot retires it: the thing it reports is that there is nothing for
+	// a snapshot to find. Not even one that read the records long afterwards.
+	m = m.prunePending(time.Now().Add(time.Hour))
+	if len(m.pending) != 1 {
+		t.Error("a snapshot retired the report of a dispatch it knows nothing about")
+	}
+}
+
+// The human takes it off, and that is the only thing that does.
+func TestDismissingAFailedLaunchIsTheOnlyWayItGoes(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	fleet = nil
+
+	m := submitting(t)
+	next, _ := m.Update(launchedMsg{feature: "retry backoff",
+		notice: "launch failed: no remote", failed: true, reason: "no remote"})
+	m = next.(model)
+
+	row, ok := m.fleetSel()
+	if !ok {
+		t.Fatal("nothing under the cursor")
+	}
+	if len(row.acts) != 1 || row.acts[0].k != "x" {
+		t.Fatalf("acts = %#v, want the one act a row with no record behind it can honour", row.acts)
+	}
+	// Through the act loop, not by calling dropPending: the point is that the
+	// key the row advertises reaches it.
+	m, _ = m.cqRun(row, row.acts[0])
+	if len(m.pending) != 0 || len(m.fleetRows()) != 0 {
+		t.Errorf("x did not dismiss the row: %d rows, %d pending", len(m.fleetRows()), len(m.pending))
 	}
 }
 

@@ -76,10 +76,35 @@ func capSlug(s string) string {
 // prompt rather than as a flag (see fanout.go): when set, the prompt gains the
 // ultracode sentence before anything records or runs it, so the record's
 // Prompt is the prompt the session actually received.
-func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut bool) (*state.Dispatch, error) {
+func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut bool) (d *state.Dispatch, err error) {
+	// The audit, opened before anything is created and closed on every way out.
+	// A launch that fails here fails before state.Save, so without this the
+	// whole event is a notice in a footer that the next keypress replaces —
+	// which is why every different failure looked like the same one thing:
+	// the dispatcher disappeared.
+	audit(state.Event{Event: state.EventDispatchAsked, Feature: feature, Repo: r.Name})
+	defer func() {
+		switch {
+		case err != nil:
+			audit(state.Event{Event: state.EventDispatchFailed, Feature: feature, Repo: r.Name,
+				Reason: err.Error(), DispatcherID: idOf(d)})
+		case d != nil:
+			audit(state.Event{Event: state.EventDispatchLaunched, Feature: feature, Repo: r.Name,
+				DispatcherID: d.ID, Cwd: d.WorktreePath})
+		}
+	}()
+
 	slug := Slugify(feature)
 	if slug == "" {
 		return nil, fmt.Errorf("feature name %q produces an empty slug", feature)
+	}
+	if n := len(prompt); n > MaxPromptBytes {
+		// Refused up front and by name, because the alternative is a session
+		// that starts and never gets its prompt: the shell would fail the exec
+		// with E2BIG, no hook would ever fire for it, and the record would sit
+		// at launching until a sweep retired it hours later.
+		return nil, fmt.Errorf("the prompt is %d bytes and the limit is %d — put the detail in a file in the repo and point the prompt at it",
+			n, MaxPromptBytes)
 	}
 	if live := liveDispatch(slug); live != nil {
 		return nil, fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
@@ -103,7 +128,12 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut
 	mode = mode.Normalize()
 	model = model.Normalize()
 	prompt = withFanOut(prompt, fanOut)
-	d := &state.Dispatch{
+	// Trailing newlines are dropped here rather than by the shell, so the two
+	// platforms send the same bytes and the record says exactly what the
+	// session was given: `$(cat …)` strips them and PowerShell's ReadAllText
+	// does not.
+	prompt = strings.TrimRight(prompt, "\n")
+	d = &state.Dispatch{
 		ID:           state.NewID(),
 		Feature:      feature,
 		Slug:         slug,
@@ -125,18 +155,73 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut
 		return nil, err
 	}
 
+	// The prompt goes to disk and the session reads it there. It is written
+	// before the session starts and never removed: it is the transport, and it
+	// is also the only copy the session itself can be pointed back at.
+	promptPath, err := state.WritePrompt(d.ID, prompt)
+	if err != nil {
+		return d, failLaunch(d, fmt.Errorf("could not write the prompt file: %w", err))
+	}
+
 	// launchCommand is OS-specific (bash on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := launchCommand(d.ID, prompt, mode, model)
+	cmd := launchCommand(d.ID, promptPath, mode, model)
 	if err := newSession(d.TmuxSession, worktree, cmd); err != nil {
-		d.Status = state.StatusExited
-		d.StatusReason = "tmux launch failed"
-		_ = state.Save(d)
-		return nil, err
+		return d, failLaunch(d, err)
 	}
 	return d, nil
 }
+
+// MaxPromptBytes is the largest prompt a dispatch will carry.
+//
+// The prompt reaches claude as one argument, and a single argument is capped by
+// the kernel: Linux's MAX_ARG_STRLEN is 128KB (32 pages) and Windows caps a
+// whole command line at 32767 characters. This sits under both with room for
+// the rest of the command, so the refusal is ours — said plainly, at the moment
+// of asking — rather than an exec failing inside a session nobody is watching.
+//
+// It is not a limit on how much work a dispatch can be given: 100KB of prompt
+// is around 25,000 words, and anything approaching it belongs in a file in the
+// repo that the prompt names.
+const MaxPromptBytes = 100 * 1024
+
+// failLaunch records a session that never started on the record that was
+// already written, and returns the error to report. The record is kept rather
+// than deleted: it is the evidence, and the cockpit's history is where a human
+// goes looking for a dispatch that did not appear on the table.
+//
+// The reason carries the supervisor's own words. "tmux launch failed" was what
+// this said for every one of them, which turned "command too long" — the whole
+// diagnosis, handed to us by tmux — into four words that diagnose nothing.
+func failLaunch(d *state.Dispatch, err error) error {
+	d.Status = state.StatusExited
+	d.StatusReason = "did not start: " + firstLine(err.Error())
+	_ = state.Save(d)
+	return err
+}
+
+// firstLine keeps a status reason to one line; a supervisor's error can carry
+// several and the table has room for one.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
+}
+
+// idOf is a dispatch's id, or "" when the launch failed before there was one.
+func idOf(d *state.Dispatch) string {
+	if d == nil {
+		return ""
+	}
+	return d.ID
+}
+
+// audit is the seam the dispatch audit is written through, so tests can watch
+// it without a state directory. It never fails a launch: state.AppendEvent
+// swallows its own errors for the same reason the hook path does.
+var audit = state.AppendEvent
 
 // liveDispatch returns a dispatch of the same slug whose session is still
 // running, or nil.
@@ -329,10 +414,19 @@ func baseRef(repoPath string) string {
 // worktree left behind by an earlier dispatch of the same feature.
 func ensureWorktree(repoPath, path, branch string) error {
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		if strings.TrimSpace(string(out)) == branch {
+		on := strings.TrimSpace(string(out))
+		if on == branch {
 			return nil
 		}
-		return fmt.Errorf("%s exists but is not a worktree on %s", path, branch)
+		// Names what it is on, because this reaches a human now (the failed row
+		// carries it verbatim) and "is not a worktree on feature/x" leaves them
+		// nothing to do about it. The usual cause is the last session of this
+		// feature renaming its own branch — two worktrees in the reporter's own
+		// fleet sit on fix/… branches their dispatchers moved them to — and the
+		// worktree is kept rather than reset, because it may hold work nobody
+		// has pushed.
+		return fmt.Errorf("its worktree %s is on %s, not %s — a previous session moved it; switch it back or remove it",
+			path, on, branch)
 	}
 	// Recover bookkeeping for worktree dirs deleted behind git's back.
 	_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()

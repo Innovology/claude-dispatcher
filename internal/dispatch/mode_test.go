@@ -102,12 +102,12 @@ func TestPermissionArgsSaysNothingWhenItCannotTell(t *testing.T) {
 func TestLaunchAndResumeCarryTheMode(t *testing.T) {
 	withModes(t, parseModeNames(modernHelp))
 
-	launch := launchCommand("abc123", "do the thing", ModePlan, DefaultModel)
+	launch := launchCommand("abc123", "/prompts/abc123.txt", ModePlan, DefaultModel)
 	if !strings.Contains(launch, "--permission-mode plan") {
 		t.Errorf("launch command has no mode flag:\n%s", launch)
 	}
-	if !strings.Contains(launch, "do the thing") {
-		t.Errorf("launch command lost the prompt:\n%s", launch)
+	if !strings.Contains(launch, "/prompts/abc123.txt") {
+		t.Errorf("launch command lost the prompt file:\n%s", launch)
 	}
 
 	resume := resumeCommand("abc123", "sess-1", "", ModePlan, DefaultModel)

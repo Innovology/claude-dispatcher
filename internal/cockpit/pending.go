@@ -25,6 +25,7 @@ package cockpit
 // only evidence there is — see prunePending.
 
 import (
+	"strings"
 	"time"
 
 	dispatchpkg "claude-dispatcher/internal/dispatch"
@@ -40,6 +41,11 @@ import (
 // differ only in which of our own artefacts exists, which is not a distinction
 // worth two words in a table cell.
 const startingSignal = "starting session"
+
+// failedSignal is what a dispatch that never started says in the cell the human
+// reads for what a row wants. What this one wants is to be read: the reason
+// sits beside it, in the detail panel's lead.
+const failedSignal = "did not start"
 
 // pendingDispatch is a dispatch this cockpit has asked for and has not yet seen
 // a record for. Everything in it is known at the moment of asking; nothing here
@@ -60,13 +66,26 @@ type pendingDispatch struct {
 	// disk. A snapshot only speaks for this dispatch if it read the records
 	// after it — see prunePending.
 	settledAt time.Time
+	// failed says the launch came back with an error, and reason is what it
+	// said. The note then stops being a placeholder and becomes the only
+	// account of the dispatch there is: it stays on the table, saying why,
+	// until the human takes it off (see prunePending).
+	failed bool
+	reason string
 }
 
 // pendingID is the row id a pending dispatch carries. It is namespaced so it
 // can never collide with a record id: the cursor, the skip order and the
 // suppressed set are all keyed by id, and a placeholder must not inherit the
 // UI state of a real dispatcher (or leave any behind when it goes).
-func pendingID(feature string) string { return "pending:" + feature }
+func pendingID(feature string) string { return pendingPrefix + feature }
+
+const pendingPrefix = "pending:"
+
+// isPendingID reports whether a row id belongs to a note rather than a record.
+// The acts a note offers cannot go through the record-keyed commands — there is
+// no record to key by — so cqRun tells them apart by this.
+func isPendingID(id string) bool { return strings.HasPrefix(id, pendingPrefix) }
 
 // pendingFor builds the note from what the launch was given. The branch is
 // composed the way dispatch.Launch composes it rather than copied from the
@@ -107,9 +126,34 @@ func (m model) markPending(p pendingDispatch) model {
 	return m
 }
 
-// dropPending forgets an ask outright. This is the failure path: a launch that
-// reported an error produced no record and never will, so the row has to go
-// with the notice that says why.
+// failPending turns an ask into the report of a launch that did not happen.
+//
+// The row used to be deleted here, and deleting it is the whole of the bug
+// this file is named after. A launch can fail before dispatch.Launch writes
+// anything at all — a feature already live, a worktree its last session left on
+// another branch, a supervisor that would not take the command — so there is no
+// record to fall back to, nothing in history, and no worktree: the row was the
+// only thing on screen that knew this dispatch had ever been asked for. Taking
+// it away left a footer notice against a table that looked exactly as it had
+// before, which reads as "nothing happened", and on an otherwise empty fleet
+// put the blank dispatch form back up, which reads as "that did not work"
+// without ever saying what did not work.
+//
+// So the note stays and says so. reason is the launch's own words.
+func (m model) failPending(feature, reason string) model {
+	for i := range m.pending {
+		if m.pending[i].feature == feature {
+			m.pending[i].failed = true
+			m.pending[i].reason = reason
+			m.pending[i].settled = false
+		}
+	}
+	return m
+}
+
+// dropPending forgets an ask outright. It is what dismissing a failed row does:
+// the human has read why it did not start, and the note has nothing left to
+// say. Nothing else removes a failed note — see prunePending.
 func (m model) dropPending(feature string) model {
 	out := m.pending[:0:0]
 	for _, p := range m.pending {
@@ -172,6 +216,16 @@ func (m model) prunePending(recordsAt time.Time) model {
 	for _, p := range m.pending {
 		id, onTable := rowFor[p.feature]
 		switch {
+		case p.failed && !onTable:
+			// A failed note answers to nothing: the thing it reports is that
+			// there is nothing for a snapshot to find, so no snapshot can
+			// retire it. Only the human takes it off (x, cqRun).
+			//
+			// A launch that got far enough to write a record is the exception,
+			// and it falls through to the case below: the record says the same
+			// thing with more behind it, and two rows for one dispatch would be
+			// this cockpit contradicting itself.
+			out = append(out, p)
 		case onTable:
 			if m.fleetSelID == pendingID(p.feature) {
 				m.fleetSelID = id
@@ -226,22 +280,45 @@ func pendingRow(p pendingDispatch) fleetRow {
 		// about what this dispatcher was asked to do.
 		goal, goalLabel = s, "prompt"
 	}
+	signal, tone, why := startingSignal, "normal",
+		"Starting: its worktree and session are being made. Nothing has reported back yet."
+	rank := fleetRank("run", "normal")
+	var acts []cqAct
+	if p.failed {
+		// The reason is the launch's own words, in the cell the human is already
+		// reading for what a dispatcher wants — because what this one wants is
+		// to be told what went wrong.
+		//
+		// Rank 0 for the red glyph; it leads the table either way, because every
+		// note does (fleetAll). It stays a "run" row all the same: the queue's
+		// own keys act on records — park writes a reason to one, skip rotates
+		// the ask queue — and there is no record here for either to reach.
+		//
+		// x is the only act, and all it does is take the row off. Which is
+		// precisely what used to happen by itself, with nothing said.
+		signal, tone, why, rank = failedSignal, "red", p.reason, 0
+		acts = []cqAct{{k: "x", d: "dismiss",
+			ok: "dismissed \"" + p.feature + "\"", keep: true}}
+	}
 	return fleetRow{
 		id:        pendingID(p.feature),
 		kind:      "run",
-		rank:      fleetRank("run", "normal"),
+		rank:      rank,
 		product:   p.product,
 		feature:   p.feature,
 		repo:      p.repo,
 		ref:       p.branch,
-		signal:    startingSignal,
-		tone:      "normal",
-		why:       "Starting: its worktree and session are being made. Nothing has reported back yet.",
+		signal:    signal,
+		tone:      tone,
+		why:       why,
+		acts:      acts,
 		goal:      goal,
 		goalLabel: goalLabel,
-		// No acts. Attach would have no session to hand over, and kill would have
-		// no record to mark — an offered key that cannot act is the defect this
-		// lens keeps finding in its own design.
+		// A starting note offers no acts at all: attach would have no session to
+		// hand over and kill no record to mark, and an offered key that cannot
+		// act is the defect this lens keeps finding in its own design. A failed
+		// one offers the single act that can be honoured with no record behind
+		// it — see above.
 		// Both ages count from the same instant, which is the truth about a
 		// dispatcher that has existed for as long as it has been silent.
 		moved:   p.since,

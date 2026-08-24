@@ -90,10 +90,22 @@ func TestResumeStartsTheRecordedSession(t *testing.T) {
 	if sup.started.dir != d.WorktreePath {
 		t.Errorf("resumed in %q, want the dispatch's own worktree %q", sup.started.dir, d.WorktreePath)
 	}
-	for _, want := range []string{"--resume", "'sess-abc'", "'now add the retry cap'", "CLAUDE_DISPATCHER_ID=" + d.ID} {
+	// The opening message travels as a file the session reads, not inside the
+	// command: the command is one argument to the supervisor and every
+	// supervisor caps that. So the command names the file, and the file says it.
+	msgPath := state.PromptPath(d.ID + "-resume")
+	for _, want := range []string{"--resume", "'sess-abc'", msgPath, "CLAUDE_DISPATCHER_ID=" + d.ID} {
 		if !strings.Contains(sup.started.cmd, want) {
 			t.Errorf("resume command %q is missing %q", sup.started.cmd, want)
 		}
+	}
+	if b, err := os.ReadFile(msgPath); err != nil || string(b) != "now add the retry cap" {
+		t.Errorf("message file = %q, %v; want the message the human typed", b, err)
+	}
+	// And it is its own file: resuming must not overwrite what the dispatch was
+	// originally sent, which is the only copy of the ask on disk.
+	if msgPath == state.PromptPath(d.ID) {
+		t.Error("the resume message overwrote the launch prompt")
 	}
 	if d.Status != state.StatusLaunching {
 		t.Errorf("record left at %q — the hook ignores a done record, so a resumed one must move off it", d.Status)

@@ -712,6 +712,12 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 				return m, nil
 			}
 			m.notice = "dispatching \"" + t.feature + "\" again…"
+			// The note goes on the table the way every other dispatch's does,
+			// because it is also what a failure has to answer to: without one
+			// there is nothing for failPending to turn into the report, and a
+			// re-dispatch that never started would be back to saying nothing at
+			// all (see pending.go).
+			m = m.markPending(m.pendingFor(t.repo, t.feature, text)).fleetSync()
 			// Same reading as the backlog's enter: this panel asks for a line of
 			// text, not for a mode, a model or a fan-out, so the re-dispatch
 			// takes the defaults rather than inheriting the finished
