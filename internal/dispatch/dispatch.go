@@ -4,7 +4,6 @@
 package dispatch
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -76,7 +75,12 @@ func capSlug(s string) string {
 // prompt rather than as a flag (see fanout.go): when set, the prompt gains the
 // ultracode sentence before anything records or runs it, so the record's
 // Prompt is the prompt the session actually received.
-func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut bool) (d *state.Dispatch, err error) {
+//
+// root is where the feature branch is cut from (see root.go): a branch the
+// human named on the form, or RootDefault for the repo's default branch as the
+// remote sees it. Unlike the other three it is not carried to Resume — a branch
+// is cut once, and a resumed dispatcher goes back to the branch it has.
+func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root Root, fanOut bool) (d *state.Dispatch, err error) {
 	// The audit, opened before anything is created and closed on every way out.
 	// A launch that fails here fails before state.Save, so without this the
 	// whole event is a notice in a footer that the next keypress replaces —
@@ -112,7 +116,9 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut
 	}
 	branch := "feature/" + slug
 	worktree := filepath.Join(state.WorktreesDir(), r.Name, slug)
-	if err := ensureWorktree(r.Path, worktree, branch); err != nil {
+	root = root.Normalize()
+	cutFrom, err := ensureWorktree(r.Path, worktree, branch, root)
+	if err != nil {
 		return nil, err
 	}
 	// A fresh worktree is a folder Claude Code has never seen, and it blocks on
@@ -141,6 +147,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, fanOut
 		RepoName:     r.Name,
 		Product:      r.Product,
 		Branch:       branch,
+		Root:         cutFrom,
 		WorktreePath: worktree,
 		BaseSHA:      baseSHA,
 		Prompt:       prompt,
@@ -366,57 +373,20 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 	return retired, live
 }
 
-// fetchTimeout bounds the pre-dispatch fetch. Refreshing the base is a
-// courtesy; a slow or unreachable remote must never stall a launch.
-const fetchTimeout = 20 * time.Second
-
-// baseRef resolves the start point for a new feature branch: the repo's
-// default branch, as the remote sees it.
-//
-// Letting git default the start point to the repo's HEAD — what `worktree add
-// -b` does with no explicit base — silently cuts the branch from whatever the
-// human left checked out, so a dispatch starts on top of an unrelated unmerged
-// feature and its PR carries that work onto main. Naming origin/<default>
-// rather than the local branch also keeps a stale local main out of the base.
-func baseRef(repoPath string) string {
-	// Best effort: a fresh origin/<default> beats a stale one, but offline is
-	// not a launch failure. GIT_TERMINAL_PROMPT=0 stops a credential prompt
-	// from holding the fetch open until the timeout expires.
-	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
-	defer cancel()
-	fetch := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "--quiet", "origin")
-	fetch.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	_ = fetch.Run()
-
-	// origin/HEAD names the remote's default branch, but it is absent from
-	// --single-branch clones and from repos cloned before git recorded it, so
-	// fall through the conventional names — and finally to the local checkout,
-	// for a repo with no remote at all.
-	if out, err := exec.Command("git", "-C", repoPath, "symbolic-ref", "--short", "--quiet",
-		"refs/remotes/origin/HEAD").Output(); err == nil {
-		if ref := strings.TrimSpace(string(out)); ref != "" {
-			return ref
-		}
-	}
-	for _, cand := range []string{
-		"refs/remotes/origin/main", "refs/remotes/origin/master",
-		"refs/heads/main", "refs/heads/master",
-	} {
-		if exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", cand).Run() == nil {
-			return cand
-		}
-	}
-	return "HEAD"
-}
-
 // ensureWorktree adds a worktree for the branch at path, creating the branch
-// from the repo's default branch when it doesn't exist yet, and reusing a
-// worktree left behind by an earlier dispatch of the same feature.
-func ensureWorktree(repoPath, path, branch string) error {
+// from root when it doesn't exist yet (see root.go), and reusing a worktree
+// left behind by an earlier dispatch of the same feature.
+//
+// It reports the ref the branch was actually cut from, short — "origin/main" —
+// or "" when there was nothing to cut because the branch already existed. That
+// is a fact worth carrying out of here: a dispatcher forking the wrong branch
+// is invisible from anywhere else, which is how a dead one went unnoticed until
+// a launch finally failed on it.
+func ensureWorktree(repoPath, path, branch string, root Root) (string, error) {
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		on := strings.TrimSpace(string(out))
 		if on == branch {
-			return nil
+			return "", reusedRootErr(branch, root)
 		}
 		// Names what it is on, because this reaches a human now (the failed row
 		// carries it verbatim) and "is not a worktree on feature/x" leaves them
@@ -425,29 +395,56 @@ func ensureWorktree(repoPath, path, branch string) error {
 		// fleet sit on fix/… branches their dispatchers moved them to — and the
 		// worktree is kept rather than reset, because it may hold work nobody
 		// has pushed.
-		return fmt.Errorf("its worktree %s is on %s, not %s — a previous session moved it; switch it back or remove it",
+		return "", fmt.Errorf("its worktree %s is on %s, not %s — a previous session moved it; switch it back or remove it",
 			path, on, branch)
 	}
 	// Recover bookkeeping for worktree dirs deleted behind git's back.
 	_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return "", err
 	}
+	from := ""
 	branchExists := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
-	if !branchExists {
+	if branchExists {
+		if err := reusedRootErr(branch, root); err != nil {
+			return "", err
+		}
+	} else {
 		// Created as its own step so the base is explicit. --no-track because
 		// the base is normally a remote-tracking ref, and inheriting it as
 		// upstream would make a later plain `git push` refuse: push.default
 		// simple rejects a branch whose upstream carries a different name.
-		base := baseRef(repoPath)
-		if out, err := exec.Command("git", "-C", repoPath, "branch", "--no-track", branch, base).CombinedOutput(); err != nil {
-			return fmt.Errorf("git branch %s from %s: %s", branch, base, strings.TrimSpace(string(out)))
+		base, err := baseRef(repoPath, root)
+		if err != nil {
+			return "", err
 		}
+		if out, err := exec.Command("git", "-C", repoPath, "branch", "--no-track", branch, base).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git branch %s from %s: %s", branch, base, strings.TrimSpace(string(out)))
+		}
+		from = shortRef(base)
 	}
 	if out, err := exec.Command("git", "-C", repoPath, "worktree", "add", path, branch).CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree add %s: %s", branch, strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("git worktree add %s: %s", branch, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return from, nil
+}
+
+// reusedRootErr refuses a dispatch that names a root branch for a feature
+// branch that already exists.
+//
+// Re-dispatching a finished feature reuses the branch and the worktree it left
+// behind, and that is wanted: it is how a dispatcher is sent back to work it
+// already did. But a branch that exists is not going to be re-cut from
+// anywhere, so a root chosen on the form would be read, agreed with, and
+// quietly dropped — the human watching a dispatch start on a base they did not
+// pick and were never told about. Nothing is said when the root is the default,
+// because then nothing was asked for.
+func reusedRootErr(branch string, root Root) error {
+	if root.IsDefault() {
+		return nil
+	}
+	return fmt.Errorf("%s already exists, so it cannot be cut from %s — dispatch under a different feature name, or leave the root branch on %s to carry on where it left off",
+		branch, root.Normalize(), RootDefault)
 }
 
 // CleanupWorktree removes a dispatch's worktree when git deems it safe (no

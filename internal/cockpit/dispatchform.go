@@ -1,20 +1,28 @@
 package cockpit
 
 // dispatchform.go is the in-cockpit "new dispatch" overlay: the classic
-// cockpit's repo → feature → mode → model → fan out → prompt flow, ported into
-// v2 so ad-hoc work can be dispatched without a backlog ticket. Open it with
-// `+` or the palette's "dispatch" / "new dispatch" command. Like settings, it
-// lives behind a pointer on the model so its textinputs keep focus state
-// across value-receiver Update copies. Submitting hands off to launchCmd,
+// cockpit's repo → feature → root → mode → model → fan out → prompt flow,
+// ported into v2 so ad-hoc work can be dispatched without a backlog ticket.
+// Open it with `+` or the palette's "dispatch" / "new dispatch" command. Like
+// settings, it lives behind a pointer on the model so its textinputs keep focus
+// state across value-receiver Update copies. Submitting hands off to launchCmd,
 // which does the real dispatch.
 //
-// MODE, MODEL and FAN OUT are steps of their own rather than defaults this
-// overlay picks quietly. The first two reach the process as launch flags
-// (--permission-mode and --model), and fan-out reaches it as the ultracode
-// sentence in the prompt (see dispatch/fanout.go) — so a form that chose any
-// of them on the human's behalf would be deciding that silently every time.
-// Each opens on its default with the list in view, so taking the default is
-// one keypress and changing it is two.
+// ROOT, MODE, MODEL and FAN OUT are steps of their own rather than defaults
+// this overlay picks quietly. MODE and MODEL reach the process as launch flags
+// (--permission-mode and --model), fan-out reaches it as the ultracode sentence
+// in the prompt (see dispatch/fanout.go), and ROOT is the branch the work is
+// cut from — so a form that chose any of them on the human's behalf would be
+// deciding that silently every time. Each opens on its default with the list in
+// view, so taking the default is one keypress and changing it is two.
+//
+// ROOT is a filtered list rather than a switch because it is the only one of
+// the four whose choices are the repo's and not the product's: the repos this
+// form dispatches into carry 170-odd branches each, which is a list you type at
+// and not one you cycle through. Its first row is "default", which names no
+// branch at all — the repo's default is resolved from the remote at launch, and
+// a form that filled it in here would be quoting the same stale local cache
+// that made dispatches fork dead branches (see dispatch/root.go).
 
 import (
 	"strings"
@@ -32,6 +40,7 @@ type dispatchStep int
 const (
 	dispatchRepo dispatchStep = iota
 	dispatchFeature
+	dispatchRoot
 	dispatchMode
 	dispatchModel
 	dispatchFanout
@@ -40,22 +49,84 @@ const (
 )
 
 // dispatchForm is the open new-dispatch overlay. Each step owns one textinput;
-// keeping three (rather than reusing one) preserves what you typed when you esc
-// back a step.
+// keeping them separate (rather than reusing one) preserves what you typed when
+// you esc back a step.
 type dispatchForm struct {
 	step   dispatchStep
 	repos  []repos.Repo
 	cursor int
 	repo   repos.Repo
 
-	filter    textinput.Model // step 1: filter repos by name/product
-	feature   textinput.Model // step 2: feature name
-	modeSel   int             // step 3: cursor into dispatchpkg.Modes()
-	modelSel  int             // step 4: cursor into dispatchpkg.Models()
-	fanoutSel int             // step 5: cursor into dispatchFanoutOptions
-	prompt    textinput.Model // step 6: the prompt
+	filter     textinput.Model // step 1: filter repos by name/product
+	feature    textinput.Model // step 2: feature name
+	rootFilter textinput.Model // step 3: filter the picked repo's branches
+	// roots are the picked repo's branches, read once when the repo is chosen
+	// rather than per keystroke: this is a git call, and the list cannot change
+	// under a human who is looking at it.
+	rootSel   int             // step 3: cursor into rootOptions()
+	roots     []dispatchpkg.RootChoice
+	modeSel   int             // step 4: cursor into dispatchpkg.Modes()
+	modelSel  int             // step 5: cursor into dispatchpkg.Models()
+	fanoutSel int             // step 6: cursor into dispatchFanoutOptions
+	prompt    textinput.Model // step 7: the prompt
 
 	errMsg string
+}
+
+// rootOption is one row of the ROOT step: the default, then a branch each.
+type rootOption struct {
+	name  string // the branch, or "default"
+	where string // "origin" / "local", blank for the default row
+	hint  string
+}
+
+// rootOptions is every row the ROOT step could show, in order. The default
+// leads: it is the right answer for nearly every dispatch, and it is the only
+// one that cannot be a dead branch, because it is resolved from the remote at
+// launch instead of read from anything local.
+func (df *dispatchForm) rootOptions() []rootOption {
+	out := []rootOption{{
+		name: string(dispatchpkg.RootDefault),
+		hint: dispatchpkg.RootDefault.Hint(),
+	}}
+	for _, b := range df.roots {
+		hint := "last commit " + usgAgo(b.When) + " ago"
+		if b.Where == "local" {
+			// Worth saying out loud: a branch only this clone has is one the PR
+			// will be opened against a base that origin has never seen.
+			hint = "local only · " + hint
+		}
+		out = append(out, rootOption{name: b.Name, where: b.Where, hint: hint})
+	}
+	return out
+}
+
+// rootFiltered is rootOptions narrowed by what has been typed. The default row
+// filters like any other — typing "def" finds it — because a row that survived
+// every filter would be a row the human could not get rid of while looking for
+// the branch they actually want.
+func (df *dispatchForm) rootFiltered() []rootOption {
+	q := strings.TrimSpace(strings.ToLower(df.rootFilter.Value()))
+	all := df.rootOptions()
+	if q == "" {
+		return all
+	}
+	var out []rootOption
+	for _, o := range all {
+		if strings.Contains(strings.ToLower(o.name), q) {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// root is the branch step 3 has landed on, as the launch takes it.
+func (df *dispatchForm) root() dispatchpkg.Root {
+	vis := df.rootFiltered()
+	if len(vis) == 0 {
+		return dispatchpkg.RootDefault
+	}
+	return dispatchpkg.Root(vis[clampCursor(df.rootSel, len(vis))].name).Normalize()
 }
 
 // mode is the permission mode step 3 has landed on. The cursor is the state
@@ -98,6 +169,10 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 	feature.Placeholder = "payment retry flow"
 	feature.CharLimit = 80
 
+	rootFilter := textinput.New()
+	rootFilter.Placeholder = "filter branches…"
+	rootFilter.CharLimit = 120 // a branch name, not a sentence
+
 	prompt := textinput.New()
 	prompt.Placeholder = "describe the work to dispatch…"
 	// No limit. A textinput silently drops everything past CharLimit, and at
@@ -122,7 +197,8 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 			mdlSel = i
 		}
 	}
-	return &dispatchForm{step: dispatchRepo, repos: rs, modeSel: sel, modelSel: mdlSel, filter: filter, feature: feature, prompt: prompt}
+	return &dispatchForm{step: dispatchRepo, repos: rs, modeSel: sel, modelSel: mdlSel,
+		filter: filter, feature: feature, rootFilter: rootFilter, prompt: prompt}
 }
 
 // filtered returns the repos matching the current filter (by name or product).
@@ -138,6 +214,20 @@ func (df *dispatchForm) filtered() []repos.Repo {
 		}
 	}
 	return out
+}
+
+// pickRepo lands the repo step on r and reads that repo's branches for the
+// ROOT step. Coming back and choosing a different repo resets the branch
+// choice with them: a root is a branch in one repo, and carrying "release/24"
+// across to a repo that has no such branch would be carrying a launch failure.
+func (df *dispatchForm) pickRepo(r repos.Repo) {
+	if df.repo.Path == r.Path && df.roots != nil {
+		return
+	}
+	df.repo = r
+	df.roots = dispatchpkg.RootBranches(r.Path)
+	df.rootSel = 0
+	df.rootFilter.SetValue("")
 }
 
 // updateDispatchForm handles keys while the new-dispatch overlay is open.
@@ -171,7 +261,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 				return m, nil
 			}
 			df.cursor = clampCursor(df.cursor, len(vis))
-			df.repo = vis[df.cursor]
+			df.pickRepo(vis[df.cursor])
 			df.step = dispatchFeature
 			df.filter.Blur()
 			return m, df.feature.Focus()
@@ -196,12 +286,48 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 				df.errMsg = "feature name is required — history is navigated by feature"
 				return m, nil
 			}
-			df.step = dispatchMode
+			df.step = dispatchRoot
 			df.feature.Blur()
-			return m, nil
+			return m, df.rootFilter.Focus()
 		default:
 			var cmd tea.Cmd
 			df.feature, cmd = df.feature.Update(m.inputMsg(k))
+			return m, cmd
+		}
+
+	case dispatchRoot:
+		switch k {
+		case "esc":
+			df.step = dispatchFeature
+			df.rootFilter.Blur()
+			return m, df.feature.Focus()
+		case "up", "ctrl+k":
+			if df.rootSel > 0 {
+				df.rootSel--
+			}
+			return m, nil
+		case "down", "ctrl+j":
+			if df.rootSel < len(df.rootFiltered())-1 {
+				df.rootSel++
+			}
+			return m, nil
+		case "enter":
+			if len(df.rootFiltered()) == 0 {
+				df.errMsg = "no branch matches — backspace to widen, or clear it for the default"
+				return m, nil
+			}
+			df.step = dispatchMode
+			df.rootFilter.Blur()
+			return m, nil
+		default:
+			prev := df.rootFilter.Value()
+			var cmd tea.Cmd
+			df.rootFilter, cmd = df.rootFilter.Update(m.inputMsg(k))
+			if df.rootFilter.Value() != prev {
+				// A narrowed list is a different list: the cursor goes home
+				// rather than pointing at whatever now sits at that index.
+				df.rootSel = 0
+			}
 			return m, cmd
 		}
 
@@ -211,8 +337,8 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 		// for the model and fan-out steps below.
 		switch k {
 		case "esc":
-			df.step = dispatchFeature
-			return m, df.feature.Focus()
+			df.step = dispatchRoot
+			return m, df.rootFilter.Focus()
 		case "up", "ctrl+k", "left":
 			if df.modeSel > 0 {
 				df.modeSel--
@@ -287,11 +413,19 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			prompt := strings.TrimSpace(df.prompt.Value())
 			mode := df.mode()
 			mdl := df.mdl()
+			root := df.root()
 			fanOut := df.fanOut()
 			m.dispatchForm = nil
 			notice := "dispatching \"" + feature + "\" · " + string(mode)
 			if mdl != dispatchpkg.DefaultModel {
 				notice += " · " + string(mdl)
+			}
+			// Named only when a branch was named. "default" is the absence of a
+			// choice, and the branch it resolves to is not known until the launch
+			// asks the remote — printing one here would be a guess on the line
+			// that reports what happened.
+			if !root.IsDefault() {
+				notice += " · from " + string(root)
 			}
 			if fanOut {
 				notice += " · fans out"
@@ -301,7 +435,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			// dispatch has to be on the triage table by the time the human gets
 			// there — see pending.go.
 			m = m.markPending(m.pendingFor(repo, feature, prompt)).fleetSync()
-			return m, launchCmd(m.cfg, repo, feature, prompt, mode, mdl, fanOut)
+			return m, launchCmd(m.cfg, repo, feature, prompt, mode, mdl, root, fanOut)
 		default:
 			var cmd tea.Cmd
 			df.prompt, cmd = df.prompt.Update(m.inputMsg(k))
@@ -354,11 +488,12 @@ func (m model) viewDispatchForm(w, h int) string {
 		inW = 10
 	}
 	df.filter.Width, df.feature.Width, df.prompt.Width = inW, inW, inW
+	df.rootFilter.Width = inW
 
 	var lines []string
 	lines = append(lines, fg(cWhite, "new dispatch"))
 	lines = append(lines, fg(cDim, "step "+itoa(int(df.step)+1)+" of "+itoa(int(dispatchStepCount))+
-		" · repo → feature → mode → model → fan out → prompt · esc backs out"))
+		" · repo → feature → root → mode → model → fan out → prompt · esc backs out"))
 	lines = append(lines, "")
 
 	// Breadcrumb of what's already been chosen.
@@ -371,6 +506,9 @@ func (m model) viewDispatchForm(w, h int) string {
 	}
 	if df.step > dispatchFeature {
 		lines = append(lines, row(iw, "", c("feature", 10, cFaint), flexc("feature/"+slugPreview(df.feature.Value()), cMid)))
+	}
+	if df.step > dispatchRoot {
+		lines = append(lines, row(iw, "", c("root", 10, cFaint), flexc(string(df.root()), cMid)))
 	}
 	if df.step > dispatchMode {
 		lines = append(lines, row(iw, "", c("mode", 10, cFaint), flexc(string(df.mode()), cMid)))
@@ -421,7 +559,41 @@ func (m model) viewDispatchForm(w, h int) string {
 		lines = append(lines, row(iw, "", c("feature", 10, cMid), flexc(df.feature.View(), cWhite)))
 		lines = append(lines, "")
 		lines = append(lines, blank(2)+fg(cFaint, "the branch will be ")+fg(cMid, "feature/"+slugPreview(df.feature.Value())))
-		lines = append(lines, blank(2)+fg(cFaint, "enter → mode · esc → repo"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter → root · esc → repo"))
+
+	case dispatchRoot:
+		lines = append(lines, fg(cMid, "root")+fg(cFaint, "  the branch this work is cut from"))
+		lines = append(lines, "")
+		lines = append(lines, fg(cMid, "▸ ")+df.rootFilter.View())
+		lines = append(lines, "")
+		vis := df.rootFiltered()
+		if len(vis) == 0 {
+			lines = append(lines, blank(2)+fg(cFaint, "no branch matches — backspace to widen"))
+			break
+		}
+		sel := clampCursor(df.rootSel, len(vis))
+		// One row reserved for the closing hint, which says which key goes on:
+		// on a repo with 170 branches the list would otherwise run to the floor
+		// and take the only line that says how to leave it.
+		room := h - len(lines) - 3
+		if room < 1 {
+			room = 1
+		}
+		start, end := window(sel, len(vis), room)
+		for i := start; i < end; i++ {
+			o := vis[i]
+			bg, marker, nameColor := cTransparent, " ", cFg
+			if i == sel {
+				bg, marker, nameColor = cSel, "▸", cWhite
+			}
+			lines = append(lines, row(iw, bg,
+				c(marker, 2, cMid),
+				c(o.name, 34, nameColor),
+				flexc(o.hint, cDim),
+			))
+		}
+		lines = append(lines, "")
+		lines = append(lines, blank(2)+fg(cFaint, "enter → mode · esc → feature"))
 
 	case dispatchMode:
 		lines = append(lines, fg(cMid, "mode")+fg(cFaint, "  what the session may do without asking"))
@@ -440,7 +612,7 @@ func (m model) viewDispatchForm(w, h int) string {
 			))
 		}
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "enter → model · esc → feature"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter → model · esc → root"))
 
 	case dispatchModel:
 		lines = append(lines, fg(cMid, "model")+fg(cFaint, "  what the session runs — default passes no flag"))

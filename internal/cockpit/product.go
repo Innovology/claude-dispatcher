@@ -723,7 +723,7 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			// takes the defaults rather than inheriting the finished
 			// dispatcher's — the human typed a new brief, and choices made for
 			// the last run are not consent for this one.
-			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, false)
+			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false)
 		}
 		m.resumeText = next
 		return m, nil

@@ -41,7 +41,7 @@ func TestLaunchKeepsALongPromptOutOfTheCommand(t *testing.T) {
 	// Comfortably past tmux's ceiling, with the characters a real prompt has:
 	// newlines, quotes, and things a shell would otherwise expand.
 	prompt := strings.Repeat("do it 'properly' and \"carefully\" $HOME `now`\n", 1000)
-	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "long prompt", prompt, ModeAuto, DefaultModel, false)
+	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "long prompt", prompt, ModeAuto, DefaultModel, DefaultRoot, false)
 	if err != nil {
 		t.Fatalf("a %d-byte prompt failed to launch: %v", len(prompt), err)
 	}
@@ -92,7 +92,7 @@ func TestLaunchRefusesAPromptPastTheLimit(t *testing.T) {
 	stubLaunch(t)
 
 	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "huge",
-		strings.Repeat("x", MaxPromptBytes+1), ModeAuto, DefaultModel, false)
+		strings.Repeat("x", MaxPromptBytes+1), ModeAuto, DefaultModel, DefaultRoot, false)
 	if err == nil {
 		t.Fatal("a prompt past the limit was accepted")
 	}
@@ -114,11 +114,11 @@ func TestEveryDispatchAttemptIsAudited(t *testing.T) {
 	repo := initRepo(t)
 	stubLaunch(t)
 
-	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "good one", "go", ModeAuto, DefaultModel, false); err != nil {
+	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "good one", "go", ModeAuto, DefaultModel, DefaultRoot, false); err != nil {
 		t.Fatal(err)
 	}
 	// A refusal that happens before any record exists.
-	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "!!!", "go", ModeAuto, DefaultModel, false); err == nil {
+	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "!!!", "go", ModeAuto, DefaultModel, DefaultRoot, false); err == nil {
 		t.Fatal("expected the empty slug to be refused")
 	}
 
@@ -164,7 +164,7 @@ func TestAFailedSessionKeepsItsRecordAndTheReason(t *testing.T) {
 	}
 	t.Cleanup(func() { newSession = prev })
 
-	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "doomed", "go", ModeAuto, DefaultModel, false); err == nil {
+	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "doomed", "go", ModeAuto, DefaultModel, DefaultRoot, false); err == nil {
 		t.Fatal("expected the launch to fail")
 	}
 	recs := state.LoadAll()
@@ -191,7 +191,7 @@ func TestOccupiedWorktreeSaysWhatItIsOn(t *testing.T) {
 	repo := initRepo(t)
 	wt := filepath.Join(t.TempDir(), "wt")
 
-	if err := ensureWorktree(repo, wt, "feature/thing"); err != nil {
+	if _, err := ensureWorktree(repo, wt, "feature/thing", DefaultRoot); err != nil {
 		t.Fatal(err)
 	}
 	// The session renames its own branch, which is what really happens.
@@ -199,7 +199,7 @@ func TestOccupiedWorktreeSaysWhatItIsOn(t *testing.T) {
 		t.Fatalf("git branch -m: %s", out)
 	}
 
-	err := ensureWorktree(repo, wt, "feature/thing")
+	_, err := ensureWorktree(repo, wt, "feature/thing", DefaultRoot)
 	if err == nil {
 		t.Fatal("a worktree on another branch was accepted")
 	}

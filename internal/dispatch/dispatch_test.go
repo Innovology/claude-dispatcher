@@ -41,7 +41,7 @@ func TestEnsureWorktree(t *testing.T) {
 	repo := initRepo(t)
 	wt := filepath.Join(t.TempDir(), "wt", "feat")
 
-	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
+	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatal(err)
 	}
 	if got := worktreeBranch(t, wt); got != "feature/feat" {
@@ -52,11 +52,11 @@ func TestEnsureWorktree(t *testing.T) {
 		t.Fatalf("repo checkout moved to %q", got)
 	}
 	// Re-dispatch of the same feature reuses the worktree.
-	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
+	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatalf("reuse failed: %v", err)
 	}
 	// A path occupied by a different branch's worktree is refused.
-	if err := ensureWorktree(repo, wt, "feature/second"); err == nil {
+	if _, err := ensureWorktree(repo, wt, "feature/second", DefaultRoot); err == nil {
 		t.Fatal("expected error for occupied path")
 	}
 	// An existing branch is checked out rather than recreated.
@@ -64,7 +64,7 @@ func TestEnsureWorktree(t *testing.T) {
 	if out, err := exec.Command("git", "-C", repo, "worktree", "remove", wt).CombinedOutput(); err != nil {
 		t.Fatalf("worktree remove: %s", out)
 	}
-	if err := ensureWorktree(repo, wt2, "feature/feat"); err != nil {
+	if _, err := ensureWorktree(repo, wt2, "feature/feat", DefaultRoot); err != nil {
 		t.Fatalf("existing branch: %v", err)
 	}
 	if got := worktreeBranch(t, wt2); got != "feature/feat" {
@@ -89,7 +89,7 @@ func TestEnsureWorktreeBranchesFromDefaultNotHEAD(t *testing.T) {
 	git("commit", "--allow-empty", "-m", "human WIP")
 
 	wt := filepath.Join(t.TempDir(), "feat")
-	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
+	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command("git", "-C", wt, "log", "--format=%s", "main..HEAD").Output()
@@ -110,16 +110,18 @@ func TestEnsureWorktreeBranchesFromDefaultNotHEAD(t *testing.T) {
 func TestBaseRefPrefersRemoteDefault(t *testing.T) {
 	repo := initRepo(t)
 	// No remote at all: fall back to the local default branch.
-	if got := baseRef(repo); got != "refs/heads/main" {
-		t.Errorf("baseRef with no remote = %q, want refs/heads/main", got)
+	got, err := baseRef(repo, DefaultRoot)
+	if err != nil || got != "refs/heads/main" {
+		t.Errorf("baseRef with no remote = %q, %v; want refs/heads/main", got, err)
 	}
 	// With a remote-tracking ref present, prefer it over the local branch.
 	if out, err := exec.Command("git", "-C", repo, "update-ref",
 		"refs/remotes/origin/main", "refs/heads/main").CombinedOutput(); err != nil {
 		t.Fatalf("update-ref: %s", out)
 	}
-	if got := baseRef(repo); got != "refs/remotes/origin/main" {
-		t.Errorf("baseRef = %q, want refs/remotes/origin/main", got)
+	got, err = baseRef(repo, DefaultRoot)
+	if err != nil || got != "refs/remotes/origin/main" {
+		t.Errorf("baseRef = %q, %v; want refs/remotes/origin/main", got, err)
 	}
 }
 
@@ -132,7 +134,7 @@ func TestEnsureWorktreeLeavesBranchUntracked(t *testing.T) {
 		t.Fatalf("update-ref: %s", out)
 	}
 	wt := filepath.Join(t.TempDir(), "feat")
-	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
+	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatal(err)
 	}
 	err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet",
@@ -145,7 +147,7 @@ func TestEnsureWorktreeLeavesBranchUntracked(t *testing.T) {
 func TestCleanupWorktree(t *testing.T) {
 	repo := initRepo(t)
 	wt := filepath.Join(t.TempDir(), "feat")
-	if err := ensureWorktree(repo, wt, "feature/feat"); err != nil {
+	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatal(err)
 	}
 	// Dirty worktree is kept — killing a dispatcher must not discard work.
@@ -211,7 +213,7 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
 	}()
 
-	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto, DefaultModel, false)
+	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto, DefaultModel, DefaultRoot, false)
 	if err == nil {
 		t.Fatal("expected a duplicate of a live feature to be refused")
 	}
@@ -236,7 +238,7 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 		t.Errorf("a leftover login shell reported as a live dispatcher: %#v", got)
 	}
 	withAliases(t, []string{"fable", "opus", "sonnet"})
-	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModePlan, Model("opus"), true)
+	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModePlan, Model("opus"), DefaultRoot, true)
 	if err != nil {
 		t.Errorf("re-dispatching a finished feature was refused: %v", err)
 	}

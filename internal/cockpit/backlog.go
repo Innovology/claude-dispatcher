@@ -393,7 +393,7 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 			// work handed off to happen elsewhere, with nobody sitting on its
 			// permission prompt. Anything else is dispatched from a form that
 			// asks.
-			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, false)
+			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false)
 		}
 	case "ctrl+d":
 		// This used to announce a dispatch and launch nothing — the worst kind
@@ -414,7 +414,7 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 				continue
 			}
 			m = m.markPending(m.pendingFor(bt.repo, backlogFeature(bt), bt.prompt))
-			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, false))
+			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false))
 		}
 		m.picked = map[string]bool{}
 		var why []string

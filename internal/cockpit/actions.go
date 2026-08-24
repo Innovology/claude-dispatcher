@@ -255,9 +255,9 @@ func resumeCmd(id, prompt string) tea.Cmd {
 }
 
 // launchCmd dispatches a new feature into repoName with prompt, in the
-// permission mode the form chose, on the model it chose, fanning out across
-// agents if the form asked for that.
-func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, fanOut bool) tea.Cmd {
+// permission mode the form chose, on the model it chose, cut from the root
+// branch it chose, fanning out across agents if the form asked for that.
+func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, fanOut bool) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
 			return launchFailed(feature, "no config — cannot dispatch")
@@ -273,7 +273,7 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 		if found == nil {
 			return launchFailed(feature, "repo not found: "+repoName)
 		}
-		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, fanOut)
+		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, root, fanOut)
 		if err != nil {
 			return launchFailed(feature, err.Error())
 		}
