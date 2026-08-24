@@ -414,10 +414,19 @@ func baseRef(repoPath string) string {
 // worktree left behind by an earlier dispatch of the same feature.
 func ensureWorktree(repoPath, path, branch string) error {
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		if strings.TrimSpace(string(out)) == branch {
+		on := strings.TrimSpace(string(out))
+		if on == branch {
 			return nil
 		}
-		return fmt.Errorf("%s exists but is not a worktree on %s", path, branch)
+		// Names what it is on, because this reaches a human now (the failed row
+		// carries it verbatim) and "is not a worktree on feature/x" leaves them
+		// nothing to do about it. The usual cause is the last session of this
+		// feature renaming its own branch — two worktrees in the reporter's own
+		// fleet sit on fix/… branches their dispatchers moved them to — and the
+		// worktree is kept rather than reset, because it may hold work nobody
+		// has pushed.
+		return fmt.Errorf("its worktree %s is on %s, not %s — a previous session moved it; switch it back or remove it",
+			path, on, branch)
 	}
 	// Recover bookkeeping for worktree dirs deleted behind git's back.
 	_ = exec.Command("git", "-C", repoPath, "worktree", "prune").Run()

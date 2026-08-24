@@ -5,6 +5,7 @@ package dispatch
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -181,3 +182,30 @@ func TestAFailedSessionKeepsItsRecordAndTheReason(t *testing.T) {
 type errFake string
 
 func (e errFake) Error() string { return string(e) }
+
+// The refusal a human reads names what the worktree is actually on. It is the
+// commonest of the short-prompt failures — a previous session of the same
+// feature renamed its own branch — and it used to say only that the path "is
+// not a worktree on feature/x", which leaves nothing to do about it.
+func TestOccupiedWorktreeSaysWhatItIsOn(t *testing.T) {
+	repo := initRepo(t)
+	wt := filepath.Join(t.TempDir(), "wt")
+
+	if err := ensureWorktree(repo, wt, "feature/thing"); err != nil {
+		t.Fatal(err)
+	}
+	// The session renames its own branch, which is what really happens.
+	if out, err := exec.Command("git", "-C", wt, "branch", "-m", "fix/thing-polish").CombinedOutput(); err != nil {
+		t.Fatalf("git branch -m: %s", out)
+	}
+
+	err := ensureWorktree(repo, wt, "feature/thing")
+	if err == nil {
+		t.Fatal("a worktree on another branch was accepted")
+	}
+	for _, want := range []string{"fix/thing-polish", "feature/thing", wt} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+}
