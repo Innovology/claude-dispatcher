@@ -13,9 +13,20 @@ import (
 // key the lifecycle hook reads to attribute events back to the record, mode is
 // the permission mode the session opens in (see mode.go), and model is the
 // model it runs (see model.go).
-func launchCommand(dispatcherID, prompt string, mode Mode, model Model) string {
+//
+// The prompt arrives as a PATH, and the session's own shell reads it. It used
+// to be interpolated into this string, which made the prompt part of the one
+// argument the supervisor is handed — and a supervisor caps that. tmux carries
+// a client command to its server in a single imsg, whose ceiling is 16KB
+// (MAX_IMSGSIZE); measured against tmux 3.7b, a new-session command of 16313
+// bytes went through and 16314 came back "command too long". So a prompt of any
+// size a human might paste took the launch down, and every trace of it with it.
+// Reading the file inside the session leaves this command a fixed ~120 bytes
+// whatever the prompt is; the only ceiling left is the kernel's on one argv
+// (see MaxPromptBytes).
+func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) string {
 	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s %s; exec ${SHELL:-/bin/sh}",
-		dispatcherID, modeArgs(mode), modelArgs(model), shellQuote(prompt))
+		dispatcherID, modeArgs(mode), modelArgs(model), readFileArg(promptPath))
 }
 
 // resumeCommand is launchCommand for a session that already exists: claude
@@ -24,13 +35,21 @@ func launchCommand(dispatcherID, prompt string, mode Mode, model Model) string {
 // which claude would read as a first message with nothing in it. The mode and
 // the model are passed again because both are properties of the new session,
 // not of the transcript it reopens.
-func resumeCommand(dispatcherID, sessionID, prompt string, mode Mode, model Model) string {
+func resumeCommand(dispatcherID, sessionID, promptPath string, mode Mode, model Model) string {
 	arg := ""
-	if prompt != "" {
-		arg = " " + shellQuote(prompt)
+	if promptPath != "" {
+		arg = " " + readFileArg(promptPath)
 	}
 	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s --resume %s%s; exec ${SHELL:-/bin/sh}",
 		dispatcherID, modeArgs(mode), modelArgs(model), shellQuote(sessionID), arg)
+}
+
+// readFileArg is the shell fragment that expands to a file's contents as ONE
+// argument. Double-quoted so the prompt's own whitespace, newlines and glob
+// characters survive; `$(cat)` drops trailing newlines, which is why the
+// prompt is trimmed before it is written rather than relying on this.
+func readFileArg(path string) string {
+	return `"$(cat ` + shellQuote(path) + `)"`
 }
 
 // modeArgs is the permission-mode flag as a leading-space-prefixed fragment,

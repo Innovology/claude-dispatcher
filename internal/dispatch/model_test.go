@@ -157,7 +157,7 @@ func TestLaunchAndResumeCarryTheModel(t *testing.T) {
 	withModes(t, parseModeNames(modernHelp))
 	withAliases(t, []string{"opus", "sonnet"})
 
-	launch := launchCommand("abc123", "do the thing", ModeAuto, Model("opus"))
+	launch := launchCommand("abc123", "/prompts/abc123.txt", ModeAuto, Model("opus"))
 	if !strings.Contains(launch, "--model opus") {
 		t.Errorf("launch command has no model flag:\n%s", launch)
 	}
