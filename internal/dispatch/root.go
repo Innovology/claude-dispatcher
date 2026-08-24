@@ -86,9 +86,11 @@ func (r Root) Hint() string {
 // launch.
 const fetchTimeout = 20 * time.Second
 
-// git runs a read-only git command with the terminal prompt disabled, so a
-// repo whose remote wants credentials fails fast instead of holding the launch
-// open until the timeout expires.
+// gitOut runs a git command in repoPath and returns its trimmed stdout, with
+// the terminal prompt disabled so a repo whose remote wants credentials fails
+// fast instead of holding the launch open until the timeout expires. Every
+// caller here either reads or refreshes remote-tracking refs; none of them
+// touches a branch, a worktree or the human's config.
 func gitOut(repoPath string, timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
