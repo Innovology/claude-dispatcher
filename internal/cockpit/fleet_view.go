@@ -391,7 +391,7 @@ const fleetWhyLines = 2
 // knowable from a model id) and the design's check trend (one sample cannot
 // make a trend).
 func fleetMeta(r fleetRow) string {
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 7)
 	for _, p := range []string{
 		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode),
 		fleetRootLine(r.root), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
