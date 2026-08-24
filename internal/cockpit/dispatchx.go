@@ -561,14 +561,9 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, root, fanOut)
 }
 
-// dxLaunch is the launch dxSubmit hands off to, named as a variable so a test
-// can read what the form actually passes without starting a real dispatcher.
-//
-// The hand-off is where the truncated prompt got out, and it was invisible to
-// every test the form had: those assert the form's own state, and the form's
-// state was correct — m.dxWhat held the whole sentence the entire time. Only the
-// two arguments leaving this function were wrong, and nothing looked at them.
-var dxLaunch = launchCmd
+// dxLaunch is the launch dxSubmit hands off to — see launchDispatch, which the
+// `+` overlay hands off to as well.
+var dxLaunch = launchDispatch
 
 // ---- view strings -------------------------------------------------------------
 
@@ -658,7 +653,7 @@ func (m model) dxRootProblem(repoName string, root dispatchpkg.Root) string {
 		if b.Name == string(root) {
 			return ""
 		}
-		if len(near) < 3 && strings.Contains(strings.ToLower(b.Name), want) {
+		if len(near) < 3 && dxRootNear(strings.ToLower(b.Name), want) {
 			near = append(near, b.Name)
 		}
 	}
@@ -666,6 +661,61 @@ func (m model) dxRootProblem(repoName string, root dispatchpkg.Root) string {
 		return "no branch " + string(root) + " in " + repoName + " — did you mean " + strings.Join(near, ", ") + "?"
 	}
 	return "no branch " + string(root) + " in " + repoName + " — clear it to cut from the default branch"
+}
+
+// dxRootNear reports whether branch is close enough to what was typed to be
+// worth naming as a "did you mean".
+//
+// Substring either way catches the half-typed name and the extra segment. The
+// edit distance catches what a substring test cannot see at all — the mistyped
+// one, which is the case this exists for: "realese/24" shares only two
+// characters with "release/24" before it diverges, so no prefix or containment
+// rule finds it, and two edits do.
+func dxRootNear(branch, want string) bool {
+	if strings.Contains(branch, want) || strings.Contains(want, branch) {
+		return true
+	}
+	return dxEditDistance(branch, want) <= dxRootTypos
+}
+
+// dxRootTypos is how many edits still counts as "did you mean". Two catches a
+// transposition, a doubled letter and a dropped one; past that the suggestions
+// stop being about what was typed.
+const dxRootTypos = 2
+
+// dxEditDistance is Levenshtein distance, capped: anything past dxRootTypos is
+// reported as dxRootTypos+1, since the caller only ever compares against the
+// threshold and a branch list is walked in full on every submit.
+func dxEditDistance(a, b string) int {
+	over := dxRootTypos + 1
+	if d := len(a) - len(b); d > dxRootTypos || d < -dxRootTypos {
+		return over
+	}
+	// One row of the matrix, rolled forward.
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		best := cur[0]
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = mini(mini(cur[j-1]+1, prev[j]+1), prev[j-1]+cost)
+			best = mini(best, cur[j])
+		}
+		if best > dxRootTypos {
+			// Every path through this row is already too far; nothing later can
+			// bring it back under the threshold.
+			return over
+		}
+		prev, cur = cur, prev
+	}
+	return mini(prev[len(b)], over)
 }
 
 // dxModeGap separates the positions on a switch line.

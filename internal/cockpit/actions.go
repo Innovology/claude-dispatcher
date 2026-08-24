@@ -281,6 +281,18 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 	}
 }
 
+// launchDispatch is the seam both dispatch forms hand off through, named as a
+// variable so a test can read what a form actually passes without starting a
+// real dispatcher.
+//
+// The hand-off is where the truncated prompt got out, and it was invisible to
+// every test the dx form had: those assert the form's own state, and the form's
+// state was correct — m.dxWhat held the whole sentence the entire time. Only the
+// two arguments leaving that function were wrong, and nothing looked at them.
+// The `+` overlay goes through the same seam for the same reason: the choice
+// that matters is the one that leaves the form, not the one on its screen.
+var launchDispatch = launchCmd
+
 // launchFailed is the one place a failed dispatch is reported from, so the
 // footer and the row it leaves behind can never say different things. The
 // notice wears the prefix; the row carries the reason as it was given.

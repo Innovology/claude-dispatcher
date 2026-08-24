@@ -5,8 +5,8 @@ package cockpit
 // ported into v2 so ad-hoc work can be dispatched without a backlog ticket.
 // Open it with `+` or the palette's "dispatch" / "new dispatch" command. Like
 // settings, it lives behind a pointer on the model so its textinputs keep focus
-// state across value-receiver Update copies. Submitting hands off to launchCmd,
-// which does the real dispatch.
+// state across value-receiver Update copies. Submitting hands off to
+// launchDispatch, which does the real dispatch.
 //
 // ROOT, MODE, MODEL and FAN OUT are steps of their own rather than defaults
 // this overlay picks quietly. MODE and MODEL reach the process as launch flags
@@ -63,7 +63,7 @@ type dispatchForm struct {
 	// roots are the picked repo's branches, read once when the repo is chosen
 	// rather than per keystroke: this is a git call, and the list cannot change
 	// under a human who is looking at it.
-	rootSel   int             // step 3: cursor into rootOptions()
+	rootSel   int // step 3: cursor into rootOptions()
 	roots     []dispatchpkg.RootChoice
 	modeSel   int             // step 4: cursor into dispatchpkg.Modes()
 	modelSel  int             // step 5: cursor into dispatchpkg.Models()
@@ -129,20 +129,20 @@ func (df *dispatchForm) root() dispatchpkg.Root {
 	return dispatchpkg.Root(vis[clampCursor(df.rootSel, len(vis))].name).Normalize()
 }
 
-// mode is the permission mode step 3 has landed on. The cursor is the state
+// mode is the permission mode step 4 has landed on. The cursor is the state
 // and the mode is derived from it, so the two can never disagree.
 func (df *dispatchForm) mode() dispatchpkg.Mode {
 	all := dispatchpkg.Modes()
 	return all[clampCursor(df.modeSel, len(all))]
 }
 
-// mdl is the model step 4 has landed on — same cursor-is-the-state shape.
+// mdl is the model step 5 has landed on — same cursor-is-the-state shape.
 func (df *dispatchForm) mdl() dispatchpkg.Model {
 	all := dispatchpkg.Models()
 	return all[clampCursor(df.modelSel, len(all))]
 }
 
-// fanOut is whether step 5 chose fanning out.
+// fanOut is whether step 6 chose fanning out.
 func (df *dispatchForm) fanOut() bool { return df.fanoutSel == 1 }
 
 // dispatchFanoutOptions are FAN OUT's two answers, in offer order: staying
@@ -435,7 +435,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			// dispatch has to be on the triage table by the time the human gets
 			// there — see pending.go.
 			m = m.markPending(m.pendingFor(repo, feature, prompt)).fleetSync()
-			return m, launchCmd(m.cfg, repo, feature, prompt, mode, mdl, root, fanOut)
+			return m, launchDispatch(m.cfg, repo, feature, prompt, mode, mdl, root, fanOut)
 		default:
 			var cmd tea.Cmd
 			df.prompt, cmd = df.prompt.Update(m.inputMsg(k))
