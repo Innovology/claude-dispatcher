@@ -259,6 +259,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 ## How it works
 
 - Each dispatcher is an interactive `claude` session inside its own tmux session (`disp-<slug>`), started on a `feature/<slug>` branch. Sessions survive cockpit restarts; the cockpit is a stateless viewer over `~/.local/state/claude-dispatcher/`.
+- **The branch is cut from a branch that is actually there.** By default that is your repo's default branch as **origin** reports it — asked over the wire, not read from `refs/remotes/origin/HEAD`, which `git clone` writes once and no fetch ever updates: a repo that has since renamed or retired its default keeps naming the branch it left behind, and forking that either kills the launch or quietly puts a whole session's work on top of a dead branch. **ROOT** on either dispatch form overrides it — stack on another feature, or cut a fix from a release branch — and a name that is not a branch is refused by name rather than swapped for something else. The detail panel says what each dispatcher was cut from.
 - Status comes from **one** global Claude Code lifecycle hook (installed by `init` into `~/.claude/settings.json`). It maps events to states: working, needs you, blocked, done, exited.
 - **Fan-outs are visible.** When a session spins out subagents, the same hooks report each one starting and stopping. The dispatcher's row says `fan-out · 3 live` beside its CI signal while they run; the detail panel counts the turn (`fanned out 12 subagents` once they are home) and names the agent types. Installed with the other hooks; existing installs re-run `init` to get it.
 - Commits are attributed to dispatchers by **provenance** — each dispatch records the SHAs its feature branch produced (base tip at launch → branch tip). No trailers in your git history.
@@ -273,7 +274,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | key | action |
 |---|---|
 | `1`–`6` | switch lens (triage · products · backlog · usage · decisions · velocity) |
-| `+` | dispatch new work — repo → feature → prompt |
+| `+` | dispatch new work — repo → feature → root → mode → model → fan out → prompt |
 | `j` / `k` · `g` / `G` | move · first row · last row |
 | `f` | cycle the triage filter (all · wants you · needs a look · running · history) |
 | `h` | history — every dispatcher whose session is over; `enter` resumes one |
