@@ -199,6 +199,7 @@ type model struct {
 	dxTitle  string            // TITLE: the feature name, and the branch
 	dxWhat   string            // WHAT: the work — the prompt's body, wrapped as it is typed
 	dxGoal   string            // DONE WHEN: completion condition, optional
+	dxRoot   string            // ROOT: the branch to cut from; blank is the repo's default
 	dxMode   dispatchpkg.Mode  // MODE: auto / manual / plan — the session's permission mode
 	dxModel  dispatchpkg.Model // MODEL: default, or a claude alias — what the session runs
 	dxFanOut bool              // FAN OUT: may the session spread across agents when the task splits

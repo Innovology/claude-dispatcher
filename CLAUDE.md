@@ -19,12 +19,13 @@
     after two sessions collided in one working copy and a commit landed on
     the wrong branch.)
     - The feature branch is cut from the repo's **default branch as the
-      remote sees it** (`origin/HEAD`, falling back to origin/main, then
-      local), after a best-effort fetch — never from the repo's HEAD. Git's
-      default would inherit whatever branch the human left checked out, so a
-      dispatch would silently start on top of an unmerged feature and carry
-      it into its own PR. Created `--no-track`, or `git push` would refuse a
-      branch whose upstream has a different name.
+      remote sees it**, after a best-effort fetch — never from the repo's
+      HEAD. Git's default would inherit whatever branch the human left
+      checked out, so a dispatch would silently start on top of an unmerged
+      feature and carry it into its own PR. Created `--no-track`, or
+      `git push` would refuse a branch whose upstream has a different name.
+      Which branch that is comes from the **remote**, not from
+      `origin/HEAD` — see the root-branch decision below.
     - **One live dispatch per feature name.** The name is the key: the
       worktree path and the cockpit's record map are both keyed by it, so a
       second concurrent dispatch of a live name would put two sessions in one
@@ -147,6 +148,40 @@
   The `+` form's `CharLimit = 500` went with it: a silent truncation and a loud
   refusal are not two settings of one dial. Full record:
   `docs/adr/0009-a-dispatch-that-did-not-happen-is-a-thing-that-happened.md`.
+- **`origin/HEAD` is a cache, not an answer — and the root branch is a
+  choice.** Reported as "the dispatcher attempts to fork a dead branch", with
+  the launch that did it sitting in the event log 0009 had just added:
+  `git branch feature/validate-json-ld from origin/dev: fatal: not a valid
+  object name: 'origin/dev'`. `refs/remotes/origin/HEAD` is written **once, by
+  `git clone`**, and no fetch ever updates it, so a repo that has moved its
+  default branch — the trunk-based migration every one of these repos has had —
+  keeps naming the branch it left behind; `symbolic-ref` reports that name
+  whether or not anything is there, and `baseRef` handed it straight to
+  `git branch`. Measured on the reporting repo: origin/HEAD says `dev`, `dev`
+  was archived and deleted, and `ls-remote` says the remote's HEAD is `main`.
+  Two failures, and the quiet one is worse — the launch **dies** where the old
+  branch was pruned locally, and **succeeds on a dead branch** where it was
+  not, because a plain fetch never deletes a remote-tracking ref: the
+  dispatcher then spends its whole run on top of a retired base and nothing
+  anywhere says so, `BaseSHA` being a commit and a commit not saying which
+  branch it was the tip of. So the default is read from the **remote**
+  (`ls-remote --symref`), and every candidate after it — the local cache, the
+  conventional names, the checked-out HEAD — must **resolve to a commit**
+  before it is offered to git; nothing rewrites the human's `origin/HEAD`,
+  because resolving a base reads, it does not edit somebody's repo. And the
+  human gets to say: **ROOT** is on both dispatch forms — a filtered list step
+  on the `+` overlay, a typed field on the dx form (these repos carry 170-odd
+  branches each, which is a list you type at, not one you cycle), refusing an
+  unknown name *on the form* with the near misses named. Its default names **no
+  branch**, meaning "ask origin at launch", exactly as `ModelDefault` means
+  "pass no flag" — a form's only local answer is the very cache this is about.
+  A root named for a branch that already exists is refused rather than agreed
+  with and dropped, since a branch that exists is not re-cut from anywhere; the
+  ref it *was* cut from goes on the record (`Root`, e.g. `origin/main`). Stale
+  remote-tracking refs are deliberately **not** pruned: `--prune` edits the
+  human's repo and can strand commits, so the form may offer a branch origin
+  retired and the launch refuses it by name. Full record:
+  `docs/adr/0010-origin-head-is-a-cache-not-an-answer.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only
@@ -339,7 +374,9 @@
   finished dispatcher's session reopened with `claude --resume <session id>`
   in its own worktree (rebuilt if it was reclaimed). A session ending never
   loses a dispatcher — triage's `h` and the product panel's `H` tab list every
-  finished one and resume it.
+  finished one and resume it. `root.go` is where a feature branch starts: the
+  remote's own default, the human's named `Root`, and the branch list the forms
+  offer — and the reason none of it trusts `origin/HEAD`.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over

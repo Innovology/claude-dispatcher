@@ -370,9 +370,9 @@ const fleetWhyLines = 2
 
 // fleetMeta is the panel's status tail: how many turns it has taken, how full
 // its context was on the last assistant turn, which model ran it, the
-// permission mode it was dispatched in, and what its diff would have cost a
-// senior developer to write by hand. Each clause is dropped whole when its
-// source said nothing.
+// permission mode it was dispatched in, the branch it was cut from, and what
+// its diff would have cost a senior developer to write by hand. Each clause is
+// dropped whole when its source said nothing.
 //
 // The mode used to be in the list of things this line must never claim, because
 // nothing persisted it — it was a form field and not a record field, so any
@@ -391,10 +391,10 @@ const fleetWhyLines = 2
 // knowable from a model id) and the design's check trend (one sample cannot
 // make a trend).
 func fleetMeta(r fleetRow) string {
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 7)
 	for _, p := range []string{
 		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode),
-		fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
+		fleetRootLine(r.root), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
 	} {
 		if p != "" {
 			parts = append(parts, p)
@@ -410,6 +410,22 @@ func fleetModeLine(mode string) string {
 		return ""
 	}
 	return mode
+}
+
+// fleetRootLine names the branch this dispatcher's work was cut from.
+//
+// It sits with the mode because it is the same kind of fact — how the dispatch
+// was set up, not what the session has done — and it is here because a
+// dispatcher quietly forked from a branch that had been dead for months and no
+// screen could have shown it: the record kept the base commit, and a commit
+// does not say which branch it was the tip of. A record that cut nothing (a
+// re-dispatch picking up the branch it left behind) says nothing, as does one
+// written before this was recorded.
+func fleetRootLine(root string) string {
+	if root == "" {
+		return ""
+	}
+	return "from " + root
 }
 
 // fleetFanLine says the dispatch went out with the FAN OUT switch on. It sits

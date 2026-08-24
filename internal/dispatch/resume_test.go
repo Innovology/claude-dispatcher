@@ -46,7 +46,7 @@ func stubSessions(t *testing.T, s *stubSupervisor) {
 func finished(t *testing.T, repo string) *state.Dispatch {
 	t.Helper()
 	wt := filepath.Join(t.TempDir(), "worktrees", "acme", "payment-retry")
-	if err := ensureWorktree(repo, wt, "feature/payment-retry"); err != nil {
+	if _, err := ensureWorktree(repo, wt, "feature/payment-retry", DefaultRoot); err != nil {
 		t.Fatal(err)
 	}
 	transcript := filepath.Join(t.TempDir(), "sess-abc.jsonl")

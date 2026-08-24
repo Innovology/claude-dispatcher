@@ -11,6 +11,7 @@ package cockpit
 //	TITLE      what it is called: the feature name, and the branch
 //	WHAT       the work itself, wrapped over as many rows as it takes
 //	DONE WHEN  the completion condition, optional
+//	ROOT       the branch it is cut from — blank for the repo's default
 //	MODE       auto, manual or plan — what it may do without asking
 //	MODEL      default, or an alias the installed claude advertises
 //	FAN OUT    whether it may spread across agents when the task splits
@@ -29,6 +30,16 @@ package cockpit
 // nobody watching. It reaches the process now, as --permission-mode (see
 // dispatch/mode.go), which is also what lets it offer plan mode: plan is not
 // something a sentence can ask for.
+//
+// ROOT is a typed field rather than a switch because its choices belong to the
+// repo, not to the product: these repos carry 170-odd branches each, and a
+// switch cycles. Blank is the default and means "the repo's default branch, as
+// origin sees it", resolved at launch rather than filled in here — the local
+// answer to that question is a cache written at clone time, and trusting it is
+// what had dispatches forking branches that had been dead for months (see
+// dispatch/root.go). A name that is not a branch in the picked repo is refused
+// here, with the nearest branches named, rather than at the launch: by then the
+// form is gone and so is everything typed into it.
 //
 // MODEL reaches the process the same way MODE does — as a launch flag
 // (--model, see dispatch/model.go) — and its offer comes from the claude
@@ -68,6 +79,7 @@ const (
 	dxTitleF
 	dxWhatF
 	dxGoalF
+	dxRootF
 	dxModeF
 	dxModelF
 	dxFanoutF
@@ -96,6 +108,7 @@ func (m model) dxReset() model {
 	m.cqDispatch = false
 	m.dxField, m.dxRepo = dxWhereF, 0
 	m.dxFilter, m.dxTitle, m.dxWhat, m.dxGoal = "", "", "", ""
+	m.dxRoot = ""
 	m.dxMode = dispatchpkg.DefaultMode
 	m.dxModel, m.dxFanOut = dispatchpkg.DefaultModel, false
 	return m
@@ -111,14 +124,14 @@ func (m model) dxOpen(filter string) model {
 	return m
 }
 
-// dxTouched reports whether anything has been typed into the four text fields.
+// dxTouched reports whether anything has been typed into the five text fields.
 // It is what decides whether a navigation key is navigation or text: an
 // untouched form is not a trap, so 1–6, ':', 'd' and 'h' still leave it, but the
 // moment there is a filter or a sentence they are letters again. dxMode,
 // dxModel, dxFanOut and dxField deliberately do not count — cycling a switch or
 // tabbing about is not typing, and must not strand the human on this screen.
 func (m model) dxTouched() bool {
-	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != ""
+	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != "" || m.dxRoot != ""
 }
 
 // ---- the repo list -----------------------------------------------------------
@@ -423,6 +436,8 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxWhat = dxChop(m.dxWhat)
 		case dxGoalF:
 			m.dxGoal = dxChop(m.dxGoal)
+		case dxRootF:
+			m.dxRoot = dxChop(m.dxRoot)
 		}
 		return m, nil
 	}
@@ -439,6 +454,8 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxWhat += s
 		case dxGoalF:
 			m.dxGoal += s
+		case dxRootF:
+			m.dxRoot += s
 		}
 	}
 	// Everything else is swallowed: the form owns the keyboard, and a stray
@@ -483,6 +500,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	goal := strings.TrimSpace(m.dxGoal)
 	mode := m.dxMode.Normalize()
 	mdl := m.dxModel.Normalize()
+	root := dispatchpkg.Root(m.dxRoot).Normalize()
 	fanOut := m.dxFanOut
 	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal, mode)
 	if feature == "" {
@@ -495,6 +513,13 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	if strings.TrimSpace(m.dxWhat) == "" {
 		m.dxField = dxWhatF
 		m.notice = "say what it should do — the title alone is not a brief"
+		return m, nil
+	}
+	// Caught here rather than at the launch: a root that is not a branch is a
+	// typo nine times in ten, and the launch would refuse it after this form —
+	// and the sentence in it — had gone.
+	if bad := m.dxRootProblem(row.repo, root); bad != "" {
+		m.dxField, m.notice = dxRootF, bad
 		return m, nil
 	}
 	branch := m.dxBranch()
@@ -517,6 +542,11 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	if mdl != dispatchpkg.DefaultModel {
 		notice += " · " + string(mdl)
 	}
+	// Same rule as the model: named only when it was chosen. The default names
+	// no branch until the launch has asked origin which one it is.
+	if !root.IsDefault() {
+		notice += " · from " + string(root)
+	}
 	if fanOut {
 		notice += " · fans out"
 	}
@@ -528,17 +558,12 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	// table is empty. fleetSync re-keys the cursor over the row that just moved
 	// down; on an empty table it lands the cursor on the new row itself.
 	m = m.markPending(m.pendingFor(row.repo, feature, prompt)).fleetSync()
-	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, fanOut)
+	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, root, fanOut)
 }
 
-// dxLaunch is the launch dxSubmit hands off to, named as a variable so a test
-// can read what the form actually passes without starting a real dispatcher.
-//
-// The hand-off is where the truncated prompt got out, and it was invisible to
-// every test the form had: those assert the form's own state, and the form's
-// state was correct — m.dxWhat held the whole sentence the entire time. Only the
-// two arguments leaving this function were wrong, and nothing looked at them.
-var dxLaunch = launchCmd
+// dxLaunch is the launch dxSubmit hands off to — see launchDispatch, which the
+// `+` overlay hands off to as well.
+var dxLaunch = launchDispatch
 
 // ---- view strings -------------------------------------------------------------
 
@@ -590,6 +615,107 @@ func (m model) dxGoalHint() string {
 		return "it keeps working until this is true"
 	}
 	return "optional · leave empty and it does one pass, then waits for you"
+}
+
+// dxRootHint says what ROOT does and what leaving it blank means. Blank is the
+// answer for nearly every dispatch, so the hint names the default rather than
+// asking for a branch.
+func (m model) dxRootHint() string {
+	root := dispatchpkg.Root(m.dxRoot).Normalize()
+	if !root.IsDefault() {
+		return "cut from " + string(root) + " instead of the default branch"
+	}
+	return "optional · blank cuts from the repo's default branch, as origin sees it"
+}
+
+// dxRootProblem is ROOT's validation: the sentence to show when the typed
+// branch is not one this repo has, and "" when there is nothing to say.
+//
+// "Nothing to say" covers the case where we cannot check — a repo the scan has
+// not turned up yet has no path to read branches from, and a form that refused
+// a branch on the strength of a list it could not read would be worse than one
+// that let the launch answer. The launch checks too, and refuses out loud.
+func (m model) dxRootProblem(repoName string, root dispatchpkg.Root) string {
+	if root.IsDefault() {
+		return ""
+	}
+	r, ok := discoveredRepo(repoName)
+	if !ok {
+		return ""
+	}
+	branches := dispatchpkg.RootBranches(r.Path)
+	if len(branches) == 0 {
+		return ""
+	}
+	want := strings.ToLower(string(root))
+	var near []string
+	for _, b := range branches {
+		if b.Name == string(root) {
+			return ""
+		}
+		if len(near) < 3 && dxRootNear(strings.ToLower(b.Name), want) {
+			near = append(near, b.Name)
+		}
+	}
+	if len(near) > 0 {
+		return "no branch " + string(root) + " in " + repoName + " — did you mean " + strings.Join(near, ", ") + "?"
+	}
+	return "no branch " + string(root) + " in " + repoName + " — clear it to cut from the default branch"
+}
+
+// dxRootNear reports whether branch is close enough to what was typed to be
+// worth naming as a "did you mean".
+//
+// Substring either way catches the half-typed name and the extra segment. The
+// edit distance catches what a substring test cannot see at all — the mistyped
+// one, which is the case this exists for: "realese/24" shares only two
+// characters with "release/24" before it diverges, so no prefix or containment
+// rule finds it, and two edits do.
+func dxRootNear(branch, want string) bool {
+	if strings.Contains(branch, want) || strings.Contains(want, branch) {
+		return true
+	}
+	return dxEditDistance(branch, want) <= dxRootTypos
+}
+
+// dxRootTypos is how many edits still counts as "did you mean". Two catches a
+// transposition, a doubled letter and a dropped one; past that the suggestions
+// stop being about what was typed.
+const dxRootTypos = 2
+
+// dxEditDistance is Levenshtein distance, capped: anything past dxRootTypos is
+// reported as dxRootTypos+1, since the caller only ever compares against the
+// threshold and a branch list is walked in full on every submit.
+func dxEditDistance(a, b string) int {
+	over := dxRootTypos + 1
+	if d := len(a) - len(b); d > dxRootTypos || d < -dxRootTypos {
+		return over
+	}
+	// One row of the matrix, rolled forward.
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		best := cur[0]
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = mini(mini(cur[j-1]+1, prev[j]+1), prev[j-1]+cost)
+			best = mini(best, cur[j])
+		}
+		if best > dxRootTypos {
+			// Every path through this row is already too far; nothing later can
+			// bring it back under the threshold.
+			return over
+		}
+		prev, cur = cur, prev
+	}
+	return mini(prev[len(b)], over)
 }
 
 // dxModeGap separates the positions on a switch line.
@@ -716,6 +842,9 @@ func (m model) dxSummary() string {
 		return "pick a repo to dispatch into"
 	}
 	s := row.repo + " · " + m.dxBranch() + " · " + m.dxMode.Summary()
+	if root := dispatchpkg.Root(m.dxRoot).Normalize(); !root.IsDefault() {
+		s += " · from " + string(root)
+	}
 	if mdl := m.dxModel.Normalize(); mdl != dispatchpkg.DefaultModel {
 		s += " · " + string(mdl)
 	}
@@ -785,6 +914,8 @@ func (m model) dxView(w, h int) string {
 		cqFixed(m.dxFieldRow(inner, "DONE WHEN", m.dxGoal, m.dxField == dxGoalF, "")),
 		cqFixed(dxHintRow(inner, m.dxGoalHint())),
 		cqGap(8),
+		cqFixed(m.dxFieldRow(inner, "ROOT", m.dxRoot, m.dxField == dxRootF, "")),
+		cqFixed(dxHintRow(inner, m.dxRootHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModeF, "MODE", dxModeWords(), m.dxModeSel(), m.dxModeHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModelF, "MODEL", dxModelWords(), m.dxModelSel(), m.dxModelHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxFanoutF, "FAN OUT", dxFanoutWords(), m.dxFanoutSel(), m.dxFanoutHint())),

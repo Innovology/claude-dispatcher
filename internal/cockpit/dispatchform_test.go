@@ -73,7 +73,8 @@ func TestDispatchFormAcceptsBurstTyping(t *testing.T) {
 	if got := m.dispatchForm.feature.Value(); got != "payment retry flow" {
 		t.Fatalf("feature = %q", got)
 	}
-	m = press(m, "enter") // → mode
+	m = press(m, "enter") // → root
+	m = press(m, "enter") // take the default → mode
 	m = press(m, "enter") // take the default → model
 	m = press(m, "enter") // take the default → fan out
 	m = press(m, "enter") // take the default and go on to the prompt
@@ -172,11 +173,26 @@ func TestDispatchFormFlow(t *testing.T) {
 	}
 	m = typeStr(m, "csv export")
 	m = press(m, "enter")
-	if m.dispatchForm.step != dispatchMode {
-		t.Fatalf("after feature name, step = %d, want mode", m.dispatchForm.step)
+	if m.dispatchForm.step != dispatchRoot {
+		t.Fatalf("after feature name, step = %d, want root", m.dispatchForm.step)
 	}
 
-	// Step 3: the mode list opens on the default and every mode is on screen —
+	// Step 3: root opens on "default", which names no branch: the repo's own
+	// default is resolved from the remote at launch. A form that filled a branch
+	// in here would be reading the same local cache that had dispatches forking
+	// branches that had been deleted months earlier.
+	if got := m.dispatchForm.root(); got != dispatchpkg.RootDefault {
+		t.Fatalf("root opened on %q, want the default", got)
+	}
+	if !strings.Contains(m.View(), "default") {
+		t.Error("the root step does not offer the default")
+	}
+	m = press(m, "enter")
+	if m.dispatchForm.step != dispatchMode {
+		t.Fatalf("after root, step = %d, want mode", m.dispatchForm.step)
+	}
+
+	// Step 4: the mode list opens on the default and every mode is on screen —
 	// a three-way choice shown one value at a time hides two thirds of itself.
 	if got := m.dispatchForm.mode(); got != dispatchpkg.DefaultMode {
 		t.Fatalf("mode opened on %q, want the default", got)
@@ -202,7 +218,7 @@ func TestDispatchFormFlow(t *testing.T) {
 		t.Fatalf("after mode, step = %d, want model", m.dispatchForm.step)
 	}
 
-	// Step 4: the model list opens on the default — no flag at all — and every
+	// Step 5: the model list opens on the default — no flag at all — and every
 	// offered model is on screen.
 	if got := m.dispatchForm.mdl(); got != dispatchpkg.DefaultModel {
 		t.Fatalf("model opened on %q, want the default", got)
@@ -218,7 +234,7 @@ func TestDispatchFormFlow(t *testing.T) {
 		t.Fatalf("after model, step = %d, want fan out", m.dispatchForm.step)
 	}
 
-	// Step 5: fan out opens on solo, and down arms it — the choice is what
+	// Step 6: fan out opens on solo, and down arms it — the choice is what
 	// reaches the launch.
 	if m.dispatchForm.fanOut() {
 		t.Fatal("fan out opened armed, want solo")
@@ -236,7 +252,7 @@ func TestDispatchFormFlow(t *testing.T) {
 		t.Fatal("prompt step render empty")
 	}
 
-	// Step 6: empty prompt is rejected, then submitting launches and closes.
+	// Step 7: empty prompt is rejected, then submitting launches and closes.
 	m = press(m, "enter")
 	if m.dispatchForm == nil || m.dispatchForm.errMsg == "" {
 		t.Fatal("empty prompt should be rejected and keep the form open")
@@ -256,7 +272,7 @@ func TestDispatchFormFlow(t *testing.T) {
 }
 
 // TestDispatchFormEscBacksOut walks the esc chain: prompt → fan out → model →
-// mode → feature → repo → closed, mirroring the classic form's back
+// mode → root → feature → repo → closed, mirroring the classic form's back
 // navigation.
 func TestDispatchFormEscBacksOut(t *testing.T) {
 	root := seedRepoRoot(t, "api")
@@ -270,6 +286,7 @@ func TestDispatchFormEscBacksOut(t *testing.T) {
 	m = press(m, "+")
 	m = press(m, "enter") // pick the only repo
 	m = typeStr(m, "thing")
+	m = press(m, "enter") // → root
 	m = press(m, "enter") // → mode
 	m = press(m, "enter") // → model
 	m = press(m, "enter") // → fan out
@@ -290,8 +307,12 @@ func TestDispatchFormEscBacksOut(t *testing.T) {
 		t.Fatal("esc from model should go back to mode")
 	}
 	m = press(m, "esc")
+	if m.dispatchForm.step != dispatchRoot {
+		t.Fatal("esc from mode should go back to root")
+	}
+	m = press(m, "esc")
 	if m.dispatchForm.step != dispatchFeature {
-		t.Fatal("esc from mode should go back to feature")
+		t.Fatal("esc from root should go back to feature")
 	}
 	if got := strings.TrimSpace(m.dispatchForm.feature.Value()); got != "thing" {
 		t.Fatalf("feature value lost on back-nav: %q", got)

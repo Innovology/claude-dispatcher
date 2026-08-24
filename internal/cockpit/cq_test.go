@@ -327,12 +327,12 @@ func TestCQFormFallThrough(t *testing.T) {
 	}
 }
 
-// Enter walks the five fields and only submits from the last one; esc abandons
+// Enter walks the fields and only submits from the last one; esc abandons
 // the whole form.
 func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxModeF} {
+	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxRootF, dxModeF} {
 		m = press(m, "enter")
 		if m.dxField != want {
 			t.Fatalf("enter should advance to field %d, got %d", want, m.dxField)
@@ -402,7 +402,7 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 
 	var gotFeature, gotPrompt string
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ bool) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool) tea.Cmd {
 		gotFeature, gotPrompt = feature, prompt
 		return nil
 	}

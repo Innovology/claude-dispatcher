@@ -166,7 +166,7 @@ func TestDXModeLineMarksTheArmedModeWithoutColour(t *testing.T) {
 func TestDXSubmitPassesTheMode(t *testing.T) {
 	var got dispatchpkg.Mode
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, _, _ string, mode dispatchpkg.Mode, _ dispatchpkg.Model, _ bool) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, _, _ string, mode dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool) tea.Cmd {
 		got = mode
 		return nil
 	}
@@ -195,7 +195,7 @@ func TestDXSubmitPassesModelAndFanOut(t *testing.T) {
 	var gotModel dispatchpkg.Model
 	var gotFan bool
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, mdl dispatchpkg.Model, fanOut bool) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, mdl dispatchpkg.Model, _ dispatchpkg.Root, fanOut bool) tea.Cmd {
 		gotModel, gotFan = mdl, fanOut
 		return nil
 	}

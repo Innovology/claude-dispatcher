@@ -255,9 +255,9 @@ func resumeCmd(id, prompt string) tea.Cmd {
 }
 
 // launchCmd dispatches a new feature into repoName with prompt, in the
-// permission mode the form chose, on the model it chose, fanning out across
-// agents if the form asked for that.
-func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, fanOut bool) tea.Cmd {
+// permission mode the form chose, on the model it chose, cut from the root
+// branch it chose, fanning out across agents if the form asked for that.
+func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, fanOut bool) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
 			return launchFailed(feature, "no config — cannot dispatch")
@@ -273,13 +273,25 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 		if found == nil {
 			return launchFailed(feature, "repo not found: "+repoName)
 		}
-		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, fanOut)
+		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, root, fanOut)
 		if err != nil {
 			return launchFailed(feature, err.Error())
 		}
 		return launchedMsg{feature: feature, notice: "dispatched \"" + d.Feature + "\" → " + d.RepoName}
 	}
 }
+
+// launchDispatch is the seam both dispatch forms hand off through, named as a
+// variable so a test can read what a form actually passes without starting a
+// real dispatcher.
+//
+// The hand-off is where the truncated prompt got out, and it was invisible to
+// every test the dx form had: those assert the form's own state, and the form's
+// state was correct — m.dxWhat held the whole sentence the entire time. Only the
+// two arguments leaving that function were wrong, and nothing looked at them.
+// The `+` overlay goes through the same seam for the same reason: the choice
+// that matters is the one that leaves the form, not the one on its screen.
+var launchDispatch = launchCmd
 
 // launchFailed is the one place a failed dispatch is reported from, so the
 // footer and the row it leaves behind can never say different things. The

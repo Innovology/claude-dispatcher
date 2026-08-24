@@ -60,6 +60,13 @@ type Dispatch struct {
 	RepoName string `json:"repo_name"`
 	Product  string `json:"product,omitempty"`
 	Branch   string `json:"branch"`
+	// Root is the ref Branch was cut from, short — "origin/main". It is the
+	// answer to "what is this work on top of", which nothing else on the record
+	// gives: BaseSHA is the commit, and a commit does not say which branch it
+	// was the tip of. Empty when the branch already existed and this dispatch
+	// picked it up rather than cutting it, and on records written before a
+	// dispatch recorded where it started.
+	Root string `json:"root,omitempty"`
 	// WorktreePath is the dispatch's own checkout of Branch (a git worktree
 	// under WorktreesDir); the claude session runs there so concurrent
 	// dispatches never fight over the repo's working copy. RepoPath stays the

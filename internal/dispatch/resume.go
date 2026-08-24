@@ -113,7 +113,13 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		if d.RepoPath == "" || d.Branch == "" {
 			return "", "", fmt.Errorf("%s is gone and there is not enough on the record to rebuild it", dir)
 		}
-		if err := ensureWorktree(d.RepoPath, dir, d.Branch); err != nil {
+		// RootDefault, not d.Root: a rebuild is meant to put the branch that
+		// already exists back on disk, and if it has gone too, the dispatcher is
+		// being restarted from the current default rather than from wherever it
+		// once began. Naming the recorded root here would refuse the rebuild
+		// outright (see reusedRootErr) in the common case where the branch is
+		// still there.
+		if _, err := ensureWorktree(d.RepoPath, dir, d.Branch, RootDefault); err != nil {
 			return "", "", fmt.Errorf("rebuild %s: %w", dir, err)
 		}
 		InheritTrust(d.RepoPath, dir)
