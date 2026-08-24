@@ -47,6 +47,12 @@ type Root string
 // RootDefault resolves at launch rather than naming a branch. A form cannot
 // know a repo's default branch without going to the network, and a form that
 // guessed would be writing the very cache this file exists to distrust.
+//
+// It costs one branch name: a repo with a branch literally called "default"
+// cannot be cut from it by name, because Normalize reads the word as the
+// choice. That is the same trade `ModelDefault` makes with an alias called
+// "default", and the alternative — a second field saying which kind of answer
+// this is — is machinery for a branch nobody has.
 const RootDefault Root = "default"
 
 // DefaultRoot is what a dispatch is cut from when nothing chose.
