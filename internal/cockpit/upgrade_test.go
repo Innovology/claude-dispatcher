@@ -175,6 +175,20 @@ func TestUpgradeBarRendersOverAnOverlay(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.View()), "upgrading") {
 		t.Error("the upgrade bar disappeared behind the dispatch form")
 	}
+
+	// And at every width: the caption is up to 90 columns of somebody else's
+	// output, so a bar that did not clip would wrap and corrupt the alt screen.
+	m.upgrade.say(strings.Repeat("Downloading a very long cask url ", 6))
+	for _, w := range smokeWidths {
+		m.width = w
+		bar := ansi.Strip(m.upgradeBar())
+		if strings.Contains(bar, "\n") {
+			t.Errorf("@%d: the bar is more than one line: %q", w, bar)
+		}
+		if got := dispWidth(bar); got > w {
+			t.Errorf("@%d: the bar is %d columns wide: %q", w, got, bar)
+		}
+	}
 }
 
 // TestUpgradeKeyRefusesWhatItCannotDo covers the two ways U is a no-op, each of

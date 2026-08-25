@@ -268,8 +268,13 @@ func (m model) startUpgrade() (model, tea.Cmd) {
 	}
 	if m.upgrade != nil {
 		// One at a time, and saying so: a second U during a download must not
-		// start a second package manager on the same install.
+		// start a second package manager on the same install. A settled run says
+		// what it is actually waiting on, which is them.
 		m.notice = "already upgrading — " + strings.Join(m.upgrade.cmd, " ")
+		if m.upgrade.settled() {
+			m.notice = "upgraded to " + version.Label(m.upgrade.to) +
+				" — restarting as soon as you are done here"
+		}
 		return m, nil
 	}
 	if m.upgradeTo == "" {
