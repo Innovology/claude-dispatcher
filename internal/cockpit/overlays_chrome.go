@@ -67,7 +67,7 @@ var helpSections = []struct {
 	{section: "anywhere", keys: []struct{ k, d string }{
 		{",", "settings"},
 		{"+", "new dispatch, repo first"},
-		{"U", "upgrade to the published build, in place"},
+		{"U", "upgrade to the published build — behind the cockpit, in place"},
 		{"ctrl+l", "redraw a garbled screen"},
 		{"q", "quit"},
 	}},

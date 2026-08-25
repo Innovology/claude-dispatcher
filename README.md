@@ -134,16 +134,23 @@ hook survives upgrades and you do not have to re-run it after every rebuild.
 ## Upgrading
 
 When a newer release exists, the cockpit says so in the bottom-right corner.
-Press **`U`**: it names the exact command, asks, hands the terminal to your
-package manager so you can watch it work, then restarts itself in place —
+Press **`U`** and it happens: your package manager runs behind the cockpit —
+answering none of its own questions to you, because there is no terminal for
+them to appear on — and all of it on screen is one bar above the footer, with
+the manager's own last line beside a meter. Then it restarts itself in place,
 same terminal, same tmux pane. Your dispatchers are tmux sessions and are not
 touched by any of this.
+
+Nothing is asked, and nothing is taken away either: a build that lands while
+you are part-way through a dispatch prompt waits until you are done with it
+before restarting. A failed upgrade leaves you where you were and puts the
+package manager's own reason in the footer.
 
 The corner is fed by a cached check (a few hours old at most, so the cockpit
 does not chatter at GitHub). Pressing `U` when it shows nothing does not repeat
 that cache — it goes and looks, and if a release did go out in the meantime it
-takes you straight to the same confirm. So `U` is always worth a press, and
-"`v3.2.3` is the latest" is only ever said about a check that just ran.
+upgrades to it. So `U` is always worth a press, and "`v3.2.3` is the latest" is
+only ever said about a check that just ran.
 
 Which command it runs is read from the running binary's own path, not guessed
 from your OS:
@@ -154,7 +161,7 @@ from your OS:
 | Homebrew formula | `brew upgrade claude-dispatcher` |
 | `nix profile install` | `nix profile upgrade claude-dispatcher` |
 | scoop | `scoop update claude-dispatcher` |
-| winget | `winget upgrade --id Innovology.claude-dispatcher` |
+| winget | `winget upgrade --id Innovology.claude-dispatcher` (plus the three flags that stop it asking) |
 
 A **declarative** Nix install — home-manager, a NixOS module, a flake input —
 is deliberately left alone: the version lives in a file you own, and an
@@ -283,7 +290,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `p` | park an ask with a reason · on a parked row, take it back up |
 | `d` · `ctrl+z` | dispatch · put back the last thing you cleared |
 | `,` · `:` · `?` | settings · command palette · all keys |
-| `U` | upgrade to the published build and come straight back |
+| `U` | upgrade to the published build — runs behind the cockpit, then comes straight back on the new build |
 | `q` | quit |
 
 
