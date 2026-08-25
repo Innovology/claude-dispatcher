@@ -27,7 +27,7 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship" | "upgrade"
+	kind          string // "kill" | "ship"
 	feature, repo string
 	features      []string // kill targets (marked set, or the one selected)
 }
@@ -84,6 +84,12 @@ type model struct {
 	// from opening a second network call while the first is still out — the
 	// notice already says we are looking.
 	upgradeChecking bool
+
+	// upgrade is the package manager running behind the cockpit, and — once it
+	// has finished — the exec waiting for a moment that takes nothing away. A
+	// pointer, because the goroutine reading the command's output writes to it
+	// while Bubble Tea copies the model around it. See upgrade.go.
+	upgrade *upgradeRun
 
 	shipCursor    int
 	historyCursor int
@@ -390,7 +396,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.upgradeTo = msg.latest
 			if msg.forced {
 				// They pressed U to upgrade, not to be told an upgrade exists.
-				// The confirm bar still asks before anything runs.
 				m.notice = ""
 				return m.startUpgrade()
 			}
@@ -406,15 +411,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case upgradeRanMsg:
 		if msg.err != nil {
-			m.notice = upgradeFailed(m.install, msg.err)
+			// The package manager's output is no longer on screen — it went to
+			// the bar's caption — so the notice carries its own last word rather
+			// than pointing at a scrollback that does not have it.
+			m.notice = upgradeFailed(m.install, msg.err, msg.detail)
+			m.upgrade = nil
 			return m, nil
 		}
 		// The binary on disk is now the new one, but this process is still the
 		// old one — a running program cannot become a different program. Quit
 		// and let Run exec what was just installed, which keeps the human in the
 		// same terminal rather than making them start the cockpit again.
+		if m.upgrade != nil {
+			m.upgrade.settle()
+		}
+		if m.inputPending() {
+			// Not while they are typing. The run stays on the model saying so,
+			// and the tick — which arrives whoever has the keyboard — execs at
+			// the first moment there is nothing to lose.
+			return m, upgradeTick()
+		}
 		m.relaunch = true
 		return m, tea.Quit
+
+	case upgradeTickMsg:
+		if m.upgrade == nil {
+			return m, nil // the run failed, and its tick retires with it
+		}
+		m.upgrade.frame++
+		if m.upgrade.settled() && !m.inputPending() {
+			m.relaunch = true
+			return m, tea.Quit
+		}
+		return m, upgradeTick()
 
 	case trackedMsg:
 		return m.requestLoad(loadPlain)
@@ -553,10 +582,6 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		mm, tick := m.startShip(x)
 		mm2, undo := mm.offerUndo("ship " + c.feature)
 		return mm2, tea.Batch(tick, shipCmd(c.feature), undo)
-	case "upgrade":
-		// No undo is offered: the package manager owns what happens next, and
-		// an offer to undo something we cannot undo would be a lie.
-		return m, upgradeRunCmd(m.install)
 	}
 	return m, nil
 }

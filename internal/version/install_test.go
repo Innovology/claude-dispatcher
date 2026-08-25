@@ -66,7 +66,10 @@ func TestClassify(t *testing.T) {
 		{
 			name: "winget",
 			path: `C:\Users\alex\AppData\Local\Microsoft\WinGet\Packages\Innovology.claude-dispatcher_x\claude-dispatcher.exe`,
-			want: MethodWinget, cmd: "winget upgrade --id Innovology.claude-dispatcher", canUpg: true,
+			want: MethodWinget,
+			cmd: "winget upgrade --id Innovology.claude-dispatcher " +
+				"--accept-package-agreements --accept-source-agreements --disable-interactivity",
+			canUpg: true,
 		},
 		{
 			name: "a binary someone built and copied",
@@ -181,6 +184,48 @@ func TestEnvForcesHomebrewRefresh(t *testing.T) {
 	// invocation.
 	if nix := (Install{Method: MethodNixProfile}).Env(); len(nix) != len(os.Environ()) {
 		t.Error("a non-homebrew install must inherit the environment unchanged")
+	}
+}
+
+// The upgrade runs behind the cockpit with no terminal on it, so the one thing
+// the command must never do is ask a question. Homebrew 4.6 made ask mode the
+// default — `brew upgrade` stops on "Proceed? [Y/n]" — and the switch that
+// turns it off has to be the environment variable rather than the `-y` it
+// shares a help entry with: a brew too old to know the flag fails on an unknown
+// option, where the same brew simply ignores the variable.
+func TestEnvSilencesHomebrewsAsk(t *testing.T) {
+	for _, m := range []Method{MethodBrewCask, MethodBrewFormula} {
+		t.Setenv("HOMEBREW_NO_ASK", "")
+		env := Install{Method: m}.Env()
+		var n int
+		for _, kv := range env {
+			if strings.HasPrefix(kv, "HOMEBREW_NO_ASK=") {
+				n++
+				if kv != "HOMEBREW_NO_ASK=1" {
+					t.Errorf("%s: ask mode left on by %q", m, kv)
+				}
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s: HOMEBREW_NO_ASK appears %d times, want exactly 1", m, n)
+		}
+	}
+}
+
+// winget asks twice before it will install anything — once for the source
+// agreement on a machine that has never used it, once for the package's own —
+// and can hand off to an installer with UI of its own. Nobody is watching, so
+// all three are refused on the command line.
+func TestWingetIsNonInteractive(t *testing.T) {
+	cmd := strings.Join(classify(
+		`C:\Users\alex\AppData\Local\Microsoft\WinGet\Packages\x\claude-dispatcher.exe`,
+		noNixProfile).Cmd, " ")
+	for _, flag := range []string{
+		"--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity",
+	} {
+		if !strings.Contains(cmd, flag) {
+			t.Errorf("winget command can still stop and ask: %s missing from %q", flag, cmd)
+		}
 	}
 }
 

@@ -154,9 +154,19 @@ func (m model) footerHelp() string {
 	return "1 triage"
 }
 
-// barsView renders the confirm bar that sits above the footer.
+// barsView renders the bars that sit above the footer: the upgrade running
+// behind the cockpit, and the confirm.
+//
+// The upgrade goes above the confirm, not below it: the confirm is the line
+// holding the keyboard, so it stays nearest the footer that names its keys.
+// Both render over an overlay as well as over a lens — an upgrade running while
+// the dispatch form is open is exactly the case the bar exists for, and a bar
+// that vanished when a form opened would read as an upgrade that had stopped.
 func (m model) barsView() string {
 	var lines []string
+	if m.upgrade != nil {
+		lines = append(lines, m.upgradeBar())
+	}
 	if m.confirm != nil {
 		left := fg(cAmber, "confirm") + "  " + fg(cWhite, m.confirm.label)
 		right := fg(cWhite, "y") + fg(cDim, " do it · ") + fg(cWhite, "n") + fg(cDim, " cancel")

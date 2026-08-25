@@ -252,6 +252,38 @@
   must not be one slipped shift from upgrading the machine in place, so it is
   a chord. That also frees `u` for the editor's unassign, which the global
   undo used to steal whenever a triage act had left something undoable.
+- **An upgrade nobody is watching must not ask.** `U` was a confirm bar, then
+  the terminal handed to the package manager the way `enter` hands it to tmux,
+  then the re-exec. Homebrew 4.6 made ask mode the default, so the sequence had
+  become: press `U`, agree, lose the screen, and be asked again by `brew` —
+  two questions and a screen wipe for one keystroke that meant yes. The confirm
+  existed *because* of the handover (it was a warning as much as a question),
+  so the handover going takes it with it. The command runs behind the cockpit
+  now, which makes "cannot ask" a correctness requirement rather than a
+  courtesy: there is no terminal for a prompt to appear on and nobody to answer
+  it, so a manager that stopped to ask would hang forever behind a spinning
+  bar. Every question is therefore refused in advance —
+  **`HOMEBREW_NO_ASK=1` in the child's environment** rather than the `-y` it
+  shares a help entry with (an unknown flag fails the whole upgrade where an
+  unknown variable is ignored — the same rule as claude's `--permission-mode`),
+  winget's three accept/no-interactivity flags, and stdin at `/dev/null` as the
+  backstop under both. All of it on screen is **one bar above the footer**,
+  and everything on that bar is measured: the meter is indeterminate by
+  construction (a fixed lit run sliding and wrapping — the manager does not say
+  how far through it is, and a bar filling to a schedule we invented is the
+  fabricated figure this cockpit refuses everywhere else), and the words beside
+  it are the manager's own last line, quoted — pumps that break on `\r` as well
+  as `\n`, or a download's percentage never reaches the screen at all. Owning
+  the reporting also means a failure carries the manager's own `Error:` line
+  into the notice, since it is no longer on a terminal anywhere. And the
+  **exec waits for anything it would take away**: it replaces the process, so a
+  build that lands while a dispatch prompt is half-typed holds
+  (`model.inputPending`, released by the meter's own tick — the one message
+  that arrives whoever has the keyboard) rather than taking it. Reading
+  overlays are deliberately not on that list: help left open at lunch must not
+  stop an upgrade from ever landing. No timeout — killing a package manager
+  part-way through an install is the one outcome worse than a stale binary.
+  Full record: `docs/adr/0011-an-upgrade-nobody-is-watching-must-not-ask.md`.
 - **Amber is a claim about the human, not about CI.** The triage table used to
   mark a *running* dispatcher amber (◆, "green in ci and still not merged")
   the moment its PR's checks went green — while the session was busy doing
@@ -420,8 +452,8 @@
     an answer this build recorded.
   - **`U` with nothing on offer checks rather than reciting the cache**
     (`version.Recheck`). The ambient answer is hours old by design, and a human
-    presses `U` precisely when they think it is behind. Finding a release goes
-    straight to the confirm — they pressed it to upgrade, not to be told.
+    presses `U` precisely when they think it is behind. Finding a release
+    upgrades to it — they pressed it to upgrade, not to be told.
 
 ## Build
 `make build` / `make vet` / `make install` (binary to ~/.local/bin — the init
