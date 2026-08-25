@@ -632,8 +632,19 @@ func TestUpgradeRunCmdAgainstARealProcess(t *testing.T) {
 		}
 	})
 
-	t.Run("output from both streams reaches the caption", func(t *testing.T) {
-		_, r := run(t, `echo "==> Downloading"; printf '### 40%%\r### 90%%\r' ; echo "==> Installed" >&2`)
+	// Each stream is asserted on its own. Which of the two lands last is not
+	// ours to promise — they are separate pipes with a pump each, and the order
+	// they interleave in is the kernel's; a test that asserted one had the last
+	// word passed here and failed on CI.
+	t.Run("stdout reaches the caption, progress and all", func(t *testing.T) {
+		_, r := run(t, `echo "==> Downloading"; printf '### 40%%\r### 90%%\r'`)
+		if got := r.status(); got != "### 90%" {
+			t.Errorf("last line = %q", got)
+		}
+	})
+
+	t.Run("stderr reaches it too", func(t *testing.T) {
+		_, r := run(t, `echo "==> Installed" >&2`)
 		if got := r.status(); got != "==> Installed" {
 			t.Errorf("last line = %q", got)
 		}
