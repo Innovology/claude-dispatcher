@@ -71,28 +71,43 @@ func (i Install) Hint() string {
 
 // Env is the environment the upgrade command should run in.
 //
-// Homebrew only refreshes its taps if HOMEBREW_AUTO_UPDATE_SECS have passed
-// since the last fetch (a day, by default), and skips the refresh entirely
-// when HOMEBREW_NO_AUTO_UPDATE is set. Either one turns "upgrade me now" into
-// "already installed" on a machine that has not fetched since the release went
-// out — which is every machine, seconds after a release. Forcing the refresh
-// for this one child process is what makes the key mean what it says; it is
-// also why there is no separate `brew update` step, which would fetch every
-// tap the human has rather than the one we need.
+// Two things are forced here, both about Homebrew, both because the command
+// runs with nobody watching it.
+//
+// The refresh: Homebrew only refreshes its taps if HOMEBREW_AUTO_UPDATE_SECS
+// have passed since the last fetch (a day, by default), and skips the refresh
+// entirely when HOMEBREW_NO_AUTO_UPDATE is set. Either one turns "upgrade me
+// now" into "already installed" on a machine that has not fetched since the
+// release went out — which is every machine, seconds after a release. Forcing
+// the refresh for this one child process is what makes the key mean what it
+// says; it is also why there is no separate `brew update` step, which would
+// fetch every tap the human has rather than the one we need.
+//
+// The question: Homebrew 4.6 made ask mode the default, so `brew upgrade`
+// stops on "Proceed? [Y/n]" before it downloads anything. The cockpit runs the
+// upgrade behind the screen (see cockpit/upgrade.go) — there is no terminal
+// for that prompt to appear on and nobody to answer it — so the command must
+// be one that cannot ask. HOMEBREW_NO_ASK is that switch, and it is set as an
+// environment variable rather than passed as the `-y` flag it shares its help
+// entry with: a brew too old to know the flag fails the whole upgrade on an
+// unknown option, where the same brew simply does not read the variable. Same
+// rule as the dispatch form's --permission-mode — a rejected flag is not a
+// degraded run, it is a run that never happens.
 func (i Install) Env() []string {
 	env := os.Environ()
 	if i.Method != MethodBrewCask && i.Method != MethodBrewFormula {
 		return env
 	}
-	out := make([]string, 0, len(env)+1)
+	out := make([]string, 0, len(env)+2)
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "HOMEBREW_NO_AUTO_UPDATE=") ||
-			strings.HasPrefix(kv, "HOMEBREW_AUTO_UPDATE_SECS=") {
+			strings.HasPrefix(kv, "HOMEBREW_AUTO_UPDATE_SECS=") ||
+			strings.HasPrefix(kv, "HOMEBREW_NO_ASK=") {
 			continue
 		}
 		out = append(out, kv)
 	}
-	return append(out, "HOMEBREW_AUTO_UPDATE_SECS=0")
+	return append(out, "HOMEBREW_AUTO_UPDATE_SECS=0", "HOMEBREW_NO_ASK=1")
 }
 
 // Detect places the running build. The result cannot change while the process
@@ -165,9 +180,17 @@ func classify(path string, nixSelector func(string) (string, bool)) Install {
 	case strings.Contains(lower, "/scoop/"):
 		return Install{Method: MethodScoop, Path: path,
 			Cmd: []string{"scoop", "update", binName}}
+	// winget is the one manager whose questions are flags rather than an
+	// environment variable. It asks twice — once for the source agreement (on a
+	// machine that has never used winget, before it will search at all) and once
+	// for the package's own — and an installer it hands off to can put UI on the
+	// screen after that. All three are refused here, because the command runs
+	// with no terminal to ask on. See Env for the same rule under Homebrew.
 	case strings.Contains(lower, "/winget/"):
 		return Install{Method: MethodWinget, Path: path,
-			Cmd: []string{"winget", "upgrade", "--id", wingetID}}
+			Cmd: []string{"winget", "upgrade", "--id", wingetID,
+				"--accept-package-agreements", "--accept-source-agreements",
+				"--disable-interactivity"}}
 	}
 	return Install{Path: path, Note: "see " + relPage}
 }
