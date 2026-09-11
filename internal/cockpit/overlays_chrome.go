@@ -37,6 +37,20 @@ var helpLegend = []helpSection{
 	}},
 }
 
+// helpNotes are lines that belong to a generated section but are not bindings:
+// a key whose meaning depends on the row it is pressed on, and the sentence
+// that says what happens after. They are appended to their section, so nothing
+// the hand-written sheet used to say was lost when it started being built.
+var helpNotes = map[string][]helpRow{
+	"what has finished": {
+		{"⏎", "resume it · its own transcript, in its own worktree"},
+		{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
+	},
+	"products · lens 2": {
+		{"esc", "close the panel · again closes the assignment editor"},
+	},
+}
+
 // helpOrder is the order the generated sections are printed in. A section a
 // binding names and this does not is still printed, at the end — a new action
 // must never be invisible because someone forgot a list.
@@ -73,7 +87,7 @@ func (m model) helpSections() []helpSection {
 			return
 		}
 		printed[name] = true
-		out = append(out, helpSection{section: name, keys: rows[name]})
+		out = append(out, helpSection{section: name, keys: append(rows[name], helpNotes[name]...)})
 	}
 	for _, name := range helpOrder {
 		add(name)
@@ -109,6 +123,21 @@ func prettyKey(k string) string {
 	return k
 }
 
+const (
+	// helpKeyCol is the width of the sheet's key column. The widest chord it
+	// has to hold is "u / ctrl+u".
+	helpKeyCol = 10
+	// helpMaxWidth caps the sheet so its prose stays readable — a sentence run
+	// across a 200-column terminal is one the eye loses its place in.
+	//
+	// It was 100, which is narrower than the longest line the sheet has to
+	// print: split into two columns that left 36 characters for a description,
+	// and every description longer than that was cut. On a wide terminal the
+	// result was a sheet of half-sentences with most of the screen empty. 160
+	// is two columns of about 66, which is the longest description there is.
+	helpMaxWidth = 160
+)
+
 // viewHelp renders the "keys" sheet: title + subtitle, then the sections laid
 // out in two columns when width allows, one column otherwise.
 func (m model) viewHelp(w, h int) string {
@@ -116,10 +145,7 @@ func (m model) viewHelp(w, h int) string {
 	if inner < 10 {
 		inner = w
 	}
-	contentW := inner
-	if contentW > 100 {
-		contentW = 100
-	}
+	contentW := mini(inner, helpMaxWidth)
 
 	const colGap = 5
 	twoCol := contentW >= 80
@@ -129,19 +155,26 @@ func (m model) viewHelp(w, h int) string {
 	}
 
 	// Each section becomes a block: heading, an underline rule, then k/d rows.
+	//
+	// A description WRAPS onto a second line rather than being cut. It is the
+	// only explanation a key has, and the half a truncation keeps is the half
+	// that says least — "upgrade to the published build — be…" is the sentence
+	// with its point removed. The continuation lines sit under the description
+	// column, so the key column still reads as a column.
 	renderSection := func(sec helpSection) string {
 		lines := []string{
 			fg(cDim, padTo(sec.section, colW, alignLeft)),
 			fg(cRule, strings.Repeat("─", colW)),
 		}
-		dw := colW - 11 // 9ch key + 2ch gap
-		if dw < 1 {
-			dw = 1
-		}
+		dw := maxi(colW-helpKeyCol-2, 1) // key column + a 2ch gap
 		for _, kr := range sec.keys {
-			k := fg(cWhite, padTo(kr.k, 9, alignLeft))
-			d := fg(cMid, truncate(kr.d, dw))
-			lines = append(lines, k+"  "+d)
+			for i, part := range productsWrap(kr.d, dw) {
+				key := ""
+				if i == 0 {
+					key = kr.k
+				}
+				lines = append(lines, fg(cWhite, padTo(key, helpKeyCol, alignLeft))+"  "+fg(cMid, part))
+			}
 		}
 		return vjoin(lines...)
 	}

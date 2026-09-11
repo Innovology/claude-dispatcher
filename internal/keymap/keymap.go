@@ -83,7 +83,7 @@ var Defaults = []Binding{
 	// ---- the fleet ----------------------------------------------------------
 	{Action: "fleet.down", Scope: Fleet, Key: "j", Help: "move the cursor — the panel and the key hints follow it", Section: "work the fleet"},
 	{Action: "fleet.up", Scope: Fleet, Key: "k"},
-	{Action: "fleet.first", Scope: Fleet, Key: "g", Help: "first row · last row is G", Section: "work the fleet"},
+	{Action: "fleet.first", Scope: Fleet, Key: "g", Help: "first row · last row", Section: "work the fleet"},
 	{Action: "fleet.last", Scope: Fleet, Key: "G"},
 	{Action: "fleet.filter", Scope: Fleet, Key: "f", Help: "filter: all → wants you → running → history", Section: "work the fleet"},
 	{Action: "fleet.attach", Scope: Fleet, Key: "enter", Help: "attach the session", Section: "work the fleet"},
