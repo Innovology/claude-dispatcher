@@ -159,6 +159,12 @@ func (m model) productsLeft(cw, pc int, wide bool) []string {
 	var out []string
 
 	loose, looseColor := m.looseLine()
+	// A live search replaces the "N of M in no product" clause: it is what the
+	// keys currently do, and two competing right-hand notes would be one too
+	// many on a line the eye uses to orient.
+	if s := m.searchLine(); s != "" {
+		loose, looseColor = s, cSearchHit
+	}
 	out = append(out, spread(fg(cDim, "portfolio · a product is many repos"), fg(looseColor, loose), cw+2*pad))
 
 	// With nothing mapped, the table below would be a single "unassigned" row
@@ -168,8 +174,9 @@ func (m model) productsLeft(cw, pc int, wide bool) []string {
 	}
 
 	out = append(out, row(cw, "",
-		c("a", 2, cFg), flexc("assign repos to products", cDim),
-		c("n", 2, cFg), flexc("new product", cDim),
+		c(m.keys.KeyFor("products.assign"), 2, cFg), flexc("assign repos to products", cDim),
+		c(m.keys.KeyFor("products.new"), 2, cFg), flexc("new product", cDim),
+		c(m.keys.KeyFor("search.open"), 2, cFg), flexc("search", cDim),
 	))
 	out = append(out, "")
 	head := []seg{
@@ -211,7 +218,7 @@ func (m model) productsLeft(cw, pc int, wide bool) []string {
 		}
 		cells := []seg{
 			c(marker, 2, cMid),
-			flexc(p.name, nameColor),
+			flexc(p.name, nameColor).highlight(m.searchPosFor(searchProducts, n), cSearchHit),
 			c(p.repos, 10, cDim),
 		}
 		if wide {
@@ -320,7 +327,7 @@ func (m model) productsRight(cw, pc int) []string {
 	out = append(out, "")
 	out = append(out, line("repos", cw, cDim, ""))
 	if len(reposByProduct[name]) == 0 {
-		out = append(out, fg(cFaint, productNoRepos+" — a to assign some"))
+		out = append(out, fg(cFaint, productNoRepos+" — "+m.keys.KeyFor("products.assign")+" to assign some"))
 	}
 	for _, r := range reposByProduct[name] {
 		out = append(out, row(cw, "",
@@ -350,12 +357,21 @@ func (m model) productsRight(cw, pc int) []string {
 }
 
 func (m model) updateProducts(k string) (model, tea.Cmd) {
+	// The search is resolved before the lens, because while a query is being
+	// typed every letter is text — and once it is committed, its jump keys are
+	// the ones `n` means. Both are exactly the cases where the lens must not
+	// see the key.
+	if mm, cmd, handled := m.updateSearch(k); handled {
+		return mm, cmd
+	}
 	if m.clOpen {
 		mm, cmd, _ := m.updateCluster(k)
 		return mm, cmd
 	}
 	k = m.keys.Resolve(keymap.Products, k)
 	switch k {
+	case "/":
+		return m.searchStart(), nil
 	case "a", "n":
 		// Assigning repos to products is the only way to create the grouping
 		// every other lens reads, so it lives one key away from the portfolio.

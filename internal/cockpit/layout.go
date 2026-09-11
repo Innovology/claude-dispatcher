@@ -56,6 +56,17 @@ type seg struct {
 	align int    // alignLeft | alignRight
 	hex   string // foreground colour, "" for default
 	bg    string // background colour, "" for none
+	// hi are rune offsets into text to paint in hiHex — the characters a search
+	// matched. Offsets are into the cell's own text, so this is only meaningful
+	// on a left-aligned cell, where padding is appended and nothing shifts.
+	hi    map[int]bool
+	hiHex string
+}
+
+// highlight marks the runes a search matched inside an already-built cell.
+func (s seg) highlight(hi map[int]bool, hex string) seg {
+	s.hi, s.hiHex = hi, hex
+	return s
 }
 
 // c builds a fixed-width left-aligned cell.
@@ -104,11 +115,40 @@ func row(total int, bg string, segs ...seg) string {
 			continue
 		}
 		txt := padTo(truncate(s.text, w), w, s.align)
-		b.WriteString(paint(s.hex, orBg(s.bg, bg), txt))
+		if len(s.hi) > 0 && s.align == alignLeft {
+			b.WriteString(paintRuns(s.hex, s.hiHex, orBg(s.bg, bg), txt, s.hi))
+		} else {
+			b.WriteString(paint(s.hex, orBg(s.bg, bg), txt))
+		}
 		used += w
 	}
 	if used < total {
 		b.WriteString(paint("", bg, strings.Repeat(" ", total-used)))
+	}
+	return b.String()
+}
+
+// paintRuns paints txt in hex, except the runes named in hi, which go in hiHex.
+//
+// It emits one escape per RUN rather than per rune: a matched "pp" is two
+// characters and one colour change, and a row of per-rune escapes is both
+// unreadable in a capture and a real cost on a table that redraws on every
+// keystroke of a live search.
+func paintRuns(hex, hiHex, bg, txt string, hi map[int]bool) string {
+	var b strings.Builder
+	runs := []rune(txt)
+	for i := 0; i < len(runs); {
+		on := hi[i]
+		j := i
+		for j < len(runs) && hi[j] == on {
+			j++
+		}
+		colour := hex
+		if on {
+			colour = hiHex
+		}
+		b.WriteString(paint(colour, bg, string(runs[i:j])))
+		i = j
 	}
 	return b.String()
 }

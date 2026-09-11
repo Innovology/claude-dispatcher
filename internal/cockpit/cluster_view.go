@@ -41,7 +41,9 @@ func (m model) clLeft(cw, h int) []string {
 			marked++
 		}
 	}
-	markedLine := "space marks · p where it lives · enter moves them"
+	markedLine := m.keys.KeyFor("editor.mark") + " marks · " +
+		m.keys.KeyFor("editor.where") + " where it lives · " +
+		m.keys.KeyFor("search.open") + " search"
 	if marked > 0 {
 		word := "repo"
 		if marked != 1 {
@@ -53,6 +55,10 @@ func (m model) clLeft(cw, h int) []string {
 	// key it names now means something else.
 	if m.clFoldRow != "" {
 		markedLine = "checkouts of " + m.clFoldRow + " · enter picks one · esc leaves"
+	}
+	// And a live search outranks both: it is the thing the keys currently mean.
+	if s := m.searchLine(); s != "" {
+		markedLine = s
 	}
 
 	out := []string{
@@ -99,7 +105,7 @@ func (m model) clLeft(cw, h int) []string {
 		rowLine[i] = len(lines)
 		lines = append(lines, row(cw, bg,
 			c(mark, 3, cAmber),
-			flexc(r.name, nameColor),
+			flexc(r.name, nameColor).highlight(m.searchPosFor(searchRepos, i), cSearchHit),
 			c(r.forge, 6, cFaint),
 			flexc(prod, prodColor),
 			cr(itoa(r.out), 8, cFaint),
@@ -107,10 +113,12 @@ func (m model) clLeft(cw, h int) []string {
 		))
 		if m.clExpanded[r.name] {
 			focus := -1
+			var hi []map[int]bool
 			if m.clFoldRow == r.name {
 				focus = clampCursor(m.clFoldIdx, len(r.worktrees))
+				hi = m.clFoldHighlights(r)
 			}
-			lines = append(lines, clFold(r, cw, focus)...)
+			lines = append(lines, clFold(r, cw, focus, hi)...)
 		}
 	}
 	// Leave a line for the "showing x of y" footer so it cannot itself be the
@@ -147,7 +155,9 @@ const clFoldMax = 8
 // is it now" must never be a row you have to scroll to find, and with
 // sixty-nine checkouts a fixed first-eight would put it off screen for most
 // repos.
-func clFold(r clRepoRow, cw, focus int) []string {
+// hi carries the search highlight for each checkout, indexed as r.worktrees is,
+// and is nil when no query is up.
+func clFold(r clRepoRow, cw, focus int, hi []map[int]bool) []string {
 	lead := c("", 3, "")
 	inner := maxi(cw-3, 1)
 
@@ -203,7 +213,7 @@ func clFold(r clRepoRow, cw, focus int) []string {
 		}
 		out = append(out, row(cw, bg, lead,
 			c(mark, 2, cAmber),
-			flexc(filepath.Base(w.path), nameColor),
+			flexc(filepath.Base(w.path), nameColor).highlight(at(hi, i), cSearchHit),
 			c(branch, 30, cFaint),
 		))
 	}
@@ -211,6 +221,15 @@ func clFold(r clRepoRow, cw, focus int) []string {
 		out = append(out, row(cw, "", lead, c("", 2, ""), flexc("…"+itoa(hidden)+" more", cFaint)))
 	}
 	return out
+}
+
+// at indexes a highlight slice that is usually absent: no search is the normal
+// state of the screen, so nil is the common case rather than an error one.
+func at(hi []map[int]bool, i int) map[int]bool {
+	if i < 0 || i >= len(hi) {
+		return nil
+	}
+	return hi[i]
 }
 
 // clElide fits an absolute path into w columns by dropping its middle. A plain
@@ -263,7 +282,7 @@ func (m model) clRight(cw, h int) []string {
 
 	out := []string{fg(cDim, "products"), ""}
 	if len(prods) == 0 {
-		out = append(out, fg(cFaint, "none yet — n names one"))
+		out = append(out, fg(cFaint, "none yet — "+m.keys.KeyFor("products.new")+" names one"))
 	}
 	sel := clampCursor(m.clProd, len(prods))
 	for i, p := range prods {
@@ -291,9 +310,11 @@ func (m model) clRight(cw, h int) []string {
 		)
 	}
 
+	// The keys these hints name are read from the keymap, not spelled here: a
+	// hint beside a remappable binding is the same lie the help sheet would be.
 	out = append(out, "", fg(cRule, strings.Repeat("─", cw)))
-	out = append(out, row(cw, "", c("n", 3, cFg), flexc("new product…", cDim)))
-	out = append(out, row(cw, "", c("l", 3, cFg), flexc("linear token…", cDim)))
+	out = append(out, row(cw, "", c(m.keys.KeyFor("products.new"), 3, cFg), flexc("new product…", cDim)))
+	out = append(out, row(cw, "", c(m.keys.KeyFor("editor.linear"), 3, cFg), flexc("linear token…", cDim)))
 
 	if m.clNaming {
 		out = append(out, "", fg(cDim, "new product"))

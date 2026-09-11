@@ -433,6 +433,8 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 	k = m.keys.Resolve(keymap.Editor, k)
 
 	switch k {
+	case "/":
+		return m.searchStart(), nil, true
 	case "esc", "a":
 		m.clOpen, m.clMarked = false, map[string]bool{}
 		return m, nil, true
@@ -453,7 +455,7 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		// pre-filling a buffer with a secret the human cannot read is how you
 		// get a half-deleted key saved over a working one.
 		if len(prods) == 0 {
-			m.notice = "no product to hold a token — n names one"
+			m.notice = "no product to hold a token — " + m.keys.KeyFor("products.new") + " names one"
 			return m, nil, true
 		}
 		m.clPane = "products"
@@ -530,7 +532,7 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		return mm, cmd, true
 	case "enter":
 		if len(prods) == 0 {
-			m.notice = "no product to assign to — n names one"
+			m.notice = "no product to assign to — " + m.keys.KeyFor("products.new") + " names one"
 			return m, nil, true
 		}
 		target := prods[clampCursor(m.clProd, len(prods))]

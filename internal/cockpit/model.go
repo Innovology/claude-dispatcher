@@ -144,6 +144,15 @@ type model struct {
 	// keys is the resolved keymap: the defaults with `[keys]` applied. nil means
 	// the defaults, so every caller can use it without a guard.
 	keys *keymap.Map
+
+	// ---- `/` search ----------------------------------------------------------
+	// searchOpen is the query line having the keyboard; searchText survives it
+	// being committed, because the highlights and the jump keys stay live after
+	// you stop typing. searchAt is which hit the cursor is on, -1 before the
+	// first jump.
+	searchOpen bool
+	searchText string
+	searchAt   int
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.

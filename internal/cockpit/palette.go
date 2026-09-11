@@ -40,6 +40,12 @@ const (
 	cGreen  = "#34d399"
 	cViolet = "#a78bfa"
 
+	// cSearchHit lights the characters a `/` search matched. It is amber's
+	// neighbour rather than amber itself: amber already means "this wants you"
+	// on every table in the cockpit, and a search hit is a fact about the query,
+	// not about the work.
+	cSearchHit = "#fde68a"
+
 	cTransparent = "" // no colour / default terminal background
 )
 

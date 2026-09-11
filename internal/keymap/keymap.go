@@ -109,7 +109,11 @@ var Defaults = []Binding{
 	{Action: "editor.pane", Scope: Editor, Key: "tab", Help: "between the repo list and the products", Section: "products · lens 2"},
 	{Action: "editor.mark", Scope: Editor, Key: "space", Help: "mark a repo · enter moves every marked one", Section: "products · lens 2"},
 	{Action: "editor.move", Scope: Editor, Key: "enter"},
-	{Action: "editor.new", Scope: Editor, Key: "n"},
+	// The same action as on the lens behind it, deliberately sharing its id:
+	// "new product" is one thing to the person pressing it, and two ids would
+	// mean rebinding it moved half of it — measured, `n` went on making products
+	// in the editor after being rebound on the products lens.
+	{Action: "products.new", Scope: Editor, Key: "n"},
 	{Action: "editor.linear", Scope: Editor, Key: "l", Help: "the Linear token this product's backlog is read with", Section: "products · lens 2"},
 	{Action: "editor.unassign", Scope: Editor, Key: "u", Help: "take repos back out of a product · ctrl+u starts over", Section: "products · lens 2"},
 	{Action: "editor.reset", Scope: Editor, Key: "ctrl+u"},
