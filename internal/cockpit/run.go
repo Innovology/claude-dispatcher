@@ -8,6 +8,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/keymap"
 	"claude-dispatcher/internal/state"
 )
 
@@ -39,6 +40,15 @@ func Run() error {
 	if cfg, err := config.Load(); err == nil {
 		m.cfg = cfg
 		applyConfigEnv(cfg)
+		// A bad `[keys]` line keeps the defaults and says so, rather than
+		// refusing to open: the cockpit is how you would find out what the
+		// action ids are, and a binding typo must not be the thing that stops
+		// you looking them up.
+		if km, err := keymap.New(cfg.Keys); err != nil {
+			m.notice = "keys: " + err.Error() + " — using the defaults"
+		} else {
+			m.keys = km
+		}
 		_ = state.EnsureDirs()
 		ch := make(chan struct{}, 1)
 		if watcher, err := fsnotify.NewWatcher(); err == nil {

@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/keymap"
 )
 
 // clUnassigned is the product key collectProducts folds unmapped repos into.
@@ -424,10 +425,12 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 	// editor's own keys for the same reason the naming prompt is resolved before
 	// them: the alternative is one key meaning two things at once.
 	if m.clFoldRow != "" {
-		if mm, cmd, done := m.updateClFold(k, rows); done {
+		if mm, cmd, done := m.updateClFold(m.keys.Resolve(keymap.Fold, k), rows); done {
 			return mm, cmd, true
 		}
 	}
+
+	k = m.keys.Resolve(keymap.Editor, k)
 
 	switch k {
 	case "esc", "a":

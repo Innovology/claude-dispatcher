@@ -7,6 +7,7 @@ import (
 
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/keymap"
 	"claude-dispatcher/internal/version"
 )
 
@@ -139,6 +140,10 @@ type model struct {
 	// from which repo you are on, and one set of arrow keys cannot mean both.
 	clFoldRow string
 	clFoldIdx int
+
+	// keys is the resolved keymap: the defaults with `[keys]` applied. nil means
+	// the defaults, so every caller can use it without a guard.
+	keys *keymap.Map
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.

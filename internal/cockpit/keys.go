@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"claude-dispatcher/internal/keymap"
 )
 
 // typedText returns the literal text a key message types, and whether it types
@@ -240,6 +242,13 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateProducts(k)
 		return mm, cmd
 	}
+
+	// From here down the key is whatever the human bound it to. Resolving
+	// translates it back to the action's canonical spelling, which is what the
+	// switches below are written against — so a rebind changes which physical
+	// key arrives at an action, not what this code is about. ctrl+c is resolved
+	// above and is deliberately not in the map: nothing may trap the process.
+	k = m.keys.Resolve(keymap.Global, k)
 
 	if k == "?" {
 		m.helpOpen = true

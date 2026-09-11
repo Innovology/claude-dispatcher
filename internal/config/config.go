@@ -48,6 +48,14 @@ type Config struct {
 	// means retyping a key that has to match one exactly, in another file, with
 	// silence as the only feedback when it does not.
 	Linear map[string]string `toml:"linear,omitempty"`
+	// Keys rebinds cockpit actions: action id → the key that runs it. Every
+	// action the cockpit has is listed by `?`, which is built from the same
+	// table this overrides, so the help sheet can never describe a binding the
+	// cockpit does not have. An id that is not an action, a key already bound to
+	// something else in the same scope, or an attempt to rebind ctrl+c, is
+	// refused by name at startup rather than dropped — a silently ignored line
+	// presents as a key that stopped working.
+	Keys map[string]string `toml:"keys,omitempty"`
 	// WeeklyTokenLimit is the subscription's weekly token budget. There is no
 	// API to read it (Claude Code exposes usage only interactively), so it is a
 	// user setting; 0 means unknown and the usage lens shows raw tokens instead
@@ -155,6 +163,17 @@ func Save(c *Config) error {
 	b.WriteString("[products]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Products)) {
 		b.WriteString(tomlKey(k) + " = " + tomlStrings(c.Products[k]) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString("# Rebind any cockpit action: \"action id\" = \"key\". Press ? in the cockpit for\n")
+	b.WriteString("# every action and the key it currently answers to. A key already bound in the\n")
+	b.WriteString("# same place, an id that is not an action, or ctrl+c, is refused by name at\n")
+	b.WriteString("# startup — the cockpit says so rather than ignoring the line.\n")
+	b.WriteString("# \"products.new\" = \"N\"\n")
+	b.WriteString("# \"search.next\" = \"n\"\n")
+	b.WriteString("[keys]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Keys)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Keys[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Which working tree a repo is read and dispatched from, for repos with many.\n")

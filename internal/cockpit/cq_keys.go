@@ -13,6 +13,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"claude-dispatcher/internal/keymap"
 )
 
 // cqUndoEntry is the last row ctrl+z can put back. It restores the table row
@@ -266,6 +268,11 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 			return mm, cmd, true
 		}
 	}
+
+	// Resolved here rather than above, because the dispatch form is text entry:
+	// a key the human is typing into the prompt is not an action, and rebinding
+	// must not change which letters you can type.
+	k = m.keys.Resolve(keymap.Fleet, k)
 
 	switch k {
 	case "j", "down":

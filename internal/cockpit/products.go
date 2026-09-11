@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"claude-dispatcher/internal/keymap"
 )
 
 // productsFocusItem is one in-flight feature in the right pane's focus panel.
@@ -352,6 +354,7 @@ func (m model) updateProducts(k string) (model, tea.Cmd) {
 		mm, cmd, _ := m.updateCluster(k)
 		return mm, cmd
 	}
+	k = m.keys.Resolve(keymap.Products, k)
 	switch k {
 	case "a", "n":
 		// Assigning repos to products is the only way to create the grouping
