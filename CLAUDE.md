@@ -10,6 +10,38 @@
 ## Agreed decisions (2026-08-06, worktrees added 2026-08-07)
 - **Multi-repo, multi-worktree, multi-product** — three independent axes:
   - *Repo* is the organising primitive; discovery via configured roots.
+    - **A repository is its common dir, and its name is not its folder.**
+      Discovery called any directory holding a `.git` a repo and named it for
+      that directory. A `.git` marks a *checkout*, and one repo has as many as
+      it has worktrees: measured on a worktree-heavy machine, **47 "repos" for
+      26 repositories** — `kolchurin.dev` thirteen times, `playerpulse` eight,
+      and three unrelated repositories all called `main`. Name is the identity
+      everywhere (`[products]`, `ProductFor`, `discByName`, the dispatch
+      worktree path), so three repos shared one key; and `gh` keys its search
+      results by the *GitHub* name, so six repos cloned into a folder that is
+      not their name (`ord-ai-n` → `ordain`, `prototype-player-app` →
+      `Player-App-2`) had every issue and PR landing nowhere. The bare layout
+      was invisible on top of that: `<project>/.bare` carries no `.git` of its
+      own, so the project dir fell through to the depth check and was cut with
+      all 69 checkouts inside it. So identity is the **git dir every checkout
+      shares** — `<clone>/.git`, `<project>/.bare` — read from files, never a
+      git process, since a discovery runs on every load; the **name comes from
+      the origin remote**, folder only for a repo with no remote; one checkout
+      is **canonical**, because twenty call sites stand *inside* `Repo.Path`
+      and a bare repo has no working tree of its own; and the worktree list
+      comes from **git's registry**, not the scan, which skips hidden dirs and
+      so would report nothing for the common `.worktrees/<name>` layout. It is
+      an extension, not a replacement: the walk is unchanged, a plain clone
+      resolves to itself byte-for-byte as before, and unreadable metadata falls
+      back to being a repo of one named for its folder. Evidence of a repo buys
+      the one level that reaches its checkouts; the budget itself does not grow,
+      and a container below the limit still wants a nearer root. Nothing
+      rewrites the human's `[products]`: a rename can orphan an entry, and it
+      falls to "unassigned" where the editor reassigns it, because a migration
+      that guessed would be editing the file this tool calls the source of
+      truth. `p` on a row in the assignment editor is where the detail went —
+      the absolute path it acts in and every checkout git knows of. Full
+      record: `docs/adr/0012-a-repository-is-its-common-dir.md`.
   - *Worktree* is per-dispatch isolation: each dispatch gets its own git
     worktree of its repo under
     `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so concurrent
@@ -400,6 +432,11 @@
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
   `CLAUDE_DISPATCHER_STATE`).
+- `internal/repos` — repository discovery: the scan of the configured roots,
+  and the read of git's own metadata that turns the checkouts it finds into
+  repositories (common dir, name from origin, canonical checkout, the worktree
+  registry). No git process — every answer comes from files, because a
+  discovery runs on every load.
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited).
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a

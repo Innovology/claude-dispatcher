@@ -128,6 +128,10 @@ type model struct {
 	clNaming  bool
 	clNewName string
 	clMap     map[string]string
+	// clExpanded is which repo rows have been unfolded with `p` to show where
+	// they live. Keyed by repo name, and it survives the cursor moving off the
+	// row: unfolding two repos to compare where they sit is the point of it.
+	clExpanded map[string]bool
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.
@@ -221,6 +225,7 @@ func newModel() model {
 		clPane:       "repos",
 		clMarked:     map[string]bool{},
 		clMap:        map[string]string{},
+		clExpanded:   map[string]bool{},
 		cqSuppressed: map[string]bool{},
 		// How this build was installed cannot change while it runs, so it is
 		// read once here rather than from the footer, which redraws on every

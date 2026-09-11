@@ -24,10 +24,14 @@ import (
 // config and never offered as an assignment target.
 const clUnassigned = "unassigned"
 
-// clRepoRow is one row of the editor's left pane.
+// clRepoRow is one row of the editor's left pane. One row is one repository,
+// which may be many checkouts on disk — path and worktrees are what `p` unfolds
+// to say which.
 type clRepoRow struct {
 	name, forge, product, last string
 	out                        int
+	path                       string
+	worktrees                  []repoWorktree
 }
 
 // clRepos lists every discovered repo, mapped or not, in a stable order: the
@@ -49,7 +53,10 @@ func (m model) clRepos() []clRepoRow {
 			if last == "" {
 				last = "—"
 			}
-			out = append(out, clRepoRow{name: r.name, forge: r.forge, product: p, out: r.out, last: last})
+			out = append(out, clRepoRow{
+				name: r.name, forge: r.forge, product: p, out: r.out, last: last,
+				path: r.path, worktrees: r.worktrees,
+			})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -358,6 +365,26 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 			m.clMarked[name] = true
 		}
 		m.clRepo = mini(m.clRepo+1, maxi(len(rows)-1, 0))
+		return m, nil, true
+	case "p":
+		// Where a repo actually is. A row is a repository now, not a folder —
+		// one row can stand for sixty-nine checkouts and be named for none of
+		// them — so the question "which of these directories is this?" has to be
+		// answerable without leaving the screen you are assigning from. It
+		// toggles per repo and is remembered by name, so the cursor moving on
+		// does not fold it again.
+		if len(rows) == 0 {
+			return m, nil, true
+		}
+		name := rows[clampCursor(m.clRepo, len(rows))].name
+		if m.clExpanded == nil {
+			m.clExpanded = map[string]bool{}
+		}
+		if m.clExpanded[name] {
+			delete(m.clExpanded, name)
+		} else {
+			m.clExpanded[name] = true
+		}
 		return m, nil, true
 	case "u":
 		mm, cmd := m.clAssign(m.clTargets(), "")

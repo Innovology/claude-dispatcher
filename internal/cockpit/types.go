@@ -80,6 +80,18 @@ type repoRef struct {
 	// not say). The assignment editor shows it so a repo nobody has touched in
 	// months is obvious while you are deciding where it belongs.
 	last string
+	// path is the checkout the row acts in, and worktrees is every checkout git
+	// knows of. One row is one repository however many checkouts it has, so the
+	// row alone can no longer say which folders it stands for — `p` in the
+	// assignment editor unfolds these.
+	path      string
+	worktrees []repoWorktree
+}
+
+// repoWorktree is one checkout of a repo, as the assignment editor shows it.
+type repoWorktree struct {
+	path, branch string
+	main         bool
 }
 
 type staleRepo struct {

@@ -330,24 +330,27 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		// ---- repo grid -----------------------------------------------------
 		grid := make([]repoRef, 0, len(names))
 		for _, name := range names {
-			forge := "gh"
+			forge, last, path := "gh", "—", ""
+			var wts []repoWorktree
 			if r, ok := discByName[name]; ok {
-				forge = ctx.forge(r.Path)
-			}
-			g := repoGHFor(name)
-			last := "—"
-			if r, ok := discByName[name]; ok {
+				forge, path = ctx.forge(r.Path), r.Path
 				if d, ok := stqDaysSinceCommit(r.Path); ok {
 					last = itoa(d) + "d"
 				}
+				for _, w := range r.Worktrees {
+					wts = append(wts, repoWorktree{path: w.Path, branch: w.Branch, main: w.Main})
+				}
 			}
+			g := repoGHFor(name)
 			grid = append(grid, repoRef{
-				name:    name,
-				forge:   forge,
-				out:     openByRepo[name],
-				ci:      g.ci,
-				ciColor: g.ciColor,
-				last:    last,
+				name:      name,
+				forge:     forge,
+				out:       openByRepo[name],
+				ci:        g.ci,
+				ciColor:   g.ciColor,
+				last:      last,
+				path:      path,
+				worktrees: wts,
 			})
 		}
 		s.reposByProduct[p] = grid

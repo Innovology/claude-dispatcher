@@ -47,7 +47,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 ![The products lens](docs/products.svg)
 
-**Press `a` to say which repos make up which product.** Mark repos with `space`, `enter` moves them into the selected product, `n` names a new one. It writes straight to `[products]` in your config, so the grouping every other lens uses is one screen away rather than a file you have to remember the syntax for.
+**Press `a` to say which repos make up which product.** Mark repos with `space`, `enter` moves them into the selected product, `n` names a new one, and `p` unfolds a row to show where that repo actually lives — one row is one repository, however many worktrees it has on disk. It writes straight to `[products]` in your config, so the grouping every other lens uses is one screen away rather than a file you have to remember the syntax for.
 
 ![Assigning repos to products](docs/assign.svg)
 

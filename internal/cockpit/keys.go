@@ -299,6 +299,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clOpen, m.clNaming, m.clNewName = false, false, ""
 		m.clKeying, m.clKeyFor, m.clKeyText = false, "", ""
 		m.clMarked = map[string]bool{}
+		m.clExpanded = map[string]bool{}
 		return m, nil
 	}
 

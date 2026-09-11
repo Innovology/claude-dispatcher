@@ -5,7 +5,10 @@ package cockpit
 // clOpen/clNaming sections — a 30% right pane, a marked column, and the
 // explanation pinned to the bottom of the product list.
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // viewCluster is the products lens while the editor is open.
 func (m model) viewCluster(w, h int) string {
@@ -38,7 +41,7 @@ func (m model) clLeft(cw, h int) []string {
 			marked++
 		}
 	}
-	markedLine := "space marks · enter moves them"
+	markedLine := "space marks · p where it lives · enter moves them"
 	if marked > 0 {
 		word := "repo"
 		if marked != 1 {
@@ -62,11 +65,13 @@ func (m model) clLeft(cw, h int) []string {
 	if len(rows) == 0 {
 		return append(out, "", fg(cFaint, "no repos found — check your scan roots with ,"))
 	}
-	// Leave a line for the "showing x of y" footer so it cannot itself be the
-	// row that gets clipped.
-	start, end := window(sel, len(rows), maxi(h-len(out)-1, 1))
-	for i := start; i < end; i++ {
-		r := rows[i]
+	// An unfolded row is several lines, so the window is taken over rendered
+	// LINES with the cursor's own line as the anchor. Windowing over rows and
+	// then expanding them would scroll by a row and move the screen by six,
+	// walking the cursor off exactly the way rendering everything used to.
+	var lines []string
+	rowLine := make([]int, len(rows))
+	for i, r := range rows {
 		bg, mark, nameColor := cTransparent, " ", cFg
 		if m.clMarked[r.name] {
 			mark = "◆"
@@ -81,7 +86,8 @@ func (m model) clLeft(cw, h int) []string {
 		if prod == "" {
 			prod, prodColor = "—", cFaint
 		}
-		out = append(out, row(cw, bg,
+		rowLine[i] = len(lines)
+		lines = append(lines, row(cw, bg,
 			c(mark, 3, cAmber),
 			flexc(r.name, nameColor),
 			c(r.forge, 6, cFaint),
@@ -89,13 +95,98 @@ func (m model) clLeft(cw, h int) []string {
 			cr(itoa(r.out), 8, cFaint),
 			cr(r.last, 8, cFaint),
 		))
+		if m.clExpanded[r.name] {
+			lines = append(lines, clFold(r, cw)...)
+		}
 	}
+	// Leave a line for the "showing x of y" footer so it cannot itself be the
+	// row that gets clipped.
+	start, end := window(rowLine[sel], len(lines), maxi(h-len(out)-1, 1))
+	out = append(out, lines[start:end]...)
 	// Only when the list is actually scrolling: on a portfolio that fits, a
-	// position counter is noise.
-	if end-start < len(rows) {
+	// position counter is noise. It counts repos, not lines — the lines are an
+	// artefact of what is unfolded, and "38 of 114" would be a figure about
+	// nothing the human chose.
+	if end-start < len(lines) {
 		out = append(out, fg(cFaint, itoa(sel+1)+" of "+itoa(len(rows))))
 	}
 	return out
+}
+
+// clFoldMax is how many other checkouts an unfolded row lists before it counts
+// the rest. One repo here has sixty-eight of them, and a list that long is a
+// screen rather than an annotation — but it says how many it is not showing,
+// the way the product panel's history does, rather than stopping mute.
+const clFoldMax = 8
+
+// clFold is what `p` unfolds under a repo row.
+//
+// A row is a repository, and a repository is not a folder: it may be named for
+// none of the directories it occupies (a clone of `ordain` sitting in
+// `ord-ai-n`) and it may occupy many (sixty-nine checkouts of one bare repo).
+// Both of those make "which of these is it?" a real question to be asked while
+// deciding where a repo belongs — so the answer is the absolute path of the
+// checkout the row acts in, then every other checkout git knows of.
+func clFold(r clRepoRow, cw int) []string {
+	lead := c("", 3, "")
+	inner := maxi(cw-3, 1)
+
+	path := r.path
+	if path == "" {
+		// Discovery found the repository but no checkout of it is on disk — a
+		// bare repo whose worktrees have all been removed. Saying so is the
+		// point of the fold; an empty line would read as "no path".
+		path = "no checkout on disk"
+	}
+	out := []string{row(cw, "", lead, flexc(clElide(path, inner), cMid))}
+
+	var others []repoWorktree
+	for _, w := range r.worktrees {
+		if w.path != r.path {
+			others = append(others, w)
+		}
+	}
+	if len(others) == 0 {
+		return out
+	}
+	here := itoa(len(r.worktrees)) + " checkouts"
+	if r.path != "" {
+		here += " · this row works in " + filepath.Base(r.path)
+	}
+	out = append(out, row(cw, "", lead, flexc(here, cFaint)))
+
+	shown := others
+	if len(shown) > clFoldMax {
+		shown = shown[:clFoldMax]
+	}
+	for _, w := range shown {
+		branch := w.branch
+		if branch == "" {
+			branch = "detached"
+		}
+		out = append(out, row(cw, "", lead,
+			c("", 2, ""),
+			flexc(filepath.Base(w.path), cDim),
+			c(branch, 30, cFaint),
+		))
+	}
+	if n := len(others) - len(shown); n > 0 {
+		out = append(out, row(cw, "", lead, c("", 2, ""), flexc("…"+itoa(n)+" more", cFaint)))
+	}
+	return out
+}
+
+// clElide fits an absolute path into w columns by dropping its middle. A plain
+// truncation takes the tail, which is the half that says which checkout this
+// is; the head says whose machine and which root, and is worth as much.
+func clElide(s string, w int) string {
+	if w <= 1 || dispWidth(s) <= w {
+		return s
+	}
+	r := []rune(s)
+	keep := w - 1
+	head := keep / 3
+	return string(r[:head]) + "…" + string(r[len(r)-(keep-head):])
 }
 
 // clPaneLabel names which pane has the keyboard.
