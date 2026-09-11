@@ -135,6 +135,23 @@ func (m model) clLeft(cw, h int) []string {
 	return out
 }
 
+// clServerLine is the fold's one line about where a repo's sessions run: the
+// server, what they are launched under when that is anything, and the key that
+// changes it. An empty socket is named rather than left blank — "the default
+// server" is an answer, and a gap where a name goes reads as a failure to find
+// one.
+func clServerLine(r clRepoRow) string {
+	server := r.socket
+	if server == "" {
+		server = "default server"
+	}
+	line := "server " + server
+	if r.env != "" {
+		line += " · " + r.env
+	}
+	return line + " · s to change"
+}
+
 // clFoldMax is how many other checkouts an unfolded row lists before it counts
 // the rest. One repo here has sixty-eight of them, and a list that long is a
 // screen rather than an annotation — but it says how many it is not showing,
@@ -173,6 +190,12 @@ func clFold(r clRepoRow, cw, focus int, hi []map[int]bool) []string {
 		pathColor = cWhite
 	}
 	out := []string{row(cw, "", lead, flexc(clElide(path, inner), pathColor))}
+
+	// Where its files are, then where its sessions are. The second is as much a
+	// fact about this repo as the first, and it is the one nothing else on any
+	// screen says: a dispatch starts on this server, under this command, and
+	// every pane opened in it afterwards sees what that command put on PATH.
+	out = append(out, row(cw, "", lead, flexc(clElide(clServerLine(r), inner), cFaint)))
 
 	// One checkout is one directory, and "1 checkouts" beneath its own path is
 	// a sentence about nothing.
@@ -348,6 +371,16 @@ func (m model) clRight(cw, h int) []string {
 		out = append(out, "")
 		out = append(out, clHint(hint, cw)...)
 		out = append(out, clHint("scope the key to this product's teams in Linear", cw)...)
+	}
+
+	if m.clSockOpen {
+		out = append(out, "", fg(cDim, "tmux server · "+m.clSockFor))
+		out = append(out, fg(cWhite, clElide(m.clSockText, maxi(cw-1, 0)))+paint(cFg, cFg, " "))
+		out = append(out, "")
+		out = append(out, clHint("enter saves it · the -L socket this repo's sessions live on", cw)...)
+		out = append(out, clHint("a session sees the binaries of whoever started it, so one server per repo keeps this repo's own", cw)...)
+		out = append(out, clHint("leave it as the repo name unless you already start a server for this project yourself — then type that name", cw)...)
+		out = append(out, clHint("empty means the default server, shared with every other repo that names none", cw)...)
 	}
 
 	// Pin the explanation to the bottom, as the design does with flex:1.

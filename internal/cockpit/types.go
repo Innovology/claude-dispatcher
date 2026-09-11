@@ -87,6 +87,13 @@ type repoRef struct {
 	path      string
 	pinned    bool
 	worktrees []repoWorktree
+	// socket is the tmux server this repo's sessions live on, and env is what
+	// they are launched under so they see this repo's own binaries. Both are
+	// resolved answers, not config: socket defaults to the repo's name and env
+	// is read off the checkout, so the editor shows what a dispatch would
+	// actually do rather than what somebody wrote down.
+	socket string
+	env    string
 }
 
 // repoWorktree is one checkout of a repo, as the assignment editor shows it.

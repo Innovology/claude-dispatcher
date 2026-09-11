@@ -120,9 +120,12 @@ func TestUnknownActionAndFixedKeyAreRefused(t *testing.T) {
 // Two scopes share the search.open id on purpose — the same action, offered on
 // the products table and in its editor. Rebinding it moves both.
 func TestOneActionInTwoScopesMovesTogether(t *testing.T) {
-	m := mustNew(t, map[string]string{"search.open": "s"})
+	// "z" only has to be a key free in both scopes; it is not about z. It was
+	// "s" until the editor bound that to a repo's tmux server, and the refusal
+	// that produced is the collision check doing its job.
+	m := mustNew(t, map[string]string{"search.open": "z"})
 	for _, scope := range []Scope{Products, Editor} {
-		if got := m.Resolve(scope, "s"); got != "/" {
+		if got := m.Resolve(scope, "z"); got != "/" {
 			t.Errorf("%s: got %q, want the search canonical key", scope, got)
 		}
 		if got := m.Resolve(scope, "/"); got != "" {

@@ -159,6 +159,12 @@ type model struct {
 	clKeying  bool
 	clKeyFor  string
 	clKeyText string
+	// clSockOpen is the same for a repo's tmux server: which repo it is for,
+	// and what has been typed. Held by name rather than by cursor index for the
+	// same reason — a save re-sorts the list under it.
+	clSockOpen bool
+	clSockFor  string
+	clSockText string
 
 	decRepo      int
 	decCursor    int

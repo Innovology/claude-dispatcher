@@ -118,6 +118,7 @@ var Defaults = []Binding{
 	{Action: "editor.unassign", Scope: Editor, Key: "u", Help: "take repos back out of a product · ctrl+u starts over", Section: "products · lens 2"},
 	{Action: "editor.reset", Scope: Editor, Key: "ctrl+u"},
 	{Action: "editor.where", Scope: Editor, Key: "p", Help: "unfold a repo · where it lives, and its every checkout", Section: "products · lens 2"},
+	{Action: "editor.server", Scope: Editor, Key: "s", Help: "the tmux server a repo's sessions live on · its own name by default", Section: "products · lens 2"},
 
 	// ---- inside an unfolded row ---------------------------------------------
 	{Action: "fold.down", Scope: Fold, Key: "j", Help: "in the fold: pick the checkout this repo works in", Section: "products · lens 2"},

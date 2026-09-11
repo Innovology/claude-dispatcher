@@ -36,6 +36,10 @@ type clRepoRow struct {
 	path                       string
 	pinned                     bool
 	worktrees                  []repoWorktree
+	// socket is the tmux server this repo's sessions live on, and env what they
+	// are launched under. Both are resolved answers rather than config: the
+	// editor shows what a dispatch would actually do.
+	socket, env string
 }
 
 // clRepos lists every discovered repo, mapped or not, in a stable order: the
@@ -226,6 +230,55 @@ func (m model) clPinCheckout(r clRepoRow, path string) (model, tea.Cmd) {
 	}
 	// The notice rides the message because the reload it queues sets one of its
 	// own: Repo.Path is what the next snapshot reads every repo through.
+	return m, func() tea.Msg { return actionMsg{notice: notice} }
+}
+
+// clSetSocket writes the tmux server a repo's sessions live on into [sockets],
+// and persists.
+//
+// Typing the repo's own name CLEARS the entry rather than storing it, for the
+// reason choosing the pinned checkout clears a pin: "back to the default" has
+// to be reachable from the same field that left it, and a stored value equal to
+// the default is a line in the config that does nothing but go stale when the
+// default changes.
+//
+// An empty name is a real answer, not a cleared one — it means the default
+// server, which is where every dispatch ran before repos had one of their own.
+// It is stored as "", which config reads back as an entry that exists and is
+// empty, distinct from no entry at all.
+//
+// Same write discipline as clPersist and clPinCheckout: a copy saved first, and
+// only a save that worked published into the cockpit's own config.
+func (m model) clSetSocket(repo, socket string) (model, tea.Cmd) {
+	if m.cfg == nil {
+		return m, func() tea.Msg { return actionMsg{notice: "no config — nothing saved"} }
+	}
+	socket = strings.TrimSpace(socket)
+	next := map[string]string{}
+	maps.Copy(next, m.cfg.Sockets)
+	back := socket == repo
+	if back {
+		delete(next, repo)
+	} else {
+		next[repo] = socket
+	}
+	cfg := *m.cfg
+	cfg.Sockets = next
+	if err := config.Save(&cfg); err != nil {
+		return m, func() tea.Msg { return actionMsg{notice: "could not save the server: " + err.Error()} }
+	}
+	m.cfg.Sockets = next
+	var notice string
+	switch {
+	case back:
+		notice = repo + " is its own server again"
+	case socket == "":
+		notice = repo + " dispatches on the default server"
+	default:
+		notice = repo + " dispatches on " + socket
+	}
+	// The notice rides the message because the reload it queues sets one of its
+	// own: every repo's socket is resolved by the next discovery.
 	return m, func() tea.Msg { return actionMsg{notice: notice} }
 }
 
@@ -420,6 +473,32 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 
+	// Typing a repo's server. Unlike the token this is short and typed rather
+	// than pasted, but it comes off the key message the same way: one path in,
+	// one set of rules about what a key means while a field is open.
+	if m.clSockOpen {
+		switch k {
+		case "esc":
+			m.clSockOpen, m.clSockFor, m.clSockText = false, "", ""
+			return m, nil, true
+		case "enter":
+			repo, sock := m.clSockFor, m.clSockText
+			m.clSockOpen, m.clSockFor, m.clSockText = false, "", ""
+			mm, cmd := m.clSetSocket(repo, sock)
+			return mm, cmd, true
+		case "backspace":
+			r := []rune(m.clSockText)
+			if len(r) > 0 {
+				m.clSockText = string(r[:len(r)-1])
+			}
+			return m, nil, true
+		}
+		if s, ok := typedTextFor(m.key, k); ok {
+			m.clSockText += s
+		}
+		return m, nil, true
+	}
+
 	// An unfolded row can take the keyboard, and while it has it j/k/enter are
 	// about its checkouts rather than about the repo list. Resolved before the
 	// editor's own keys for the same reason the naming prompt is resolved before
@@ -514,6 +593,19 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		}
 		m.clExpanded[row.name] = true
 		m.clFoldRow, m.clFoldIdx = row.name, clCanonicalIdx(row)
+		return m, nil, true
+	case "s":
+		// The server is a fact about a repo — its sessions and its binaries —
+		// so it is typed against a repo row and nowhere else. Pre-filled with
+		// the name in force, because this is a short string being corrected
+		// rather than a secret being replaced: the useful starting point is
+		// what it says now.
+		if len(rows) == 0 {
+			return m, nil, true
+		}
+		row := rows[clampCursor(m.clRepo, len(rows))]
+		m.clPane = "repos"
+		m.clSockOpen, m.clSockFor, m.clSockText = true, row.name, row.socket
 		return m, nil, true
 	case "u":
 		mm, cmd := m.clAssign(m.clTargets(), "")
