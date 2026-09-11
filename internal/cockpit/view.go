@@ -100,6 +100,9 @@ func (m model) headerView() string {
 	// counted or omitted instead: a header that states a number the user cannot
 	// act on is worse than a header that says nothing.
 	parts := []string{fg(cDim, m.portfolioLine())}
+	if s := m.loadState(); s != "" {
+		parts = append(parts, fg(cAmber, s))
+	}
 	if w := weekWindow(); w != nil {
 		parts = append(parts, fg(cFaint, "week ")+fg(usageBandColor(w.pace), itoa(w.used)+"%")+fg(cFaint, " · resets "+usageResetDay()))
 	}
@@ -231,6 +234,31 @@ func spread(left, right string, w int) string {
 	}
 	gap := inner - lw - rw
 	return strings.Repeat(" ", pad) + left + strings.Repeat(" ", gap) + right + strings.Repeat(" ", pad)
+}
+
+// loadState says a rebuild is happening, and "" when none is.
+//
+// Loads are deliberately one at a time and requests coalesce (see load.go), so
+// a change the human just made is not applied when they made it: it is applied
+// when the load already out comes back, and a load is 4.5s warm and a minute
+// cold on a real portfolio. Nothing said so. Edit your scan roots while a poll
+// is in flight and the screen goes on showing the old repositories for as long
+// as that takes, with "settings saved" in the footer and no way to tell a
+// rescan that is coming from one that never started — which is the reason the
+// reported symptom was "they didn't show up", and why the first thing that
+// looked like it worked was navigating away and back.
+//
+// It is not a progress bar: the stages are not counted here and a figure we
+// cannot measure is the fabricated number this cockpit refuses everywhere else.
+// It says which of the two states it is in and nothing more.
+func (m model) loadState() string {
+	switch {
+	case m.loadBusy && m.loadNext != loadNone:
+		return "rescanning · another queued"
+	case m.loadBusy:
+		return "rescanning"
+	}
+	return ""
 }
 
 // portfolioLine is the header's "N out · M products · R repos" summary, counted
