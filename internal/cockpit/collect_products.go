@@ -331,9 +331,10 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 		grid := make([]repoRef, 0, len(names))
 		for _, name := range names {
 			forge, last, path := "gh", "—", ""
+			pinned := false
 			var wts []repoWorktree
 			if r, ok := discByName[name]; ok {
-				forge, path = ctx.forge(r.Path), r.Path
+				forge, path, pinned = ctx.forge(r.Path), r.Path, r.Pinned
 				if d, ok := stqDaysSinceCommit(r.Path); ok {
 					last = itoa(d) + "d"
 				}
@@ -350,6 +351,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 				ciColor:   g.ciColor,
 				last:      last,
 				path:      path,
+				pinned:    pinned,
 				worktrees: wts,
 			})
 		}

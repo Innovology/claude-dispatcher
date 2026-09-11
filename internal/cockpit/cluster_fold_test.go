@@ -10,6 +10,8 @@ package cockpit
 // assign blind from.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,15 +69,32 @@ func TestClFoldTogglesWithP(t *testing.T) {
 	}
 }
 
-// The fold survives the cursor moving on: unfolding two repos to compare where
-// they sit is the reason it is keyed by name rather than held as one cursor.
+// A fold survives the cursor moving on, which is why it is keyed by name rather
+// than held as one cursor: comparing where two repos sit is a thing you do.
+//
+// esc is the step that makes it possible. While a fold has the keyboard j is
+// its own — that is the whole point of the focus — so letting go first is how
+// the repo cursor moves with the fold still on screen.
 func TestClFoldSurvivesCursorMoving(t *testing.T) {
 	m := clFoldFixture(t)
-	m, _, _ = m.updateCluster("p")
-	m, _, _ = m.updateCluster("j")
-	m, _, _ = m.updateCluster("p")
+	m, _, _ = m.updateCluster("p")   // unfold ordain, fold takes the keys
+	m, _, _ = m.updateCluster("esc") // let go, ordain stays open
+	m, _, _ = m.updateCluster("j")   // now j moves the repo cursor again
+	m, _, _ = m.updateCluster("p")   // unfold player-app
 	if !m.clExpanded["ordain"] || !m.clExpanded["player-app"] {
 		t.Errorf("both rows should stay unfolded, got %v", m.clExpanded)
+	}
+	if m.clFoldRow != "player-app" {
+		t.Errorf("the keyboard should be on the newly unfolded row, got %q", m.clFoldRow)
+	}
+}
+
+// With no fold focused, j/k move between repos as they always did.
+func TestClRepoCursorUnaffectedWithoutAFold(t *testing.T) {
+	m := clFoldFixture(t)
+	m, _, _ = m.updateCluster("j")
+	if m.clRepo != 1 {
+		t.Errorf("j should move the repo cursor when no fold has the keys, got %d", m.clRepo)
 	}
 }
 
@@ -92,15 +111,19 @@ func TestClFoldRendersPathAndCheckouts(t *testing.T) {
 	if !strings.Contains(body, "3 checkouts") {
 		t.Errorf("the fold should count every checkout:\n%s", body)
 	}
-	for _, want := range []string{"ci-scheduling", "r2w-wearables"} {
+	for _, want := range []string{"main", "ci-scheduling", "r2w-wearables"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the fold should list %q:\n%s", want, body)
 		}
 	}
-	// The acting checkout is named once, as the place the row works, and is not
-	// repeated in the list of the others.
-	if n := strings.Count(body, "this row works in main"); n != 1 {
-		t.Errorf("expected the acting checkout named once, got %d:\n%s", n, body)
+	// ● marks the checkout the row acts in. It is a mark on the list rather than
+	// a sentence beside it, because the list is the thing you move a cursor
+	// through to change it.
+	if !strings.Contains(body, "●") {
+		t.Errorf("the acting checkout should be marked in the list:\n%s", body)
+	}
+	if !strings.Contains(body, "chosen · p to change") {
+		t.Errorf("an unpinned row should say the choice was automatic:\n%s", body)
 	}
 }
 
@@ -164,5 +187,169 @@ func TestClElideKeepsBothEnds(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "/home") || !strings.HasSuffix(got, "ci-scheduling") {
 		t.Errorf("both ends should survive, got %q", got)
+	}
+}
+
+// ---- picking the checkout a repo works in -----------------------------------
+//
+// The automatic choice knows three spellings of a trunk — the main worktree,
+// main, master. A repo that merges into `dev` matches none of them, so its row
+// would read a branch nobody ships from. These cover the way out of that.
+
+// clPinFixture has a repo whose trunk is `dev`, sitting where the automatic
+// choice would never look: after the `main` checkout, on a branch named nothing
+// like a trunk.
+func clPinFixture(t *testing.T) (model, string) {
+	t.Helper()
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	reposByProduct = map[string][]repoRef{
+		clUnassigned: {{
+			name: "playerpulse", forge: "gh", last: "7d",
+			path: "/src/playerpulse",
+			worktrees: []repoWorktree{
+				{path: "/src/playerpulse", branch: "main", main: true},
+				{path: "/src/playerpulse-dev", branch: "dev"},
+				{path: "/src/playerpulse-o6", branch: "o6"},
+			},
+		}},
+	}
+	m := newModel()
+	m.cfg = &config.Config{Products: map[string][]string{}}
+	m.clOpen = true
+	return m, home
+}
+
+// p opens the fold ON the checkout the row currently works in, not at the top:
+// with sixty-nine of them, "which one is it now" must not be a thing you scroll
+// to find.
+func TestClFoldOpensOnTheActingCheckout(t *testing.T) {
+	m, _ := clPinFixture(t)
+	m.clRepo = 0
+	m, _, _ = m.updateCluster("p")
+	if m.clFoldRow != "playerpulse" {
+		t.Fatalf("p should give the fold the keyboard, got %q", m.clFoldRow)
+	}
+	if m.clFoldIdx != 0 {
+		t.Errorf("fold should open on the acting checkout (index 0), got %d", m.clFoldIdx)
+	}
+}
+
+// While the fold has the keyboard, j/k are its own — moving the repo cursor as
+// well would make one key mean two things.
+func TestClFoldTakesTheArrowKeys(t *testing.T) {
+	m, _ := clPinFixture(t)
+	m, _, _ = m.updateCluster("p")
+	before := m.clRepo
+	m, _, _ = m.updateCluster("j")
+	if m.clFoldIdx != 1 {
+		t.Errorf("j should move inside the fold, got idx %d", m.clFoldIdx)
+	}
+	if m.clRepo != before {
+		t.Errorf("j should not also move the repo cursor, got %d want %d", m.clRepo, before)
+	}
+	m, _, _ = m.updateCluster("k")
+	if m.clFoldIdx != 0 {
+		t.Errorf("k should move back, got %d", m.clFoldIdx)
+	}
+	// esc lets go of the fold without closing it, so what you were reading stays.
+	m, _, _ = m.updateCluster("esc")
+	if m.clFoldRow != "" {
+		t.Errorf("esc should release the fold, got %q", m.clFoldRow)
+	}
+	if !m.clExpanded["playerpulse"] {
+		t.Error("esc should leave the fold open — p is what closes it")
+	}
+	if !m.clOpen {
+		t.Error("esc inside a fold must not close the editor")
+	}
+}
+
+// enter on a checkout writes it to [checkouts], which is what Repo.Path is read
+// through on the next load.
+func TestClFoldEnterPinsTheCheckout(t *testing.T) {
+	m, home := clPinFixture(t)
+	m, _, _ = m.updateCluster("p")
+	m, _, _ = m.updateCluster("j") // onto dev
+	m, cmd, _ := m.updateCluster("enter")
+	if cmd == nil {
+		t.Fatal("pinning should return a command carrying the outcome")
+	}
+	if got := m.cfg.Checkouts["playerpulse"]; got != "/src/playerpulse-dev" {
+		t.Errorf("config should hold the picked checkout, got %q", got)
+	}
+	body, err := os.ReadFile(filepath.Join(home, ".config", "claude-dispatcher", "config.toml"))
+	if err != nil {
+		t.Fatalf("config should have been written: %v", err)
+	}
+	if !strings.Contains(string(body), "playerpulse-dev") {
+		t.Errorf("the pin should reach the file:\n%s", body)
+	}
+	if msg, ok := cmd().(actionMsg); !ok || !strings.Contains(msg.notice, "playerpulse-dev") {
+		t.Errorf("the notice should name the checkout, got %#v", cmd())
+	}
+}
+
+// A pin needs a handle on the inside: choosing the one already pinned removes
+// the entry, because nothing else on this screen does and "choose automatically
+// again" has to be reachable.
+func TestClFoldEnterOnThePinnedOneClearsIt(t *testing.T) {
+	m, _ := clPinFixture(t)
+	m.cfg.Checkouts = map[string]string{"playerpulse": "/src/playerpulse-dev"}
+	// The snapshot reflects that pin: the row acts in dev and says it is pinned.
+	reposByProduct[clUnassigned][0].path = "/src/playerpulse-dev"
+	reposByProduct[clUnassigned][0].pinned = true
+
+	m, _, _ = m.updateCluster("p")
+	if m.clFoldIdx != 1 {
+		t.Fatalf("fold should open on the pinned checkout, got %d", m.clFoldIdx)
+	}
+	m, cmd, _ := m.updateCluster("enter")
+	if _, still := m.cfg.Checkouts["playerpulse"]; still {
+		t.Error("enter on the pinned checkout should clear the pin")
+	}
+	if msg, ok := cmd().(actionMsg); !ok || !strings.Contains(msg.notice, "chooses its checkout again") {
+		t.Errorf("the notice should say it is automatic again, got %#v", cmd())
+	}
+}
+
+// A pinned row says so, so a decision is visible before it is changed.
+func TestClFoldSaysPinnedRatherThanChosen(t *testing.T) {
+	m, _ := clPinFixture(t)
+	reposByProduct[clUnassigned][0].pinned = true
+	m.clExpanded = map[string]bool{"playerpulse": true}
+	body := strings.Join(m.clLeft(120, 40), "\n")
+	if !strings.Contains(body, "pinned · p to change") {
+		t.Errorf("a pinned row should say so:\n%s", body)
+	}
+}
+
+// The fold list windows around its own cursor. A repo with sixty-nine checkouts
+// and a fixed first-eight would put the one you are choosing off screen.
+func TestClFoldWindowsAroundTheCursor(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	var wts []repoWorktree
+	for i := range 69 {
+		wts = append(wts, repoWorktree{path: "/src/big/wt-" + itoa(i), branch: "b" + itoa(i)})
+	}
+	reposByProduct = map[string][]repoRef{
+		clUnassigned: {{name: "big", forge: "gh", last: "1d", path: wts[0].path, worktrees: wts}},
+	}
+	m := newModel()
+	m.cfg = &config.Config{Products: map[string][]string{}}
+	m.clOpen = true
+	m.clExpanded = map[string]bool{"big": true}
+	m.clFoldRow, m.clFoldIdx = "big", 40
+
+	body := strings.Join(m.clLeft(120, 40), "\n")
+	if !strings.Contains(body, "wt-40") {
+		t.Errorf("the fold cursor must be on screen:\n%s", body)
+	}
+	if strings.Contains(body, "wt-10 ") {
+		t.Errorf("the window should have moved off the top of the list:\n%s", body)
 	}
 }

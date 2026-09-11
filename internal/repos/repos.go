@@ -38,6 +38,11 @@ type Repo struct {
 	// from git's own registry rather than from the directory scan, so a worktree
 	// in a hidden `.worktrees/` folder or outside every scan root is still here.
 	Worktrees []Worktree
+	// Pinned reports that Path was named by the human in `[checkouts]` rather
+	// than chosen. Screens say which, because the two answer different
+	// questions: an automatic choice is a guess worth correcting, and a pin is
+	// a decision worth seeing before it is changed.
+	Pinned bool
 }
 
 const maxDepth = 3
@@ -114,6 +119,9 @@ func Discover(cfg *config.Config) []Repo {
 			Path:      canonical(wts, g.found),
 			GitDir:    common,
 			Worktrees: wts,
+		}
+		if p, ok := pinnedCheckout(cfg.Checkouts[r.Name], wts); ok {
+			r.Path, r.Pinned = p, true
 		}
 		r.Product = cfg.ProductFor(r.Name)
 		out = append(out, r)
@@ -258,6 +266,34 @@ func canonical(wts []Worktree, found []string) string {
 		return found[0]
 	}
 	return ""
+}
+
+// pinnedCheckout resolves a `[checkouts]` entry against the repo's actual
+// worktrees.
+//
+// The automatic choice knows three spellings of a trunk — the main worktree,
+// `main`, `master` — and a repository that merges into `dev` matches none of
+// them, so its row would read a branch nobody ships from: the staleness log,
+// the decisions scan and a dispatch's starting tree all come from this
+// directory. The human names it instead.
+//
+// A pin that git does not list as a worktree of this repo is ignored rather
+// than obeyed. It is stale (the worktree was removed), or it was typed by hand
+// into the wrong repo's entry — and in both cases pointing Repo.Path at a
+// directory outside the repository would make every read from it wrong in a way
+// nothing on screen could explain. A pin chooses between the checkouts that
+// exist; it does not invent one.
+func pinnedCheckout(pin string, wts []Worktree) (string, bool) {
+	if pin == "" {
+		return "", false
+	}
+	want := filepath.Clean(pin)
+	for _, w := range wts {
+		if filepath.Clean(w.Path) == want {
+			return w.Path, true
+		}
+	}
+	return "", false
 }
 
 // repoName is what the repository is called, which is not what its folder is

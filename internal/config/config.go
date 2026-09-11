@@ -24,6 +24,14 @@ type Config struct {
 	// directory name. Unlisted repos use the first workflow whose name looks
 	// deploy-ish (deploy/release/publish/ship/prod).
 	DeployWorkflows map[string]string `toml:"deploy_workflows"`
+	// Checkouts pins which working tree a repo's row acts in, keyed by repo
+	// name, for repos whose trunk is not spelled the way the automatic choice
+	// guesses — the main worktree, then a checkout on main, then on master.
+	// A repo that merges into `dev` matches none of those and would be read from
+	// a branch nobody ships. Set from the assignment editor (`p`), and ignored
+	// when it names a path git does not list as a worktree of that repo, since a
+	// pin is a choice between the checkouts that exist, not a way to invent one.
+	Checkouts map[string]string `toml:"checkouts,omitempty"`
 
 	// Integrations (optional). Matching env vars, when set, override these so a
 	// secret can be kept out of the file. Edited in-app from the cockpit.
@@ -147,6 +155,17 @@ func Save(c *Config) error {
 	b.WriteString("[products]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Products)) {
 		b.WriteString(tomlKey(k) + " = " + tomlStrings(c.Products[k]) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString("# Which working tree a repo is read and dispatched from, for repos with many.\n")
+	b.WriteString("# Unlisted repos choose automatically: the main worktree, else a checkout on\n")
+	b.WriteString("# main, else master. Name one here when your trunk is spelled otherwise —\n")
+	b.WriteString("# a repo that merges into \"dev\" matches none of those. Set it with p in the\n")
+	b.WriteString("# assignment editor (2, a); a path git does not list as a worktree is ignored.\n")
+	b.WriteString("# shop-api = \"/home/you/src/shop-api/dev\"\n")
+	b.WriteString("[checkouts]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Checkouts)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Checkouts[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Per-repo deploy workflow override (\"done means live\" watches this workflow\n")

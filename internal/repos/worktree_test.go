@@ -324,6 +324,47 @@ func TestCanonicalCheckout(t *testing.T) {
 	}
 }
 
+// The automatic choice knows three spellings of a trunk, and a repo that merges
+// into `dev` is none of them. [checkouts] is how the human says so.
+func TestDiscoverPinnedCheckout(t *testing.T) {
+	f := newFixture(t)
+	clone := f.mkdir("playerpulse")
+	common := filepath.Join(clone, ".git")
+	f.gitDir(common, "git@github.com:acme/playerpulse.git", false)
+	dev := filepath.Join(f.root, "playerpulse-dev")
+	f.worktree(common, dev, "dev")
+
+	base := config.Config{Roots: []string{f.root}}
+	if r := only(t, Discover(&base)); r.Path != clone || r.Pinned {
+		t.Fatalf("without a pin the main worktree wins: path %q pinned %v", r.Path, r.Pinned)
+	}
+
+	pinned := base
+	pinned.Checkouts = map[string]string{"playerpulse": dev}
+	r := only(t, Discover(&pinned))
+	if r.Path != dev {
+		t.Errorf("path: got %q, want the pinned %q", r.Path, dev)
+	}
+	if !r.Pinned {
+		t.Error("a pinned repo should say the path was named, not chosen")
+	}
+
+	// A pin is a choice between the checkouts that exist. One naming anything
+	// else is stale or mistyped, and obeying it would point every read at a
+	// directory outside the repository.
+	for _, bogus := range []string{
+		filepath.Join(f.root, "not-a-worktree"),
+		"/nowhere/at/all",
+	} {
+		off := base
+		off.Checkouts = map[string]string{"playerpulse": bogus}
+		r := only(t, Discover(&off))
+		if r.Path != clone || r.Pinned {
+			t.Errorf("pin %q should be ignored, got path %q pinned %v", bogus, r.Path, r.Pinned)
+		}
+	}
+}
+
 // Two checkouts of one repository are one repository, and the products map
 // keyed by the repo's name reaches it.
 func TestDiscoverGroupsAndMapsProduct(t *testing.T) {

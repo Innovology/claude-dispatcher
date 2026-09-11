@@ -132,6 +132,13 @@ type model struct {
 	// they live. Keyed by repo name, and it survives the cursor moving off the
 	// row: unfolding two repos to compare where they sit is the point of it.
 	clExpanded map[string]bool
+	// clFoldRow is the unfolded repo whose checkouts have the keyboard ("" when
+	// none), and clFoldIdx the checkout under the cursor inside it. The fold
+	// takes j/k/enter while it is focused, the way the naming prompt takes the
+	// letters: choosing which checkout a repo works in is a different question
+	// from which repo you are on, and one set of arrow keys cannot mean both.
+	clFoldRow string
+	clFoldIdx int
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.

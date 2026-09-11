@@ -49,6 +49,11 @@ func (m model) clLeft(cw, h int) []string {
 		}
 		markedLine = itoa(marked) + " " + word + " marked · enter moves them"
 	}
+	// While a fold has the keyboard the hint is about the fold, because every
+	// key it names now means something else.
+	if m.clFoldRow != "" {
+		markedLine = "checkouts of " + m.clFoldRow + " · enter picks one · esc leaves"
+	}
 
 	out := []string{
 		spread(fg(cDim, m.clPaneLabel()), fg(cFaint, markedLine), cw+2*pad),
@@ -77,9 +82,14 @@ func (m model) clLeft(cw, h int) []string {
 			mark = "◆"
 		}
 		if i == sel && m.clPane == "repos" {
-			bg, nameColor = cSel, cWhite
 			if mark == " " {
 				mark = "▸"
+			}
+			// The repo row keeps its marker but gives up the highlight while its
+			// own fold is being steered: two lit rows would be two cursors, and
+			// only one of them is taking the keys.
+			if m.clFoldRow == "" {
+				bg, nameColor = cSel, cWhite
 			}
 		}
 		prod, prodColor := r.product, cMid
@@ -96,7 +106,11 @@ func (m model) clLeft(cw, h int) []string {
 			cr(r.last, 8, cFaint),
 		))
 		if m.clExpanded[r.name] {
-			lines = append(lines, clFold(r, cw)...)
+			focus := -1
+			if m.clFoldRow == r.name {
+				focus = clampCursor(m.clFoldIdx, len(r.worktrees))
+			}
+			lines = append(lines, clFold(r, cw, focus)...)
 		}
 	}
 	// Leave a line for the "showing x of y" footer so it cannot itself be the
@@ -125,9 +139,15 @@ const clFoldMax = 8
 // none of the directories it occupies (a clone of `ordain` sitting in
 // `ord-ai-n`) and it may occupy many (sixty-nine checkouts of one bare repo).
 // Both of those make "which of these is it?" a real question to be asked while
-// deciding where a repo belongs — so the answer is the absolute path of the
-// checkout the row acts in, then every other checkout git knows of.
-func clFold(r clRepoRow, cw int) []string {
+// deciding where a repo belongs — so the fold is the absolute path the row acts
+// in, then every checkout git knows of, with the acting one marked.
+//
+// focus is the checkout under the fold's own cursor while it has the keyboard,
+// and -1 when it does not. The list windows around it: the answer to "which one
+// is it now" must never be a row you have to scroll to find, and with
+// sixty-nine checkouts a fixed first-eight would put it off screen for most
+// repos.
+func clFold(r clRepoRow, cw, focus int) []string {
 	lead := c("", 3, "")
 	inner := maxi(cw-3, 1)
 
@@ -138,40 +158,57 @@ func clFold(r clRepoRow, cw int) []string {
 		// point of the fold; an empty line would read as "no path".
 		path = "no checkout on disk"
 	}
-	out := []string{row(cw, "", lead, flexc(clElide(path, inner), cMid))}
-
-	var others []repoWorktree
-	for _, w := range r.worktrees {
-		if w.path != r.path {
-			others = append(others, w)
-		}
+	pathColor := cMid
+	if r.pinned {
+		pathColor = cWhite
 	}
-	if len(others) == 0 {
+	out := []string{row(cw, "", lead, flexc(clElide(path, inner), pathColor))}
+
+	// One checkout is one directory, and "1 checkouts" beneath its own path is
+	// a sentence about nothing.
+	if len(r.worktrees) < 2 {
 		return out
 	}
-	here := itoa(len(r.worktrees)) + " checkouts"
-	if r.path != "" {
-		here += " · this row works in " + filepath.Base(r.path)
-	}
-	out = append(out, row(cw, "", lead, flexc(here, cFaint)))
 
-	shown := others
-	if len(shown) > clFoldMax {
-		shown = shown[:clFoldMax]
+	meta := itoa(len(r.worktrees)) + " checkouts"
+	switch {
+	case focus >= 0:
+		meta += " · enter picks where this row works · esc leaves"
+	case r.pinned:
+		meta += " · pinned · p to change"
+	default:
+		meta += " · chosen · p to change"
 	}
-	for _, w := range shown {
+	out = append(out, row(cw, "", lead, flexc(meta, cFaint)))
+
+	start, end := 0, mini(clFoldMax, len(r.worktrees))
+	if focus >= 0 {
+		start, end = window(focus, len(r.worktrees), clFoldMax)
+	}
+	for i := start; i < end; i++ {
+		w := r.worktrees[i]
 		branch := w.branch
 		if branch == "" {
 			branch = "detached"
 		}
-		out = append(out, row(cw, "", lead,
-			c("", 2, ""),
-			flexc(filepath.Base(w.path), cDim),
+		// ● is the checkout this row acts in; the highlight is where the fold's
+		// cursor is. They are different facts and a reader has to be able to see
+		// both at once — the point of the screen is moving one onto the other.
+		mark, nameColor, bg := " ", cDim, cTransparent
+		if w.path == r.path {
+			mark, nameColor = "●", cMid
+		}
+		if i == focus {
+			bg, nameColor = cSel, cWhite
+		}
+		out = append(out, row(cw, bg, lead,
+			c(mark, 2, cAmber),
+			flexc(filepath.Base(w.path), nameColor),
 			c(branch, 30, cFaint),
 		))
 	}
-	if n := len(others) - len(shown); n > 0 {
-		out = append(out, row(cw, "", lead, c("", 2, ""), flexc("…"+itoa(n)+" more", cFaint)))
+	if hidden := len(r.worktrees) - (end - start); hidden > 0 {
+		out = append(out, row(cw, "", lead, c("", 2, ""), flexc("…"+itoa(hidden)+" more", cFaint)))
 	}
 	return out
 }

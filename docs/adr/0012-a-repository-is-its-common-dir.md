@@ -93,14 +93,29 @@ directory holding a valid bare repo is descended into even at the depth limit.
 The budget itself does not grow — a container *below* the limit is still out of
 reach, and the answer to that is a nearer scan root.
 
-**`p` in the assignment editor says where a repo is.** A row was a folder and is
-now a repository: it may be named for none of the directories it occupies and it
-may occupy sixty-nine of them. The screen you assign from could no longer answer
-"which directory is this?" by being read, so `p` unfolds the selected row to the
-absolute path of the checkout it acts in and every other checkout git knows of,
-capped with a count of the rest. It toggles per repo and is keyed by name, so
-the cursor moving on does not fold it — comparing two repos' locations is the
-point of it.
+**`p` in the assignment editor says where a repo is, and picks which checkout it
+works in.** A row was a folder and is now a repository: it may be named for none
+of the directories it occupies and it may occupy sixty-nine of them. The screen
+you assign from could no longer answer "which directory is this?" by being read,
+so `p` unfolds the selected row to the absolute path it acts in and every
+checkout git knows of, the acting one marked `●`.
+
+The automatic choice is also a guess, and three spellings of a trunk is a narrow
+guess: a repository that merges into `dev` matches none of them and would be
+read from a branch nobody ships. So the fold **takes the keyboard** — `j`/`k`
+move through the checkouts, `enter` sets one, `esc` lets go without closing, `p`
+folds. The pin lands in `[checkouts]`, keyed by repo name, and `enter` on the
+one already pinned clears it: nothing else on the screen removes a pin, and
+"choose automatically again" has to be reachable. A pin naming a path git does
+not list as a worktree of that repo is ignored rather than obeyed — it is stale
+or mistyped, and either way pointing `Repo.Path` outside the repository would
+make every read from it wrong in a way nothing on screen could explain.
+
+The fold's list windows around its own cursor rather than showing a fixed first
+eight, because with sixty-nine checkouts the one you are choosing would
+otherwise be off screen; and while the fold has the keyboard the repo row keeps
+its marker but gives up its highlight, since two lit rows would be two cursors
+and only one of them is taking the keys.
 
 ## Consequences
 
@@ -120,6 +135,12 @@ point of it.
   key. That is a pre-existing property of `[products]` being keyed by bare name,
   narrowed rather than widened here: the old scheme collided on folder names,
   which is how three repos came to be called `main`.
+- **A pinned checkout is not a root branch.** It decides which working tree the
+  repo is read from — the staleness log, the decisions scan, the tree a dispatch
+  starts in — and not which branch a feature is cut from. That still comes from
+  the remote's own default and the human's `Root` field (ADR 0010). Pinning the
+  `dev` checkout of a repo that merges into `dev` fixes what its row reads and
+  leaves ROOT to be answered where ROOT is answered.
 - Dispatchers still cut their worktrees under
   `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, not beside the
   user's own. Making that follow the project's layout is a separate decision:

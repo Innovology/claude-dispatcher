@@ -11,6 +11,8 @@ package cockpit
 // already in it survives a round trip.
 
 import (
+	"maps"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -31,6 +33,7 @@ type clRepoRow struct {
 	name, forge, product, last string
 	out                        int
 	path                       string
+	pinned                     bool
 	worktrees                  []repoWorktree
 }
 
@@ -55,7 +58,7 @@ func (m model) clRepos() []clRepoRow {
 			}
 			out = append(out, clRepoRow{
 				name: r.name, forge: r.forge, product: p, out: r.out, last: last,
-				path: r.path, worktrees: r.worktrees,
+				path: r.path, pinned: r.pinned, worktrees: r.worktrees,
 			})
 		}
 	}
@@ -179,6 +182,52 @@ func (m model) clPersist() tea.Cmd {
 	return func() tea.Msg { return actionMsg{notice: ""} } // reloads the snapshot so every lens regroups
 }
 
+// clPinCheckout writes which working tree a repo is read and dispatched from
+// into `[checkouts]`, and persists.
+//
+// The automatic choice knows three spellings of a trunk — the main worktree,
+// `main`, `master` — and a repository whose trunk is none of those gets a row
+// pointed at a branch nobody ships from: its staleness log, its decisions scan
+// and the tree a dispatch starts in all come from this directory. The human
+// picks instead, from the checkouts git actually lists, which is why this is a
+// selection in the fold rather than a path typed anywhere.
+//
+// Choosing the one already pinned CLEARS the entry rather than rewriting it.
+// Otherwise a pin would be a door with no handle on the inside: nothing else on
+// this screen removes one, and "back to choosing automatically" is a state the
+// human has to be able to get back to.
+//
+// Same write discipline as clPersist and clSetLinearKey — a copy saved first,
+// and only a save that worked published into the cockpit's own config, so the
+// file on disk and the config every collector reads are never two different
+// things.
+func (m model) clPinCheckout(r clRepoRow, path string) (model, tea.Cmd) {
+	if m.cfg == nil {
+		return m, func() tea.Msg { return actionMsg{notice: "no config — nothing saved"} }
+	}
+	next := map[string]string{}
+	maps.Copy(next, m.cfg.Checkouts)
+	unpin := r.pinned && r.path == path
+	if unpin {
+		delete(next, r.name)
+	} else {
+		next[r.name] = path
+	}
+	cfg := *m.cfg
+	cfg.Checkouts = next
+	if err := config.Save(&cfg); err != nil {
+		return m, func() tea.Msg { return actionMsg{notice: "could not save the checkout: " + err.Error()} }
+	}
+	m.cfg.Checkouts = next
+	notice := r.name + " works in " + filepath.Base(path)
+	if unpin {
+		notice = r.name + " chooses its checkout again"
+	}
+	// The notice rides the message because the reload it queues sets one of its
+	// own: Repo.Path is what the next snapshot reads every repo through.
+	return m, func() tea.Msg { return actionMsg{notice: notice} }
+}
+
 // clLinearKey is the Linear token a product's backlog is read with, or "" when
 // it names none and reads with the unscoped key.
 func (m model) clLinearKey(product string) string {
@@ -238,6 +287,66 @@ func (m model) clSetLinearKey(product, key string) (model, tea.Cmd) {
 	// queues sets one of its own — collectBacklog reads per token, so the next
 	// snapshot is already the one this changed.
 	return m, func() tea.Msg { return actionMsg{notice: notice} }
+}
+
+// clCanonicalIdx is where in a row's checkouts the one it works in sits, so the
+// fold opens on it rather than at the top: the list can be sixty-nine long and
+// the answer to "which one is it now" should not have to be scrolled for.
+func clCanonicalIdx(r clRepoRow) int {
+	for i, w := range r.worktrees {
+		if w.path == r.path {
+			return i
+		}
+	}
+	return 0
+}
+
+// clFoldTarget is the row the fold has the keyboard for, and whether it is still
+// on screen. A reload can retire a repo while its fold is open — the roots
+// changed, or it was moved — and the fold must then let go rather than act on a
+// row that is not there.
+func clFoldTarget(rows []clRepoRow, name string) (clRepoRow, bool) {
+	for _, r := range rows {
+		if r.name == name {
+			return r, true
+		}
+	}
+	return clRepoRow{}, false
+}
+
+// updateClFold handles the keys an unfolded row owns while it is focused. done
+// is false for everything it does not claim, which goes on to the editor's own
+// keys — `a`, `n`, `tab` and the rest still work with a fold open.
+func (m model) updateClFold(k string, rows []clRepoRow) (model, tea.Cmd, bool) {
+	row, ok := clFoldTarget(rows, m.clFoldRow)
+	if !ok || len(row.worktrees) == 0 {
+		m.clFoldRow = ""
+		return m, nil, false
+	}
+	switch k {
+	case "j", "down":
+		m.clFoldIdx = mini(m.clFoldIdx+1, len(row.worktrees)-1)
+		return m, nil, true
+	case "k", "up":
+		m.clFoldIdx = maxi(m.clFoldIdx-1, 0)
+		return m, nil, true
+	case "esc":
+		// Out of the fold, not out of the editor, and the fold stays open: esc
+		// here means "stop steering this list", and closing what the human is
+		// reading as well would make the key ambiguous with `p`.
+		m.clFoldRow = ""
+		return m, nil, true
+	case "tab":
+		// tab moves to the products pane, which the fold's cursor has nothing to
+		// do with — it lets go rather than leaving two cursors lit at once.
+		m.clFoldRow = ""
+		return m, nil, false
+	case "enter":
+		w := row.worktrees[clampCursor(m.clFoldIdx, len(row.worktrees))]
+		mm, cmd := m.clPinCheckout(row, w.path)
+		return mm, cmd, true
+	}
+	return m, nil, false
 }
 
 // ---- keys -------------------------------------------------------------------
@@ -310,6 +419,16 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 
+	// An unfolded row can take the keyboard, and while it has it j/k/enter are
+	// about its checkouts rather than about the repo list. Resolved before the
+	// editor's own keys for the same reason the naming prompt is resolved before
+	// them: the alternative is one key meaning two things at once.
+	if m.clFoldRow != "" {
+		if mm, cmd, done := m.updateClFold(k, rows); done {
+			return mm, cmd, true
+		}
+	}
+
 	switch k {
 	case "esc", "a":
 		m.clOpen, m.clMarked = false, map[string]bool{}
@@ -367,24 +486,29 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		m.clRepo = mini(m.clRepo+1, maxi(len(rows)-1, 0))
 		return m, nil, true
 	case "p":
-		// Where a repo actually is. A row is a repository now, not a folder —
-		// one row can stand for sixty-nine checkouts and be named for none of
-		// them — so the question "which of these directories is this?" has to be
-		// answerable without leaving the screen you are assigning from. It
-		// toggles per repo and is remembered by name, so the cursor moving on
-		// does not fold it again.
+		// Where a repo actually is, and which of its checkouts it works in. A row
+		// is a repository now, not a folder — one row can stand for sixty-nine
+		// checkouts and be named for none of them — so both questions have to be
+		// answerable without leaving the screen you are assigning from.
+		//
+		// Unfolding also hands the fold the keyboard, because the second question
+		// is answered by moving through the list and picking one. The fold is
+		// remembered by name, so leaving it with esc keeps it open and the cursor
+		// can move on with it still showing.
 		if len(rows) == 0 {
 			return m, nil, true
 		}
-		name := rows[clampCursor(m.clRepo, len(rows))].name
+		row := rows[clampCursor(m.clRepo, len(rows))]
 		if m.clExpanded == nil {
 			m.clExpanded = map[string]bool{}
 		}
-		if m.clExpanded[name] {
-			delete(m.clExpanded, name)
-		} else {
-			m.clExpanded[name] = true
+		if m.clFoldRow == row.name {
+			m.clFoldRow = ""
+			delete(m.clExpanded, row.name)
+			return m, nil, true
 		}
+		m.clExpanded[row.name] = true
+		m.clFoldRow, m.clFoldIdx = row.name, clCanonicalIdx(row)
 		return m, nil, true
 	case "u":
 		mm, cmd := m.clAssign(m.clTargets(), "")

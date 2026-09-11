@@ -85,6 +85,7 @@ type repoRef struct {
 	// row alone can no longer say which folders it stands for — `p` in the
 	// assignment editor unfolds these.
 	path      string
+	pinned    bool
 	worktrees []repoWorktree
 }
 

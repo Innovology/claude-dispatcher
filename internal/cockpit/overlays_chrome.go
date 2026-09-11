@@ -55,6 +55,7 @@ var helpSections = []struct {
 		{"l", "the Linear token this product's backlog is read with"},
 		{"space", "mark a repo · enter moves every marked one"},
 		{"p", "unfold a repo · where it lives, and its every checkout"},
+		{"", "in the fold: j/k picks the checkout it works in, ⏎ sets it"},
 		{"tab", "between the repo list and the products"},
 		{"u / ctrl+u", "take repos back out of a product · start over"},
 	}},

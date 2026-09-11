@@ -40,7 +40,19 @@
       falls to "unassigned" where the editor reassigns it, because a migration
       that guessed would be editing the file this tool calls the source of
       truth. `p` on a row in the assignment editor is where the detail went —
-      the absolute path it acts in and every checkout git knows of. Full
+      the absolute path it acts in and every checkout git knows of, the acting
+      one marked. **And the automatic choice is a guess worth correcting**:
+      three spellings of a trunk is narrow, and a repo that merges into `dev`
+      matches none of them, so its row would be read from a branch nobody
+      ships. The fold therefore takes the keyboard (`j`/`k` move its checkouts,
+      `enter` pins one into `[checkouts]`, `esc` lets go without closing, `p`
+      folds); `enter` on the one already pinned clears it, because nothing else
+      removes a pin and "choose automatically again" has to be reachable; and a
+      pin naming a path git does not list as a worktree of that repo is ignored,
+      since a pin chooses between the checkouts that exist rather than inventing
+      one. A pinned checkout is **not** a root branch — it decides what the row
+      reads, while which branch a feature is cut from stays with the remote's
+      default and the human's `Root` (see the root-branch decision below). Full
       record: `docs/adr/0012-a-repository-is-its-common-dir.md`.
   - *Worktree* is per-dispatch isolation: each dispatch gets its own git
     worktree of its repo under
