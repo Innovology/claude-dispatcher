@@ -29,7 +29,7 @@ func TestShellCommandsCoverALoginShell(t *testing.T) {
 // A session tmux cannot answer for is unknown, never idle: the caller reclaims
 // an idle session and leaves an unknown one alone.
 func TestSessionIdleIsUnknownForAMissingSession(t *testing.T) {
-	idle, known := SessionIdle("definitely-not-a-real-tmux-session-xyz")
+	idle, known := Default.SessionIdle("definitely-not-a-real-tmux-session-xyz")
 	if known || idle {
 		t.Errorf("SessionIdle(missing) = idle:%v known:%v", idle, known)
 	}

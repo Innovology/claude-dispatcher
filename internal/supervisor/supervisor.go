@@ -9,17 +9,36 @@
 //
 // The surface, implemented by each build-tagged file:
 //
-//	Available() bool                         — is the backend usable on this host
-//	Backend() string                         — its name, for messages ("tmux")
-//	NewSession(name, dir, shellCommand) error — start a detached session
-//	HasSession(name) bool                    — is that session still alive
-//	Sessions() []string                      — every live session, in one call
-//	AttachCmd(name) *exec.Cmd                — hand the terminal to it
-//	KillSession(name) error                  — end it
-//	SendKeys(name, text) error               — type text at its prompt + Enter
-//	UniqueName(base) string                  — a session name not already taken
-//	SetStatusHint(name)                      — show the way back in its status line
-//	EnsureBackKey()                          — bind the prefix-free "back" key
-//	EnsureFocusEvents()                      — have the host report focus changes
-//	AttachSwitches() bool                    — does AttachCmd exit on the way out
+// The surface, implemented by each build-tagged file:
+//
+//	Available() bool                          — is the backend usable on this host
+//	Backend() string                          — its name, for messages ("tmux")
+//	NewSession(s, dir, shellCommand, env)     — start a detached session
+//	HasSession(s) bool                        — is that session still alive
+//	Sessions(socket) []string                 — every live session there, in one call
+//	AttachCmd(s, env) *exec.Cmd               — hand the terminal to it
+//	KillSession(s) error                      — end it
+//	SendKeys(s, text) error                   — type text at its prompt + Enter
+//	UniqueName(s) string                      — a session name not already taken
+//	SetStatusHint(s)                          — show the way back in its status line
+//	EnsureBackKey(sockets...)                 — bind the prefix-free "back" key
+//	EnsureFocusEvents()                       — have the host report focus changes
+//	AttachSwitches(s) bool                    — does AttachCmd exit on the way out
 package supervisor
+
+// Session is where a dispatcher's session can be reached: its name, and the
+// server it lives on.
+//
+// The name alone stopped being an address when a repo could name a socket of
+// its own — "disp-login" on two sockets is two sessions, and asking the wrong
+// server about one gets a confident "no such session". So the pair travels
+// together, and it is on the record (state.Dispatch.TmuxSocket) rather than
+// recomputed, because a socket worked out from config that has since changed is
+// a dispatcher nothing can find again.
+//
+// Socket is empty for the default server, which is every dispatch made before
+// repos could name one and every repo that does not.
+type Session struct {
+	Name   string
+	Socket string
+}

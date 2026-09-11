@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"claude-dispatcher/internal/supervisor"
 	"testing"
 
 	"claude-dispatcher/internal/state"
@@ -27,8 +28,11 @@ func withSessionSeams(t *testing.T, list func() []string, probe func(string) boo
 	t.Helper()
 	prevAlive, prevNames, prevReady := sessionAlive, sessionNames, supervisorReady
 	t.Cleanup(func() { sessionAlive, sessionNames, supervisorReady = prevAlive, prevNames, prevReady })
-	sessionNames = list
-	sessionAlive = probe
+	// The seams are addressed by (socket, name) now; these tests are about what
+	// the listing and the probe say, not about which server was asked, so the
+	// socket is dropped on the way in and the name is all either one sees.
+	sessionNames = func(string) []string { return list() }
+	sessionAlive = func(sess supervisor.Session) bool { return probe(sess.Name) }
 	supervisorReady = func() bool { return ready }
 }
 

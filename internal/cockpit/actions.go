@@ -48,7 +48,7 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		m.notice = "no live session for \"" + feature + "\""
 		return m, nil
 	}
-	if !supervisor.HasSession(rec.TmuxSession) {
+	if !supervisor.HasSession(dispatchpkg.SessionOf(rec)) {
 		if retired, _ := reconcileSessions([]*state.Dispatch{rec}); retired > 0 {
 			m.notice = "\"" + feature + "\" lost its " + supervisor.Backend() +
 				" session — retired · h for history, where ⏎ resumes it"
@@ -63,19 +63,25 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		m.notice = "no live " + supervisor.Backend() + " session for \"" + feature + "\""
 		return m, nil
 	}
-	return m.attachSession(rec.TmuxSession)
+	return m.attachSession(dispatchpkg.SessionOf(rec), rec.EnvCommand)
 }
 
-// attachSession hands the terminal to a named session. attach resolves a
-// feature to one; a resume has just started one and knows its name directly.
-func (m model) attachSession(name string) (model, tea.Cmd) {
-	if name == "" || !supervisor.HasSession(name) {
+// attachSession hands the terminal to a session. attach resolves a feature to
+// one; a resume has just started one and knows its address directly.
+//
+// env is the repo's own environment, and it is passed here as well as at launch
+// because the human is about to open panes of their own: a split or a new
+// window takes its PATH from the client they arrived through, so an attach
+// without it hands them a session whose every further pane is blind to the
+// toolchain the first one was given.
+func (m model) attachSession(sess supervisor.Session, env string) (model, tea.Cmd) {
+	if sess.Name == "" || !supervisor.HasSession(sess) {
 		m.notice = "no live session to attach to"
 		return m, nil
 	}
-	supervisor.EnsureBackKey()
+	supervisor.EnsureBackKey(sess.Socket)
 	supervisor.EnsureFocusEvents()
-	supervisor.SetStatusHint(name)
+	supervisor.SetStatusHint(sess)
 	// Whether this command's exit means "they are back" depends on how the
 	// handover works. A plain attach owns the terminal until they detach, so it
 	// exits on the way home. A switch-client (inside tmux) or a raised console
@@ -83,8 +89,8 @@ func (m model) attachSession(name string) (model, tea.Cmd) {
 	// their return is the focus their pane or window regains — so record that
 	// they are away and let that close the loop. See the attachReturnedMsg and
 	// tea.FocusMsg cases in model.go.
-	m.away = supervisor.AttachSwitches()
-	return m, tea.ExecProcess(supervisor.AttachCmd(name), func(err error) tea.Msg {
+	m.away = supervisor.AttachSwitches(sess)
+	return m, tea.ExecProcess(supervisor.AttachCmd(sess, env), func(err error) tea.Msg {
 		return attachReturnedMsg{err: err}
 	})
 }
@@ -101,7 +107,7 @@ func killCmd(features []string) tea.Cmd {
 			if rec == nil {
 				continue
 			}
-			_ = supervisor.KillSession(rec.TmuxSession)
+			_ = supervisor.KillSession(dispatchpkg.SessionOf(rec))
 			// The kill takes the session's subagents with it, and no hook
 			// will fire to say so: settle the fan-out with the record.
 			swept := rec.SweepSubagents(time.Now())
@@ -181,10 +187,10 @@ func markDoneCmd(feature string) tea.Cmd {
 func replyCmd(feature, text string) tea.Cmd {
 	return func() tea.Msg {
 		rec := recordFor(feature)
-		if rec == nil || !supervisor.HasSession(rec.TmuxSession) {
+		if rec == nil || !supervisor.HasSession(dispatchpkg.SessionOf(rec)) {
 			return actionMsg{notice: "no live session to reply to"}
 		}
-		_ = supervisor.SendKeys(rec.TmuxSession, text)
+		_ = supervisor.SendKeys(dispatchpkg.SessionOf(rec), text)
 		return actionMsg{notice: "replied to \"" + feature + "\" · session resumed"}
 	}
 }
@@ -216,7 +222,8 @@ type launchedMsg struct {
 // tea.ExecProcess — so the command reports and Update does the handover.
 type resumedMsg struct {
 	notice  string
-	session string
+	session supervisor.Session
+	env     string
 }
 
 // resumeCmd reopens a finished dispatcher's Claude session, with prompt as the
@@ -245,13 +252,22 @@ func resumeCmd(id, prompt string) tea.Cmd {
 			if strings.TrimSpace(prompt) != "" {
 				notice += " · say it there, it was not sent"
 			}
-			return resumedMsg{notice: notice, session: session}
+			return resumedMsg{notice: notice, session: resumedAt(rec, session), env: rec.EnvCommand}
 		}
 		return resumedMsg{
 			notice:  "resumed \"" + rec.Feature + "\" in " + rec.RepoName,
-			session: session,
+			session: resumedAt(rec, session),
+			env:     rec.EnvCommand,
 		}
 	}
+}
+
+// resumedAt is where a resume left its session: the name Resume answered with,
+// on the server the record lives on. Resume may have taken a new name — the old
+// one can be occupied by the shell the finished session dropped to — but never a
+// new server, because the repo it reopens in is the one it ran in.
+func resumedAt(rec *state.Dispatch, name string) supervisor.Session {
+	return supervisor.Session{Name: name, Socket: rec.TmuxSocket}
 }
 
 // launchCmd dispatches a new feature into repoName with prompt, in the

@@ -93,13 +93,13 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// shell in (see tmux.SessionIdle): "idle" here kills the session, and a
 	// probe that called every live claude idle was killing the very dispatcher
 	// the human had just asked to reopen.
-	if d.TmuxSession != "" && sessionAlive(d.TmuxSession) {
-		idle, known := sessionIdle(d.TmuxSession)
+	if d.TmuxSession != "" && sessionAlive(SessionOf(d)) {
+		idle, known := sessionIdle(SessionOf(d))
 		switch {
 		case known && !idle:
 			return ResumeLive, d.TmuxSession, nil
 		case known && idle:
-			_ = killSession(d.TmuxSession)
+			_ = killSession(SessionOf(d))
 		}
 		// Unknown: leave it running and take a new name below. A backend that
 		// cannot see into a session must not have it killed on a guess.
@@ -153,8 +153,12 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		promptPath = p
 	}
 
-	name := uniqueName(base)
-	if err := newSession(name, dir, resumeCommand(d.ID, sid, promptPath, Mode(d.Mode), Model(d.Model))); err != nil {
+	// The same server and the same environment it went out in, both read off
+	// the record rather than resolved again: a repo's config may have changed
+	// since, and a session reopened somewhere else is a different session.
+	name := uniqueName(supervisor.Session{Name: base, Socket: d.TmuxSocket})
+	sess := supervisor.Session{Name: name, Socket: d.TmuxSocket}
+	if err := newSession(sess, dir, resumeCommand(d.ID, sid, promptPath, Mode(d.Mode), Model(d.Model)), d.EnvCommand); err != nil {
 		return "", "", err
 	}
 

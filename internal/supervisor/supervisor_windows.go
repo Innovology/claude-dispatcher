@@ -103,7 +103,14 @@ func processAlive(pid int) bool {
 // running it through cmd.exe, and records name→PID in the registry. The window
 // is titled name so the user can find it (see AttachCmd). Start (not Run) so
 // the process detaches and outlives this call.
-func NewSession(name, dir, shellCmd string) error {
+// The socket on a Session and the env prefix are both tmux notions with no
+// analogue here: this backend has one session manager — the registry below —
+// rather than a server per socket, and it starts the session process itself, so
+// what it inherits is this process's environment and there is no client in
+// between for a prefix to wrap. They are accepted and ignored rather than
+// refused, because a repo carrying either is describing its Unix hosts.
+func NewSession(sess Session, dir, shellCmd, env string) error {
+	name := sess.Name
 	// Title the window after the session so the user can locate it, then run
 	// the launch command.
 	full := "title " + name + " && " + shellCmd
@@ -122,7 +129,8 @@ func NewSession(name, dir, shellCmd string) error {
 
 // HasSession reports whether name's tracked process is still alive, pruning the
 // registry entry when it has exited.
-func HasSession(name string) bool {
+func HasSession(sess Session) bool {
+	name := sess.Name
 	reg := loadRegistry()
 	pid, ok := reg[name]
 	if !ok {
@@ -138,7 +146,7 @@ func HasSession(name string) bool {
 
 // Sessions names every tracked process still alive, pruning the ones that have
 // exited in the same pass. It is the whole-registry form of HasSession.
-func Sessions() []string {
+func Sessions(socket string) []string {
 	reg := loadRegistry()
 	var live []string
 	changed := false
@@ -159,7 +167,8 @@ func Sessions() []string {
 
 // KillSession terminates name's tracked process tree and drops it from the
 // registry. taskkill /T kills the console's child claude process too.
-func KillSession(name string) error {
+func KillSession(sess Session) error {
+	name := sess.Name
 	reg := loadRegistry()
 	pid, ok := reg[name]
 	if ok {
@@ -176,7 +185,8 @@ func KillSession(name string) error {
 // the prompt: it looks up the session's PID, then attaches to that console and
 // writes the keystrokes to its input buffer (see supervisor_windows_input.go).
 // Best-effort — a clear error, never a silent success, if the injection fails.
-func SendKeys(name, text string) error {
+func SendKeys(sess Session, text string) error {
+	name := sess.Name
 	reg := loadRegistry()
 	pid, ok := reg[name]
 	if !ok {
@@ -194,7 +204,8 @@ func SendKeys(name, text string) error {
 // foregrounding the session's own window is the analogue (a preview — see the
 // package doc and supervisor_windows_focus.go). If we cannot resolve our own
 // path, fall back to a command that prints where to find the window.
-func AttachCmd(name string) *exec.Cmd {
+func AttachCmd(sess Session, env string) *exec.Cmd {
+	name := sess.Name
 	exe, err := os.Executable()
 	if err != nil || exe == "" {
 		return exec.Command("cmd", "/c", "echo",
@@ -204,9 +215,10 @@ func AttachCmd(name string) *exec.Cmd {
 }
 
 // UniqueName returns base, or base-2, base-3, … if a session already exists.
-func UniqueName(base string) string {
+func UniqueName(sess Session) string {
+	base := sess.Name
 	name := base
-	for i := 2; HasSession(name); i++ {
+	for i := 2; HasSession(Session{Name: name}); i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	return name
@@ -217,19 +229,19 @@ func UniqueName(base string) string {
 // runs and while the trailing `pause` holds the window open afterwards. It
 // reports "unknown" rather than guessing, and the caller leaves the old console
 // alone and starts a new one — see dispatch.Resume.
-func SessionIdle(name string) (idle, known bool) { return false, false }
+func SessionIdle(sess Session) (idle, known bool) { return false, false }
 
 // SetStatusHint and EnsureBackKey are tmux status-line / key-binding concerns
 // with no console-window analogue; they are no-ops on Windows. Focus reporting
 // is the console's own business rather than something we can switch on for it,
 // so EnsureFocusEvents is a no-op too.
-func SetStatusHint(name string) {}
-func EnsureBackKey()            {}
-func EnsureFocusEvents()        {}
+func SetStatusHint(sess Session)      {}
+func EnsureBackKey(sockets ...string) {}
+func EnsureFocusEvents()              {}
 
 // AttachSwitches is true here for the same reason it is true inside tmux: the
 // Windows handover raises the session's own console window and returns at once,
 // so the human is over there and this command's exit is not their return. The
 // cockpit therefore waits for focus rather than rechecking on that exit — see
 // the attachReturnedMsg case in internal/cockpit.
-func AttachSwitches() bool { return true }
+func AttachSwitches(sess Session) bool { return true }

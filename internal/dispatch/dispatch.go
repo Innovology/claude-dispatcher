@@ -154,7 +154,9 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		Mode:         string(mode),
 		Model:        string(model),
 		FanOut:       fanOut,
-		TmuxSession:  uniqueName("disp-" + slug),
+		TmuxSocket:   r.Socket,
+		EnvCommand:   r.Env,
+		TmuxSession:  uniqueName(supervisor.Session{Name: "disp-" + slug, Socket: r.Socket}),
 		Status:       state.StatusLaunching,
 		CreatedAt:    time.Now(),
 	}
@@ -174,7 +176,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
 	cmd := launchCommand(d.ID, promptPath, mode, model)
-	if err := newSession(d.TmuxSession, worktree, cmd); err != nil {
+	if err := newSession(SessionOf(d), worktree, cmd, d.EnvCommand); err != nil {
 		return d, failLaunch(d, err)
 	}
 	return d, nil
@@ -215,6 +217,17 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return strings.TrimSpace(s)
+}
+
+// SessionOf is where d's session can be reached. The name alone stopped being
+// an address when a repo could name a socket of its own: asking the wrong
+// server about a session gets a confident "no such session", so the pair is
+// read off the record together everywhere it is used.
+func SessionOf(d *state.Dispatch) supervisor.Session {
+	if d == nil {
+		return supervisor.Session{}
+	}
+	return supervisor.Session{Name: d.TmuxSession, Socket: d.TmuxSocket}
 }
 
 // idOf is a dispatch's id, or "" when the launch failed before there was one.
@@ -267,10 +280,10 @@ func liveDispatch(slug string) *state.Dispatch {
 		if d.Slug != slug || d.TmuxSession == "" || !unfinished(d.Status) {
 			continue
 		}
-		if !sessionAlive(d.TmuxSession) {
+		if !sessionAlive(SessionOf(d)) {
 			continue
 		}
-		if idle, known := sessionIdle(d.TmuxSession); known && idle {
+		if idle, known := sessionIdle(SessionOf(d)); known && idle {
 			continue // claude has ended; what is left is the shell it dropped to
 		}
 		return d
@@ -335,19 +348,39 @@ var (
 // "the whole fleet died" — the same reason an unreachable supervisor sweeps
 // nothing. The extra probe costs one subprocess per record about to be retired,
 // and a retired record is skipped on every pass after this one.
+// socketsOf is every server the given records live on, each once.
+func socketsOf(ds []*state.Dispatch) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range ds {
+		if d.TmuxSession == "" || seen[d.TmuxSocket] {
+			continue
+		}
+		seen[d.TmuxSocket] = true
+		out = append(out, d.TmuxSocket)
+	}
+	return out
+}
+
 func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 	if !supervisorReady() {
 		return 0, 0
 	}
-	listed := make(map[string]bool)
-	for _, name := range sessionNames() {
-		listed[name] = true
+	// One listing per SERVER the fleet is spread over, not one per record: a
+	// repo names its own socket, so the single listing this used to take is now
+	// as many as there are servers in play — bounded by repos, not by
+	// dispatches, and still nothing like a probe apiece.
+	listed := make(map[supervisor.Session]bool)
+	for _, sock := range socketsOf(ds) {
+		for _, name := range sessionNames(sock) {
+			listed[supervisor.Session{Name: name, Socket: sock}] = true
+		}
 	}
 	for _, d := range ds {
 		if d.TmuxSession == "" {
 			continue
 		}
-		if listed[d.TmuxSession] {
+		if listed[SessionOf(d)] {
 			live++
 			continue
 		}
@@ -356,7 +389,7 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 		default:
 			continue
 		}
-		if sessionAlive(d.TmuxSession) {
+		if sessionAlive(SessionOf(d)) {
 			live++
 			continue
 		}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -16,8 +17,57 @@ func Available() bool {
 	return err == nil
 }
 
-func HasSession(name string) bool {
-	return exec.Command("tmux", "has-session", "-t", "="+name).Run() == nil
+// Server is one tmux server, addressed by its socket. Two servers are two
+// separate worlds: neither can list, attach to or kill the other's sessions,
+// and switch-client cannot cross between them. The zero Server is tmux's
+// default socket, which is where every dispatch ran before a repo could name
+// one of its own.
+//
+// A socket is how a repository keeps its own toolchain in front of a human.
+// A pane inherits the environment of the CLIENT that asked for it — not the
+// server's, and not the environment the server was started in — so which
+// binaries a pane sees is decided by whoever ran the tmux command, and stays
+// decided for every pane opened from that client afterwards. One server per
+// repo is what keeps that answer the repo's own.
+type Server struct {
+	// Socket is the -L name. Empty is tmux's default socket.
+	Socket string
+}
+
+// Default is "no -L": tmux's default socket, or — inside a tmux session — the
+// server that session belongs to.
+var Default = Server{}
+
+// cmd builds a tmux invocation against this server.
+//
+// Note what is deliberately NOT here: the environment prefix a repo's sessions
+// are launched under. That belongs to the two calls that spawn a pane —
+// NewSession and AttachCmd — and to nothing else. On the Server it would put a
+// `nix develop` evaluation behind every has-session and list-sessions, which
+// the cockpit issues on every poll.
+func (s Server) cmd(args ...string) *exec.Cmd {
+	return s.cmdIn("", args...)
+}
+
+// cmdIn is cmd with the tmux client run under a command prefix — the repo's
+// environment, when it has one. The prefix is a command and its arguments
+// ("nix develop --command"), not a shell line: it is split on whitespace and
+// exec'd directly, so nothing in it is quoted, globbed or expanded, and a
+// prefix that is not on PATH fails the call with its own error rather than a
+// shell's.
+func (s Server) cmdIn(env string, args ...string) *exec.Cmd {
+	if s.Socket != "" {
+		args = append([]string{"-L", s.Socket}, args...)
+	}
+	args = append([]string{"tmux"}, args...)
+	if fields := strings.Fields(env); len(fields) > 0 {
+		args = append(fields, args...)
+	}
+	return exec.Command(args[0], args[1:]...)
+}
+
+func (s Server) HasSession(name string) bool {
+	return s.cmd("has-session", "-t", "="+name).Run() == nil
 }
 
 // ListSessions names every live session on the server, in one round trip.
@@ -25,8 +75,8 @@ func HasSession(name string) bool {
 // costs a subprocess per dispatch; the opening screen wants the whole picture
 // at once. No server running is not an error — it is zero sessions, which is
 // exactly what a machine with nothing dispatched looks like.
-func ListSessions() []string {
-	out, err := exec.Command("tmux", "list-sessions", "-F", "#{session_name}").Output()
+func (s Server) ListSessions() []string {
+	out, err := s.cmd("list-sessions", "-F", "#{session_name}").Output()
 	if err != nil {
 		return nil
 	}
@@ -39,30 +89,39 @@ func ListSessions() []string {
 	return names
 }
 
-// NewSession starts a detached session running shellCommand in dir.
-func NewSession(name, dir, shellCommand string) error {
-	out, err := exec.Command("tmux", "new-session", "-d", "-s", name, "-c", dir, shellCommand).CombinedOutput()
+// NewSession starts a detached session running shellCommand in dir, with the
+// tmux client itself run under env when a repo names one.
+//
+// env wraps the CLIENT, not shellCommand — `nix develop --command tmux …`, not
+// `tmux … "nix develop --command claude …"`. Both put the repo's binaries on
+// the session's PATH, and only this one leaves the pane running the plain
+// `<shell> -c "… claude …"` that SessionIdle reads to decide whether claude has
+// ended. Wrapping the command instead makes the launcher the pane's foreground
+// process, and a pane whose command is not a shell is taken at its word as
+// busy — for ever, since the launcher never exits.
+func (s Server) NewSession(name, dir, shellCommand, env string) error {
+	out, err := s.cmdIn(env, "new-session", "-d", "-s", name, "-c", dir, shellCommand).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux new-session: %s", strings.TrimSpace(string(out)))
 	}
-	EnsureDetachKey()
-	SetStatusHint(name)
+	s.EnsureDetachKey()
+	s.SetStatusHint(name)
 	return nil
 }
 
 // SetStatusHint puts the way home in the session's status line. Note the
 // trailing colon: set-option rejects the "=name" exact-match form that
 // attach/kill accept.
-func SetStatusHint(name string) {
-	_ = exec.Command("tmux", "set-option", "-t", name+":", "status-right",
+func (s Server) SetStatusHint(name string) {
+	_ = s.cmd("set-option", "-t", name+":", "status-right",
 		` Ctrl-\ → back to dispatch `).Run()
 }
 
 // EnsureDetachKey binds Ctrl-\ (prefix-free, server-wide) to detach. The
 // default Ctrl-b d is a timed sequence that trips people up — holding Ctrl
 // for the whole chord gets silently swallowed by tmux. One chord instead.
-func EnsureDetachKey() {
-	_ = exec.Command("tmux", "bind-key", "-n", `C-\`, "detach-client").Run()
+func (s Server) EnsureDetachKey() {
+	_ = s.cmd("bind-key", "-n", `C-\`, "detach-client").Run()
 }
 
 // EnsureFocusEvents asks tmux to pass focus in and out through to the programs
@@ -72,17 +131,44 @@ func EnsureDetachKey() {
 // them to, because switch-client exits at the moment they leave rather than the
 // moment they come back (see AttachSwitches). Set server-wide, like the detach
 // key, so it covers the cockpit's client and not just the sessions we start.
-func EnsureFocusEvents() {
-	_ = exec.Command("tmux", "set-option", "-g", "focus-events", "on").Run()
+func (s Server) EnsureFocusEvents() {
+	_ = s.cmd("set-option", "-g", "focus-events", "on").Run()
 }
 
 // AttachSwitches reports whether AttachCmd moves the human to another client
 // instead of taking this terminal over until they detach — which decides
 // whether that command's exit means "they are back" or "they have just left".
-func AttachSwitches() bool { return os.Getenv("TMUX") != "" }
+func (s Server) AttachSwitches() bool { return currentSocket() == s.socketName() }
 
-func KillSession(name string) error {
-	return exec.Command("tmux", "kill-session", "-t", "="+name).Run()
+// socketName is the socket this server is addressed by, spelled the way $TMUX
+// spells it: the default server's socket file is itself named "default".
+func (s Server) socketName() string {
+	if s.Socket != "" {
+		return s.Socket
+	}
+	// The zero Server passes no -L, and a bare tmux talks to $TMUX's server
+	// when there is one. So inside a session its socket is that session's,
+	// and only outside one is it the socket literally named "default".
+	if cur := currentSocket(); cur != "" {
+		return cur
+	}
+	return "default"
+}
+
+// currentSocket is the socket of the tmux server this process is running
+// inside, or "" when it is not inside one at all. $TMUX is
+// "<socket path>,<pid>,<session id>", and the socket file's base name is what
+// -L names it.
+func currentSocket() string {
+	path, _, _ := strings.Cut(os.Getenv("TMUX"), ",")
+	if path == "" {
+		return ""
+	}
+	return filepath.Base(path)
+}
+
+func (s Server) KillSession(name string) error {
+	return s.cmd("kill-session", "-t", "="+name).Run()
 }
 
 // shellCommands are the pane commands that mean "nothing is running here": the
@@ -120,8 +206,8 @@ func paneIdle(cmd string) bool { return shellCommands[strings.TrimPrefix(cmd, "-
 // login shell, which sits there childless. A pane tmux can name a real command
 // for is still taken at its word (that is the same question, already answered),
 // so nothing is lost where job control does apply.
-func SessionIdle(name string) (idle, known bool) {
-	out, err := exec.Command("tmux", "list-panes", "-t", "="+name, "-F", "#{pane_pid} #{pane_current_command}").Output()
+func (s Server) SessionIdle(name string) (idle, known bool) {
+	out, err := s.cmd("list-panes", "-t", "="+name, "-F", "#{pane_pid} #{pane_current_command}").Output()
 	if err != nil {
 		return false, false
 	}
@@ -196,18 +282,27 @@ func processParents() map[string]bool {
 }
 
 // AttachCmd returns the command that hands the terminal over to a session.
-// Inside an existing tmux client we switch rather than nest.
-func AttachCmd(name string) *exec.Cmd {
-	if AttachSwitches() {
-		return exec.Command("tmux", "switch-client", "-t", "="+name)
+// Inside a client of THIS server we switch rather than nest; a client of
+// another server has to attach, because switch-client cannot cross servers —
+// which is also the honest outcome, since that attach runs in the cockpit's own
+// pane and exits when the human detaches, the one shape the caller already
+// knows how to wait for.
+//
+// env matters here for the same reason it matters at launch: every pane the
+// human opens after they arrive — a split, a new window — takes its PATH from
+// the client they arrived through. Attaching without it hands them a session
+// whose next pane cannot see the toolchain the first one was given.
+func (s Server) AttachCmd(name, env string) *exec.Cmd {
+	if s.AttachSwitches() {
+		return s.cmdIn(env, "switch-client", "-t", "="+name)
 	}
-	return exec.Command("tmux", "attach-session", "-t", "="+name)
+	return s.cmdIn(env, "attach-session", "-t", "="+name)
 }
 
 // UniqueName returns base, or base-2, base-3, … if a session already exists.
-func UniqueName(base string) string {
+func (s Server) UniqueName(base string) string {
 	name := base
-	for i := 2; HasSession(name); i++ {
+	for i := 2; s.HasSession(name); i++ {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	return name

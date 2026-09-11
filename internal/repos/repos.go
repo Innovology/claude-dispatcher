@@ -38,6 +38,11 @@ type Repo struct {
 	// from git's own registry rather than from the directory scan, so a worktree
 	// in a hidden `.worktrees/` folder or outside every scan root is still here.
 	Worktrees []Worktree
+	// Socket is the supervisor server this repo's sessions live on, and Env is
+	// the command they are launched under so they see this repo's own binaries.
+	// Both default to something sensible and are overridable; see env.go.
+	Socket string
+	Env    string
 	// Pinned reports that Path was named by the human in `[checkouts]` rather
 	// than chosen. Screens say which, because the two answer different
 	// questions: an automatic choice is a guess worth correcting, and a pin is
@@ -124,6 +129,10 @@ func Discover(cfg *config.Config) []Repo {
 			r.Path, r.Pinned = p, true
 		}
 		r.Product = cfg.ProductFor(r.Name)
+		r.Socket = socketFor(cfg, r.Name)
+		// Read from the checkout the repo actually works in, which the pin above
+		// may just have changed.
+		r.Env = envFor(cfg, r.Name, r.Path)
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {

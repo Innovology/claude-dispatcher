@@ -3,6 +3,7 @@
 package dispatch
 
 import (
+	"claude-dispatcher/internal/supervisor"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ type stubSupervisor struct {
 	idle    bool
 	known   bool
 	killed  []string
-	started struct{ name, dir, cmd string }
+	started struct{ name, socket, dir, cmd, env string }
 }
 
 func stubSessions(t *testing.T, s *stubSupervisor) {
@@ -27,16 +28,17 @@ func stubSessions(t *testing.T, s *stubSupervisor) {
 	t.Cleanup(func() {
 		sessionAlive, sessionIdle, killSession, uniqueName, newSession = pAlive, pIdle, pKill, pUniq, pNew
 	})
-	sessionAlive = func(name string) bool { return s.alive[name] }
-	sessionIdle = func(string) (bool, bool) { return s.idle, s.known }
-	killSession = func(name string) error {
-		s.killed = append(s.killed, name)
-		s.alive[name] = false
+	sessionAlive = func(sess supervisor.Session) bool { return s.alive[sess.Name] }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return s.idle, s.known }
+	killSession = func(sess supervisor.Session) error {
+		s.killed = append(s.killed, sess.Name)
+		s.alive[sess.Name] = false
 		return nil
 	}
-	uniqueName = func(base string) string { return base }
-	newSession = func(name, dir, cmd string) error {
-		s.started.name, s.started.dir, s.started.cmd = name, dir, cmd
+	uniqueName = func(sess supervisor.Session) string { return sess.Name }
+	newSession = func(sess supervisor.Session, dir, cmd, env string) error {
+		s.started.name, s.started.socket = sess.Name, sess.Socket
+		s.started.dir, s.started.cmd, s.started.env = dir, cmd, env
 		return nil
 	}
 }

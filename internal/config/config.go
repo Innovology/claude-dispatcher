@@ -32,6 +32,18 @@ type Config struct {
 	// when it names a path git does not list as a worktree of that repo, since a
 	// pin is a choice between the checkouts that exist, not a way to invent one.
 	Checkouts map[string]string `toml:"checkouts,omitempty"`
+	// Sockets names the supervisor server a repo's sessions live on, keyed by
+	// repo name. Unlisted repos use their own name, so every repo is its own
+	// server without anyone configuring anything; an entry is for a human who
+	// already keeps per-project servers under names of their own choosing,
+	// which is a label chosen outside the repository and therefore not
+	// something any amount of reading the repo could discover.
+	Sockets map[string]string `toml:"sockets,omitempty"`
+	// SessionEnv overrides the command a repo's sessions are launched under,
+	// keyed by repo name. Unlisted repos are read: a checkout with a flake.nix
+	// on a machine with nix is launched under `nix develop`. An entry set to ""
+	// turns that off for a repo whose flake nix develop cannot open.
+	SessionEnv map[string]string `toml:"session_env,omitempty"`
 
 	// Integrations (optional). Matching env vars, when set, override these so a
 	// secret can be kept out of the file. Edited in-app from the cockpit.
@@ -185,6 +197,27 @@ func Save(c *Config) error {
 	b.WriteString("[checkouts]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Checkouts)) {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Checkouts[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# The tmux server each repo's sessions live on, keyed by repo name. Unlisted\n")
+	b.WriteString("# repos use their own name, so each is its own server and its own PATH: a\n")
+	b.WriteString("# session inherits the environment of whatever asked for it, so one server per\n")
+	b.WriteString("# repo is what keeps a repo's toolchain in front of every pane you open in it.\n")
+	b.WriteString("# Name one here only to match servers you already start yourself.\n")
+	b.WriteString("# shop-api = \"shop\"\n")
+	b.WriteString("[sockets]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Sockets)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Sockets[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# What a repo's sessions are launched under, so they see that repo's own\n")
+	b.WriteString("# binaries. Unlisted repos are read rather than configured: a checkout with a\n")
+	b.WriteString("# flake.nix, on a machine with nix, runs under `nix develop`. Set one to \"\" to\n")
+	b.WriteString("# stop that for a repo whose flake has no devShell for nix develop to open.\n")
+	b.WriteString("# shop-api = \"\"\n")
+	b.WriteString("[session_env]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.SessionEnv)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.SessionEnv[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Per-repo deploy workflow override (\"done means live\" watches this workflow\n")

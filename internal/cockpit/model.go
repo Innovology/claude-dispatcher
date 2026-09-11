@@ -499,7 +499,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resumedMsg:
 		// The resumed session is the thing the human asked for, so they land in
 		// it — the same handover "jump in" does.
-		if mm, cmd := m.attachSession(msg.session); cmd != nil {
+		if mm, cmd := m.attachSession(msg.session, msg.env); cmd != nil {
 			mm.notice = msg.notice
 			return mm, cmd
 		}

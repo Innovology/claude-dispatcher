@@ -93,8 +93,26 @@ type Dispatch struct {
 	// work across multiple agents where the task warranted it. The sentence
 	// itself lives in Prompt; this flag is what lets screens say so without
 	// grepping the prompt for a keyword.
-	FanOut         bool   `json:"fan_out,omitempty"`
-	TmuxSession    string `json:"tmux_session"`
+	FanOut      bool   `json:"fan_out,omitempty"`
+	TmuxSession string `json:"tmux_session"`
+	// TmuxSocket is the supervisor server the session lives on — a repo names
+	// one to keep its own toolchain (see repos.Repo.Socket). Empty is the
+	// default server, which is every dispatch made before this existed.
+	//
+	// It is on the record rather than worked out from the repo's config at the
+	// time of asking, for the reason Root and Mode are: config changes, and a
+	// session looked for on the wrong server answers "no such session" with
+	// complete confidence. Together with TmuxSession it is the whole address.
+	TmuxSocket string `json:"tmux_socket,omitempty"`
+	// EnvCommand is the command prefix the tmux client was run under, so that
+	// the session sees the repo's own binaries — "nix develop --command" for a
+	// flake repo, empty for everywhere else.
+	//
+	// Recorded for the same reason: a dispatch launched before nix was on the
+	// machine, resumed after it arrived, would otherwise come back in a
+	// different world than it went out in — and the record is the only account
+	// of which world that was.
+	EnvCommand     string `json:"env_command,omitempty"`
 	SessionID      string `json:"session_id,omitempty"`
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	// BaseSHA is the branch tip at launch; commits in BaseSHA..Branch were
