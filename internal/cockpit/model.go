@@ -153,6 +153,9 @@ type model struct {
 	searchOpen bool
 	searchText string
 	searchAt   int
+	// sessionCursor is the Y tab: which session of the human's own is under
+	// the cursor.
+	sessionCursor int
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.

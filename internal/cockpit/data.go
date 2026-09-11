@@ -60,6 +60,10 @@ var (
 	staleRepos     []staleRepo
 	working        []workingItem
 	productStats   = map[string]productStat{}
+	// ownSessions is keyed by product: the sessions on this machine that no
+	// dispatch record claims. They are not dispatchers and never appear in the
+	// fleet — see collect_sessions.go.
+	ownSessions = map[string][]ownSession{}
 )
 
 // ---- product detail ---------------------------------------------------------

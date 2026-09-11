@@ -24,6 +24,8 @@
 //	EnsureBackKey(sockets...)                 — bind the prefix-free "back" key
 //	EnsureFocusEvents()                       — have the host report focus changes
 //	AttachSwitches(s) bool                    — does AttachCmd exit on the way out
+//	Servers() []string                        — every server found by looking
+//	SessionList(socket) []SessionInfo         — its sessions, with their directories
 package supervisor
 
 // Session is where a dispatcher's session can be reached: its name, and the
@@ -41,4 +43,15 @@ package supervisor
 type Session struct {
 	Name   string
 	Socket string
+}
+
+// SessionInfo is a session found by looking rather than by remembering: its
+// address and the directory it runs in.
+//
+// The path is what makes an unknown session attributable. A session this
+// cockpit did not start has no record and no dispatcher id, so where it is
+// working is the only thing tying it to a repository.
+type SessionInfo struct {
+	Session
+	Path string
 }

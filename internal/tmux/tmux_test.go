@@ -1,8 +1,11 @@
 package tmux
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -105,5 +108,53 @@ func TestProcessParentsSeesThisProcess(t *testing.T) {
 	}
 	if !parents[itoa(os.Getppid())] {
 		t.Error("the parent of this test process is not in the parent set")
+	}
+}
+
+// The sockets we are looking for were made by somebody else's tmux, so the only
+// way to find them is tmux's own rule for where they go: TMUX_TMPDIR, or /tmp.
+func TestSocketDirFollowsTmuxsOwnRule(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", "/run/user/1000")
+	if got := SocketDir(); !strings.HasPrefix(got, "/run/user/1000/tmux-") {
+		t.Errorf("SocketDir() = %q, want it under TMUX_TMPDIR", got)
+	}
+	t.Setenv("TMUX_TMPDIR", "")
+	if got := SocketDir(); !strings.HasPrefix(got, "/tmp/tmux-") {
+		t.Errorf("SocketDir() with no TMUX_TMPDIR = %q, want it under /tmp", got)
+	}
+}
+
+// Every socket found is a candidate, never a server: the file outlives the
+// process that made it. Listing one that is dead must answer nothing, and must
+// not start a server to find that out — only new-session may do that.
+func TestServersFindsSocketsAndADeadOneAnswersNothing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", dir)
+	sockets := filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()))
+	if err := os.MkdirAll(sockets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A socket file with nothing behind it — a reboot's leftover.
+	dead := filepath.Join(sockets, "dead-project")
+	if err := os.WriteFile(dead, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(sockets, "a-directory"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Servers()
+	if len(got) != 1 || got[0].Socket != "dead-project" {
+		t.Fatalf("Servers() = %+v, want just the socket file", got)
+	}
+	if s := got[0].SessionList(); len(s) != 0 {
+		t.Errorf("a dead socket listed %+v, want nothing", s)
+	}
+	// The probe must not have brought a server into being.
+	if HasSession := (Server{Socket: "dead-project"}).HasSession("anything"); HasSession {
+		t.Error("probing a dead socket started a server")
+	}
+	if fi, err := os.Stat(dead); err != nil || fi.Size() != 0 {
+		t.Errorf("the dead socket file changed under the probe: %v", err)
 	}
 }

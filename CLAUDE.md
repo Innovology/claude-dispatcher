@@ -200,6 +200,35 @@
   their product already, so a product's sessions list across as many servers as
   it has repos. Full record:
   `docs/adr/0014-a-dispatch-runs-in-its-repos-environment.md`.
+- **The sessions you started yourself.** A repo dispatches onto its own server
+  (above), and a human who works that way has servers of their own on the same
+  machine — one per project, started by hand long before any dispatcher. That is
+  real work in these repos and the cockpit could not name one of them: it only
+  asked about sockets it had a record for. Servers are found by looking where
+  **tmux** puts them (`${TMUX_TMPDIR:-/tmp}/tmux-$UID`), because the sockets in
+  question were made by somebody else's tmux and there is nowhere else to learn
+  of them. A socket *file* is not a server — it outlives its process, and a
+  reboot's leftovers sit on an ext4 `/tmp` for months — so every name found is a
+  candidate and only asking settles it; asking is safe because `list-sessions`
+  on a dead socket errors rather than starting one, which is what makes
+  enumeration possible at all. A record claims a session by its **whole
+  address** and at **any status** (a finished dispatcher's session outlives its
+  claude by design and is still its own). What is left is attributed by the
+  socket when it names a repo — the launcher's own rule, so exact rather than
+  inferred — and otherwise by the directory it runs in, matched against the
+  repo's checkouts by path *segment* and longest-first, since `/src/app` must
+  not swallow `/src/app-2` and one repo here has seven worktrees named exactly
+  that way. The directory is the case that matters: a server a human named
+  themselves matches no repo, and nothing but the path says whose it is. They
+  are **not dispatchers and never shown as ones** — no feature, no status, no
+  effort figure exists for them, so the row is the three facts that do and
+  `enter` to jump in, with no kill key for something this cockpit did not start.
+  A session in no known repo is dropped; a repo in no product goes to the
+  `unassigned` bucket the portfolio already keeps, which is the difference
+  between using a bucket and inventing one — and dropping those instead made the
+  whole tab invisible on a machine with no products assigned, which is every
+  machine on its first run. Full record:
+  `docs/adr/0015-the-sessions-you-started-yourself.md`.
 - **A dispatch that did not happen is a thing that happened.** Reported as
   "when the prompt is massive the dispatcher seems to just disappear", then
   "it's not just long prompts — that last one failed with a one line prompt".
@@ -534,6 +563,8 @@
   offer — and the reason none of it trusts `origin/HEAD`.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
+  `collect_sessions.go` is the one collector that reads the machine rather than
+  the records: the sessions on it that no dispatch claims.
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is
   a real stage and every figure is what it found — the list is a description of

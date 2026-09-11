@@ -27,6 +27,31 @@ func KillSession(s Session) error               { return server(s).KillSession(s
 func UniqueName(s Session) string               { return server(s).UniqueName(s.Name) }
 func SetStatusHint(s Session)                   { server(s).SetStatusHint(s.Name) }
 
+// Servers is every server with a socket on this machine, by socket name. It
+// finds servers this cockpit never started — the per-project ones a human keeps
+// themselves — because it looks where tmux puts sockets rather than at what we
+// happen to have recorded.
+func Servers() []string {
+	var out []string
+	for _, s := range tmux.Servers() {
+		out = append(out, s.Socket)
+	}
+	return out
+}
+
+// SessionList is every session on one server, with the directory each runs in.
+// A socket whose server has gone lists nothing and starts nothing.
+func SessionList(socket string) []SessionInfo {
+	var out []SessionInfo
+	for _, s := range (tmux.Server{Socket: socket}).SessionList() {
+		out = append(out, SessionInfo{
+			Session: Session{Name: s.Name, Socket: socket},
+			Path:    s.Path,
+		})
+	}
+	return out
+}
+
 // SessionIdle reports whether a session is sitting at its shell with nothing
 // running — the state a dispatch session is left in once claude exits. known is
 // false when the backend cannot tell, which is never the same answer as "idle".

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -306,4 +307,77 @@ func (s Server) UniqueName(base string) string {
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	return name
+}
+
+// ---- finding the servers ----------------------------------------------------
+
+// SocketDir is where tmux keeps its sockets: one directory per user under
+// TMUX_TMPDIR, or /tmp when that is unset. It is tmux's own rule, and it has to
+// be ours too — the sockets we are looking for were made by somebody else's
+// tmux (a per-project shell wrapper, a hand-started server), so the only way to
+// find them is to look where tmux itself would have put them.
+func SocketDir() string {
+	dir := os.Getenv("TMUX_TMPDIR")
+	if dir == "" {
+		dir = "/tmp"
+	}
+	return filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()))
+}
+
+// Servers is every tmux server with a socket on this machine, by socket name.
+//
+// A socket FILE is not a server: the file outlives the process that made it, so
+// a reboot or a killed server leaves one behind (on an ext4 /tmp it can sit
+// there for months). Every name here is therefore a candidate, and only asking
+// it settles whether anything is listening — which SessionList does, safely: a
+// dead socket makes list-sessions error out, and it does NOT start a server.
+// Only new-session does that.
+//
+// Sorted, so what a load produces never depends on the order a directory
+// happened to be read in.
+func Servers() []Server {
+	entries, err := os.ReadDir(SocketDir())
+	if err != nil {
+		return nil
+	}
+	var out []Server
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		out = append(out, Server{Socket: e.Name()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Socket < out[j].Socket })
+	return out
+}
+
+// SessionInfo is one session on a server: what it is called, and the directory
+// it was started in.
+//
+// The path is what makes a session attributable. A session this cockpit did not
+// start carries no record and no dispatcher id, so the only thing tying it to a
+// repository is where it is working — and `#{session_path}` is that, straight
+// from tmux, for free in the listing we are already making.
+type SessionInfo struct {
+	Name string
+	Path string
+}
+
+// SessionList is every session on this server with the directory it runs in.
+// A server that is not there lists nothing, which is not an error anyone acts
+// on: it is what a socket file whose server has gone looks like.
+func (s Server) SessionList() []SessionInfo {
+	out, err := s.cmd("list-sessions", "-F", "#{session_name}\t#{session_path}").Output()
+	if err != nil {
+		return nil
+	}
+	var sessions []SessionInfo
+	for _, ln := range strings.Split(string(out), "\n") {
+		name, path, ok := strings.Cut(strings.TrimRight(ln, "\r"), "\t")
+		if !ok || strings.TrimSpace(name) == "" {
+			continue
+		}
+		sessions = append(sessions, SessionInfo{Name: name, Path: path})
+	}
+	return sessions
 }

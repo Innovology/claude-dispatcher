@@ -67,6 +67,10 @@ type snapshot struct {
 	productHistory  map[string][]historyItem
 	historyOlder    map[string]int
 	productVelocity map[string][]velTile
+	// ownSessions are the sessions on this machine that no record claims —
+	// the ones the human started themselves — filed under the product whose
+	// repo each is working in.
+	ownSessions map[string][]ownSession
 
 	decisions         map[string][]decision
 	decisionRepoOrder []string
@@ -249,6 +253,16 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	if retired > 0 {
 		sessionsFound += " · " + countOf(retired, "ghost", "ghosts") + " retired"
 	}
+	// The same question asked of every server on the machine rather than only
+	// of the records: a human who keeps a server per project has sessions here
+	// this cockpit never started, and they are work in these repos too. Found
+	// in this stage because this is the stage that asks the supervisor what is
+	// running; which repo each belongs to needs the scan below, so the
+	// attribution waits for it.
+	unclaimed := unclaimedSessions(records)
+	if len(unclaimed) > 0 {
+		sessionsFound += " · " + countOf(len(unclaimed), "session", "sessions") + " of your own"
+	}
 	r.done(bootSessions, sessionsFound, false)
 
 	roots := cfg.ExpandedRoots()
@@ -278,6 +292,7 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	s.dataMode = "live"
 	s.recordsAt = recordsAt
 	s.discovered = ctx.repos
+	s.ownSessions = sessionsByProduct(ctx.repos, unclaimed)
 	s.recordsByID = make(map[string]*state.Dispatch, len(ctx.records))
 	for _, rec := range ctx.records {
 		s.recordsByID[rec.ID] = rec
@@ -393,6 +408,9 @@ func applySnapshot(s snapshot) {
 	}
 	if s.reposByProduct != nil {
 		reposByProduct = s.reposByProduct
+	}
+	if s.ownSessions != nil {
+		ownSessions = s.ownSessions
 	}
 	if s.productOrder != nil {
 		productOrder = s.productOrder

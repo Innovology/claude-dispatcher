@@ -224,6 +224,23 @@ func UniqueName(sess Session) string {
 	return name
 }
 
+// Servers has no analogue here: the console backend has one session manager,
+// the registry, rather than a server per socket. Nothing is found by looking,
+// so nothing is returned — and SessionList answers for the only "server" there
+// is, whatever socket it is asked about.
+func Servers() []string { return nil }
+
+func SessionList(socket string) []SessionInfo {
+	var out []SessionInfo
+	for _, name := range Sessions(socket) {
+		// No path: the registry records a pid, not where it was started. A
+		// session with nowhere to attribute it to is dropped by the caller
+		// rather than guessed at.
+		out = append(out, SessionInfo{Session: Session{Name: name}})
+	}
+	return out
+}
+
 // SessionIdle cannot be answered by this backend: the registry tracks the
 // cmd.exe that hosts the session, and that process is alive both while claude
 // runs and while the trailing `pause` holds the window open afterwards. It
