@@ -288,6 +288,33 @@
   means retyping one exactly, in another file, with a silent read under a
   product that groups nowhere as the failure. The full record is
   `docs/adr/0006-a-linear-token-is-the-scope.md`.
+- **A key sheet that can lie is worse than none, and `/` is fzf itself.**
+  Every key was a literal in a switch with `?` hand-written beside it — merely
+  duplicated while keys are fixed, and the central problem the moment they are
+  not, because `?` is where you go to find out what your keys are. `internal/
+  keymap` is now the one table: action id, scope, shipped key, and the sentence
+  `?` prints, with `[keys]` in config.toml rebinding any of them and the sheet
+  **generated** from the resolved map. A collision is refused at load with both
+  actions named — including across scopes, since a lens is asked before the
+  global keys are, so a lens binding that reuses `U` does not share it, it takes
+  it. An unknown id, a key bound to nothing and `ctrl+c` are refused the same
+  way; a bad `[keys]` keeps the defaults and says so, because the cockpit is how
+  you look the ids up. **Scope** is what lets one key mean two things: `n` makes
+  a product and steps to the next search match, never both at once. Resolution
+  hands the switches the action's DEFAULT key, so they still read `case "n":`
+  and a rebind changes which physical key arrives, not what the code is about —
+  and a key whose action was rebound away is swallowed, not passed through.
+  Resolving happens *after* each screen's text-entry guards: rebinding must not
+  change which letters you can type. **An action the user thinks of as one thing
+  must be one id** — "new product" shipped as two and rebinding moved half of
+  it, caught against the real binary. `/` searches the list that has the
+  keyboard (portfolio, the editor's repos, an unfolded row's checkouts) using
+  fzf's own matcher linked in process, so the ranking is the one in the human's
+  fingers and the match POSITIONS come back for an in-place highlight; the list
+  is **lit, not filtered**, because a row's neighbours are often the point of it
+  and a shrinking table makes the count at the top a different number from the
+  one you were reading. `n`/`ctrl+n` jump between hits. Full record:
+  `docs/adr/0013-a-key-sheet-that-can-lie-is-worse-than-none.md`.
 - **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
   a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
   a lens that wants its own capital U never sees the key — the assignment
@@ -444,6 +471,10 @@
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
   `CLAUDE_DISPATCHER_STATE`).
+- `internal/keymap` — every action the cockpit has (id, scope, default key,
+  help line), `[keys]` overrides, and the collision rules. `?` is built from it.
+- `internal/fuzzy` — `/` search, wrapping fzf's own matcher in process; returns
+  match positions so a hit is highlighted where it sits.
 - `internal/repos` — repository discovery: the scan of the configured roots,
   and the read of git's own metadata that turns the checkouts it finds into
   repositories (common dir, name from origin, canonical checkout, the worktree

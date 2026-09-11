@@ -14,7 +14,8 @@ You can run ten Claude Code sessions. You can't watch ten terminals. The cockpit
 
 - **One screen, the whole factory** — dispatchers, PRs, deploys, backlog, usage and velocity across every repo and product.
 - **Real data, live** — dispatch records + `git` + `gh` + Linear + Azure Boards, refreshed on an fsnotify watch and a poll. Nothing is mocked.
-- **Keyboard-first** — six lenses on the number keys, one key per action, a `:` command palette, and `?` for the map.
+- **Keyboard-first** — six lenses on the number keys, one key per action, a `:` command palette, and `?` for the map. Every key is rebindable in `[keys]`, and `?` is generated from the same table, so it can never describe a binding you don't have.
+- **`/` is fzf** — not fzf-like: the matcher is linked in and called in process, so a query ranks the way it does in your terminal, and matches light up where they sit instead of the list collapsing around them.
 - **Done means live** — a feature stays open until it's actually deployed, not merely merged.
 - **Tokens, not dollars** — built for a Claude subscription; usage speaks in tokens and effort.
 
