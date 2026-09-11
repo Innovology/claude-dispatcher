@@ -7,7 +7,7 @@ package repos
 // Both are properties of the REPOSITORY, not of the machine and not of the
 // product. A product is a grouping lens over repos that may have nothing in
 // common but a goal; its members can be a Go service, a Node app and a flake,
-// and each has to bring its own. See docs/adr/0013.
+// and each has to bring its own. See docs/adr/0014.
 
 import (
 	"os"

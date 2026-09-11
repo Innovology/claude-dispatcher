@@ -88,8 +88,10 @@
     repo picker group by the `[products]` config, most urgent group first;
     unmapped repos fall under "other". No separate group concept.
 - Sessions run as interactive `claude` inside per-dispatch tmux sessions
-  (`disp-<slug>`); tmux is a hard dependency and the process supervisor. The
-  cockpit is a stateless viewer — "jump in" hands the terminal to tmux.
+  (`disp-<slug>`) on their repo's own tmux server; tmux is a hard dependency
+  and the process supervisor. A session is addressed by the pair
+  (`supervisor.Session`: socket + name), never by name alone. The cockpit is a
+  stateless viewer — "jump in" hands the terminal to tmux.
 - Status truth comes from one global Claude Code hook in
   `~/.claude/settings.json` (hooks cannot be injected at launch time). The
   `CLAUDE_DISPATCHER_ID` env var is the join key from session to record.
@@ -159,6 +161,45 @@
   session probe alone would refuse every name that had ever completed, with no
   kill key on a history row to clear it. Full record:
   `docs/adr/0008-a-shell-in-the-pane-is-not-an-idle-session.md`.
+- **A dispatch runs in its repo's environment, not the cockpit's.** Two repos
+  in one product can need different versions of the same binary, and the
+  isolation this product had was git isolation: a worktree per dispatch stops
+  two sessions sharing a checkout and says nothing about what `go` or `psql`
+  resolve to inside it. What decides that is not what the client/server split
+  suggests — **a pane inherits the environment of the CLIENT that asked for
+  it**, not the server's and not the environment the server was born in
+  (measured on tmux 3.7b: a server started with `PATH=/plain-server-path`,
+  asked by a later client carrying `PATH=/nix/store/FAKE-flake-bin`, spawns the
+  pane with the client's). PATH is also the one variable that does not stick to
+  a session: everything else captured at creation persists, PATH is re-taken
+  from whichever client spawns each new window. So the cockpit — one process
+  spanning the whole portfolio — was deciding what every dispatcher could see,
+  and would go on deciding it for every pane the human opened after jumping in.
+  A repository brings its own now: its **server** (`Repo.Socket`, the `-L`
+  name, defaulting to the repo's own name — so each repo is its own server with
+  nothing configured; `[sockets]` names one for a human who already keeps
+  per-project servers, since a socket name is chosen outside the repository and
+  no reading of it finds one) and its **environment** (`Repo.Env`, the command
+  the client runs under — a checkout with a `flake.nix` *on a machine with nix*
+  is launched under `nix develop`, the second half no more optional than a
+  model alias we cannot vouch for). The prefix wraps the **client**, never the
+  session's command: both put the repo's binaries on PATH and only this one
+  leaves the pane running the plain `<shell> -c "… claude …"` that
+  `SessionIdle` reads, since a pane whose command is not a shell is taken at
+  its word as busy for ever — ADR 0008 with the sign flipped. It is applied to
+  the two calls that spawn a pane and nowhere else, because on the Server it
+  would put a nix evaluation behind every poll. The name alone stops being an
+  address: `supervisor.Session` carries `(socket, name)` and both go on the
+  record (`TmuxSocket`, `EnvCommand`) beside Mode and Root, so resume reopens
+  where it ran rather than where config now says. `AttachSwitches` becomes "is
+  this session on *my* server" — switch-client cannot cross servers, and the
+  nested attach that results exits on the way home, which is the shape the
+  caller already waits for. The sweep asks each server once rather than the
+  fleet once, and still probes any record its server did not name. And the
+  socket is **not** the grouping: a product is a lens over records, which carry
+  their product already, so a product's sessions list across as many servers as
+  it has repos. Full record:
+  `docs/adr/0014-a-dispatch-runs-in-its-repos-environment.md`.
 - **A dispatch that did not happen is a thing that happened.** Reported as
   "when the prompt is massive the dispatcher seems to just disappear", then
   "it's not just long prompts — that last one failed with a one line prompt".
@@ -479,7 +520,9 @@
   and the read of git's own metadata that turns the checkouts it finds into
   repositories (common dir, name from origin, canonical checkout, the worktree
   registry). No git process — every answer comes from files, because a
-  discovery runs on every load.
+  discovery runs on every load. `env.go` is the other half of what a repo
+  is for a dispatch: the tmux server its sessions live on and the command
+  they are launched under, both resolved rather than typed.
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited).
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
