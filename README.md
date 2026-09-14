@@ -129,8 +129,10 @@ or in home-manager (`home.packages`), or apply `overlays.default` and use
 The binary is wrapped with `git` and `tmux` on its PATH — as a fallback, so
 your own copies still win — which leaves `claude` and `gh` yours to provide.
 `init` records the profile path it was invoked through (`~/.nix-profile/bin/…`,
-`/run/current-system/sw/bin/…`), not the `/nix/store` path behind it, so the
-hook survives upgrades and you do not have to re-run it after every rebuild.
+`/run/current-system/sw/bin/…`), not the `/nix/store` path behind it (or the
+`.claude-dispatcher-wrapped` binary the wrapper execs), so the hook survives
+upgrades and garbage collection and you do not have to re-run it after every
+rebuild.
 
 ## Upgrading
 
@@ -330,6 +332,7 @@ Each publisher's `skip_upload` is templated on its token, so an unset token mean
 ## Troubleshooting
 
 - **Everything stuck on "launching"** — the hook isn't firing. Re-run `claude-dispatcher init`; confirm `~/.claude/settings.json` points at the installed binary.
+- **`SessionStart:startup hook error … .claude-dispatcher-wrapped: No such file or directory`** — the hook names a `/nix/store` build that has been garbage-collected (older releases pinned it there). Re-run `claude-dispatcher init`: it repoints every dispatcher hook at the path you invoked it through and removes the duplicates earlier installs left behind, without touching anyone else's hooks.
 - **`needs you` vs `blocked` lag** — those rely on the `Notification` hook matchers (`idle_prompt` / `permission_prompt`); `Stop` covers turn completion regardless.
 - **Backlog empty** — set a Linear key / Azure org in settings, and check `gh auth status` for GitHub Issues. One product's Linear tickets missing is usually the scope of its own token: a key granted only some of that workspace's teams returns nothing for the rest, rather than an error.
 - **Fan-outs invisible** — the `SubagentStart`/`SubagentStop` hook entries are newer than your install. Re-run `claude-dispatcher init` to add them.

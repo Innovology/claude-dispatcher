@@ -80,8 +80,6 @@ func hookSpecs() []hookSpec {
 	}
 }
 
-const hookMarker = "claude-dispatcher hook"
-
 const nixStore = "/nix/store/"
 
 // hookExe returns the path to bake into the hook command.
@@ -109,10 +107,23 @@ func hookExe(exe, argv0 string, lookPath, eval func(string) (string, error)) str
 	if err != nil {
 		return exe
 	}
-	if resolved, err := eval(cand); err != nil || resolved != exe {
+	if resolved, err := eval(cand); err != nil || !(resolved == exe || wraps(resolved, exe)) {
 		return exe
 	}
 	return cand
+}
+
+// wraps reports whether wrapper is the makeWrapper script in front of exe. The
+// Nix package wraps the binary to put git and tmux on its PATH, and wrapProgram
+// does it by moving bin/claude-dispatcher to bin/.claude-dispatcher-wrapped and
+// writing a script that execs it in its place. So the name on PATH resolves to
+// the script and os.Executable to the moved binary: the two never compare
+// equal, and without this every Nix install pinned its hook to the store path
+// — which the next garbage collection deletes. Same directory is the proof: a
+// store path's hash names exactly one build.
+func wraps(wrapper, exe string) bool {
+	return filepath.Dir(wrapper) == filepath.Dir(exe) &&
+		filepath.Base(exe) == "."+filepath.Base(wrapper)+"-wrapped"
 }
 
 func installHook() error {
@@ -149,31 +160,23 @@ func installHook() error {
 		hooks = map[string]any{}
 	}
 
-	added := 0
-	for _, spec := range hookSpecs() {
-		entries, _ := hooks[spec.event].([]any)
-		if hasOurHook(entries, spec.matcher) {
-			continue
-		}
-		entry := map[string]any{
-			"hooks": []any{map[string]any{
-				"type":    "command",
-				"command": fmt.Sprintf("%s hook %s", exe, spec.arg),
-			}},
-		}
-		if spec.matcher != "" {
-			entry["matcher"] = spec.matcher
-		}
-		hooks[spec.event] = append(entries, any(entry))
-		added++
-	}
-	if added == 0 {
+	ch := reconcileHooks(hooks, exe)
+	if ch == (hookChanges{}) {
 		fmt.Println("✓ lifecycle hook already installed in", settingsPath)
 		return nil
 	}
 	root["hooks"] = hooks
 
-	fmt.Printf("\nAbout to add %d hook entries to %s\n", added, settingsPath)
+	fmt.Printf("\nAbout to update %s:\n", settingsPath)
+	if ch.added > 0 {
+		fmt.Printf("  add %d hook %s\n", ch.added, plural(ch.added, "entry", "entries"))
+	}
+	if ch.repointed > 0 {
+		fmt.Printf("  repoint %d hook %s at this binary (they named another path)\n", ch.repointed, plural(ch.repointed, "entry", "entries"))
+	}
+	if ch.dropped > 0 {
+		fmt.Printf("  remove %d duplicate hook %s left by earlier installs\n", ch.dropped, plural(ch.dropped, "entry", "entries"))
+	}
 	fmt.Printf("Each runs: %s hook <event>\n", exe)
 	fmt.Println("This fires on every Claude Code session machine-wide (that is how status")
 	fmt.Println("tracking works; sessions started outside the cockpit are logged too).")
@@ -207,27 +210,98 @@ func installHook() error {
 	return nil
 }
 
-func hasOurHook(entries []any, matcher string) bool {
-	for _, e := range entries {
-		entry, ok := e.(map[string]any)
-		if !ok {
-			continue
-		}
-		if m, _ := entry["matcher"].(string); m != matcher {
-			continue
-		}
-		inner, _ := entry["hooks"].([]any)
-		for _, h := range inner {
-			hm, ok := h.(map[string]any)
-			if !ok {
+// hookChanges counts what reconcileHooks did to the settings.
+type hookChanges struct {
+	added, repointed, dropped int
+}
+
+// reconcileHooks leaves hooks holding exactly one hook of ours per hookSpec,
+// each running exe. It used to add a spec only when no entry of ours was
+// there, which could not repair anything: a hook naming a build that has since
+// been garbage-collected was "already installed", and one naming
+// .claude-dispatcher-wrapped was not recognised as ours at all, so every re-run
+// of init appended another full set beside the dead ones. Ours is recognised by
+// what the command runs, never by its exact path, so a hook left by any earlier
+// install is repointed or removed; hooks that are not ours, including ones
+// sharing an entry with ours, are left exactly as they were.
+func reconcileHooks(hooks map[string]any, exe string) hookChanges {
+	var ch hookChanges
+	for _, spec := range hookSpecs() {
+		want := fmt.Sprintf("%s hook %s", exe, spec.arg)
+		entries, _ := hooks[spec.event].([]any)
+		kept := make([]any, 0, len(entries))
+		have, stale := false, 0
+		for _, e := range entries {
+			entry, ok := e.(map[string]any)
+			if m, _ := entry["matcher"].(string); !ok || m != spec.matcher {
+				kept = append(kept, e)
 				continue
 			}
-			if cmd, _ := hm["command"].(string); strings.Contains(cmd, hookMarker) {
-				return true
+			inner, _ := entry["hooks"].([]any)
+			rest := make([]any, 0, len(inner))
+			for _, h := range inner {
+				hm, _ := h.(map[string]any)
+				cmd, _ := hm["command"].(string)
+				switch {
+				case !isOurCommand(cmd, spec.arg):
+					rest = append(rest, h)
+				case cmd == want && !have:
+					have = true
+					rest = append(rest, h)
+				default:
+					stale++
+				}
+			}
+			switch {
+			case len(rest) == len(inner):
+				kept = append(kept, e)
+			case len(rest) > 0:
+				entry["hooks"] = rest
+				kept = append(kept, entry)
 			}
 		}
+		if !have {
+			entry := map[string]any{
+				"hooks": []any{map[string]any{"type": "command", "command": want}},
+			}
+			if spec.matcher != "" {
+				entry["matcher"] = spec.matcher
+			}
+			kept = append(kept, any(entry))
+			if stale > 0 {
+				ch.repointed++
+				stale--
+			} else {
+				ch.added++
+			}
+		}
+		ch.dropped += stale
+		hooks[spec.event] = kept
 	}
-	return false
+	return ch
+}
+
+// isOurCommand reports whether cmd is this dispatcher's hook for arg, whatever
+// install wrote it: `<path>/claude-dispatcher hook <arg>`, the Nix-wrapped
+// `.claude-dispatcher-wrapped`, or Windows' `claude-dispatcher.exe`. The path
+// is everything before " hook ", so a directory with a space in it does not
+// hide an entry.
+func isOurCommand(cmd, arg string) bool {
+	bin, ok := strings.CutSuffix(cmd, " hook "+arg)
+	if !ok {
+		return false
+	}
+	name := bin[strings.LastIndexAny(bin, `/\`)+1:]
+	name = strings.TrimSuffix(name, ".exe")
+	name = strings.TrimSuffix(strings.TrimPrefix(name, "."), "-wrapped")
+	return name == "claude-dispatcher"
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func claudeConfigDir() string {
