@@ -158,3 +158,60 @@ func TestServersFindsSocketsAndADeadOneAnswersNothing(t *testing.T) {
 		t.Errorf("the dead socket file changed under the probe: %v", err)
 	}
 }
+
+// The launch that reported this: dispatching into a flake repo from a cockpit
+// started in ~ died with `path "/home/…" does not contain a 'flake.nix'`,
+// because the `nix develop` wrapping the client looked for its flake where the
+// cockpit stood. The prefix here is a script that records where it was run, on
+// a private server, so the test is about the directory and not about nix.
+func TestTheEnvironmentPrefixStandsInTheSession(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	tmp := t.TempDir()
+	worktree := filepath.Join(tmp, "worktree")
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(tmp, "cwd")
+	prefix := filepath.Join(tmp, "record-cwd")
+	script := "#!/bin/sh\npwd > " + marker + "\nexec \"$@\"\n"
+	if err := os.WriteFile(prefix, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := Server{Socket: "disp-test-cwd-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	if err := srv.NewSession("s", worktree, "sleep 30", prefix); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the prefix never ran: %v", err)
+	}
+	if want, _ := filepath.EvalSymlinks(worktree); strings.TrimSpace(string(got)) != want {
+		t.Errorf("the environment prefix ran in %q, want the session's %q", strings.TrimSpace(string(got)), want)
+	}
+
+	if c := srv.AttachCmd("s", prefix); c.Dir != worktree {
+		t.Errorf("attach ran its prefix in %q, want the session's %q", c.Dir, worktree)
+	}
+	// No prefix, nothing to stand anywhere for: the plain client is unchanged.
+	if c := srv.AttachCmd("s", ""); c.Dir != "" {
+		t.Errorf("a plain attach was given a directory: %q", c.Dir)
+	}
+	// A directory that has gone is left out, not a chdir failure.
+	if c := srv.clientIn(filepath.Join(tmp, "gone"), prefix, "list-sessions"); c.Dir != "" {
+		t.Errorf("a missing dir was kept: %q", c.Dir)
+	}
+}
+
+func TestPathOfSessionMatchesTheWholeName(t *testing.T) {
+	out := "disp-app-2\t/src/app-2\ndisp-app\t/src/app\n"
+	if got := pathOfSession(out, "disp-app"); got != "/src/app" {
+		t.Errorf("pathOfSession(disp-app) = %q", got)
+	}
+	if got := pathOfSession(out, "disp"); got != "" {
+		t.Errorf("a prefix matched: %q", got)
+	}
+}

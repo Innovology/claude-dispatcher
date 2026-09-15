@@ -294,6 +294,7 @@ func TestLaunchCmdNoConfig(t *testing.T) {
 }
 
 func TestLaunchCmdRepoNotFound(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir()) // a launch audits itself; never into the real event log
 	dir := t.TempDir()
 	cfg := &config.Config{Roots: []string{dir}}
 	msg := launchCmd(cfg, "nonexistent-repo", "feature", "prompt", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false)()
@@ -304,6 +305,7 @@ func TestLaunchCmdRepoNotFound(t *testing.T) {
 }
 
 func TestLaunchCmdEnsureBranchFails(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir()) // a launch audits itself; never into the real event log
 	// repos.Discover only requires a ".git" entry to exist — it does not
 	// validate the repo. An empty ".git" directory passes discovery but
 	// fails every real git operation, so dispatch.Launch's ensureBranch step

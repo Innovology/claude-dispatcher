@@ -153,6 +153,18 @@ where socket → repo → product is the only chain there is.
   contract working. `[session_env]` set to `""` turns the sniff off for that
   repo. A silent fallback to a bare launch was rejected: a dispatcher that
   quietly cannot see its toolchain is the failure this ADR is about.
+- **The client runs from the session's directory** (amended 2026-09-15).
+  `nix develop` with no flake reference reads the flake where it stands,
+  searching up, and the client first ran wherever the human had started the
+  cockpit. Reported as a dispatch into player-app from a cockpit opened in `~`
+  failing with `path "/home/_liminor" does not contain a 'flake.nix'`. The same
+  defect had a quiet form: started from inside *another* flake repo, a dispatch
+  got that repo's dev shell. `NewSession` now runs the wrapped client from the
+  worktree, and `AttachCmd` from the session's own `session_path`, asked of tmux
+  so a human's own session is covered too. Nix was checked to resolve a flake
+  from inside a dispatch worktree (`git+file://…/worktrees/player-app/…`). A
+  path baked into `Env` was rejected: the record's stored prefix would then name
+  the canonical checkout's flake, not the one the feature branch carries.
 - **Windows accepts both and ignores both.** The console backend has one session
   manager rather than a server per socket, and it starts the session process
   itself, so there is no client in between for a prefix to wrap.

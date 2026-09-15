@@ -67,6 +67,29 @@ func (s Server) cmdIn(env string, args ...string) *exec.Cmd {
 	return exec.Command(args[0], args[1:]...)
 }
 
+// clientIn is cmdIn run from dir, when there is an environment prefix to run.
+//
+// A prefix finds its environment by looking where it stands: `nix develop` with
+// no flake reference reads the flake in its working directory, searching up. So
+// the client has to stand in the repo, and a process's working directory is
+// wherever the human happened to start the cockpit. Started from `~`, every
+// flake repo's launch died with "path /home/… does not contain a 'flake.nix'";
+// started from inside another flake repo, a dispatch silently got THAT repo's
+// dev shell instead of its own, which is the failure ADR 0014 exists to end.
+//
+// A dir that is not there is left out rather than failing the exec on a chdir:
+// the prefix's own error says more than "no such file or directory" does.
+func (s Server) clientIn(dir, env string, args ...string) *exec.Cmd {
+	c := s.cmdIn(env, args...)
+	if strings.TrimSpace(env) == "" || dir == "" {
+		return c
+	}
+	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		c.Dir = dir
+	}
+	return c
+}
+
 func (s Server) HasSession(name string) bool {
 	return s.cmd("has-session", "-t", "="+name).Run() == nil
 }
@@ -101,7 +124,7 @@ func (s Server) ListSessions() []string {
 // process, and a pane whose command is not a shell is taken at its word as
 // busy — for ever, since the launcher never exits.
 func (s Server) NewSession(name, dir, shellCommand, env string) error {
-	out, err := s.cmdIn(env, "new-session", "-d", "-s", name, "-c", dir, shellCommand).CombinedOutput()
+	out, err := s.clientIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, shellCommand).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux new-session: %s", strings.TrimSpace(string(out)))
 	}
@@ -293,11 +316,41 @@ func processParents() map[string]bool {
 // human opens after they arrive — a split, a new window — takes its PATH from
 // the client they arrived through. Attaching without it hands them a session
 // whose next pane cannot see the toolchain the first one was given.
+//
+// And it runs from the session's own directory, for the reason on clientIn —
+// asked of tmux rather than passed in, so a session the human started
+// themselves is covered as well as one a record describes.
 func (s Server) AttachCmd(name, env string) *exec.Cmd {
-	if s.AttachSwitches() {
-		return s.cmdIn(env, "switch-client", "-t", "="+name)
+	var dir string
+	if strings.TrimSpace(env) != "" {
+		dir = s.sessionPath(name)
 	}
-	return s.cmdIn(env, "attach-session", "-t", "="+name)
+	if s.AttachSwitches() {
+		return s.clientIn(dir, env, "switch-client", "-t", "="+name)
+	}
+	return s.clientIn(dir, env, "attach-session", "-t", "="+name)
+}
+
+// sessionPath is the directory a session was started in, "" when tmux cannot
+// say. It lists rather than asks for the one session: `display-message -t
+// =name` prints an empty path on tmux 3.7b, and `-t name:` matches by prefix,
+// so the exact match is made here instead.
+func (s Server) sessionPath(name string) string {
+	out, err := s.cmd("list-sessions", "-F", "#{session_name}\t#{session_path}").Output()
+	if err != nil {
+		return ""
+	}
+	return pathOfSession(string(out), name)
+}
+
+// pathOfSession finds name's path in list-sessions output of name<TAB>path.
+func pathOfSession(out, name string) string {
+	for _, ln := range strings.Split(out, "\n") {
+		if n, p, ok := strings.Cut(ln, "\t"); ok && n == name {
+			return strings.TrimSpace(p)
+		}
+	}
+	return ""
 }
 
 // UniqueName returns base, or base-2, base-3, … if a session already exists.

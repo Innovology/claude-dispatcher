@@ -186,7 +186,11 @@
   session's command: both put the repo's binaries on PATH and only this one
   leaves the pane running the plain `<shell> -c "… claude …"` that
   `SessionIdle` reads, since a pane whose command is not a shell is taken at
-  its word as busy for ever — ADR 0008 with the sign flipped. It is applied to
+  its word as busy for ever — ADR 0008 with the sign flipped. The wrapped
+  client runs **from the session's directory** (the worktree at launch, tmux's
+  `session_path` at attach), because `nix develop` finds its flake where it
+  stands: run from the cockpit's cwd it failed from `~` and, worse, lent a
+  dispatch whichever flake repo the cockpit was opened in. It is applied to
   the two calls that spawn a pane and nowhere else, because on the Server it
   would put a nix evaluation behind every poll. The name alone stops being an
   address: `supervisor.Session` carries `(socket, name)` and both go on the
