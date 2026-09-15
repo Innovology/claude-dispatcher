@@ -19,13 +19,21 @@ import (
 // to read as texture at a glance and never compete with the figure itself, so
 // it sits between cRule (a border, invisible as type) and cFaint (which the
 // footer already uses for real words).
-const bootLeader = "#243244"
+const bootLeader = "boot-leader"
 
 // bootRamp is the wordmark's vertical gradient, violet at the top through to
 // the cyan the cockpit uses for anything in flight. While the load is running
 // the ramp is offset by the frame so the colour sweeps down the letters; on
-// READY it settles.
-var bootRamp = []string{"#a78bfa", "#8ba3fb", "#6ebcf5", "#4ac8f2", "#22d3ee"}
+// READY it settles. Each step is a role, so a theme draws its own gradient.
+const (
+	cRamp1 = "ramp-1"
+	cRamp2 = "ramp-2"
+	cRamp3 = "ramp-3"
+	cRamp4 = "ramp-4"
+	cRamp5 = "ramp-5"
+)
+
+var bootRamp = []string{cRamp1, cRamp2, cRamp3, cRamp4, cRamp5}
 
 // bootFont is a 5-row block face, 6 columns per letter with 2-column stems, for
 // the eight letters the wordmark needs. Wider stems are what make it read as a

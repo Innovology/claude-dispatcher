@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"claude-dispatcher/internal/appearance"
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/version"
@@ -209,6 +210,21 @@ type model struct {
 	dxMode   dispatchpkg.Mode  // MODE: auto / manual / plan — the session's permission mode
 	dxModel  dispatchpkg.Model // MODEL: default, or a claude alias — what the session runs
 	dxFanOut bool              // FAN OUT: may the session spread across agents when the task splits
+
+	// ---- theme ------------------------------------------------------------------
+	// themeMode is config's `theme`, normalised: "system" or a theme's name.
+	// themeSystem is the newest answer about the light/dark switch from either
+	// reporter, and themeOS the OS's own last answer, kept apart so a poll only
+	// counts when the OS has actually moved. See theme.go.
+	themeMode   string
+	themeSystem appearance.Appearance
+	themeOS     appearance.Appearance
+	// themeTerm says stdout is a terminal we may send mode sequences to;
+	// themeNoOS that this machine has nothing to ask; themePolling that an OS
+	// read is scheduled, so a second loop is never started beside it.
+	themeTerm    bool
+	themeNoOS    bool
+	themePolling bool
 }
 
 func newModel() model {
@@ -236,6 +252,10 @@ func newModel() model {
 		// default — no --model at all — is the only answer that cannot be wrong
 		// on a machine we have not asked yet.
 		dxModel: dispatchpkg.DefaultModel,
+		// Following the switch is the default posture; Run asks the switch
+		// (initTheme) before the first frame. Until something answers, system
+		// draws the design as it was drawn.
+		themeMode: themeSystem,
 	}
 }
 
@@ -280,7 +300,7 @@ func (m model) Init() tea.Cmd {
 	// The upgrade check is about the binary, not the portfolio, so it runs even
 	// on demo data — a config-less cockpit is still a real build.
 	if m.cfg == nil {
-		return upgradeCheckCmd() // no config — run on demo seed data
+		return tea.Batch(upgradeCheckCmd(), m.themeFollowCmds()) // no config — run on demo seed data
 	}
 	// The first load is the one with a screen watching it: it reports each
 	// stage as it runs, and the model subscribes for those reports and ticks
@@ -294,7 +314,7 @@ func (m model) Init() tea.Cmd {
 	// is already marked in flight, and every request that arrives while it runs
 	// queues behind it rather than racing it.
 	load := loadSnapshotCmd(m.cfg, m.loadSeq)
-	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), ageTick(), upgradeCheckCmd()}
+	cmds := []tea.Cmd{trackRefreshCmd(m.cfg), waitState(m.stateCh), refreshTick(), ageTick(), upgradeCheckCmd(), m.themeFollowCmds()}
 	if m.boot != nil {
 		load = bootLoadCmd(m.cfg, m.bootCh, m.loadSeq)
 		cmds = append(cmds, waitBoot(m.bootCh), bootTick())
@@ -491,18 +511,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "attach failed: " + msg.err.Error()
 			m.away = false
 		}
+		// A tmux client attached in this terminal turns the theme reports off
+		// again as it leaves, and the switch may have flipped while it had the
+		// screen — ask for both again.
+		follow := m.themeFollowTerm()
 		if m.cfg == nil {
-			return m, nil
+			return m, follow
 		}
 		// A handover that exits on the way out has not returned anyone yet:
 		// rechecking here would read the world at the instant the human left and
 		// then have nothing to say when they actually come back, which is the
 		// staleness this is meant to end. Wait for focus. Everywhere else this
 		// message IS the return, so recheck now.
+		kind := loadRecheck
 		if m.away {
-			return m.requestLoad(loadPlain)
+			kind = loadPlain
 		}
-		return m.requestLoad(loadRecheck)
+		mm, load := m.requestLoad(kind)
+		return mm, tea.Batch(load, follow)
+
+	case themeOSMsg:
+		return m.onThemeOS(msg)
 
 	case tea.FocusMsg:
 		// Only a jump-in earns a recheck; focus on its own must not. A full
@@ -557,6 +586,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.key = msg
 		return m.handleKey(msg.String())
+	}
+	// The terminal saying its light/dark switch moved. It arrives as a message
+	// Bubble Tea has no type for, so it is matched here rather than by a case.
+	if a, ok := termThemeReport(msg); ok {
+		m.themeSystem = a
+		m.applyTheme()
 	}
 	return m, nil
 }

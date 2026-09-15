@@ -16,98 +16,104 @@ package cockpit
 
 import "github.com/charmbracelet/lipgloss"
 
-// The palette, verbatim from the design's C table. Referenced by hex through
-// fg/bg so a lens can use any colour the mock uses without a named constant.
+// The palette: the design's C table, as roles. Each constant names what a
+// colour is FOR, and the active theme (theme.go) says what hex that is — the
+// design's own values are the dark theme. Lenses pass these through fg/paint
+// and never see a hex, which is what lets one table redraw the whole cockpit
+// for a light terminal.
 const (
-	cWhite = "#f8fafc"
-	cFg    = "#e2e8f0"
-	cMid   = "#cbd5e1"
-	cDim   = "#a3b1c2"
-	cFaint = "#7d8da3"
+	cWhite = "bright"
+	cFg    = "text"
+	cMid   = "mid"
+	cDim   = "dim"
+	cFaint = "faint"
 
-	// A rule and a selected row share one hex in this revision — the design's
-	// C.rule and C.sel are both #18222f. They stay two constants because they
-	// are two roles (a border versus a highlight fill) and earlier revisions
-	// spelled them apart; collapsing them would lose that.
-	cRule = "#18222f"
-	cSel  = "#18222f"
+	// A rule and a selected row share one hex in the design — its C.rule and
+	// C.sel are both #18222f. They stay two roles because they are two jobs (a
+	// border versus a highlight fill), earlier revisions spelled them apart,
+	// and the light theme needs them apart again.
+	cRule = "rule"
+	cSel  = "selection"
 
-	cRed   = "#fb7185"
-	cAmber = "#fbbf24"
+	cRed   = "red"
+	cAmber = "amber"
 	// cBlue is the design's C.blue, which this revision swings to cyan: the
 	// review state, the review slice of the usage split and the live agent rule.
-	cBlue   = "#22d3ee"
-	cGreen  = "#34d399"
-	cViolet = "#a78bfa"
+	cBlue   = "blue"
+	cGreen  = "green"
+	cViolet = "violet"
 
 	cTransparent = "" // no colour / default terminal background
 )
 
 // Colours the design spells as literals rather than through its C table. They
-// are still colours the cockpit renders, so they live here and nowhere else.
+// are still colours the cockpit renders, so they are roles like the rest.
 const (
 	// cSurface is the design's panel background. The cockpit draws on the
 	// terminal's own background, so this is only needed where a glyph sits ON a
-	// light fill and takes the surface colour as its foreground — the caret.
-	cSurface = "#060b14"
+	// text-coloured fill and takes the surface colour as its foreground — the
+	// caret.
+	cSurface = "surface"
 
 	// cChainArrow is the arrow between two steps of the plan → act → observe →
-	// ship chain. It reads a shade above the steps it separates: an unreached
-	// step is cFaint and the step in progress is cWhite, so the arrows must not
-	// compete with either. (Until this revision one constant served both the
-	// arrows and the unreached step; the design now separates them.)
-	cChainArrow = "#5b6b80"
+	// ship chain. It reads a shade quieter than the steps it separates: an
+	// unreached step is cFaint and the step in progress is cWhite, so the
+	// arrows must not compete with either. (Until this revision one constant
+	// served both the arrows and the unreached step; the design now separates
+	// them.)
+	cChainArrow = "chain-arrow"
 
 	// Fills back text rather than carry it: product-board lane headers, the
 	// queue's ready left edge and the non-leading velocity bar. Green and blue
-	// now take the full C-table hue — this revision drops the muted variants —
-	// but they stay named apart from cGreen/cBlue because they are a different
-	// role and the design has separated them before.
-	cFillGreen  = "#34d399"
-	cFillViolet = "#4c3f7a"
-	cFillBlue   = "#22d3ee"
-	cFillGrey   = "#5b6b80"
+	// take the full C-table hue in the dark design — this revision drops the
+	// muted variants — but they stay named apart from cGreen/cBlue because they
+	// are a different role and the design has separated them before.
+	cFillGreen  = "fill-green"
+	cFillViolet = "fill-violet"
+	cFillBlue   = "fill-blue"
+	cFillGrey   = "fill-grey"
 
 	// cBoards is azure boards in sourceMeta. Its two siblings there need no
 	// constant of their own: linear is cViolet and github is cMid.
-	cBoards = "#c084fc"
+	cBoards = "boards"
 )
 
 // styleCache memoises foreground/background styles so we build each colour's
-// lipgloss.Style once rather than per cell per frame.
+// lipgloss.Style once rather than per cell per frame. Keyed by role, so
+// setTheme empties them.
 var (
 	fgCache = map[string]lipgloss.Style{}
 	bgCache = map[string]lipgloss.Style{}
 )
 
-// fg colours s with the given hex. An empty hex leaves the string untouched.
-func fg(hex, s string) string {
-	if hex == "" {
+// fg colours s with the given role. An empty role leaves the string untouched.
+func fg(role, s string) string {
+	if role == "" {
 		return s
 	}
-	st, ok := fgCache[hex]
+	st, ok := fgCache[role]
 	if !ok {
-		st = lipgloss.NewStyle().Foreground(lipgloss.Color(hex))
-		fgCache[hex] = st
+		st = lipgloss.NewStyle().Foreground(lipgloss.Color(hexOf(role)))
+		fgCache[role] = st
 	}
 	return st.Render(s)
 }
 
-// paint colours s foreground hex over background bgHex in one pass, so a
+// paint colours s foreground role over background bgRole in one pass, so a
 // selected row keeps its highlight underneath per-cell foreground colours.
-func paint(hex, bgHex, s string) string {
-	if hex == "" && bgHex == "" {
+func paint(role, bgRole, s string) string {
+	if role == "" && bgRole == "" {
 		return s
 	}
-	key := hex + "|" + bgHex
+	key := role + "|" + bgRole
 	st, ok := bgCache[key]
 	if !ok {
 		st = lipgloss.NewStyle()
-		if hex != "" {
-			st = st.Foreground(lipgloss.Color(hex))
+		if role != "" {
+			st = st.Foreground(lipgloss.Color(hexOf(role)))
 		}
-		if bgHex != "" {
-			st = st.Background(lipgloss.Color(bgHex))
+		if bgRole != "" {
+			st = st.Background(lipgloss.Color(hexOf(bgRole)))
 		}
 		bgCache[key] = st
 	}

@@ -537,6 +537,9 @@ func TestSettingsEditEveryField(t *testing.T) {
 	m.settings = newSettings(m.cfg)
 
 	for i, f := range settingsFields {
+		if f.kind == setChoice {
+			continue // no text to type; TestSettingsCyclesTheTheme covers it
+		}
 		m.settings.cursor = i
 		mm, _ := m.handleKey("enter")
 		m = mm.(model)

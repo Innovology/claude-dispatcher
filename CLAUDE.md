@@ -115,6 +115,35 @@
   session probe alone would refuse every name that had ever completed, with no
   kill key on a history row to clear it. Full record:
   `docs/adr/0008-a-shell-in-the-pane-is-not-an-idle-session.md`.
+- **A colour is a role, and the switch is news.** The cockpit paints only
+  foregrounds onto the terminal's own ground, and it painted the dark design's
+  hexes whatever that ground was: on a light terminal (NixOS/niri, ghostty
+  following the desktop) the pale greys were pale grey on white, and a selected
+  row was a slab of `#18222f`. Every `c…` constant is a **role** now, and a
+  **theme** (`theme.go`) is the table that says what hex it is; `fg`/`paint`
+  resolve at render time and `setTheme` empties the role-keyed style caches.
+  `dark` is the design verbatim. `light` turns it over rather than inverting
+  it: the emphasis ramp keeps its order, each hue takes its 700-ish shade so
+  amber still means "wants you", and rule and selection come apart again. A
+  test holds every theme to every role and to WCAG AA on its own ground. Config
+  `theme` is the mode — `"system"` (or no line) follows the switch live, a
+  theme's name holds it — cycled on enter in settings, applied without a reload.
+  Following it takes **two reporters, because neither is enough**: the OS is
+  polled every 2s (`internal/appearance`: the freedesktop portal via
+  `busctl`/`gdbus`, `AppleInterfaceStyle`, `AppsUseLightTheme`; "no preference"
+  is unknown, and a machine with nothing to ask stops polling), and the
+  terminal is asked with mode 2031 / `CSI ? 996 n` for `CSI ? 997 ; 1|2 n`,
+  which tmux 3.6+ relays and ghostty sends — instant where spoken. Bubble Tea
+  v1 delivers that as its unexported unknown-CSI slice, matched by shape then
+  exact content; the enabling write is safe beside the renderer because both go
+  through one `*os.File` write lock, and is re-sent after a jump-in. **The
+  newest change wins**: the OS answer counts only when it differs from its own
+  last answer, so a terminal that said "dark" is not overruled every poll. The
+  first frame is decided before the program starts (OS, else the terminal's
+  background once), so boot never flashes the wrong theme. A third-party theme
+  is one more table; which one `system` picks per side is one lookup
+  (`themeForAppearance`) waiting for a key. Full record:
+  `docs/adr/0016-a-colour-is-a-role-and-the-switch-is-news.md`.
 - **A dispatch that did not happen is a thing that happened.** Reported as
   "when the prompt is massive the dispatcher seems to just disappear", then
   "it's not just long prompts — that last one failed with a one line prompt".
@@ -400,6 +429,9 @@
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
   `CLAUDE_DISPATCHER_STATE`).
+- `internal/appearance` — whether the OS is set light or dark, asked (never
+  subscribed to) through the platform's own command. The cockpit's
+  `theme.go` polls it and pairs it with the terminal's 2031 reports.
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited).
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
