@@ -48,7 +48,7 @@ var themeRoles = []string{
 	cWhite, cFg, cMid, cDim, cFaint,
 	cRule, cSel,
 	cRed, cAmber, cBlue, cGreen, cViolet,
-	cSurface, cChainArrow,
+	cSearchHit, cSurface, cChainArrow,
 	cFillGreen, cFillViolet, cFillBlue, cFillGrey,
 	cBoards,
 	bootLeader, cRamp1, cRamp2, cRamp3, cRamp4, cRamp5,
@@ -76,6 +76,7 @@ var darkTheme = &theme{
 		cGreen:  "#34d399",
 		cViolet: "#a78bfa",
 
+		cSearchHit:  "#fde68a",
 		cSurface:    "#060b14",
 		cChainArrow: "#5b6b80",
 
@@ -125,6 +126,7 @@ var lightTheme = &theme{
 
 		// Still amber's neighbour: the olive side of it, since a paler amber
 		// is exactly what stops reading on white.
+		cSearchHit:  "#a16207",
 		cSurface:    "#ffffff",
 		cChainArrow: "#94a3b8",
 

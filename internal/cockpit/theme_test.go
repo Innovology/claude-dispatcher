@@ -65,7 +65,7 @@ func contrast(a, b string) float64 {
 // light theme was the design's greys on a white terminal — and to a readable
 // floor on a selected row, which keeps each cell's own colour over the fill.
 func TestThemesAreLegibleOnTheirGround(t *testing.T) {
-	words := []string{cWhite, cFg, cMid, cDim, cFaint, cRed, cAmber, cBlue, cGreen, cViolet, cBoards}
+	words := []string{cWhite, cFg, cMid, cDim, cFaint, cRed, cAmber, cBlue, cGreen, cViolet, cSearchHit, cBoards}
 	for name, th := range themes {
 		ground, sel := th.colors[cSurface], th.colors[cSel]
 		for _, role := range words {
