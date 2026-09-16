@@ -208,18 +208,24 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 				if rec.PRNumber > 0 {
 					pr = "#" + itoa(rec.PRNumber)
 				}
+				// When it was last worked, not when its record was last
+				// written: UpdatedAt is stamped by every save, including the
+				// bookkeeping ones that go on touching a finished record for
+				// the rest of its life, so ordering by it puts whatever the
+				// last sweep happened to rewrite at the top. See fleetActed.
+				acted := fleetActed(rec)
 				hist = append(hist, histEntry{
 					it: historyItem{
 						id:      rec.ID,
 						feature: rec.Feature,
 						repo:    rec.RepoName,
 						pr:      pr,
-						at:      prodAge(rec.UpdatedAt) + " ago",
+						at:      prodAge(acted) + " ago",
 						ended:   cqEnded(rec),
 						session: rec.SessionID,
 						prompt:  rec.Prompt,
 					},
-					t: rec.UpdatedAt,
+					t: acted,
 				})
 			}
 			if rec.Status != state.StatusDone && rec.Status != state.StatusExited {

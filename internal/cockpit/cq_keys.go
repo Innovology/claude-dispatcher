@@ -148,7 +148,8 @@ func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
 		// belong to several finished dispatchers. A parked row can be either —
 		// its session survives a park but not a reboot — and cqActs already
 		// decided which from the record, so the act's own verb is the answer.
-		if r.kind == "past" || (r.kind == "parked" && a.d == "resume") {
+		if r.kind == "past" || r.kind == "done" ||
+			(r.kind == "parked" && a.d == "resume") {
 			return m, resumeCmd(r.id, "")
 		}
 		return m.attach(r.feature)
@@ -167,6 +168,12 @@ func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
 		}
 		return m, markDoneCmd(r.feature)
 	case "x":
+		// On a held row x dismisses rather than kills: the session is already
+		// over, and what the key takes off the table is the row, by id, because
+		// a feature name can belong to several finished dispatchers.
+		if r.kind == "done" {
+			return m, dismissCmd(r.id)
+		}
 		return m, killCmd([]string{r.feature})
 	}
 	return m, nil

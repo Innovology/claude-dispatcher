@@ -194,6 +194,10 @@ func fleetGlyph(rank int) string {
 		return "●"
 	case 1:
 		return "○"
+	case fleetDoneRank:
+		// The tick: this one is over, and the row is here to be read and
+		// cleared rather than watched.
+		return "✓"
 	case fleetParkedRank:
 		// The pause bars: shelved by the human, waiting for later.
 		return "‖"
@@ -271,7 +275,7 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	if f == fleetHistory {
 		return m.fleetHistoryHeadline(inner, rows)
 	}
-	wants, parked, clean := fleetCount(rows)
+	wants, parked, finished, clean := fleetCount(rows)
 
 	title, right := itoa(len(rows))+" in flight", "f filters · h history · sorted by urgency"
 	if f != fleetFilters[0] {
@@ -287,8 +291,12 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	left := fg(cFg, title) + "   " +
 		fg(blockHex, itoa(wants)+" want you") + "   " +
 		fg(cFaint, itoa(clean)+" running clean")
-	// The shelf only earns a clause when something is on it: "0 parked" would
-	// advertise a group the table is not showing.
+	// The two groups below the live table each earn a clause only when
+	// something is in them: "0 parked" would advertise a group the table is not
+	// showing. Finished comes first, in the order the table itself puts them.
+	if finished > 0 {
+		left += "   " + fg(cFaint, itoa(finished)+" finished · x clears")
+	}
 	if parked > 0 {
 		left += "   " + fg(cFaint, itoa(parked)+" parked")
 	}
@@ -565,12 +573,13 @@ func (m model) viewFleet(w, h int) string {
 // cursor on screen and j/k move the cursor rather than a scroll offset, so no
 // row is unreachable and none of the height needs spending to say so.
 //
-// The parked group gets the one header the table has: a divider line naming
-// the shelf, drawn above the first parked row. It is a display line, never a
-// row — the cursor cannot land on it — so the window is computed over lines
-// and the selection mapped across the divider. fleetSort and fleetAll keep the
-// parked rows contiguous at the bottom, which is what lets one divider be the
-// whole boundary.
+// The groups below the live table get the only headers the table has: a
+// divider line naming the group, drawn above its first row. There are two —
+// the finished dispatchers nobody has dismissed yet, then the shelf — and each
+// is a display line, never a row: the cursor cannot land on one, so the window
+// is computed over lines and the selection mapped across however many dividers
+// precede it. fleetSort and fleetAll keep each group contiguous, which is what
+// lets one line be a whole boundary.
 func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string) []string {
 	if h <= 0 {
 		return nil
@@ -582,33 +591,45 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string)
 		// reading as "nothing is running".
 		out = append(out, flG(fg(cFaint, empty)))
 	}
-	div := -1
-	for i, r := range rows {
-		if r.kind == "parked" {
-			div = i
-			break
-		}
-	}
-	lines, selLine := len(rows), sel
-	if div >= 0 {
-		lines++
-		if sel >= div {
-			selLine++
-		}
-	}
-	start, end := window(selLine, lines, h)
-	for ln := start; ln < end; ln++ {
-		i := ln
-		if div >= 0 {
-			if ln == div {
-				out = append(out, fleetParkedDivider(w))
-				continue
-			}
-			if ln > div {
-				i = ln - 1
+	// Row index -> the divider drawn above it. In fleetSort's order the groups
+	// arrive in this order and never interleave, so the first row of each is
+	// the whole boundary.
+	divAt := map[int]string{}
+	for _, g := range []struct{ kind, label string }{
+		{"done", "finished"}, {"parked", "parked"},
+	} {
+		for i, r := range rows {
+			if r.kind == g.kind {
+				divAt[i] = g.label
+				break
 			}
 		}
-		out = append(out, fleetDataLine(w, cols, rows[i], i == sel))
+	}
+	// The lines the table would draw with no window on it: each one either a
+	// row or a divider. Building it is also what maps the selection, so the two
+	// cannot disagree — the cursor's line is wherever its row landed.
+	type line struct {
+		row   int // index into rows, or -1 for a divider
+		label string
+	}
+	lines := make([]line, 0, len(rows)+len(divAt))
+	selLine := sel
+	for i := range rows {
+		if lbl, ok := divAt[i]; ok {
+			lines = append(lines, line{row: -1, label: lbl})
+			if i <= sel {
+				selLine++
+			}
+		}
+		lines = append(lines, line{row: i})
+	}
+	start, end := window(selLine, len(lines), h)
+	for _, ln := range lines[start:end] {
+		if ln.row < 0 {
+			out = append(out, fleetGroupDivider(w, ln.label))
+			continue
+		}
+		out = append(out, fleetDataLine(w, cols, rows[ln.row], ln.row == sel))
 	}
 	for len(out) < h {
 		out = append(out, "")
@@ -616,10 +637,10 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string)
 	return out[:h]
 }
 
-// fleetParkedDivider is the line above the parked group: the group's name, set
-// into a rule so it reads as a boundary rather than as a row.
-func fleetParkedDivider(w int) string {
-	lead, label := "── ", "parked "
+// fleetGroupDivider is the line above a group below the live table: the group's
+// name, set into a rule so it reads as a boundary rather than as a row.
+func fleetGroupDivider(w int, name string) string {
+	lead, label := "── ", name+" "
 	rest := maxi(0, cqInner(w)-dispWidth(lead)-dispWidth(label))
 	return flG(fg(cRule, lead) + fg(cFaint, label) + fg(cRule, strings.Repeat("─", rest)))
 }

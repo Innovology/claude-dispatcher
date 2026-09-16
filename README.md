@@ -76,9 +76,10 @@ Every act the table offers is wired to the live session — the key hints show o
 - **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back). Coming back **rechecks** rather than redraws: you have just spent minutes driving that session by hand, so the forge is read again instead of replayed from cache, and any session that died without getting a `SessionEnd` out stops being reported as working
 - **`y`** on a PR waiting to merge: `gh pr merge --squash --auto`, then mark live. Elsewhere it marks the record shipped, and it is hidden entirely when the dispatcher has produced no commits
 - **`x`** kill the session · **`s`** skip to the back of the table · **`ctrl+z`** undo
+- **a dispatcher that finishes keeps its row.** It drops to a **finished** group at the bottom of the live table, marked ✓ with how it ended, and stays there until **`x`** dismisses it — which is a dismissal, not a kill, since there is nothing left to kill. Nothing takes a row off the table on your behalf: a dispatch that ends is a thing that happened, and a table that clears itself is a table that never told you
 - **`p`** park an ask you cannot answer right now — say why, and it drops to a **parked** group at the bottom of the fleet, out of the counts, with your reason on the row. `p` again brings it back, and so does answering it: the shelf clears itself the moment a prompt reaches the session. It survives reboots — a parked dispatcher whose session died resumes from its own row
 - **`d`** open the prompt · **`f`** filter the table · **`enter` on a backlog ticket** dispatches it
-- **`h`** the finished dispatchers, and **`enter`** on one resumes its session — `claude --resume` on the same transcript, in the same worktree, so it comes back knowing what it already did
+- **`h`** the dispatchers you have dismissed, **newest-worked first**, and **`enter`** on one resumes its session — `claude --resume` on the same transcript, in the same worktree, so it comes back knowing what it already did. The order is when each was last *worked*, read from its own transcript, never when its record was last written: a finished record goes on being rewritten for the rest of its life by sweeps and forge reconciliation, and ordering by that puts whatever we last touched at the top
 
 ## Install
 
@@ -271,7 +272,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 - **Fan-outs are visible.** When a session spins out subagents, the same hooks report each one starting and stopping. The dispatcher's row says `fan-out · 3 live` beside its CI signal while they run; the detail panel counts the turn (`fanned out 12 subagents` once they are home) and names the agent types. Installed with the other hooks; existing installs re-run `init` to get it.
 - Commits are attributed to dispatchers by **provenance** — each dispatch records the SHAs its feature branch produced (base tip at launch → branch tip). No trailers in your git history.
 - The **hand-coding equivalent** comes off that same provenance diff, read once per load and shared by every screen that shows it, so triage, history and velocity can never quote different hours for one branch. A branch whose diff cannot be read (no base SHA, or a branch since deleted by hand) is left out of the totals rather than counted as zero, and velocity says how many of its live features it could actually price.
-- **Nothing disappears:** a session that ends — shipped, killed or simply exited — moves to history rather than off the screen. `h` on triage and the product panel's `H` tab both list them, and `enter` resumes one: its worktree is put back if it was reclaimed and `claude --resume` picks the same conversation up where it stopped.
+- **Nothing disappears:** a session that ends — shipped, killed or simply exited — holds its row on the triage table until you dismiss it, and then moves to history rather than off the screen. `h` on triage and the product panel's `H` tab both list them, and `enter` resumes one: its worktree is put back if it was reclaimed and `claude --resume` picks the same conversation up where it stopped.
 - **Done means live:** when a PR merges, the tracker watches the repo's deploy workflow (auto-detected by name, or set in `[deploy_workflows]`) and flips the feature to done on a green run. Repos with no deploy workflow count merge as live.
 - The layout is **responsive**: wide terminals tile into three panes, narrower ones collapse to essentials.
 - **It opens on a boot screen.** The first load reads every dispatch record, asks tmux which sessions are still running, scans your roots and talks to the forge — seconds of work on a real portfolio. The opening screen shows each stage ticking off with what it found and how long it took, so the wait is legible instead of blank. Any key skips straight to the cockpit; the load carries on behind it.
@@ -284,9 +285,9 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `+` | dispatch new work — repo → feature → root → mode → model → fan out → prompt |
 | `j` / `k` · `g` / `G` | move · first row · last row |
 | `f` | cycle the triage filter (all · wants you · needs a look · running · history) |
-| `h` | history — every dispatcher whose session is over; `enter` resumes one |
+| `h` | history — every dispatcher you have dismissed, newest-worked first; `enter` resumes one |
 | `enter` | attach the selected dispatcher's tmux session · open what is selected |
-| `y` · `x` · `s` | ship (squash-merge) · kill · skip to the back |
+| `y` · `x` · `s` | ship (squash-merge) · kill — dismiss, on a finished row · skip to the back |
 | `p` | park an ask with a reason · on a parked row, take it back up |
 | `d` · `ctrl+z` | dispatch · put back the last thing you cleared |
 | `,` · `:` · `?` | settings · command palette · all keys |

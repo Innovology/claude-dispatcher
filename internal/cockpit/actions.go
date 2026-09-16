@@ -111,8 +111,7 @@ func killCmd(features []string) tea.Cmd {
 				// "you will come back to this".
 				rec.ParkedReason, rec.ParkedAt = "", nil
 				if rec.Status != state.StatusDone {
-					rec.Status = state.StatusExited
-					rec.StatusReason = "killed from cockpit"
+					rec.Stop(state.StatusExited, "killed from cockpit", time.Now())
 				}
 				_ = state.Save(rec)
 			} else if swept {
@@ -155,8 +154,7 @@ func shipCmd(feature string) tea.Cmd {
 			}
 			merged = fmt.Sprintf(" · #%d squash-merged", rec.PRNumber)
 		}
-		rec.Status = state.StatusDone
-		rec.StatusReason = "shipped from cockpit"
+		rec.Stop(state.StatusDone, "shipped from cockpit", time.Now())
 		_ = state.Save(rec)
 		gh.InvalidateCache() // the merge just changed what the forge would say
 		return actionMsg{notice: "✓ " + feature + " marked live" + merged}
@@ -170,8 +168,7 @@ func markDoneCmd(feature string) tea.Cmd {
 		if rec == nil {
 			return actionMsg{notice: "\"" + feature + "\" has no record to mark"}
 		}
-		rec.Status = state.StatusDone
-		rec.StatusReason = "marked shipped"
+		rec.Stop(state.StatusDone, "marked shipped", time.Now())
 		_ = state.Save(rec)
 		return actionMsg{notice: "\"" + feature + "\" marked shipped"}
 	}
