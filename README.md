@@ -228,6 +228,7 @@ Press `,` in the cockpit (or `:settings`) to edit — written straight to `~/.co
 - **Linear API key** — turns on the Linear backlog source (or set `LINEAR_API_KEY`)
 - **Azure org / project** — turns on Azure Boards (needs the `az` CLI; or set `AZURE_DEVOPS_ORG` / `AZURE_DEVOPS_PROJECT`)
 - **weekly token budget** — optional; when set, the usage lens gauges against it, otherwise it shows learned caps and raw tokens
+- **theme** — `system` (the default) follows your light/dark switch and repaints the moment it flips, even with the cockpit open; `light` or `dark` holds one. Enter cycles it. The switch is heard from the terminal where it reports one (ghostty, kitty, foot, and tmux 3.6+ relaying them), and otherwise read from the OS every couple of seconds
 
 Environment variables override file values, so a secret can stay out of the file.
 

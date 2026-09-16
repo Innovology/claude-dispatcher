@@ -8,6 +8,7 @@ package cockpit
 // triggers a reload.
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,10 @@ const (
 	setSecret
 	setInt
 	setRoots
+	// setChoice is a field with a fixed set of answers: enter steps to the next
+	// one and saves it, because a typed "lihgt" is a mistake the editor should
+	// not be able to accept.
+	setChoice
 )
 
 type settingsField struct {
@@ -49,6 +54,7 @@ var settingsFields = []settingsField{
 	{key: "azure_org", label: "Azure DevOps org", hint: "org URL, e.g. https://dev.azure.com/acme", kind: setString},
 	{key: "azure_project", label: "Azure project", hint: "Azure Boards project name", kind: setString},
 	{key: "weekly_token_limit", label: "weekly token budget", hint: "0 = unknown → usage shows raw tokens", kind: setInt},
+	{key: "theme", label: "theme", hint: "enter cycles · system follows your light/dark switch while open", kind: setChoice},
 }
 
 func newSettings(cfg *config.Config) *settingsState {
@@ -76,6 +82,9 @@ func settingsValue(cfg *config.Config, f settingsField) string {
 			return ""
 		}
 		return strconv.Itoa(cfg.WeeklyTokenLimit)
+	case "theme":
+		mode, _ := themeModeOf(cfg.Theme)
+		return mode
 	}
 	return ""
 }
@@ -151,11 +160,39 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 		st.saved = ""
 	case "enter":
 		f := st.fields[st.cursor]
+		if f.kind == setChoice {
+			return m.cycleTheme()
+		}
 		st.input.SetValue(settingsValue(m.cfg, f))
 		st.input.CursorEnd()
 		st.editing = true
 		st.saved = ""
 		return m, st.input.Focus()
+	}
+	return m, nil
+}
+
+// cycleTheme steps the theme to the next mode, redraws in it at once and saves
+// it. Nothing is reloaded: a theme changes how the snapshot is drawn, not what
+// is in it.
+func (m model) cycleTheme() (model, tea.Cmd) {
+	modes := themeModes()
+	next := modes[0]
+	if i := slices.Index(modes, m.themeMode); i >= 0 {
+		next = modes[(i+1)%len(modes)]
+	}
+	m.themeMode = next
+	m.applyTheme()
+	if m.cfg != nil {
+		m.cfg.Theme = next
+		if err := config.Save(m.cfg); err != nil {
+			m.notice = "save failed: " + err.Error()
+		} else {
+			m.settings.saved = "theme saved"
+		}
+	}
+	if next == themeSystem {
+		return m.followSystem()
 	}
 	return m, nil
 }
@@ -201,6 +238,9 @@ func (m model) viewSettings(w, h int) string {
 			display = "•••••••• (set)"
 		case val == "":
 			display = fg(cFaint, "— not set")
+		case f.key == "theme" && m.themeMode == themeSystem:
+			// What system means right now is the thing worth knowing about it.
+			display = val + fg(cFaint, " · "+m.currentTheme().name+" now")
 		}
 		if st.editing && i == st.cursor {
 			display = st.input.View()
