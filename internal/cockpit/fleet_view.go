@@ -607,7 +607,7 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string)
 	}
 	// A line number is a row index plus the dividers above it; walk both at
 	// once so the mapping is built exactly the way it is read back.
-	rowAt := make([]int, 0, len(rows)+len(divAt))  // line -> row index, -1 for a divider
+	rowAt := make([]int, 0, len(rows)+len(divAt))      // line -> row index, -1 for a divider
 	labelAt := make([]string, 0, len(rows)+len(divAt)) // line -> divider label
 	selLine := sel
 	for i := range rows {

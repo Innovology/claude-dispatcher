@@ -182,6 +182,42 @@
   human's repo and can strand commits, so the form may offer a branch origin
   retired and the launch refuses it by name. Full record:
   `docs/adr/0010-origin-head-is-a-cache-not-an-answer.md`.
+- **A dispatch that ends is not a dispatch that goes away — and history is
+  ordered by work, not by our own writes.** Reported as "the history needs to
+  be ordered by last access/last action" and "the triage should hold
+  dispatchments until they are dismissed; they should not auto-dismiss", which
+  is one complaint from both ends. `collectFleet` sent every finished record
+  straight to history, which is not in `fleetAll`, so a dispatcher that
+  finished left the triage table on the next poll: the human watching the one
+  screen they watch saw a count go from 4 to 3 and a line disappear, with
+  nothing saying which one or how it ended — ADR 0009's defect moved to the
+  other end of the run. So a finished dispatcher **holds its row** until `x`
+  takes it off: its own rank under a `finished` divider, glyph ✓, the SIGNAL a
+  history row carries, `⏎` resume and `o` open pr beside a **dismiss** that is
+  not a kill (there is nothing left to kill), and its own headline count,
+  because folding it into "running clean" hides a finished dispatcher inside
+  the number that means everything is fine. No snapshot retires it, for the
+  same reason none retires a failed launch's note. The dismissal is written to
+  the record (`DismissedAt`, an annotation like parking, never a status) — kept
+  in the model it would come back on the next load, and come back for all ~170
+  finished records the moment the cockpit restarted. What is held is `Held()`:
+  finished, stamped with `FinishedAt`, not dismissed. `state.Stop` stamps
+  `FinishedAt` **at the transition and nowhere else**, which is also the whole
+  of the migration — a record that ended before this build has no stamp, so it
+  was never held, and shipping this cannot flush a year of history onto the
+  fleet. `Save` clears both whenever the status is not a finished one, an
+  invariant rather than a guess, and that is what makes a resumed dispatcher
+  come back clean. And history is ordered by `fleetActed`: the transcript's own
+  mtime — the only clock the session writes — falling back to the record only
+  when there is no transcript. `UpdatedAt` cannot answer it, because `Save`
+  stamps it on every write and a finished record goes on being written for the
+  rest of its life by sweeps, the tracker and forge reconciliation. Measured on
+  the reporting store: a dispatcher whose transcript had not moved in seven days
+  carrying an `UpdatedAt` from that morning, and five that ended on four
+  different days sharing one to the second because a sweep wrote them in a loop.
+  `fleetMoved` keeps its `max` for live rows — a hook save there is real
+  liveness. Full record:
+  `docs/adr/0012-a-dispatch-that-ends-is-not-a-dispatch-that-goes-away.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only
