@@ -13,6 +13,8 @@
 package track
 
 import (
+	"time"
+
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
@@ -60,13 +62,11 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 			switch {
 			case deployed:
 				d.DeployedAt = &at
-				d.Status = state.StatusDone
-				d.StatusReason = "deployed — live"
+				d.Stop(state.StatusDone, "deployed — live", time.Now())
 				changed = true
 			case !hasWorkflow:
 				d.DeployedAt = d.PRMergedAt
-				d.Status = state.StatusDone
-				d.StatusReason = "PR merged (repo has no deploy workflow)"
+				d.Stop(state.StatusDone, "PR merged (repo has no deploy workflow)", time.Now())
 				changed = true
 			}
 		}

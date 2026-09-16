@@ -282,8 +282,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusBlocked
 		d.StatusReason = "waiting on a permission approval"
 	case "SessionEnd":
-		d.Status = state.StatusExited
-		d.StatusReason = "session ended"
+		d.Stop(state.StatusExited, "session ended", time.Now())
 	default:
 		return false
 	}

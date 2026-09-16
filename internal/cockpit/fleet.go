@@ -46,10 +46,12 @@ type fleetRow struct {
 	// has to survive the rebuild.
 	id string
 	// kind is "queue" — it is waiting on you — "run", it is getting on with it,
-	// "parked", the human shelved it with a reason, or "past", its session is
-	// over. rank orders the table and picks the glyph; see fleetRank. Past rows
-	// are not part of the in-flight table at all: they are what `h` and the
-	// history filter show, and what resume acts on.
+	// "parked", the human shelved it with a reason, "done", its session is over
+	// and nobody has dismissed the ending yet, or "past", its session is over
+	// and they have. rank orders the table and picks the glyph; see fleetRank.
+	// Past rows are not part of the in-flight table at all: they are what `h`
+	// and the history filter show, and what resume acts on. Done rows are the
+	// same dispatcher still on the table, and turn into past rows on x.
 	kind string
 	rank int
 	// ask classifies what a queue row wants: permission | review | turn-done |
@@ -199,7 +201,14 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 			// show again — its transcript, branch and worktree all still exist,
 			// but nothing on any screen could reach them. They are collected as
 			// history rows, kept out of the in-flight table, and resumable.
-			rows = append(rows, fleetPastRow(ctx, s, passes, rec))
+			//
+			// Until the human has taken it off, though, the row stays where they
+			// are looking. A dispatcher moving itself from the triage table into
+			// history the moment it stopped is the table dismissing it on their
+			// behalf: the one screen they watch goes on saying "N in flight" and
+			// says nothing at all about the one that just ended. Held is the
+			// record's own answer to whether that reading has happened yet.
+			rows = append(rows, fleetEndedRow(ctx, s, passes, rec, rec.Held()))
 		}
 	}
 
@@ -233,15 +242,22 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 // result sampled twice over time, and gh.Checks is a point sample. See
 // cqShipDetail.
 //
-// Rank 3 is parked (glyph ‖): the human shelved it, with a reason. It shares
+// Rank 3 is finished-and-unread (glyph ✓): the session is over and nobody has
+// said they saw it. It shares the table, under its own divider, and leaves on
+// x — see fleetEndedRow.
+//
+// Rank 4 is parked (glyph ‖): the human shelved it, with a reason. It shares
 // the table — below everything that is live, under its own divider line.
 //
-// Rank 4 is history. It is below every live row and never shares a table with
+// Rank 5 is history. It is below every live row and never shares a table with
 // one, so it needs no glyph or colour of its own: both fall through to the
 // rank-2 defaults, and the SIGNAL cell says how the session ended.
 func fleetRank(kind, tone string) int {
 	if kind == "past" {
 		return fleetPastRank
+	}
+	if kind == "done" {
+		return fleetDoneRank
 	}
 	if kind == "parked" {
 		return fleetParkedRank
@@ -270,10 +286,12 @@ func fleetSort(rows []fleetRow) {
 		if a.rank != b.rank {
 			return a.rank < b.rank
 		}
-		if a.kind == "past" {
+		if a.kind == "past" || a.kind == "done" {
 			// History reads the other way round from the live table: the thing
 			// that just ended is the one you are most likely to want back, so the
-			// newest sits at the top.
+			// newest sits at the top. The held group reads the same way for the
+			// same reason — and both are ordered by when the dispatcher was last
+			// worked, never by when its record was last written (fleetActed).
 			if !a.moved.Equal(b.moved) {
 				return a.moved.After(b.moved)
 			}
@@ -485,13 +503,19 @@ func fleetSubagents(rec *state.Dispatch) (live, done []string) {
 	return live, done
 }
 
+// fleetDoneRank is where a dispatcher that has finished and not yet been
+// dismissed sits: below everything still going, because it is not going, and
+// above the shelf and history, because clearing it is one keystroke the human
+// has not made yet.
+const fleetDoneRank = 3
+
 // fleetParkedRank is where the human's shelf sits: below everything asking or
 // running — parking exists to get an ask you cannot answer out of the live
 // table's way — and above history, because a parked dispatcher is not over.
-const fleetParkedRank = 3
+const fleetParkedRank = 4
 
 // fleetPastRank is where history sits: below everything alive.
-const fleetPastRank = 4
+const fleetPastRank = 5
 
 // fleetParkedRow builds a row for a dispatcher the human has shelved.
 //
@@ -542,7 +566,11 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 	}
 }
 
-// fleetPastRow builds a row for a dispatcher whose session is over.
+// fleetEndedRow builds a row for a dispatcher whose session is over — held on
+// the triage table if the human has not dismissed the ending yet, in history if
+// they have. The two are the same row with a different rank and a different
+// answer to "what can I do with this", which is why they are one function:
+// dismissing must not appear to change anything about the dispatcher itself.
 //
 // It is deliberately the cheapest row of the three. A machine accumulates
 // finished dispatchers forever while the live table stays small, so this pays
@@ -557,16 +585,22 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 // land here — so the figure is already paid for. A dispatcher that ended
 // WITHOUT shipping was never on the floor and has no entry, so it carries no
 // estimate, which is the honest answer rather than a zero.
-func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *state.Dispatch) fleetRow {
+func fleetEndedRow(ctx *collectCtx, s *snapshot, passes map[string]int,
+	rec *state.Dispatch, held bool) fleetRow {
+
 	goal, goalLabel := cqGoal(rec)
 	est, codedKnown := s.effortBy[rec.Feature]
 	// A record slice, not a read: the fan-out rides the record, so history
 	// stays constant work.
 	subLive, subDone := fleetSubagents(rec)
+	kind := "past"
+	if held {
+		kind = "done"
+	}
 	return fleetRow{
 		id:         rec.ID,
-		kind:       "past",
-		rank:       fleetRank("past", "normal"),
+		kind:       kind,
+		rank:       fleetRank(kind, "normal"),
 		product:    ctx.productFor(rec),
 		feature:    rec.Feature,
 		repo:       rec.RepoName,
@@ -584,8 +618,8 @@ func fleetPastRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *stat
 		fanOut:     rec.FanOut,
 		subLive:    subLive,
 		subDone:    subDone,
-		acts:       cqActs(rec, "past"),
-		moved:      fleetMoved(rec),
+		acts:       cqActs(rec, kind),
+		moved:      fleetActed(rec),
 		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
 	}
@@ -626,6 +660,34 @@ func fleetMoved(rec *state.Dispatch) time.Time {
 		return mt
 	}
 	return t
+}
+
+// fleetActed is fleetMoved for a dispatcher whose session is over: when it was
+// last worked, which is what history is ordered by and what its LAST column
+// says.
+//
+// The max fleetMoved takes is wrong here, and only here. UpdatedAt is stamped
+// by every save, and a finished record goes on being saved for the rest of its
+// life by things that are not the dispatcher doing anything — the ghost sweep
+// noticing days later that a session had died, the tracker catching a merge,
+// a PR field coming back different. Measured on a real store: a dispatcher
+// whose transcript had not been touched in seven days carried an UpdatedAt from
+// that morning, and five that ended on five different days shared one UpdatedAt
+// to the second, because one sweep had written them all in a loop. Ordered by
+// that, history is a list of when we last wrote a file — and the thing the
+// human was working on an hour ago sits under a week-old dispatcher whose
+// record happened to be touched.
+//
+// So it asks the transcript, which only the session writes, and only falls back
+// to UpdatedAt when there is no transcript to read (a launch that died before
+// claude opened one). That is also the right answer for "last access": resuming
+// a finished dispatcher reopens its transcript and appends to it, so the one
+// you were last in is the one at the top.
+func fleetActed(rec *state.Dispatch) time.Time {
+	if mt := cqLastWrite(rec.TranscriptPath); !mt.IsZero() {
+		return mt
+	}
+	return rec.UpdatedAt
 }
 
 // fleetRepo strips a product prefix off a repo name — "cortiva-api" under
@@ -690,6 +752,12 @@ func (m model) fleetFilter() string {
 // question in the cockpit is this function's length — the dispatch form opens
 // on an empty fleet, the headline counts it — and a machine with a month of
 // finished dispatchers would answer all of them wrongly.
+//
+// A held row IS in here, and is the reason the two are different sets: a
+// dispatcher that finished and has not been dismissed is not in flight, but it
+// is on the table, because taking it off is the human's to do. Only the ones
+// that have been dismissed — and everything that finished before this build
+// existed, which has no FinishedAt and so was never held — are history.
 func (m model) fleetAll() []fleetRow {
 	byID := make(map[string]fleetRow, len(fleet))
 	for _, r := range fleet {
@@ -700,11 +768,13 @@ func (m model) fleetAll() []fleetRow {
 	out := make([]fleetRow, 0, len(fleet))
 	placed := make(map[string]bool, len(fleet))
 	for _, id := range m.cqOrder {
-		// Parked rows sit out the user's ordering: the shelf is always below
-		// the live table, and an id `s` ordered while it was still a queue row
-		// must not drag its parked self back to the top. They fall through to
-		// the collector segment, whose rank sort keeps them last.
-		if r, ok := byID[id]; ok && r.kind != "parked" && !placed[id] && !m.cqSuppressed[id] {
+		// Parked and held rows sit out the user's ordering: both groups are
+		// always below the live table, and an id `s` ordered while it was still
+		// a queue row must not drag its shelved — or finished — self back to
+		// the top. They fall through to the collector segment, whose rank sort
+		// keeps them last.
+		if r, ok := byID[id]; ok && r.kind != "parked" && r.kind != "done" &&
+			!placed[id] && !m.cqSuppressed[id] {
 			out = append(out, r)
 			placed[id] = true
 		}
@@ -775,18 +845,23 @@ func (m model) fleetSel() (fleetRow, bool) {
 // Parked is its own tally because it is neither of the others: it does want
 // you (later), and calling it "running clean" would hide the shelf inside the
 // healthiest number on the line.
-func fleetCount(rows []fleetRow) (wants, parked, clean int) {
+// A held row is its own tally for the same reason the shelf is: it is not
+// running, and folding it into "running clean" would hide a finished
+// dispatcher inside the number that means everything is getting on with it.
+func fleetCount(rows []fleetRow) (wants, parked, finished, clean int) {
 	for _, r := range rows {
 		switch r.kind {
 		case "queue":
 			wants++
 		case "parked":
 			parked++
+		case "done":
+			finished++
 		default:
 			clean++
 		}
 	}
-	return wants, parked, clean
+	return wants, parked, finished, clean
 }
 
 // fleetRunning is how many dispatchers are getting on with it, across the whole

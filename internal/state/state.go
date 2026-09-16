@@ -136,10 +136,60 @@ type Dispatch struct {
 	Subagents []Subagent `json:"subagents,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+	// FinishedAt is the instant this dispatcher's status first said it was over
+	// — stamped by Stop, at the transition, and nowhere else. UpdatedAt cannot
+	// answer that question: Save stamps it on every write, and a finished record
+	// goes on being written for as long as it exists (the tracker catching a
+	// merge, a reconcile marking a ghost exited, a PR field catching up), so a
+	// dispatcher whose last act was a week ago routinely carries an UpdatedAt
+	// from this morning.
+	//
+	// It is also what tells a dispatcher that finished under this build from one
+	// that finished before it existed: only the former is held on the triage
+	// table (see DismissedAt), so shipping this cannot flush a year of history
+	// onto the fleet.
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	// DismissedAt is the human taking a finished dispatcher off the triage
+	// table. Like parking it is an annotation, never a Status: it says the
+	// finish has been read, not that anything about the work changed. Until it
+	// is set, a dispatcher that finished under this build keeps its row — a
+	// dispatch that ends is a thing that happened, and a table that clears
+	// itself is a table that never told anyone.
+	DismissedAt *time.Time `json:"dismissed_at,omitempty"`
 }
 
 // Parked reports whether the human has shelved this dispatch — see ParkedReason.
 func (d *Dispatch) Parked() bool { return d.ParkedAt != nil || d.ParkedReason != "" }
+
+// Finished reports whether this dispatcher's session is over for good.
+func (d *Dispatch) Finished() bool {
+	return d.Status == StatusDone || d.Status == StatusExited
+}
+
+// Held reports whether the triage table should still be carrying this finished
+// dispatcher: it ended while this build was the one running (FinishedAt), and
+// nobody has said they have seen it (DismissedAt).
+func (d *Dispatch) Held() bool {
+	return d.Finished() && d.FinishedAt != nil && d.DismissedAt == nil
+}
+
+// Stop moves a dispatcher into a finished status and stamps when it got there.
+//
+// Every place that ends a dispatch goes through here — the SessionEnd hook, the
+// ghost sweep, the cockpit's kill and its two ship keys, the tracker's deploy
+// flip — because FinishedAt has to mean "the moment it stopped" and only the
+// transition knows that. A record already finished keeps the stamp it has: the
+// tracker re-writing a merged PR's fields months later is not a second ending.
+func (d *Dispatch) Stop(status Status, reason string, now time.Time) {
+	was := d.Finished()
+	d.Status, d.StatusReason = status, reason
+	if !was && d.Finished() && d.FinishedAt == nil {
+		d.FinishedAt = &now
+	}
+}
+
+// Dismiss takes a finished dispatcher off the triage table.
+func (d *Dispatch) Dismiss(now time.Time) { d.DismissedAt = &now }
 
 // Subagent is one agent the session fanned out, as the hooks named it. The
 // hooks are the source, not the transcript: transcript JSONL is best-effort
@@ -325,6 +375,14 @@ func Save(d *Dispatch) error {
 		return err
 	}
 	d.UpdatedAt = time.Now()
+	// An invariant, not a guess: a record whose status is not a finished one has
+	// not finished, so it can carry neither the instant it stopped nor the
+	// human's reading of that. This is what clears both when a dispatcher is
+	// resumed or reopened — the next event to save it puts it back in the live
+	// table with no stale ending attached.
+	if !d.Finished() {
+		d.FinishedAt, d.DismissedAt = nil, nil
+	}
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return err

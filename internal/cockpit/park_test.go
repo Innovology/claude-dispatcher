@@ -147,7 +147,7 @@ func TestFleetCountSeparatesParkedFromClean(t *testing.T) {
 		{kind: "run", rank: 2},
 		{kind: "parked", rank: fleetParkedRank},
 	}
-	wants, parked, clean := fleetCount(rows)
+	wants, parked, _, clean := fleetCount(rows)
 	if wants != 1 || parked != 1 || clean != 1 {
 		t.Errorf("fleetCount = %d,%d,%d — a shelved row is not running clean", wants, parked, clean)
 	}
