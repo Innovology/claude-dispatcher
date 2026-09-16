@@ -605,28 +605,31 @@ func fleetBody(w int, cols fleetCols, rows []fleetRow, sel, h int, empty string)
 			}
 		}
 	}
-	// A line number is a row index plus the dividers above it; walk both at
-	// once so the mapping is built exactly the way it is read back.
-	rowAt := make([]int, 0, len(rows)+len(divAt))      // line -> row index, -1 for a divider
-	labelAt := make([]string, 0, len(rows)+len(divAt)) // line -> divider label
+	// The lines the table would draw with no window on it: each one either a
+	// row or a divider. Building it is also what maps the selection, so the two
+	// cannot disagree — the cursor's line is wherever its row landed.
+	type line struct {
+		row   int // index into rows, or -1 for a divider
+		label string
+	}
+	lines := make([]line, 0, len(rows)+len(divAt))
 	selLine := sel
 	for i := range rows {
 		if lbl, ok := divAt[i]; ok {
-			rowAt, labelAt = append(rowAt, -1), append(labelAt, lbl)
+			lines = append(lines, line{row: -1, label: lbl})
 			if i <= sel {
 				selLine++
 			}
 		}
-		rowAt, labelAt = append(rowAt, i), append(labelAt, "")
+		lines = append(lines, line{row: i})
 	}
-	start, end := window(selLine, len(rowAt), h)
-	for ln := start; ln < end; ln++ {
-		if rowAt[ln] < 0 {
-			out = append(out, fleetGroupDivider(w, labelAt[ln]))
+	start, end := window(selLine, len(lines), h)
+	for _, ln := range lines[start:end] {
+		if ln.row < 0 {
+			out = append(out, fleetGroupDivider(w, ln.label))
 			continue
 		}
-		i := rowAt[ln]
-		out = append(out, fleetDataLine(w, cols, rows[i], i == sel))
+		out = append(out, fleetDataLine(w, cols, rows[ln.row], ln.row == sel))
 	}
 	for len(out) < h {
 		out = append(out, "")
