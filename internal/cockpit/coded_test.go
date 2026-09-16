@@ -165,7 +165,7 @@ func TestPastRowsTakeTheEstimateWithoutReadingADiff(t *testing.T) {
 	s := &snapshot{effortBy: map[string]effort.Estimate{
 		"csv export": {Dur: 4 * time.Hour, Files: 3, Lines: 200},
 	}}
-	got := fleetPastRow(&collectCtx{}, s, nil, rec)
+	got := fleetEndedRow(&collectCtx{}, s, nil, rec, false)
 	if !got.codedKnown || got.coded != 4*time.Hour {
 		t.Errorf("past row = %s (known %v), want the floor's own figure",
 			effort.Human(got.coded), got.codedKnown)
@@ -174,7 +174,7 @@ func TestPastRowsTakeTheEstimateWithoutReadingADiff(t *testing.T) {
 	// And a dispatcher that ended without shipping was never on the floor, so
 	// it has no entry and says nothing rather than claiming zero.
 	rec.Feature = "abandoned spike"
-	if got := fleetPastRow(&collectCtx{}, s, nil, rec); got.codedKnown {
+	if got := fleetEndedRow(&collectCtx{}, s, nil, rec, false); got.codedKnown {
 		t.Error("a record with no floor entry should carry no estimate")
 	}
 }

@@ -96,6 +96,26 @@ func parkCmd(id, reason string) tea.Cmd {
 	}
 }
 
+// dismissCmd takes a finished dispatcher off the triage table: the ending has
+// been read, and the record goes to history.
+//
+// Written to the record, not to the model, for the same reason parking is: the
+// table is rebuilt from disk on every poll and every state-file change, so a
+// dismissal the cockpit only remembered would come back on the next load — and
+// would come back for every finished dispatcher the moment the cockpit was
+// restarted, which is the whole fleet.
+func dismissCmd(id string) tea.Cmd {
+	return func() tea.Msg {
+		rec := recordByID(id)
+		if rec == nil {
+			return actionMsg{notice: "no dispatch record to dismiss"}
+		}
+		rec.Dismiss(time.Now())
+		_ = state.Save(rec)
+		return actionMsg{notice: "dismissed \"" + rec.Feature + "\" · h for history"}
+	}
+}
+
 // unparkCmd takes the record back up: the annotation is cleared and the next
 // snapshot re-ranks the row from its real status like any other.
 func unparkCmd(id string) tea.Cmd {
