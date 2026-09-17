@@ -86,7 +86,7 @@ nix develop --no-write-lock-file --command  tmux -L player-app  new-session -d â
 Two facts on `repos.Repo`, both resolved rather than typed:
 
 - **`Socket`** â€” the `-L` name, defaulting to the repo's own name, which is the
-  name git knows it by rather than its folder (ADR 0012). Every repo is its own
+  name git knows it by rather than its folder (ADR 0017). Every repo is its own
   server with nobody configuring anything. `[sockets]` names one for a human who
   already keeps per-project servers: a socket name is chosen *outside* the
   repository, so no amount of reading the repo finds it.

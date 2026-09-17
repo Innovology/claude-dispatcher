@@ -6,7 +6,7 @@
 // and one repository can have many. Identity comes from the git directory every
 // checkout of a repository shares (its common dir), and the name comes from the
 // origin remote, because neither a folder name nor a branch name is the repo.
-// See docs/adr/0012-a-repository-is-its-common-dir.md.
+// See docs/adr/0017-a-repository-is-its-common-dir.md.
 package repos
 
 import (

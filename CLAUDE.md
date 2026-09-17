@@ -53,7 +53,7 @@
       one. A pinned checkout is **not** a root branch — it decides what the row
       reads, while which branch a feature is cut from stays with the remote's
       default and the human's `Root` (see the root-branch decision below). Full
-      record: `docs/adr/0012-a-repository-is-its-common-dir.md`.
+      record: `docs/adr/0017-a-repository-is-its-common-dir.md`.
   - *Worktree* is per-dispatch isolation: each dispatch gets its own git
     worktree of its repo under
     `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so concurrent
