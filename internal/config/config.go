@@ -73,6 +73,10 @@ type Config struct {
 	// user setting; 0 means unknown and the usage lens shows raw tokens instead
 	// of a percentage.
 	WeeklyTokenLimit int `toml:"weekly_token_limit,omitempty"`
+	// Theme is the cockpit's colours: "system" (and empty) follows the light/
+	// dark switch, live while the cockpit is open; a theme's name — "light",
+	// "dark" — holds that theme whatever the switch says. Edited in settings.
+	Theme string `toml:"theme,omitempty"`
 }
 
 func Dir() string {
@@ -159,7 +163,14 @@ func Save(c *Config) error {
 	fmt.Fprintf(&b, "azure_project = %q\n", c.AzureProject)
 	b.WriteString("# Your subscription's weekly token budget (no API exposes it, so set it here).\n")
 	b.WriteString("# 0 = unknown → the usage lens shows raw tokens instead of a percentage.\n")
-	fmt.Fprintf(&b, "weekly_token_limit = %d\n\n", c.WeeklyTokenLimit)
+	fmt.Fprintf(&b, "weekly_token_limit = %d\n", c.WeeklyTokenLimit)
+	b.WriteString("# The cockpit's colours: \"system\" follows your light/dark switch, live while\n")
+	b.WriteString("# the cockpit is open; \"light\" or \"dark\" holds one. Edit in-app with `,`.\n")
+	if c.Theme == "" {
+		b.WriteString("# theme = \"system\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "theme = %q\n\n", c.Theme)
+	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")
 	b.WriteString("# two products in one workspace get a team-scoped key each — scope it where\n")

@@ -26,6 +26,7 @@ var helpLegend = []helpSection{
 		{"●", "blocking — it cannot move until you answer"},
 		{"○", "waiting on you, not blocking anything else"},
 		{"·", "running · nothing there needs you yet"},
+		{"✓", "finished · it ended and is waiting for you to read it · x clears"},
 		{"‖", "parked · you shelved it, its row keeps your reason"},
 		{"", "sorted by what needs you, not by product — the top row is next"},
 	}},
@@ -42,8 +43,12 @@ var helpLegend = []helpSection{
 // that says what happens after. They are appended to their section, so nothing
 // the hand-written sheet used to say was lost when it started being built.
 var helpNotes = map[string][]helpRow{
+	"work the fleet": {
+		{"x", "on a ✓ row: dismiss it · nothing to kill, it goes to history"},
+	},
 	"what has finished": {
-		{"⏎", "resume it · its own transcript, in its own worktree"},
+		{"", "a dispatcher that ends keeps its row until you dismiss it"},
+		{"⏎","resume it · its own transcript, in its own worktree"},
 		{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
 	},
 	"products · lens 2": {

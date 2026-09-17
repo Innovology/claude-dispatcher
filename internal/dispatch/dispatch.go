@@ -204,8 +204,7 @@ const MaxPromptBytes = 100 * 1024
 // this said for every one of them, which turned "command too long" — the whole
 // diagnosis, handed to us by tmux — into four words that diagnose nothing.
 func failLaunch(d *state.Dispatch, err error) error {
-	d.Status = state.StatusExited
-	d.StatusReason = "did not start: " + firstLine(err.Error())
+	d.Stop(state.StatusExited, "did not start: "+firstLine(err.Error()), time.Now())
 	_ = state.Save(d)
 	return err
 }
@@ -393,8 +392,7 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 			live++
 			continue
 		}
-		d.Status = state.StatusExited
-		d.StatusReason = "its " + supervisor.Backend() + " session is gone"
+		d.Stop(state.StatusExited, "its "+supervisor.Backend()+" session is gone", time.Now())
 		// The session died without a SessionEnd, so its fan-out died without
 		// SubagentStops: settle the annotation here, where the death is
 		// proven, or the history row claims live subagents forever.

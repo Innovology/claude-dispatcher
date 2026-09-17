@@ -92,7 +92,7 @@ var Defaults = []Binding{
 	{Action: "fleet.skip", Scope: Fleet, Key: "s", Help: "skip · send it to the back, it comes round again", Section: "work the fleet"},
 	{Action: "fleet.park", Scope: Fleet, Key: "p", Help: "park it · say why, it waits below the fleet · again unparks", Section: "work the fleet"},
 	{Action: "fleet.dispatch", Scope: Fleet, Key: "d", Help: "dispatch · pick a repo, say what it does", Section: "work the fleet"},
-	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher whose session is over, and back again", Section: "what has finished"},
+	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher you have dismissed, newest worked first", Section: "what has finished"},
 	{Action: "fleet.openpr", Scope: Fleet, Key: "o", Help: "open its pull request", Section: "what has finished"},
 
 	// ---- products lens ------------------------------------------------------

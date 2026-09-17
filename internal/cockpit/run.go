@@ -75,6 +75,18 @@ func Run() error {
 		m.notice = "no config — showing demo data · run `claude-dispatcher init`"
 	}
 
+	// The theme is decided before the program starts, so the opening screen is
+	// drawn in it rather than flashing the dark design first.
+	var configured string
+	if m.cfg != nil {
+		configured = m.cfg.Theme
+	}
+	m = m.initTheme(configured)
+	if m.themeTerm {
+		// Whatever mode it ends in — settings can switch to system mid-run.
+		defer func() { _, _ = os.Stdout.WriteString(termThemeOff) }()
+	}
+
 	// Focus reporting is what tells the cockpit the human has come back from a
 	// session it switched them to rather than attached them to — the handover
 	// there exits on the way out, so nothing else marks the return. Terminals

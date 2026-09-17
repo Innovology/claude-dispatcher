@@ -267,7 +267,13 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 	// approve or kill. What it has is a transcript, so ⏎ resumes it — and the
 	// act keeps its row, because until the resumed session reports in, the
 	// record it was fired on is still a finished one.
-	if kind == "past" {
+	// A held row is the same finished dispatcher one keystroke earlier, so it
+	// offers the same acts plus the one that ends the holding. x is that key —
+	// the same key that takes a failed launch's note off the table, and the
+	// same meaning: this row has been read. It is not a kill (there is nothing
+	// left to kill) and it keeps the row until the record comes back saying so,
+	// because the dismissal is written to disk, not to the screen.
+	if kind == "past" || kind == "done" {
 		acts := []cqAct{
 			{k: "⏎", d: "resume", ok: "resuming \"" + rec.Feature + "\"…", keep: true},
 		}
@@ -277,6 +283,10 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 			// cell already carries the id in the right notation (cqRef).
 			acts = append(acts, cqAct{k: "o", d: "open pr",
 				ok: "opening the pull request for \"" + rec.Feature + "\"…", keep: true})
+		}
+		if kind == "done" {
+			acts = append(acts, cqAct{k: "x", d: "dismiss",
+				ok: "dismissed \"" + rec.Feature + "\"", keep: true})
 		}
 		return acts
 	}
