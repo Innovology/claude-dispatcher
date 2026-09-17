@@ -171,8 +171,14 @@ type model struct {
 	// model holds only what the user did to it: the order they left it in, what
 	// they have already acted on, and what they are typing.
 	cqOrder      []string        // item ids, front first; `s` rotates, new asks land at the back
-	cqSuppressed map[string]bool // acted on, hidden until the record leaves the queue for real
+	cqSuppressed map[string]bool // acted on, hidden until the record catches up with the act
 	cqCleared    int             // "N things handled" this session
+	// fleetDismissed is the finished dispatchers this human has taken off the
+	// table whose snapshot has not caught up yet: the record on disk is what a
+	// dismissal IS, and this is only the screen agreeing with it now instead of
+	// in a load's time. Every entry is retired by the snapshot that reads it
+	// back — see fleetNow and cqReconcile.
+	fleetDismissed map[string]bool
 
 	cqFlash     string // an act's confirmation, held on screen for cqFlashLinger
 	cqFlashKeep bool   // the flashing act did not clear the item (attach)
@@ -229,15 +235,16 @@ type model struct {
 
 func newModel() model {
 	return model{
-		lens:         "floor",
-		pane:         "list",
-		rightTab:     "overview",
-		srcFilter:    "all",
-		picked:       map[string]bool{},
-		clPane:       "repos",
-		clMarked:     map[string]bool{},
-		clMap:        map[string]string{},
-		cqSuppressed: map[string]bool{},
+		lens:           "floor",
+		pane:           "list",
+		rightTab:       "overview",
+		srcFilter:      "all",
+		picked:         map[string]bool{},
+		clPane:         "repos",
+		clMarked:       map[string]bool{},
+		clMap:          map[string]string{},
+		cqSuppressed:   map[string]bool{},
+		fleetDismissed: map[string]bool{},
 		// How this build was installed cannot change while it runs, so it is
 		// read once here rather than from the footer, which redraws on every
 		// frame. Holding it on the model is also what lets a test drive the
@@ -471,6 +478,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case actionMsg:
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
+
+	case dismissedMsg:
+		// The record on disk is the dismissal; this is the table saying so at
+		// once rather than in a load's time — see fleetNow. It is set here, on
+		// the way back from the write, and never on the way in: a flash is a
+		// promise that the act already ran, and a row moved for a write that
+		// then failed would be the screen making that promise on its own.
+		m.notice = msg.notice
+		m.fleetDismissed[msg.id] = true
+		// The cursor stays where it is and the next row comes up under it, the
+		// way parking leaves it: dismissing is putting the thing down, and a
+		// stack of finished rows is cleared with one key.
+		m.fleetSelID = ""
+		mm, load := m.fleetSync().requestLoad(loadPlain)
+		return mm, load
 
 	case launchedMsg:
 		// A launch is the one action whose row was on screen before the action

@@ -759,14 +759,15 @@ func (m model) fleetFilter() string {
 // that have been dismissed — and everything that finished before this build
 // existed, which has no FinishedAt and so was never held — are history.
 func (m model) fleetAll() []fleetRow {
-	byID := make(map[string]fleetRow, len(fleet))
-	for _, r := range fleet {
+	rows := m.fleetNow()
+	byID := make(map[string]fleetRow, len(rows))
+	for _, r := range rows {
 		if r.kind != "past" {
 			byID[r.id] = r
 		}
 	}
-	out := make([]fleetRow, 0, len(fleet))
-	placed := make(map[string]bool, len(fleet))
+	out := make([]fleetRow, 0, len(rows))
+	placed := make(map[string]bool, len(rows))
 	for _, id := range m.cqOrder {
 		// Parked and held rows sit out the user's ordering: both groups are
 		// always below the live table, and an id `s` ordered while it was still
@@ -779,7 +780,7 @@ func (m model) fleetAll() []fleetRow {
 			placed[id] = true
 		}
 	}
-	for _, r := range fleet {
+	for _, r := range rows {
 		if r.kind != "past" && !placed[r.id] && !m.cqSuppressed[r.id] {
 			out = append(out, r)
 		}
@@ -800,13 +801,73 @@ func (m model) fleetAll() []fleetRow {
 // row cleared moments ago does not reappear under `h` while the record catches
 // up.
 func (m model) fleetPast() []fleetRow {
-	out := make([]fleetRow, 0, len(fleet))
-	for _, r := range fleet {
+	rows := m.fleetNow()
+	out := make([]fleetRow, 0, len(rows))
+	for _, r := range rows {
 		if r.kind == "past" && !m.cqSuppressed[r.id] {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// fleetNow is the collector's fleet with this session's own dismissals already
+// applied, and it is the only thing the two tables above read.
+//
+// A dismissal is written to the record and nowhere else (dismissCmd), which is
+// right — kept in the model it would come back on the next load, and come back
+// for every finished dispatcher the moment the cockpit restarted. But the
+// record is not the screen, and the screen used to wait for a whole snapshot to
+// catch up with it: a load reads every record, every repo and every forge, and
+// on a real portfolio takes seconds to a minute (see load.go), all of it with
+// the dismissed row still sitting under the "finished" divider and the history
+// the flash had just named — "h for history" — not containing it. Measured on
+// the reporting store, 212 records: ten to fifteen seconds with nothing running,
+// and the human filed this thirty-six seconds after pressing the key.
+//
+// So the act shows now and the record still decides. The map is what the human
+// did; every field on the row still comes from the collector.
+func (m model) fleetNow() []fleetRow {
+	if len(m.fleetDismissed) == 0 {
+		return fleet
+	}
+	out := make([]fleetRow, len(fleet))
+	copy(out, fleet)
+	moved := false
+	for i, r := range out {
+		// Only a held row is turned over. A snapshot that has caught up already
+		// says "past" and there is nothing to do; a record that came back alive —
+		// a resume clears the ending, see state.Save — is a live row again, and
+		// must not be hidden by a dismissal it no longer carries. That is also
+		// what retires the entry: see cqReconcile.
+		if r.kind == "done" && m.fleetDismissed[r.id] {
+			out[i] = fleetDismissedRow(r)
+			moved = true
+		}
+	}
+	if moved {
+		// Re-ranked, so it takes its place in history by the same rule as
+		// everything else there rather than wherever it sat on the live table.
+		fleetSort(out)
+	}
+	return out
+}
+
+// fleetDismissedRow is the held row as history: the same dispatcher a rank
+// lower, without the key that has just been pressed on it. Everything else is
+// left alone, because dismissing changes nothing about the dispatcher — see
+// fleetEndedRow, which builds both kinds for the same reason.
+func fleetDismissedRow(r fleetRow) fleetRow {
+	r.kind = "past"
+	r.rank = fleetRank("past", r.tone)
+	acts := make([]cqAct, 0, len(r.acts))
+	for _, a := range r.acts {
+		if a.k != "x" {
+			acts = append(acts, a)
+		}
+	}
+	r.acts = acts
+	return r
 }
 
 // fleetRows is what the table actually draws: fleetAll narrowed by `f`, or the

@@ -102,21 +102,24 @@ func killCmd(features []string) tea.Cmd {
 				continue
 			}
 			_ = supervisor.KillSession(rec.TmuxSession)
+			now := time.Now()
 			// The kill takes the session's subagents with it, and no hook
 			// will fire to say so: settle the fan-out with the record.
-			swept := rec.SweepSubagents(time.Now())
-			if rec.Parked() || rec.Status != state.StatusDone {
-				// A kill is abandonment, not shelving: clear the park so the
-				// record cannot haunt the parked group, whose whole claim is
-				// "you will come back to this".
-				rec.ParkedReason, rec.ParkedAt = "", nil
-				if rec.Status != state.StatusDone {
-					rec.Stop(state.StatusExited, "killed from cockpit", time.Now())
-				}
-				_ = state.Save(rec)
-			} else if swept {
-				_ = state.Save(rec)
+			rec.SweepSubagents(now)
+			// A kill is abandonment, not shelving: clear the park so the
+			// record cannot haunt the parked group, whose whole claim is
+			// "you will come back to this".
+			rec.ParkedReason, rec.ParkedAt = "", nil
+			if rec.Status != state.StatusDone {
+				rec.Stop(state.StatusExited, "killed from cockpit", now)
 			}
+			// And it is read: the human ended this one themselves and was told
+			// so. The triage table holds a finished dispatcher because an ending
+			// nobody watched is news (see state.Dispatch.Held), which an ending
+			// they asked for is not — unheld, it would come back as an unread ✓
+			// row asking them to dismiss the thing they just killed.
+			rec.Dismiss(now)
+			_ = state.Save(rec)
 			if rec.WorktreePath != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
 				kept++
 			}
@@ -154,7 +157,11 @@ func shipCmd(feature string) tea.Cmd {
 			}
 			merged = fmt.Sprintf(" · #%d squash-merged", rec.PRNumber)
 		}
-		rec.Stop(state.StatusDone, "shipped from cockpit", time.Now())
+		now := time.Now()
+		rec.Stop(state.StatusDone, "shipped from cockpit", now)
+		// Shipped by the human, so it is already read — the same rule the kill
+		// follows: the held row exists for endings nobody watched.
+		rec.Dismiss(now)
 		_ = state.Save(rec)
 		gh.InvalidateCache() // the merge just changed what the forge would say
 		return actionMsg{notice: "✓ " + feature + " marked live" + merged}
@@ -168,7 +175,9 @@ func markDoneCmd(feature string) tea.Cmd {
 		if rec == nil {
 			return actionMsg{notice: "\"" + feature + "\" has no record to mark"}
 		}
-		rec.Stop(state.StatusDone, "marked shipped", time.Now())
+		now := time.Now()
+		rec.Stop(state.StatusDone, "marked shipped", now)
+		rec.Dismiss(now) // the human's own ending, and so already read
 		_ = state.Save(rec)
 		return actionMsg{notice: "\"" + feature + "\" marked shipped"}
 	}

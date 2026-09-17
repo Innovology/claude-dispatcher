@@ -37,8 +37,9 @@ var helpSections = []struct {
 		{"ctrl+z", "put back the last thing you cleared"},
 	}},
 	{section: "what has finished", keys: []struct{ k, d string }{
-		{"h", "history · every dispatcher you have dismissed, newest worked first"},
+		{"h", "history · every dispatcher that is over, newest worked first"},
 		{"", "a dispatcher that ends keeps its row until you dismiss it"},
+		{"", "one you killed or merged yourself goes straight there — you read it"},
 		{"⏎", "resume it · its own transcript, in its own worktree"},
 		{"o", "open its pull request"},
 		{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
