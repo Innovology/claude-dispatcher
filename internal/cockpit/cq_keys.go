@@ -269,8 +269,12 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// "h" into the repo filter instead — with nothing in flight, the form is
 		// always up, so `h` would be unreachable exactly when history is the only
 		// thing left to look at.
+		//
+		// "Untouched" means at rest (dxAtRest), not merely "nothing typed": a repo
+		// picked with the arrows and enter is a choice, and the title typed after
+		// it may well start with one of these keys.
 		navKey := isLensDigit(k) || k == ":" || k == "d" || k == "h"
-		if m.dxTouched() || !navKey {
+		if !m.dxAtRest() || !navKey {
 			mm, cmd := m.dxKey(k)
 			return mm, cmd, true
 		}

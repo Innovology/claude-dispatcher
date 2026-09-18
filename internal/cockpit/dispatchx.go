@@ -134,6 +134,21 @@ func (m model) dxTouched() bool {
 	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != "" || m.dxRoot != ""
 }
 
+// dxAtRest reports whether the form is exactly as it opened: focus on WHERE,
+// the repo cursor on the first row, nothing typed. Only then do 1–6, ':', 'd'
+// and 'h' leave it.
+//
+// dxTouched alone was the test, and it cannot see a choice made without typing.
+// Arrow down to a repo and press enter, and every text field is still empty,
+// so the form read as untouched and the first letter of the title went to the
+// key it stands for: a title starting with "d" re-opened the form on WHERE and
+// dropped the pick, one starting with "h" left for history, "2fa…" switched
+// lens. Leaving WHERE, or moving along its list, is choosing, and from then on
+// the form owns every key; esc is still the way out.
+func (m model) dxAtRest() bool {
+	return m.dxField == dxWhereF && m.dxRepo == 0 && !m.dxTouched()
+}
+
 // ---- the repo list -----------------------------------------------------------
 
 // dxAllRepos is every repo the form could dispatch into, unfiltered — the
@@ -858,7 +873,7 @@ func (m model) dxSummary() string {
 // keys that exist here: ctrl+d and not the design's ctrl+⏎, and the exits only
 // while they are still exits.
 func (m model) dxFooterHelp() string {
-	if m.dxTouched() {
+	if !m.dxAtRest() {
 		return "enter next field · tab moves · ctrl+d dispatch · esc cancel"
 	}
 	return "dispatch · enter next field · tab moves · esc cancel · 1…6 sections"
