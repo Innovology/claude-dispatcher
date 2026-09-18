@@ -100,9 +100,23 @@
   `SessionEnd` out (SIGKILL, an outside `tmux kill-session`, a tmux server
   that went down with the machine), so `dispatch.ReconcileSessions` sweeps
   working/needs-input/blocked records whose session is gone and marks them
-  exited. It never sweeps `launching`: no hook has fired for one, so its
-  session may simply not exist *yet* — absence is only evidence where a hook
-  proved the session once existed.
+  exited. It never sweeps a `launching` record on absence alone: no hook has
+  fired for one, so its session may simply not exist *yet* — absence is only
+  evidence where something proved the session once existed. A hook proves it,
+  and so does the supervisor: once new-session returns, Launch and Resume stamp
+  `SessionStartedAt`, and a launching record carrying it whose session is gone
+  is a launch that died before claude ran, swept with a reason that says so.
+- **A pane's command names its own shell.** The launch line is POSIX
+  (`VAR=… claude "$(cat …)"; exec ${SHELL}`), and tmux runs a one-argument
+  command through `default-shell`, which is the human's to set. A tmux.conf
+  that makes nu the default shell (NixOS box, 2026-09-18) handed nu that line;
+  nu refused to parse it, the pane died in milliseconds and the server went
+  with it — after new-session had returned 0, so the launch reported success
+  and the row said "starting session" for good. It never looked like a shell
+  problem: it looked like `nix develop` taking over a minute. `tmux.NewSession`
+  now passes `/bin/sh -c <line>` as separate arguments, which tmux 3.0+ execs
+  directly, and nu/xonsh/elvish count as idle shells for the `exec ${SHELL}`
+  that follows claude.
 - **A ghost cannot clear itself, so every load looks.** That sweep ran in one
   place — `recheckCmd`, the reload after a jump-in — so a record whose session
   had been taken away claimed *working* for as long as the cockpit stayed open

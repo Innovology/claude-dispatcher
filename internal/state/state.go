@@ -152,8 +152,17 @@ type Dispatch struct {
 	// no background tasks is swept, because a subagent cannot outlive the turn
 	// unless it is one of those tasks.
 	Subagents []Subagent `json:"subagents,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	// SessionStartedAt is the supervisor accepting the session: new-session
+	// returned, so at that instant the session existed. It is what makes a
+	// launching record's missing session evidence. Without it, a launching
+	// record is in the window where its session may not exist yet, and absence
+	// proves nothing; with it, the session was there and has gone before claude
+	// fired a single hook, which is a launch that died — a pane whose command
+	// could not run — and nothing else will ever report it. Stamped by Launch
+	// and Resume after the supervisor says yes, never before.
+	SessionStartedAt *time.Time `json:"session_started_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 	// FinishedAt is the instant this dispatcher's status first said it was over
 	// — stamped by Stop, at the transition, and nowhere else. UpdatedAt cannot
 	// answer that question: Save stamps it on every write, and a finished record

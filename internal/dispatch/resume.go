@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
@@ -162,9 +163,11 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		return "", "", err
 	}
 
+	started := time.Now()
 	d.TmuxSession = name
 	d.Status = state.StatusLaunching
 	d.StatusReason = "resuming its session"
+	d.SessionStartedAt = &started
 	d.WaitingOnTasks = false
 	if err := state.Save(d); err != nil {
 		return ResumeStarted, name, err

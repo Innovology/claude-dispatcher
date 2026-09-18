@@ -3,10 +3,12 @@ package tmux
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -213,5 +215,40 @@ func TestPathOfSessionMatchesTheWholeName(t *testing.T) {
 	}
 	if got := pathOfSession(out, "disp"); got != "" {
 		t.Errorf("a prefix matched: %q", got)
+	}
+}
+
+// The report: on a machine whose tmux.conf makes nu the default shell, every
+// dispatch sat at "starting session" for good. Handed one argument, tmux runs a
+// pane's command through default-shell, nu could not parse the POSIX launch
+// line, and the pane died with the server behind it — after new-session had
+// returned 0. The default shell here is the extreme case, one that runs
+// nothing at all: a session must survive it, because the launch line names
+// its own shell.
+func TestALaunchDoesNotRideTheHumansDefaultShell(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	tmp := t.TempDir()
+	refuse := filepath.Join(tmp, "refuse-everything")
+	if err := os.WriteFile(refuse, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conf := filepath.Join(tmp, "tmux.conf")
+	if err := os.WriteFile(conf, []byte("set -g exit-empty off\nset -g default-shell "+refuse+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := Server{Socket: "disp-test-shell-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	if out, err := exec.Command("tmux", "-L", srv.Socket, "-f", conf, "start-server").CombinedOutput(); err != nil {
+		t.Fatalf("start-server: %v: %s", err, out)
+	}
+
+	if err := srv.NewSession("s", tmp, `X="posix only"; sleep 30; exec ${SHELL:-/bin/sh}`, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if !srv.HasSession("s") {
+		t.Fatal("the session died: its command went through the server's default-shell")
 	}
 }

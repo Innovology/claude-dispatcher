@@ -179,7 +179,30 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	if err := newSession(SessionOf(d), worktree, cmd, d.EnvCommand); err != nil {
 		return d, failLaunch(d, err)
 	}
+	markSessionStarted(d, time.Now())
 	return d, nil
+}
+
+// markSessionStarted stamps SessionStartedAt on the record as it stands on disk,
+// under the hook lock. Launch saved its record before the session existed, and
+// by the time new-session returns a hook may already have written it — a fast
+// SessionStart can land first — so saving Launch's own copy would put
+// "launching" back over whatever the session had said. Reloaded under the lock,
+// the stamp joins the record the hooks left and changes nothing else.
+func markSessionStarted(d *state.Dispatch, at time.Time) {
+	d.SessionStartedAt = &at
+	release := state.Lock()
+	defer release()
+	for _, cur := range state.LoadAll() {
+		if cur.ID != d.ID {
+			continue
+		}
+		if cur.SessionStartedAt == nil {
+			cur.SessionStartedAt = &at
+			_ = state.Save(cur)
+		}
+		return
+	}
 }
 
 // MaxPromptBytes is the largest prompt a dispatch will carry.
@@ -334,7 +357,10 @@ var (
 // existed and its absence now proves it ended. A launching record has had no
 // hook at all, and there is a window — between Launch saving it and NewSession
 // returning — where its session does not exist yet and never did; absence
-// there proves nothing, so nothing is claimed. Likewise a supervisor we cannot
+// there proves nothing, so nothing is claimed. Once NewSession has returned the
+// record carries SessionStartedAt, and from then on it is evidence again: the
+// session existed, and gone before any hook fired means its command never ran.
+// That is the one launching record swept, and its reason says so. Likewise a supervisor we cannot
 // even reach is not evidence that every session is gone, which is why an
 // unavailable backend sweeps nothing rather than retiring the whole fleet.
 //
@@ -383,8 +409,19 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 			live++
 			continue
 		}
+		reason := "its " + supervisor.Backend() + " session is gone"
 		switch d.Status {
 		case state.StatusWorking, state.StatusNeedsInput, state.StatusBlocked:
+		case state.StatusLaunching:
+			// No hook has fired, so absence proves nothing — unless the supervisor
+			// already said the session existed. Then it is a launch that died
+			// before claude ran: a pane whose command could not start, which no
+			// hook will ever report, and whose row would otherwise say "starting"
+			// for as long as the record exists.
+			if d.SessionStartedAt == nil {
+				continue
+			}
+			reason = "its " + supervisor.Backend() + " session ended before claude reported in"
 		default:
 			continue
 		}
@@ -392,7 +429,7 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 			live++
 			continue
 		}
-		d.Stop(state.StatusExited, "its "+supervisor.Backend()+" session is gone", time.Now())
+		d.Stop(state.StatusExited, reason, time.Now())
 		// The session died without a SessionEnd, so its fan-out died without
 		// SubagentStops: settle the annotation here, where the death is
 		// proven, or the history row claims live subagents forever.

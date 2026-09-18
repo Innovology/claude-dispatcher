@@ -116,15 +116,27 @@ func (s Server) ListSessions() []string {
 // NewSession starts a detached session running shellCommand in dir, with the
 // tmux client itself run under env when a repo names one.
 //
+// shellCommand is POSIX shell, and it reaches tmux as `/bin/sh -c <command>` —
+// three arguments, not one. Handed a single argument, tmux runs it through its
+// `default-shell`, which is the human's to set and need not be a POSIX shell at
+// all: a tmux.conf that makes nu the default shell hands nu
+// `CLAUDE_DISPATCHER_ID=… claude "$(cat …)"; exec ${SHELL}`, nu refuses to
+// parse it, the pane dies in milliseconds, the server exits with its last
+// session — and new-session has already returned 0, so the launch reported
+// success for a dispatcher that never ran. Measured on tmux 3.7b with such a
+// config: every dispatch sat at "starting session" for good. Given more than one
+// argument tmux (3.0 and later) execs them directly, so the command is parsed by
+// the shell it was written for whatever the human's shell is.
+//
 // env wraps the CLIENT, not shellCommand — `nix develop --command tmux …`, not
 // `tmux … "nix develop --command claude …"`. Both put the repo's binaries on
 // the session's PATH, and only this one leaves the pane running the plain
-// `<shell> -c "… claude …"` that SessionIdle reads to decide whether claude has
+// `sh -c "… claude …"` that SessionIdle reads to decide whether claude has
 // ended. Wrapping the command instead makes the launcher the pane's foreground
 // process, and a pane whose command is not a shell is taken at its word as
 // busy — for ever, since the launcher never exits.
 func (s Server) NewSession(name, dir, shellCommand, env string) error {
-	out, err := s.clientIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, shellCommand).CombinedOutput()
+	out, err := s.clientIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, "--", "/bin/sh", "-c", shellCommand).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux new-session: %s", strings.TrimSpace(string(out)))
 	}
@@ -198,10 +210,13 @@ func (s Server) KillSession(name string) error {
 // shellCommands are the pane commands that mean "nothing is running here": the
 // login shell a dispatch session drops to once claude exits (see
 // launchCommand). A login shell reports as "-bash", hence the leading dash trim
-// in paneIdle.
+// in paneIdle. $SHELL is whatever the human logs in with, so the shells that
+// are not POSIX count too: a pane parked at nu after claude exits is as idle
+// as one parked at bash.
 var shellCommands = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "fish": true,
 	"dash": true, "ksh": true, "csh": true, "tcsh": true, "login": true,
+	"nu": true, "xonsh": true, "elvish": true,
 }
 
 // paneIdle reports whether a pane's current command is a shell waiting for
@@ -219,7 +234,7 @@ func paneIdle(cmd string) bool { return shellCommands[strings.TrimPrefix(cmd, "-
 //
 // `#{pane_current_command}` alone cannot answer this, and reading it as if it
 // could is why every session we start looked idle while claude was running in
-// it. A session is launched as `<shell> -c "… claude …; exec $SHELL"`, and a
+// it. A session is launched as `/bin/sh -c "… claude …; exec $SHELL"`, and a
 // non-interactive shell has no job control, so claude never gets a process
 // group of its own: the pane's foreground group leader stays the shell, and
 // tmux dutifully reports "zsh". Measured on a live dispatcher — pane_pid 51122
