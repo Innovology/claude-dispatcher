@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"claude-dispatcher/internal/state"
 )
 
@@ -227,8 +229,14 @@ func TestDismissWritesTheRecord(t *testing.T) {
 	liveByID = map[string]*state.Dispatch{"r4": rec}
 
 	msg := dismissCmd("r4")()
-	if a, ok := msg.(actionMsg); !ok || !strings.Contains(a.notice, "dismissed") {
+	// It names the id it wrote for, which is what lets the table move that row
+	// to history now rather than when the load it also asks for lands.
+	d, ok := msg.(dismissedMsg)
+	if !ok || !strings.Contains(d.notice, "dismissed") {
 		t.Fatalf("dismissCmd said %#v", msg)
+	}
+	if d.id != "r4" {
+		t.Errorf("dismissedMsg names %q", d.id)
 	}
 	got := loadRecord(t, "r4")
 	if got.DismissedAt == nil {
@@ -236,6 +244,214 @@ func TestDismissWritesTheRecord(t *testing.T) {
 	}
 	if got.Held() {
 		t.Error("a dismissed record is still held")
+	}
+}
+
+// ---- the screen, before the record comes back ------------------------------------
+
+// heldFleet is one held row and one live one, the table a human dismisses from.
+func heldFleet(now time.Time) []fleetRow {
+	return []fleetRow{
+		{id: "id-run", kind: "run", rank: fleetRank("run", "normal"), feature: "running",
+			moved: now.Add(-time.Minute), started: now.Add(-time.Hour)},
+		{id: "id-held", kind: "done", rank: fleetDoneRank, feature: "just ended",
+			signal: "deployed", moved: now.Add(-2 * time.Minute), started: now.Add(-time.Hour),
+			acts: []cqAct{
+				{k: "⏎", d: "resume", ok: "resuming \"just ended\"…", keep: true},
+				{k: "x", d: "dismiss", ok: "dismissed \"just ended\"", keep: true},
+			}},
+		{id: "id-past", kind: "past", rank: fleetPastRank, feature: "long gone",
+			moved: now.Add(-40 * time.Hour), started: now.Add(-48 * time.Hour)},
+	}
+}
+
+// The defect this branch is named for. The dismissal is written to the record
+// and the record is right — but the screen used to wait for a whole snapshot to
+// read it back, and a load reads every record, repo and forge: ten to fifteen
+// seconds measured on the reporting store, up to a minute cold. For all of it
+// the dismissed row sat under the "finished" divider it had just been taken off,
+// and `h` — which the flash names by hand — did not have it.
+func TestADismissedRowIsInHistoryBeforeTheNextSnapshotLands(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	now := time.Now()
+	fleet = heldFleet(now)
+
+	m := newModel()
+	m.width, m.height = 130, 40
+	mm, _ := m.Update(dismissedMsg{id: "id-held", notice: "dismissed \"just ended\""})
+	m = mm.(model)
+
+	if got := fleetFeatures(m); got != "running" {
+		t.Errorf("triage table = %q — the dismissed row is still on it", got)
+	}
+	var past []string
+	for _, r := range m.fleetPast() {
+		past = append(past, r.feature)
+	}
+	if len(past) != 2 || past[0] != "just ended" {
+		t.Errorf("history = %v — the row it was just sent to must have it, newest first", past)
+	}
+	// It reads as history, not as a held row wearing history's rank: the key
+	// that has just been pressed on it is not offered again.
+	for _, r := range m.fleetPast() {
+		if r.id != "id-held" {
+			continue
+		}
+		if r.kind != "past" || r.rank != fleetPastRank {
+			t.Errorf("the dismissed row is kind %q rank %d", r.kind, r.rank)
+		}
+		for _, a := range r.acts {
+			if a.k == "x" {
+				t.Error("history still offers dismiss on a row that has been dismissed")
+			}
+		}
+	}
+	// And the headline stops counting it the moment the row moves, because the
+	// count is taken over the rows on screen.
+	_, _, finished, _ := fleetCount(m.fleetRows())
+	if finished != 0 {
+		t.Errorf("%d finished — the table says it is still holding one", finished)
+	}
+	// The collector's own fleet is untouched: what the human did is on the
+	// model, and every fact on the row still comes from the record.
+	if fleet[1].kind != "done" {
+		t.Error("fleetNow edited the collector's slice in place")
+	}
+}
+
+// The entry is the screen catching up, so the snapshot that catches up retires
+// it — and a snapshot that has NOT is not allowed to, which is the same rule
+// the pending placeholder follows (see prunePending).
+func TestTheSnapshotThatReadsTheDismissalRetiresIt(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	now := time.Now()
+
+	m := newModel()
+	m.fleetDismissed["id-held"] = true
+
+	// A load still carrying the pre-dismissal record: it says held, so the
+	// entry stands and the row stays in history.
+	fleet = heldFleet(now)
+	m = m.cqReconcile()
+	if !m.fleetDismissed["id-held"] {
+		t.Fatal("a snapshot that had not read the dismissal retired it anyway")
+	}
+	if len(m.fleetPast()) != 2 {
+		t.Error("the row left history while the snapshot was still behind")
+	}
+
+	// The load that read it. The collector says past now, so there is nothing
+	// left for the entry to do.
+	fleet = heldFleet(now)
+	fleet[1] = fleetDismissedRow(fleet[1])
+	m = m.cqReconcile()
+	if m.fleetDismissed["id-held"] {
+		t.Error("the entry outlived the snapshot that made it true")
+	}
+
+	// And a record that came back alive — a resume clears the ending — is a
+	// live row again, which a stale dismissal must never hide.
+	m.fleetDismissed["id-held"] = true
+	fleet = heldFleet(now)
+	fleet[1].kind, fleet[1].rank = "run", fleetRank("run", "normal")
+	m = m.cqReconcile()
+	if m.fleetDismissed["id-held"] {
+		t.Fatal("a resumed dispatcher is still carrying a dismissal")
+	}
+	if got := fleetFeatures(m); !strings.Contains(got, "just ended") {
+		t.Errorf("triage table = %q — the resumed dispatcher is missing from it", got)
+	}
+}
+
+// ---- an ending the human asked for ----------------------------------------------
+
+// The triage table holds a finished dispatcher because an ending nobody watched
+// is news. An ending the human asked for is not: they pressed the key and were
+// told it happened. Unheld — which is what these three used to leave — the
+// dispatcher came back as an unread ✓ row on the next cockpit start, asking
+// them to dismiss the thing they had killed or merged hours earlier.
+func TestAnEndingTheHumanAskedForIsAlreadyRead(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+
+	cases := []struct {
+		name string
+		run  func(rec *state.Dispatch) tea.Msg
+	}{
+		{"kill", func(rec *state.Dispatch) tea.Msg { return killCmd([]string{rec.Feature})() }},
+		{"mark shipped", func(rec *state.Dispatch) tea.Msg { return markDoneCmd(rec.Feature)() }},
+		{"approve merge", func(rec *state.Dispatch) tea.Msg { return shipCmd(rec.Feature)() }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+			rec := &state.Dispatch{ID: "r-" + c.name, Feature: "ending", Status: state.StatusWorking}
+			if err := state.Save(rec); err != nil {
+				t.Fatal(err)
+			}
+			liveRecords = map[string]*state.Dispatch{"ending": rec}
+			liveByID = map[string]*state.Dispatch{rec.ID: rec}
+
+			c.run(rec)
+
+			got := loadRecord(t, rec.ID)
+			if !got.Finished() {
+				t.Fatalf("%s left the record %v", c.name, got.Status)
+			}
+			if got.FinishedAt == nil {
+				t.Errorf("%s did not stamp when it ended", c.name)
+			}
+			if got.Held() {
+				t.Errorf("%s left the dispatcher held — it comes back unread on the next start", c.name)
+			}
+		})
+	}
+}
+
+// The suppressed set is what hides a row between the act and the record
+// catching up with it. It used to be retired by the id LEAVING the fleet, which
+// stopped happening when a finished dispatcher started keeping a row for good:
+// a killed dispatcher was then hidden from the triage table AND from history for
+// the rest of the session.
+func TestSuppressionEndsWhenTheRecordCatchesUp(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	now := time.Now()
+
+	m := newModel()
+	m.cqSuppressed["id-run"] = true // x on a running row: killed, hidden
+	m.cqUndo = &cqUndoEntry{id: "id-run", label: "killed \"running\""}
+
+	// The kill has not reached the record yet, so the row must stay hidden —
+	// otherwise it flickers back in for a poll.
+	fleet = heldFleet(now)
+	m = m.cqReconcile()
+	if !m.cqSuppressed["id-run"] || m.cqUndo == nil {
+		t.Fatal("the suppression was dropped before the record said anything")
+	}
+	if strings.Contains(fleetFeatures(m), "running") {
+		t.Error("the killed row came back while the record still said it was running")
+	}
+
+	// The record caught up: the session is over and the human's own kill
+	// dismissed it, so it is history — and history is where it must be findable.
+	fleet = heldFleet(now)
+	fleet[0].kind, fleet[0].rank = "past", fleetPastRank
+	m = m.cqReconcile()
+	if m.cqSuppressed["id-run"] {
+		t.Fatal("the row is still hidden with nothing left to hide it for")
+	}
+	var past []string
+	for _, r := range m.fleetPast() {
+		past = append(past, r.feature)
+	}
+	if len(past) != 2 {
+		t.Errorf("history = %v — a dispatcher you killed belongs in it", past)
+	}
+	if m.cqUndo != nil {
+		t.Error("undo should be dropped once the row is not hidden")
 	}
 }
 

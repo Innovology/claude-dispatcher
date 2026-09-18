@@ -99,27 +99,54 @@ func fleetNextFilter(cur string) string {
 	return fleetFilters[0]
 }
 
-// cqReconcile folds a fresh snapshot into the user's ordering: ids that have
-// left the fleet are dropped from the order, from the suppressed set — which is
-// what bounds it — and from the undo, which can no longer put anything back.
+// cqReconcile folds a fresh snapshot into what the human did to the last one:
+// the order they left it in, the rows they have acted on, the endings they have
+// dismissed, and the one row ctrl+z can still put back.
+//
+// Each of those is held only until the record catches up with the act, and the
+// snapshot is how they find out. What none of them may be keyed on any more is
+// the id LEAVING the fleet, which is what this used to test: a finished
+// dispatcher keeps a row for good now — held, then history — so an id that was
+// hidden on the strength of "until the record catches up" stayed hidden for the
+// rest of the session, missing from the triage table and from history alike,
+// and came back unread on the next cockpit start. A row that has reached a
+// finished kind IS the record having caught up.
 func (m model) cqReconcile() model {
-	live := make(map[string]bool, len(fleet))
+	kind := make(map[string]string, len(fleet))
 	for _, r := range fleet {
-		live[r.id] = true
+		kind[r.id] = r.kind
+	}
+	// Still on the live table, so an act fired on it may not have landed yet.
+	pending := func(id string) bool {
+		switch kind[id] {
+		case "queue", "run", "parked":
+			return true
+		}
+		return false
 	}
 	order := make([]string, 0, len(m.cqOrder))
 	for _, id := range m.cqOrder {
-		if live[id] {
+		if kind[id] != "" {
 			order = append(order, id)
 		}
 	}
 	m.cqOrder = order
 	for id := range m.cqSuppressed {
-		if !live[id] {
+		if !pending(id) {
 			delete(m.cqSuppressed, id)
 		}
 	}
-	if m.cqUndo != nil && !live[m.cqUndo.id] {
+	// A dismissal the collector has read is the collector's fact now; anything
+	// else means the record no longer says what the entry claims — a resume
+	// clears the ending, and the row is live again.
+	for id := range m.fleetDismissed {
+		if kind[id] != "done" {
+			delete(m.fleetDismissed, id)
+		}
+	}
+	// Undo un-hides a row, so there is nothing for it to do once the row is not
+	// hidden — see the ctrl+z handler in keys.go.
+	if m.cqUndo != nil && !m.cqSuppressed[m.cqUndo.id] {
 		m.cqUndo = nil
 	}
 	return m

@@ -247,6 +247,38 @@
   `fleetMoved` keeps its `max` for live rows — a hook save there is real
   liveness. Full record:
   `docs/adr/0012-a-dispatch-that-ends-is-not-a-dispatch-that-goes-away.md`.
+- **The record is the truth; the screen must not wait for it.** Reported as
+  "dismiss should move it to history" — thirty-six seconds after a dismissal
+  the event log shows landing perfectly on the record. Nothing about the record
+  was wrong: `dismissCmd` writes it and asks for a reload, and a reload reads
+  every record, repo and forge — 4.5s warm and 61s cold on 94 records (ADR
+  0007), serialised one at a time, ten to fifteen seconds measured against the
+  reporting store's 212. For all of it the row sat under the `finished` divider
+  it had just been taken off, the headline went on counting it, and `h` — the
+  one place the flash names by hand, "h for history" — was built from the same
+  stale fleet and did not have it. So `fleetNow` applies **this session's own
+  dismissals over the collector's rows**, and `fleetAll`/`fleetPast` read
+  nothing else: the row reads as history at once, re-ranked into history's own
+  order, without the `x` just pressed on it, every other field still the
+  record's. Set on the way back from the write (`dismissedMsg` carries the id;
+  a dismissal that found no record moves nothing), because a row moved for a
+  write that then failed is the screen promising on its own; retired by the
+  snapshot that reads it back, where a **stale** load still saying "held"
+  leaves it alone and one saying the row is alive again — a resume clears the
+  ending — retires it, since a stale dismissal must never hide a running
+  dispatcher. And **an ending the human asked for is already read**: `kill`,
+  `approve merge` and `mark shipped` dismiss as they stop, so they go to
+  history instead of coming back as an unread ✓ row on the next cockpit start,
+  asking to dismiss a merge from hours ago; the hold is for endings nobody
+  watched (`SessionEnd`, the tracker, the ghost sweep, a launch that would not
+  start), and every one of those still holds. That also fixes what `cqSuppressed`
+  had become: it hid a row "until the id leaves the fleet", which stopped
+  happening when a finished dispatcher started keeping a row for good, so a
+  killed dispatcher was missing from the triage table *and* from history for
+  the rest of the session — it is retired by the row reaching a finished kind,
+  which is the record catching up, the thing it was always waiting for. Full
+  record:
+  `docs/adr/0013-the-record-is-the-truth-the-screen-must-not-wait-for-it.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only
