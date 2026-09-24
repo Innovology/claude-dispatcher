@@ -70,6 +70,9 @@ func hookSpecs() []hookSpec {
 		{event: "UserPromptSubmit", arg: "UserPromptSubmit"},
 		{event: "PostToolUse", arg: "PostToolUse"},
 		{event: "Stop", arg: "Stop"},
+		// Fires instead of Stop when an API error ends the turn; without it
+		// such a session reads as working forever.
+		{event: "StopFailure", arg: "StopFailure"},
 		{event: "SessionEnd", arg: "SessionEnd"},
 		// The fan-out annotation: which subagents a session has spun out.
 		// A claude too old to know these event names ignores the entries.

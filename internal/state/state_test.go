@@ -116,3 +116,18 @@ func TestSaveLoadKeepsThePark(t *testing.T) {
 		t.Error("a record nobody parked came back parked")
 	}
 }
+
+func TestFailureTransient(t *testing.T) {
+	for e, want := range map[string]bool{
+		"overloaded": true, "server_error": true, "unknown": true, "max_output_tokens": true,
+		"rate_limit": false, "authentication_failed": false, "billing_error": false,
+		"invalid_request": false, "model_not_found": false,
+	} {
+		if got := (&Failure{Error: e}).Transient(); got != want {
+			t.Errorf("%s: got %v want %v", e, got, want)
+		}
+	}
+	if (*Failure)(nil).Transient() {
+		t.Error("no failure is not a transient one")
+	}
+}

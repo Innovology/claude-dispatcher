@@ -111,7 +111,10 @@ func velDwellState(event string) string {
 	// turns with the most work in them.
 	case "SubagentStart", "SubagentStop":
 		return "working"
-	case "Stop", "Notification:idle_prompt":
+	// StopFailure is a turn an API error ended — stopped just the same. Before
+	// the hook was installed nothing fired there, so the interval ran on as the
+	// prompt's "working" for however long the session sat dead.
+	case "Stop", "StopFailure", "Notification:idle_prompt":
 		return "waiting"
 	case "Notification:permission_prompt":
 		return "blocked"

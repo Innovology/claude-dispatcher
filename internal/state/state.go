@@ -134,7 +134,15 @@ type Dispatch struct {
 	// no background tasks is swept, because a subagent cannot outlive the turn
 	// unless it is one of those tasks.
 	Subagents []Subagent `json:"subagents,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	// Failure is the API error that ended the session's last turn, as Claude
+	// Code's StopFailure hook reported it. That hook fires *instead of* Stop, so
+	// without it a turn killed by an overloaded API left the record saying
+	// "working" over a session sitting at an idle prompt — a stall nothing on
+	// the screen could tell from progress. An annotation, never a Status: the
+	// status is needs-input like any other stopped turn, and this says why.
+	// Cleared by the next Stop (a turn that completed) and by SessionStart.
+	Failure   *Failure  `json:"failure,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	// FinishedAt is the instant this dispatcher's status first said it was over
 	// — stamped by Stop, at the transition, and nowhere else. UpdatedAt cannot
@@ -202,6 +210,39 @@ type Subagent struct {
 	// subagent still running.
 	StartedAt time.Time  `json:"started_at"`
 	StoppedAt *time.Time `json:"stopped_at,omitempty"`
+}
+
+// Failure is one API error that ended a turn, in Claude Code's own words.
+type Failure struct {
+	// Error is StopFailure's category, verbatim: "overloaded", "server_error",
+	// "rate_limit", "authentication_failed", "max_output_tokens", "unknown"…
+	Error string `json:"error"`
+	// Detail is the hook's error_details, verbatim, when it sent any.
+	Detail string    `json:"detail,omitempty"`
+	At     time.Time `json:"at"`
+	// Retries is how many times the cockpit has typed "continue" at the
+	// session since its last completed turn. It survives the UserPromptSubmit
+	// its own retry causes — the hook cannot tell that prompt from the human's —
+	// and is only reset by a Stop, which is the one proof the retries worked.
+	Retries   int        `json:"retries,omitempty"`
+	RetriedAt *time.Time `json:"retried_at,omitempty"`
+}
+
+// Transient reports whether the error is one that "continue" can get past:
+// the API was briefly unavailable, or the reply ran out of room. It is what
+// the human typed after 20 of the 24 API errors in the transcripts measured
+// for ADR 0017. Everything else — a usage limit, a credential, a billing
+// problem, a bad model name — is a fact the human has to act on, and typing
+// at it again only buries it.
+func (f *Failure) Transient() bool {
+	if f == nil {
+		return false
+	}
+	switch f.Error {
+	case "overloaded", "server_error", "unknown", "max_output_tokens":
+		return true
+	}
+	return false
 }
 
 // maxSubagents bounds the annotation. The record is rewritten on every hook
