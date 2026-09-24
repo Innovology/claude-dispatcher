@@ -436,18 +436,18 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 // typed, and the brief is WHAT in full, however long either one is.
 func TestDXDispatchNamesFromTitleBriefsFromWhat(t *testing.T) {
 	long := "rebuild the deploy watcher so it stops polling a workflow that already finished"
-	feature, prompt := dxDispatch("  deploy watcher  ", "  "+long+"  ", "", dispatchpkg.ModeAuto)
+	feature, prompt := dxDispatch("  deploy watcher  ", "  "+long+"  ", "")
 	if feature != "deploy watcher" {
 		t.Errorf("feature = %q, want the title as typed", feature)
 	}
-	if !strings.HasPrefix(prompt, "deploy watcher\n\n"+long+"\n") {
+	if prompt != "deploy watcher\n\n"+long {
 		t.Errorf("prompt = %q, want the title then the whole sentence", prompt)
 	}
 
 	// A title past the branch's five-word cap keeps its words on the record: the
 	// cap belongs to the slug, which is what has to be a path (see
 	// dispatch.SlugWords), not to the name every screen shows.
-	feature, _ = dxDispatch("stop polling a workflow that already finished", "x", "", dispatchpkg.ModeAuto)
+	feature, _ = dxDispatch("stop polling a workflow that already finished", "x", "")
 	if feature != "stop polling a workflow that already finished" {
 		t.Errorf("a long title was abbreviated on the record: %q", feature)
 	}
@@ -455,7 +455,7 @@ func TestDXDispatchNamesFromTitleBriefsFromWhat(t *testing.T) {
 	// Nothing nameable is still nothing: submit's "name it" test reads the
 	// feature, so it must stay empty rather than become whitespace.
 	for _, s := range []string{"   ", "!!!"} {
-		if feature, _ := dxDispatch(s, "x", "", dispatchpkg.ModeAuto); feature != "" {
+		if feature, _ := dxDispatch(s, "x", ""); feature != "" {
 			t.Errorf("title %q gave feature %q", s, feature)
 		}
 	}

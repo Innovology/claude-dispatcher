@@ -278,9 +278,9 @@ func (m model) dxBranch() string {
 // The two returns stay: a caller that reconstructs the brief from the feature
 // name is precisely the bug, and one function returning both is what stops the
 // next one from trying.
-func dxDispatch(title, what, goal string, mode dispatchpkg.Mode) (feature, prompt string) {
+func dxDispatch(title, what, goal string) (feature, prompt string) {
 	title, what = strings.TrimSpace(title), strings.TrimSpace(what)
-	return dxFeatureName(title), dxPrompt(title, what, goal, mode)
+	return dxFeatureName(title), dxPrompt(title, what, goal)
 }
 
 // dxPrompt composes the prompt. what is the sentence as it was typed, in full:
@@ -291,17 +291,14 @@ func dxDispatch(title, what, goal string, mode dispatchpkg.Mode) (feature, promp
 // whether its condition came true — so it is an instruction, and this is the
 // only place it exists. Keep the copy inside what a prompt can promise.
 //
-// MODE does reach the process, as --permission-mode, and still gets a sentence
-// here: the flag says what claude may do without asking, and the sentence says
-// how far to take the work. "May edit without asking" is not "commit, push and
-// open the PR", and a session given the first and not the second stops with the
-// work uncommitted — which is exactly the unattended dispatch that never
-// shipped. The two lines have to agree, so they are chosen together.
+// MODE's sentence is not added here any more: the working contract for the
+// mode is composed at Launch (dispatch.Contract), so the + overlay and the
+// backlog's launches carry it too — this form was the only way in that did.
 //
 // TITLE leads, on its own line, because it is the name the branch, the worktree
 // and every screen file this work under: the session should know what it is
 // building before it reads the brief. WHAT follows as the body.
-func dxPrompt(title, what, goal string, mode dispatchpkg.Mode) string {
+func dxPrompt(title, what, goal string) string {
 	lines := []string{title}
 	if what != "" {
 		lines = append(lines, "", what)
@@ -309,22 +306,7 @@ func dxPrompt(title, what, goal string, mode dispatchpkg.Mode) string {
 	if goal != "" {
 		lines = append(lines, "", "done when: "+goal, "Keep working until that is true.")
 	}
-	return strings.Join(append(lines, "", dxModeInstruction(mode)), "\n")
-}
-
-// dxModeInstruction is the sentence that tells the session how far to take the
-// work, matched to the mode its permissions were set to.
-func dxModeInstruction(mode dispatchpkg.Mode) string {
-	switch mode.Normalize() {
-	case dispatchpkg.ModeManual:
-		return "Do one pass, then stop and check in before committing, pushing or opening a PR."
-	case dispatchpkg.ModePlan:
-		// Plan mode already stops claude from changing anything; the sentence
-		// says what to spend the read-only pass on, so the plan that comes back
-		// is about this work rather than a summary of the repo.
-		return "Work out how you would do this and put the plan up for approval before changing anything."
-	}
-	return "Commit as you go, open the PR, and fix your own CI failures without stopping to ask."
+	return strings.Join(lines, "\n")
 }
 
 // ---- keys ---------------------------------------------------------------------
@@ -502,7 +484,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	mdl := m.dxModel.Normalize()
 	root := dispatchpkg.Root(m.dxRoot).Normalize()
 	fanOut := m.dxFanOut
-	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal, mode)
+	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal)
 	if feature == "" {
 		// Empty *or* unslugabble: a title of nothing but punctuation passes a
 		// plain "is it blank" test and then fails inside Launch, where the human
@@ -531,7 +513,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	if goal != "" {
 		notice += " · runs until: " + goal
 	} else {
-		notice += " · one pass, then waits"
+		notice += dxUngoaledNotice(mode)
 	}
 	// The mode is always named, not only when it is the interesting one: it now
 	// configures the session rather than describing it, and a launch flag the
@@ -609,10 +591,25 @@ func (m model) dxWhatHint() string {
 	return "the work itself — as long as it needs to be"
 }
 
-// dxGoalHint says what leaving DONE WHEN empty costs.
+// dxUngoaledNotice is the launch notice's clause for a dispatch with no DONE
+// WHEN — the same distinction dxGoalHint draws, in the notice's shorter words.
+func dxUngoaledNotice(mode dispatchpkg.Mode) string {
+	if mode.Normalize() == dispatchpkg.ModeAuto {
+		return " · runs to an open pr"
+	}
+	return " · one pass, then waits"
+}
+
+// dxGoalHint says what leaving DONE WHEN empty costs, which depends on the
+// mode: auto's contract takes the brief through to an open PR and stops only
+// for a call that is the human's (dispatch.Contract); manual and plan stop
+// after one pass by design.
 func (m model) dxGoalHint() string {
 	if strings.TrimSpace(m.dxGoal) != "" {
 		return "it keeps working until this is true"
+	}
+	if m.dxMode.Normalize() == dispatchpkg.ModeAuto {
+		return "optional · leave empty and it works to an open PR, stopping only for your call"
 	}
 	return "optional · leave empty and it does one pass, then waits for you"
 }
