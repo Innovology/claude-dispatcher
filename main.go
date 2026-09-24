@@ -7,6 +7,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -14,6 +15,7 @@ import (
 	"claude-dispatcher/internal/fleetcmd"
 	"claude-dispatcher/internal/hookcmd"
 	"claude-dispatcher/internal/initcmd"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/version"
 )
 
@@ -27,6 +29,9 @@ Usage:
                                type one line into a waiting dispatcher's session
   claude-dispatcher park <id|feature> <reason>
                                shelve a dispatcher · unpark <id|feature> takes it back
+  claude-dispatcher note <id|feature> <text>
+                               the steward's reading of a dispatcher's wait
+  claude-dispatcher steward    start the fleet's steward session · steward stop ends it
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -53,7 +58,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "init:", err)
 			os.Exit(1)
 		}
-	case "status", "reply", "park", "unpark":
+	case "steward":
+		os.Exit(runSteward(args[1:]))
+	case "status", "reply", "park", "unpark", "note":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
@@ -77,6 +84,34 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		os.Exit(2)
 	}
+}
+
+// runSteward starts or stops the steward session (internal/steward).
+func runSteward(args []string) int {
+	if len(args) > 0 && args[0] == "stop" {
+		if err := steward.Stop(); err != nil {
+			fmt.Fprintln(os.Stderr, "steward:", err)
+			return 1
+		}
+		fmt.Println("steward stopped")
+		return 0
+	}
+	if len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "steward: unknown argument %q (steward | steward stop)\n", args[0])
+		return 2
+	}
+	switch err := steward.Start(); {
+	case errors.Is(err, steward.ErrUntrusted):
+		fmt.Println("steward " + err.Error() + " · tmux attach -t =" + steward.Session)
+	case errors.Is(err, steward.ErrRunning):
+		fmt.Println("steward already running · jump in from the cockpit (: steward) or tmux attach -t =" + steward.Session)
+	case err != nil:
+		fmt.Fprintln(os.Stderr, "steward:", err)
+		return 1
+	default:
+		fmt.Println("steward started in " + steward.Dir() + " · jump in from the cockpit (: steward) or tmux attach -t =" + steward.Session)
+	}
+	return 0
 }
 
 func runCockpit() {

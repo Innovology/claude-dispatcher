@@ -1,7 +1,8 @@
 // Package fleetcmd is the fleet from the command line: what every live
-// dispatcher is doing and wants (`status`), and the three things a human does
-// to one from the triage table without attaching — answer it (`reply`), shelve
-// it (`park`) and take it back up (`unpark`).
+// dispatcher is doing and wants (`status`), and the things a human does to one
+// from the triage table without attaching — answer it (`reply`), shelve it
+// (`park`) and take it back up (`unpark`) — plus the steward's own act, saying
+// what it makes of a wait (`note`), and its wake-up (`status --next`).
 //
 // It exists so a Claude Code session can steward the fleet. The cockpit is a
 // TUI, and a session cannot read one; these print what the triage table says,
@@ -43,6 +44,11 @@ type Entry struct {
 	Repo    string `json:"repo"`
 	Product string `json:"product,omitempty"`
 	Branch  string `json:"branch,omitempty"`
+	// RepoPath is the repo on disk — where gh and git read its PR and history.
+	RepoPath string `json:"repo_path,omitempty"`
+	// Prompt is the brief it was dispatched with — what "inside the brief"
+	// is measured against.
+	Prompt string `json:"prompt,omitempty"`
 	// State is the triage table's reading: "wants-you" (stopped on something
 	// only the human can answer), "running" (working, or a retry on its way),
 	// "parked" (the human shelved it) or "finished" (ended, not yet dismissed).
@@ -70,6 +76,15 @@ type Entry struct {
 	Started      time.Time `json:"started"`
 	Session      string    `json:"session,omitempty"`
 	Worktree     string    `json:"worktree,omitempty"`
+	// WaitingSince is when it stopped to wait; Note is the steward's note on
+	// that wait, if it has written one. Handled is a wait with a note: it has
+	// been looked at, and waking the steward for it again would be noise.
+	WaitingSince *time.Time `json:"waiting_since,omitempty"`
+	Note         string     `json:"note,omitempty"`
+	// Answer is the line already typed into this wait, waiting for the
+	// session to pick it up.
+	Answer  string `json:"answer,omitempty"`
+	Handled bool   `json:"handled,omitempty"`
 
 	failure string // the row's failure clause, for the text form
 }
@@ -84,6 +99,8 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runReply(args, out)
 	case "park":
 		err = runPark(args, out)
+	case "note":
+		err = runNote(args, out)
 	case "unpark":
 		err = runUnpark(args, out)
 	default:
@@ -99,8 +116,13 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 func runStatus(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the fleet as JSON")
+	next := fs.Bool("next", false, "wait until a dispatcher is waiting unhandled, then print those as JSON")
+	timeout := fs.Duration("timeout", 30*time.Minute, "with --next: give up after this long and say so")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *next {
+		return runNext(out, *timeout, time.Now)
 	}
 	entries := Fleet(state.LoadAll(), time.Now())
 	if *asJSON {
@@ -118,10 +140,54 @@ func runStatus(args []string, out io.Writer) error {
 	return nil
 }
 
+// NextPoll is how often `status --next` re-reads the records. A read is a
+// directory of small JSON files; the steward it wakes costs far more per wake
+// than this costs per minute.
+var NextPoll = 3 * time.Second
+
+// Next is what `status --next` prints: the waits nobody has handled, or a
+// timeout with none — the steward's cue to look over the running rows.
+type Next struct {
+	Waiting  []Entry `json:"waiting"`
+	TimedOut bool    `json:"timed_out,omitempty"`
+}
+
+// runNext blocks until some dispatcher is waiting with no steward note on its
+// current wait, then prints every such one and returns.
+//
+// It is how a steward session sleeps: run as a Claude Code background task, the
+// session's turn ends waiting on it (the Stop hook reads that as working, not as
+// wanting anyone), and its exit is what wakes the session. No baseline is kept
+// between runs, so nothing that happened between two runs can be missed: a
+// wait is pending until a reply ends it or a note answers it, and both are on
+// the record.
+func runNext(out io.Writer, timeout time.Duration, now func() time.Time) error {
+	deadline := now().Add(timeout)
+	for {
+		var waiting []Entry
+		for _, e := range Fleet(state.LoadAll(), now()) {
+			if e.State == "wants-you" && !e.Handled {
+				waiting = append(waiting, e)
+			}
+		}
+		timedOut := !now().Before(deadline)
+		if len(waiting) > 0 || timedOut {
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			return enc.Encode(Next{Waiting: waiting, TimedOut: len(waiting) == 0 && timedOut})
+		}
+		time.Sleep(NextPoll)
+	}
+}
+
 // headline is the text form's last column: the ask, else the failure, else the
 // reason — the same precedence the triage row's SIGNAL uses.
 func (e Entry) headline() string {
 	switch {
+	case e.Note != "":
+		return "steward: " + e.Note
+	case e.Answer != "":
+		return "answered · " + e.Answer
 	case e.Ask != "":
 		return e.Ask
 	case e.Parked != "":
@@ -143,13 +209,17 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 		}
 		e := Entry{
 			ID: d.ID, Feature: d.Feature, Repo: d.RepoName, Product: d.Product,
-			Branch: d.Branch, State: st, Status: string(d.Status), Reason: d.StatusReason,
+			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
 			Failure: d.Failure, Retrying: dispatch.RetryPending(d, now),
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
 			Mode: d.Mode, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
 			Session: d.TmuxSession, Worktree: d.WorktreePath,
-			failure: dispatch.FailureSummary(d, now),
+			failure:      dispatch.FailureSummary(d, now),
+			WaitingSince: d.WaitingSince,
+			Note:         d.Note(),
+			Answer:       d.Answered(),
+			Handled:      d.Handled(),
 		}
 		if d.Status == state.StatusNeedsInput || d.Finished() {
 			e.Said, e.Ask = d.Said, ask.Of(d.Said)
@@ -219,8 +289,30 @@ func runReply(args []string, out io.Writer) error {
 	if err := sendKeys(d.TmuxSession, text); err != nil {
 		return err
 	}
+	MarkAnswered(d.ID, text)
 	_, _ = fmt.Fprintf(out, "replied to %q\n", d.Feature)
 	return nil
+}
+
+// MarkAnswered records a line just typed into a dispatcher's current wait, under
+// the hook lock and against a fresh read. Best-effort: the reply has already
+// been typed, and failing to write that it was must not turn it into an error.
+// A record that has already moved on (the hook beat us here) is left alone.
+func MarkAnswered(id, text string) {
+	release := state.Lock()
+	defer release()
+	for _, d := range state.LoadAll() {
+		if d.ID != id {
+			continue
+		}
+		if !d.Waiting() {
+			return
+		}
+		now := time.Now()
+		d.Answer, d.AnsweredAt = text, &now
+		_ = state.Save(d)
+		return
+	}
 }
 
 func runPark(args []string, out io.Writer) error {
@@ -231,10 +323,31 @@ func runPark(args []string, out io.Writer) error {
 	if reason == "" {
 		return errors.New("say why — the reason is what the parked group shows")
 	}
-	return edit(args[0], func(d *state.Dispatch) string {
+	return edit(args[0], func(d *state.Dispatch) (string, error) {
 		now := time.Now()
 		d.ParkedReason, d.ParkedAt = reason, &now
-		return "parked " + quote(d.Feature) + " · " + reason
+		return "parked " + quote(d.Feature) + " · " + reason, nil
+	}, out)
+}
+
+// runNote records the steward's reading of a dispatcher's current wait. It is
+// refused on one that is not waiting: a note on a working dispatcher would be
+// about nothing, and would be cleared by the next prompt anyway.
+func runNote(args []string, out io.Writer) error {
+	if len(args) < 2 {
+		return errors.New("usage: note <id|feature> <text…>")
+	}
+	text := strings.Join(strings.Fields(strings.Join(args[1:], " ")), " ")
+	if text == "" {
+		return errors.New("nothing to note")
+	}
+	return edit(args[0], func(d *state.Dispatch) (string, error) {
+		if !d.Waiting() {
+			return "", fmt.Errorf("%q is not waiting on anyone", d.Feature)
+		}
+		now := time.Now()
+		d.StewardNote, d.StewardNoteAt = text, &now
+		return "noted " + quote(d.Feature) + " · " + text, nil
 	}, out)
 }
 
@@ -242,22 +355,25 @@ func runUnpark(args []string, out io.Writer) error {
 	if len(args) != 1 {
 		return errors.New("usage: unpark <id|feature>")
 	}
-	return edit(args[0], func(d *state.Dispatch) string {
+	return edit(args[0], func(d *state.Dispatch) (string, error) {
 		d.ParkedReason, d.ParkedAt = "", nil
-		return quote(d.Feature) + " back on the fleet"
+		return quote(d.Feature) + " back on the fleet", nil
 	}, out)
 }
 
 // edit applies an annotation under the hook lock, against a fresh read, so it
 // cannot drop a hook's write that landed in between.
-func edit(key string, apply func(*state.Dispatch) string, out io.Writer) error {
+func edit(key string, apply func(*state.Dispatch) (string, error), out io.Writer) error {
 	release := state.Lock()
 	defer release()
 	d, err := find(key)
 	if err != nil {
 		return err
 	}
-	msg := apply(d)
+	msg, err := apply(d)
+	if err != nil {
+		return err
+	}
 	if err := state.Save(d); err != nil {
 		return err
 	}

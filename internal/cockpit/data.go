@@ -48,6 +48,8 @@ var (
 var (
 	fleet        []fleetRow
 	cqLastOutput time.Time
+	// stewardOn is whether the steward session is running (internal/steward).
+	stewardOn bool
 )
 
 // ---- products ---------------------------------------------------------------

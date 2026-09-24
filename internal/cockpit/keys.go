@@ -126,6 +126,15 @@ func (m model) runCommand() (model, tea.Cmd) {
 		m.paletteOpen, m.paletteText = false, ""
 		return m.startUpgrade()
 	}
+	if c.name == "steward" {
+		m.paletteOpen, m.paletteText = false, ""
+		m.notice = "starting the steward…"
+		return m, stewardStartCmd()
+	}
+	if c.name == "stop steward" {
+		m.paletteOpen, m.paletteText = false, ""
+		return m, stewardStopCmd()
+	}
 	direct := map[string]string{
 		"backlog": "backlog", "usage": "usage",
 		"decisions": "decisions", "plugins": "decisions", "velocity": "velocity",

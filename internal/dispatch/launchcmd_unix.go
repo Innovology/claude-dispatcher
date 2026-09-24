@@ -29,6 +29,25 @@ func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) stri
 		dispatcherID, modeArgs(mode), modelArgs(model), readFileArg(promptPath))
 }
 
+// StewardCommand is the command the steward session runs: claude in auto mode,
+// opening on a short first message — its standing brief is the CLAUDE.md in
+// its own folder, which claude loads itself and which survives compaction and
+// restarts where a first message would not. No CLAUDE_DISPATCHER_ID: the
+// steward is not a dispatcher, and its hooks must not be attributed to one.
+//
+// stateDir, when set, is carried inline the way CLAUDE_DISPATCHER_ID is for a
+// dispatch: tmux starts a session with its server's environment, not the
+// caller's, so a store chosen with CLAUDE_DISPATCHER_STATE would otherwise be
+// lost on the way in and the steward would read — and reply into — the default
+// one.
+func StewardCommand(stateDir, opening string) string {
+	env := ""
+	if stateDir != "" {
+		env = "CLAUDE_DISPATCHER_STATE=" + shellQuote(stateDir) + " "
+	}
+	return fmt.Sprintf("%sclaude%s %s; exec ${SHELL:-/bin/sh}", env, modeArgs(ModeAuto), shellQuote(opening))
+}
+
 // resumeCommand is launchCommand for a session that already exists: claude
 // picks the recorded conversation back up instead of starting a new one, and an
 // empty prompt is left off entirely rather than passed as an empty argument,

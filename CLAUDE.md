@@ -477,6 +477,29 @@
   the next step, and the owner of the LAND (merge-when-green) call this
   deliberately did not make. Full record:
   `docs/adr/0018-a-stop-says-what-it-needs.md`.
+- **The steward pushes what the brief settles, and leaves the rest with a
+  note.** Asked for as "its own claude code session … to monitor, observe, kick
+  along, pause, and act as the lead". A push is judgement ("does the brief
+  already answer this?") and the cockpit never guesses, so the steward is a
+  Claude Code session of the dispatcher's own (`claude-dispatcher steward`,
+  `: steward`), not a rule: tmux `disp_steward` (underscore — outside every
+  slug's namespace), its brief the `CLAUDE.md` of a folder under the state dir,
+  its settings allowing the fleet verbs and read-only gh/git and denying
+  Edit/Write, the folder trusted by `TrustOwnDir` (the one place trust is
+  written, only for our own folder). Not a dispatcher: no record, no
+  `CLAUDE_DISPATCHER_ID`. It sleeps on `status --next` as a background task —
+  Claude Code's own long-running machinery, not a timer — which exits when a
+  wait is unhandled. Handled lives on the record: `WaitingSince` (stamped per
+  Stop/StopFailure/permission prompt, cleared while working), a steward `note`
+  written during it, or an `Answer` stamped by any reply (`r` or `reply`) at
+  the send, under the lock — found by a live run, where the moment between a
+  reply and its UserPromptSubmit hook woke the steward for the same wait. It
+  replies (`steward: …`) only where the brief settles the stop, and notes
+  everything leaving the branch (merge, deploy, messages, deletion, spend,
+  access), anything outside the brief, and permission prompts. Rows read
+  `steward · yours: …` or `answered · …`; the headline says `steward watching`.
+  Verified against a real steward and scratch fleet. Full record:
+  `docs/adr/0019-the-steward-pushes-what-the-brief-settles.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
@@ -527,7 +550,8 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
-  fleet verbs `status`/`reply`/`park`/`unpark` (`internal/fleetcmd`).
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note` (`internal/fleetcmd`)
+  and `steward [stop]` (`internal/steward`).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
@@ -541,7 +565,10 @@
 - `internal/ask` — the question a stopped session closed on, quoted; shared by
   the triage row and `status`.
 - `internal/fleetcmd` — the triage table's reading and hand-acts on the command
-  line, for a session stewarding the fleet.
+  line, for a session stewarding the fleet: `status [--json|--next]`, `reply`,
+  `note`, `park`, `unpark`.
+- `internal/steward` — the steward session: its folder, brief (`brief.go`),
+  settings and start/stop.
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
   finished dispatcher's session reopened with `claude --resume <session id>`
   in its own worktree (rebuilt if it was reclaimed). A session ending never

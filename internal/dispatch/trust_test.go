@@ -141,3 +141,27 @@ func TestInheritTrustIsIdempotent(t *testing.T) {
 		t.Error("trust was lost on the second pass")
 	}
 }
+
+// TrustOwnDir trusts the dispatcher's own folder, keeping every key it does not
+// understand, and leaves an existing entry's settings alone.
+func TestTrustOwnDir(t *testing.T) {
+	home := writeClaudeConfig(t, map[string]any{
+		"/state/steward": map[string]any{"allowedTools": []any{"Read"}},
+	})
+	if !TrustOwnDir("/state/steward") || !TrustOwnDir("/state/other") {
+		t.Fatal("TrustOwnDir reported failure")
+	}
+	p := readProjects(t, home)
+	if p["/state/steward"]["hasTrustDialogAccepted"] != true || p["/state/other"]["hasTrustDialogAccepted"] != true {
+		t.Fatalf("not trusted: %v", p)
+	}
+	if p["/state/steward"]["allowedTools"] == nil {
+		t.Error("an existing entry's settings were dropped")
+	}
+	raw, _ := os.ReadFile(filepath.Join(home, ".claude.json"))
+	var cfg map[string]any
+	_ = json.Unmarshal(raw, &cfg)
+	if cfg["someOtherSetting"] != "must survive" {
+		t.Error("a key we do not own was lost")
+	}
+}
