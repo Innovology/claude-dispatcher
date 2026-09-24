@@ -172,8 +172,8 @@ type Dispatch struct {
 	// the row for the human to see.
 	Answer     string     `json:"answer,omitempty"`
 	AnsweredAt *time.Time `json:"answered_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 	// FinishedAt is the instant this dispatcher's status first said it was over
 	// — stamped by Stop, at the transition, and nowhere else. UpdatedAt cannot
 	// answer that question: Save stamps it on every write, and a finished record
