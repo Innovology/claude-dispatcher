@@ -46,8 +46,9 @@ type snapshot struct {
 
 	fleet        []fleetRow
 	cqLastOutput time.Time
-	// stewardOn is whether the steward's session was up when this load asked.
-	stewardOn bool
+	// stewardOn is whether the steward's session was up when this load asked;
+	// stewardEnabled whether the human has it switched on (steward.Enabled).
+	stewardOn, stewardEnabled bool
 
 	products       []product
 	reposByProduct map[string][]repoRef
@@ -254,7 +255,7 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	}
 	// The steward is not a record, so the sweep does not see it; one probe,
 	// in the stage that is already asking the supervisor what is running.
-	stewardOn := steward.Running()
+	stewardOn, stewardEnabled := steward.Running(), steward.Enabled()
 	if stewardOn {
 		sessionsFound += " · steward on"
 	}
@@ -286,7 +287,7 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	var s snapshot
 	s.dataMode = "live"
 	s.recordsAt = recordsAt
-	s.stewardOn = stewardOn
+	s.stewardOn, s.stewardEnabled = stewardOn, stewardEnabled
 	s.discovered = ctx.repos
 	s.recordsByID = make(map[string]*state.Dispatch, len(ctx.records))
 	for _, rec := range ctx.records {
@@ -398,7 +399,8 @@ func applySnapshot(s snapshot) {
 	// session has a readable transcript, which is an observation the view must
 	// show, and a stale instant left in place would be a lie about liveness.
 	cqLastOutput = s.cqLastOutput
-	stewardOn = s.stewardOn // a boolean has no "unread" value to protect
+	// Booleans have no "unread" value to protect.
+	stewardOn, stewardEnabled = s.stewardOn, s.stewardEnabled
 	if s.products != nil {
 		products = s.products
 	}

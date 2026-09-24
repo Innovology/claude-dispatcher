@@ -530,6 +530,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
 
+	case stewardToggledMsg:
+		mm, cmd := m.onStewardToggled(msg)
+		return mm, cmd
+
 	case stewardStartedMsg:
 		mm, cmd := m.onStewardStarted(msg)
 		return mm, cmd

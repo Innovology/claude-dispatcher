@@ -300,10 +300,11 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	if parked > 0 {
 		left += "   " + fg(cFaint, itoa(parked)+" parked")
 	}
-	// Said only while it is on: a clause saying the steward is off would be a
-	// nag on every screen of a cockpit that has never wanted one.
-	if stewardOn {
-		left += "   " + fg(cFaint, "steward watching")
+	// Said only while it is switched on: a clause saying it is off would be a
+	// nag on every screen of a cockpit that has never wanted one — the footer's
+	// t is how it is found.
+	if clause := stewardClause(); clause != "" {
+		left += "   " + fg(cFaint, clause)
 	}
 	// Appended only when the whole cell fits. flSpread's overflow answer is to
 	// truncate the left side, which would leave "≈10h t…" hanging off the end of
@@ -680,6 +681,6 @@ func (m model) cqFooterHelp() string {
 		// footer only names keys that work right now.
 		return strings.Join(append(parts, "j/k move", "h back to the fleet", "? keys"), " · ")
 	}
-	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "ctrl+z undo", "? keys")
+	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "t "+stewardToggleVerb(), "ctrl+z undo", "? keys")
 	return strings.Join(parts, " · ")
 }
