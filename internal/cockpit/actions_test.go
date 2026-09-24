@@ -472,6 +472,10 @@ func TestInitBothPaths(t *testing.T) {
 // ---- refresh.go --------------------------------------------------------------
 
 func TestRefreshCmds(t *testing.T) {
+	// A whole load and a tracker pass: without a fake gh on PATH they reach
+	// GitHub for real, and a rate-limit answer parks gh for every test after
+	// this one.
+	fakeGHOnPath(t, "SUCCESS")
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
 	cfg := &config.Config{}
