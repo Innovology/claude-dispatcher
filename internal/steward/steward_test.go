@@ -11,6 +11,8 @@ import (
 
 type fakeSup struct {
 	running bool
+	idle    bool // claude has exited in the session
+	known   bool
 	started []string // "name|dir|cmd"
 	killed  []string
 	trusted bool
@@ -19,8 +21,11 @@ type fakeSup struct {
 func withFakes(t *testing.T, f *fakeSup, exe string) {
 	t.Helper()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	ph, pn, pk, pt, pe := hasSession, newSession, killSession, trustDir, executable
-	t.Cleanup(func() { hasSession, newSession, killSession, trustDir, executable = ph, pn, pk, pt, pe })
+	ph, pn, pk, pt, pe, pi := hasSession, newSession, killSession, trustDir, executable, sessionIdle
+	t.Cleanup(func() {
+		hasSession, newSession, killSession, trustDir, executable, sessionIdle = ph, pn, pk, pt, pe, pi
+	})
+	sessionIdle = func(string) (bool, bool) { return f.idle, f.known }
 	hasSession = func(string) bool { return f.running }
 	newSession = func(name, dir, cmd string) error {
 		f.started = append(f.started, name+"|"+dir+"|"+cmd)
@@ -108,5 +113,53 @@ func TestStartRefusesAGoRunBinary(t *testing.T) {
 func TestSessionCannotCollideWithADispatcher(t *testing.T) {
 	if strings.HasPrefix(Session, "disp-") {
 		t.Fatalf("%q is in the dispatchers' namespace", Session)
+	}
+}
+
+// The switch is the human's whole involvement: Start turns it on, Stop turns
+// it off, and Ensure brings a switched-on steward back when its session was
+// taken away — and leaves a switched-off one alone.
+func TestEnsureKeepsASwitchedOnStewardRunning(t *testing.T) {
+	f := &fakeSup{trusted: true, known: true}
+	withFakes(t, f, filepath.Join(t.TempDir(), "claude-dispatcher"))
+
+	if started, err := Ensure(); started || err != nil || len(f.started) != 0 {
+		t.Fatalf("switched off, Ensure must do nothing: %v %v", started, err)
+	}
+	if err := Start(); err != nil || !Enabled() {
+		t.Fatalf("Start must switch it on: %v", err)
+	}
+	if started, _ := Ensure(); started {
+		t.Fatal("a running steward must be left alone")
+	}
+
+	f.running = false // a reboot took tmux with it
+	if started, err := Ensure(); !started || err != nil || len(f.started) != 2 {
+		t.Fatalf("a switched-on steward must come back: %v %v %d", started, err, len(f.started))
+	}
+
+	f.idle = true // claude exited; the shell it dropped to is still there
+	if started, _ := Ensure(); !started || len(f.killed) != 1 || len(f.started) != 3 {
+		t.Fatalf("an exited claude must be replaced: killed=%v started=%d", f.killed, len(f.started))
+	}
+	f.idle, f.known = true, false // cannot see into the pane
+	if started, _ := Ensure(); started {
+		t.Fatal("an unknown answer must never replace a steward that may be working")
+	}
+
+	if err := Stop(); err != nil || Enabled() {
+		t.Fatalf("Stop must switch it off: %v", err)
+	}
+	if started, _ := Ensure(); started {
+		t.Fatal("a switched-off steward must stay off")
+	}
+}
+
+// Switching on a steward that is already up records the intent.
+func TestStartOnARunningStewardSwitchesItOn(t *testing.T) {
+	f := &fakeSup{trusted: true, running: true, known: true}
+	withFakes(t, f, filepath.Join(t.TempDir(), "claude-dispatcher"))
+	if err := Start(); !errors.Is(err, ErrRunning) || !Enabled() {
+		t.Fatalf("got %v, enabled=%v", err, Enabled())
 	}
 }

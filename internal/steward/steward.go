@@ -43,6 +43,7 @@ func Dir() string { return filepath.Join(state.Dir(), "steward") }
 
 // The supervisor calls, as seams for tests.
 var (
+	sessionIdle = supervisor.SessionIdle
 	hasSession  = supervisor.HasSession
 	newSession  = supervisor.NewSession
 	killSession = supervisor.KillSession
@@ -52,6 +53,60 @@ var (
 
 // Running reports whether the steward's session is up.
 func Running() bool { return hasSession(Session) }
+
+// enabledPath is the steward's switch: present means on. It lives in the state
+// dir, not the config, because it is a fact about this machine's fleet — and so
+// a scratch store (CLAUDE_DISPATCHER_STATE) can never switch on a steward for
+// the real one.
+func enabledPath() string { return filepath.Join(Dir(), "enabled") }
+
+// Enabled reports whether the human has switched the steward on. It is the
+// intent; Running is the fact. Ensure makes the fact follow the intent.
+func Enabled() bool {
+	_, err := os.Stat(enabledPath())
+	return err == nil
+}
+
+func setEnabled(on bool) error {
+	if !on {
+		if err := os.Remove(enabledPath()); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(enabledPath(), nil, 0o644)
+}
+
+// Ensure keeps a switched-on steward running. The human's switch is the whole
+// of their involvement: a reboot, a WSL distro shutting down with its last
+// console, or claude exiting inside the session all take the steward away
+// without anyone asking, and it comes back on the cockpit's next poll rather
+// than when someone notices the notes have stopped. A session whose claude has
+// exited — the shell it drops to is still there — is replaced; an unknown
+// answer leaves it alone, since replacing a steward that is working would be
+// worse than a steward that is late. It reports whether it started one.
+func Ensure() (bool, error) {
+	if !Enabled() || !supervisor.Available() {
+		return false, nil
+	}
+	if Running() {
+		idle, known := sessionIdle(Session)
+		if !idle || !known {
+			return false, nil
+		}
+		if err := killSession(Session); err != nil {
+			return false, err
+		}
+	}
+	err := Start()
+	if errors.Is(err, ErrUntrusted) {
+		return true, nil // up, and saying so is Start's caller's job on the toggle
+	}
+	return err == nil, err
+}
 
 // ErrRunning is Start finding the steward already up — not a failure; the
 // caller attaches to it.
@@ -65,6 +120,9 @@ func Start() error {
 		return errors.New(supervisor.Backend() + " is not available")
 	}
 	if Running() {
+		// Switching on a steward that is already up still records the intent,
+		// so Ensure keeps it.
+		_ = setEnabled(true)
 		return ErrRunning
 	}
 	exe, err := binary()
@@ -79,6 +137,9 @@ func Start() error {
 	if err := newSession(Session, dir, dispatch.StewardCommand(os.Getenv("CLAUDE_DISPATCHER_STATE"), Opening)); err != nil {
 		return err
 	}
+	if err := setEnabled(true); err != nil {
+		return err
+	}
 	if !trusted {
 		// Not fatal: the session is up, and the trust dialog is one keypress
 		// on attach. Saying so beats a steward that looks idle.
@@ -91,9 +152,13 @@ func Start() error {
 // it is sitting on Claude Code's trust dialog until someone attaches.
 var ErrUntrusted = errors.New("started, but its folder could not be marked trusted — attach and accept the trust prompt once")
 
-// Stop ends the steward's session. Its folder stays: it holds nothing that
-// matters, and the next Start rewrites it.
+// Stop switches the steward off and ends its session. Off first, so a poll
+// landing between the two cannot bring it straight back. Its folder stays: it
+// holds nothing that matters, and the next Start rewrites it.
 func Stop() error {
+	if err := setEnabled(false); err != nil {
+		return err
+	}
 	if !Running() {
 		return errors.New("the steward is not running")
 	}
