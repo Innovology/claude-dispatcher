@@ -3,8 +3,6 @@ package cockpit
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"claude-dispatcher/internal/state"
 )
 
@@ -80,5 +78,4 @@ func TestUpdateReply(t *testing.T) {
 	if cmd != nil || mm.replyOpen || mm.replyText != "" {
 		t.Fatal("esc must cancel and forget the line")
 	}
-	var _ tea.Cmd = cmd
 }

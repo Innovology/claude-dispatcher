@@ -90,7 +90,7 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = fmt.Errorf("unknown command %q", verb)
 	}
 	if err != nil {
-		fmt.Fprintln(errOut, verb+":", err)
+		_, _ = fmt.Fprintln(errOut, verb+":", err)
 		return 1
 	}
 	return 0
@@ -109,11 +109,11 @@ func runStatus(args []string, out io.Writer) error {
 		return enc.Encode(entries)
 	}
 	if len(entries) == 0 {
-		fmt.Fprintln(out, "nothing in flight")
+		_, _ = fmt.Fprintln(out, "nothing in flight")
 		return nil
 	}
 	for _, e := range entries {
-		fmt.Fprintf(out, "%-10s %-28s %-22s %s\n", e.State, clip(e.Feature, 28), clip(e.Repo, 22), e.headline())
+		_, _ = fmt.Fprintf(out, "%-10s %-28s %-22s %s\n", e.State, clip(e.Feature, 28), clip(e.Repo, 22), e.headline())
 	}
 	return nil
 }
@@ -219,7 +219,7 @@ func runReply(args []string, out io.Writer) error {
 	if err := sendKeys(d.TmuxSession, text); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "replied to %q\n", d.Feature)
+	_, _ = fmt.Fprintf(out, "replied to %q\n", d.Feature)
 	return nil
 }
 
@@ -261,7 +261,7 @@ func edit(key string, apply func(*state.Dispatch) string, out io.Writer) error {
 	if err := state.Save(d); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, msg)
+	_, _ = fmt.Fprintln(out, msg)
 	return nil
 }
 

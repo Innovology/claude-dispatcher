@@ -4,6 +4,7 @@ package supervisor
 
 import (
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +18,9 @@ func TestSendKeysTypesLiterally(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("no tmux")
 	}
-	name := "disp-sendkeys-test-" + time.Now().Format("150405.000")
+	// Dot-free, like every real session name (slugs are [a-z0-9-]): tmux reads
+	// a "." in a target as the window.pane separator.
+	name := "disp-sendkeys-test-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "-x", "80", "-y", "10", "cat").Run(); err != nil {
 		t.Skipf("tmux will not start a session here: %v", err)
 	}
