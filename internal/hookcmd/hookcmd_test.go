@@ -389,3 +389,18 @@ func TestApplyStopFailureOnDone(t *testing.T) {
 		t.Fatalf("done must hold: %+v", d.Failure)
 	}
 }
+
+// The whole last message rides the Stop, and the next prompt clears it: by
+// then whatever it asked has been answered.
+func TestApplyRecordsWhatItSaid(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	msg := "PR #700 is open.\n\nWant me to merge it?"
+	apply(d, "Stop", hookInput{LastAssistantMessage: msg})
+	if d.Said != msg {
+		t.Fatalf("said %q", d.Said)
+	}
+	apply(d, "UserPromptSubmit", hookInput{})
+	if d.Said != "" {
+		t.Fatalf("a new prompt must clear what was said, got %q", d.Said)
+	}
+}

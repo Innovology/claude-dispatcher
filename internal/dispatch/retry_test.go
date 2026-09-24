@@ -14,7 +14,9 @@ func withRetrySeams(t *testing.T, alive bool, idle, known bool) *[]string {
 	t.Helper()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 	prevAlive, prevIdle, prevReady, prevSend := sessionAlive, sessionIdle, supervisorReady, sendKeys
-	t.Cleanup(func() { sessionAlive, sessionIdle, supervisorReady, sendKeys = prevAlive, prevIdle, prevReady, prevSend })
+	t.Cleanup(func() {
+		sessionAlive, sessionIdle, supervisorReady, sendKeys = prevAlive, prevIdle, prevReady, prevSend
+	})
 	sessionAlive = func(string) bool { return alive }
 	sessionIdle = func(string) (bool, bool) { return idle, known }
 	supervisorReady = func() bool { return true }
@@ -148,5 +150,29 @@ func TestRetryFailedRechecksUnderTheLock(t *testing.T) {
 	saveAll(t, answered)
 	if n := RetryFailed(stale, time.Now()); n != 0 {
 		t.Fatalf("typed over the human: %q", *typed)
+	}
+}
+
+func TestRetryPending(t *testing.T) {
+	t0 := time.Now()
+	rec := failedRec("a", "overloaded", t0, 0)
+	for _, c := range []struct {
+		at   time.Duration
+		want bool
+	}{
+		{0, true},                          // scheduled
+		{time.Minute, true},                // due, the poll has not come round
+		{time.Minute + RetryGrace - 1, true},
+		{time.Minute + RetryGrace, false}, // overdue: it is not coming
+	} {
+		if got := RetryPending(rec, t0.Add(c.at)); got != c.want {
+			t.Errorf("at +%v: got %v want %v", c.at, got, c.want)
+		}
+	}
+	if RetryPending(failedRec("b", "rate_limit", t0, 0), t0) {
+		t.Error("a usage limit is never pending")
+	}
+	if RetryPending(failedRec("c", "overloaded", t0, len(RetryBackoff)), t0) {
+		t.Error("a spent retry budget is not pending")
 	}
 }

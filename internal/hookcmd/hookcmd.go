@@ -65,6 +65,8 @@ type hookInput struct {
 	// read must not cost us the category beside it.
 	Error        string          `json:"error"`
 	ErrorDetails json.RawMessage `json:"error_details"`
+	// Stop/StopFailure: the text of the turn's last message, whole.
+	LastAssistantMessage string `json:"last_assistant_message"`
 }
 
 // detail renders error_details as one line: a JSON string is unquoted, any
@@ -264,6 +266,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 	switch event {
 	case "SessionStart":
 		d.Failure = nil // a new session has not failed at anything yet
+		d.Said = ""
 		if in.SessionID != "" {
 			d.SessionID = in.SessionID
 		}
@@ -277,6 +280,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "processing your prompt"
 		d.WaitingOnTasks = false
+		d.Said = "" // whatever it last asked has just been answered
 		// A prompt reaching the session answers the question it was parked on:
 		// the park said "I cannot answer that right now", and someone just did.
 		// No other event clears the shelf — a Stop, an idle prompt or a session
@@ -294,6 +298,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		// A turn that completed is the proof whatever last failed is past it,
 		// and the only thing that resets the retry count.
 		d.Failure = nil
+		d.SetSaid(in.LastAssistantMessage)
 		d.WaitingOnTasks = len(in.BackgroundTasks) > 0
 		if d.WaitingOnTasks {
 			d.Status = state.StatusWorking
@@ -316,6 +321,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 			f.Retries, f.RetriedAt = d.Failure.Retries, d.Failure.RetriedAt
 		}
 		d.Failure = f
+		d.SetSaid(in.LastAssistantMessage)
 		d.WaitingOnTasks = false
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "stopped on an API error: " + strings.ReplaceAll(f.Error, "_", " ")

@@ -46,6 +46,25 @@ func RetryDue(d *state.Dispatch, now time.Time) (due bool, at time.Time) {
 	return !now.Before(at), at
 }
 
+// RetryGrace is how overdue a scheduled retry may be before the screen stops
+// promising it. The poll is a minute, so two of them is a retry that should
+// have happened and did not — the pane could not be seen into, the session was
+// busy with something else — and a row saying "retrying" over a retry that is
+// never coming is the stall this exists to end, wearing a better excuse.
+const RetryGrace = 2 * time.Minute
+
+// RetryPending reports whether the machine still has d in hand: its turn
+// ended on a transient error, a retry is scheduled, and that retry is not
+// overdue past RetryGrace. While it is, the dispatcher is not the human's —
+// the cockpit files it with the running rows, saying when the retry comes.
+func RetryPending(d *state.Dispatch, now time.Time) bool {
+	due, at := RetryDue(d, now)
+	if at.IsZero() {
+		return false
+	}
+	return !due || now.Before(at.Add(RetryGrace))
+}
+
 // RetryFailed types "continue" into every session whose last turn a transient
 // API error ended, on the RetryBackoff schedule. It is the one part of keeping
 // a dispatcher going that the cockpit does rather than the session: Claude

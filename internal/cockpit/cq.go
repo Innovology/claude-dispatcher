@@ -139,6 +139,9 @@ func cqKind(rec *state.Dispatch, st string) string {
 	if st == "review" {
 		return "review"
 	}
+	if rec.Failure != nil {
+		return "api-error"
+	}
 	switch rec.StatusReason {
 	case "turn complete — waiting on you":
 		return "turn-done"
@@ -158,6 +161,8 @@ func cqWant(kind string) string {
 		return "it finished a turn"
 	case "idle":
 		return "it is waiting on you"
+	case "api-error":
+		return "stopped on an API error"
 	}
 	return "it stopped"
 }
@@ -192,8 +197,18 @@ func cqToneOf(st string, checks gh.Checks, review gh.Review, clash *cqClash) str
 // cqLeadOf is the one sentence saying what the dispatcher wants. For a finished
 // turn the truest answer is the last thing it actually said, used verbatim — if
 // it asked a question, the lead reads as a question.
+//
+// The ask comes first when the hook handed over the whole message (rec.Said):
+// the transcript preview holds each block's first line, which is the turn's
+// headline, and the question it closed on is the sentence the human needs.
 func cqLeadOf(s *snapshot, rec *state.Dispatch, kind string) string {
+	if kind == "api-error" {
+		return cqFailLead(rec)
+	}
 	if kind != "permission" {
+		if ask := cqAsk(rec.Said); ask != "" {
+			return ask
+		}
 		if said := s.saidBy[rec.Feature]; said != "" {
 			return said
 		}

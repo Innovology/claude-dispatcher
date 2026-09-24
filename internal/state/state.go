@@ -141,9 +141,18 @@ type Dispatch struct {
 	// the screen could tell from progress. An annotation, never a Status: the
 	// status is needs-input like any other stopped turn, and this says why.
 	// Cleared by the next Stop (a turn that completed) and by SessionStart.
-	Failure   *Failure  `json:"failure,omitempty"`
+	Failure *Failure `json:"failure,omitempty"`
+	// Said is the session's last message, as the Stop (or StopFailure) hook
+	// handed it over in last_assistant_message — the whole message, where the
+	// transcript preview keeps only each block's first line. The difference is
+	// the point: a turn ends with its headline first and its question last
+	// ("PR #700 is open…" … "Want me to merge it?"), so the preview showed the
+	// one line that needed no answer and cut the one that did. Cleared when the
+	// next turn starts, because by then it has been answered. Capped at
+	// MaxSaid, keeping the end, since the end is where the ask is.
+	Said      string    `json:"said,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// FinishedAt is the instant this dispatcher's status first said it was over
 	// — stamped by Stop, at the transition, and nowhere else. UpdatedAt cannot
 	// answer that question: Save stamps it on every write, and a finished record
@@ -210,6 +219,18 @@ type Subagent struct {
 	// subagent still running.
 	StartedAt time.Time  `json:"started_at"`
 	StoppedAt *time.Time `json:"stopped_at,omitempty"`
+}
+
+// MaxSaid bounds Dispatch.Said. The record is rewritten on every hook event.
+const MaxSaid = 4000
+
+// SetSaid records a turn's last message, keeping the end when it is too long.
+func (d *Dispatch) SetSaid(msg string) {
+	msg = strings.TrimSpace(msg)
+	if r := []rune(msg); len(r) > MaxSaid {
+		msg = "…" + string(r[len(r)-MaxSaid:])
+	}
+	d.Said = msg
 }
 
 // Failure is one API error that ended a turn, in Claude Code's own words.
