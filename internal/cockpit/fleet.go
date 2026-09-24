@@ -496,6 +496,12 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 // generic "it finished a turn" on every row was why the table could not be
 // triaged without opening each session to read what it wanted.
 func cqQueueSignal(rec *state.Dispatch, kind string) string {
+	// The steward's reading of this wait leads when there is one: it has looked,
+	// decided the call is the human's, and said why — "yours: merge #71 — CI
+	// green, no review". The ask it answered stays in the detail lead.
+	if note := rec.Note(); note != "" {
+		return "steward · " + note
+	}
 	if kind == "api-error" {
 		return cqFailSignal(rec, time.Now())
 	}

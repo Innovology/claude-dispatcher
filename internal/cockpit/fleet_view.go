@@ -300,6 +300,11 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	if parked > 0 {
 		left += "   " + fg(cFaint, itoa(parked)+" parked")
 	}
+	// Said only while it is on: a clause saying the steward is off would be a
+	// nag on every screen of a cockpit that has never wanted one.
+	if stewardOn {
+		left += "   " + fg(cFaint, "steward watching")
+	}
 	// Appended only when the whole cell fits. flSpread's overflow answer is to
 	// truncate the left side, which would leave "≈10h t…" hanging off the end of
 	// a narrow terminal — a clause half-said is worse than one not said, and it

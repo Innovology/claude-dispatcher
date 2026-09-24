@@ -152,6 +152,8 @@ var commands = []command{
 	{name: "new dispatch", hint: "open the repo → feature → prompt form"},
 	{name: "product", hint: "open the product under the cursor"},
 	{name: "upgrade", hint: "install the published build and come straight back"},
+	{name: "steward", hint: "start the fleet's steward session, or jump into it"},
+	{name: "stop steward", hint: "end the steward session"},
 	{name: "reply", hint: "answer the selected dispatcher without attaching"},
 	{name: "attach", hint: "tmux attach at full fidelity · ctrl+\\ to come back"},
 	{name: "merge", hint: "gh pr merge --squash --auto on the selected feature"},
