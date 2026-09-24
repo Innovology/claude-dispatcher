@@ -369,6 +369,11 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	clash := cqCollision(touched, rec)
 	ask := cqKind(rec, st)
 	tone := cqToneOf(st, checks, review, clash)
+	if ask == "api-error" && tone == "normal" {
+		// Like a blocked row: stopped, and nothing more will get it going on
+		// its own — a retry still coming files it with the running rows.
+		tone = "amber"
+	}
 	goal, goalLabel := cqGoal(rec)
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
 	est, codedKnown := s.effortBy[rec.Feature]
@@ -385,7 +390,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		ref:        cqRef(forge, rec),
 		stage:      cqPhase(s.tailLines[rec.Feature], rec),
 		pass:       passes[rec.ID],
-		signal:     cqWant(ask),
+		signal:     cqQueueSignal(rec, ask),
 		tone:       tone,
 		why:        cqWhy(s, rec, ask, tone, clash),
 		goal:       goal,
@@ -434,7 +439,10 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	// the checks are reported: a count the hooks measured, no louder than the
 	// ci clause it sits with. Live subagents come first — they are what the
 	// session is doing now; the PR is where what it did stands.
-	signal := cqJoin(cqFanSignal(len(subLive)), cqShipDetail(forge, rec))
+	// A turn an API error ended, with a retry on its way, rides here too
+	// (floorState) — and its clause leads, because it is why this row is not
+	// moving right now.
+	signal := cqJoin(cqFailSignal(rec, time.Now()), cqFanSignal(len(subLive)), cqShipDetail(forge, rec))
 	// The record exists and no hook has fired for it: it was launched, and
 	// nothing has been heard from the session since. cqShipDetail has nothing to
 	// say about a dispatcher with no PR, so the cell would be blank — which on
@@ -481,6 +489,24 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
 	}, mt
+}
+
+// cqQueueSignal is a waiting row's SIGNAL: what an API error did to it, else
+// the question it closed on in its own words, else the generic want. The
+// generic "it finished a turn" on every row was why the table could not be
+// triaged without opening each session to read what it wanted.
+func cqQueueSignal(rec *state.Dispatch, kind string) string {
+	if kind == "api-error" {
+		return cqFailSignal(rec, time.Now())
+	}
+	// A review row's ask is quoted too: "approve a merge" is our reading of an
+	// open PR, and the session often closed on something else entirely.
+	if kind != "permission" {
+		if ask := cqAsk(rec.Said); ask != "" {
+			return ask
+		}
+	}
+	return cqWant(kind)
 }
 
 // fleetSubagents splits the record's fan-out into the type names of the

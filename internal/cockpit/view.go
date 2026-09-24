@@ -210,6 +210,8 @@ func (m model) overlayView(w, h int) (string, bool) {
 		return m.viewResume(w, h), true
 	case m.parkOpen:
 		return m.viewPark(w, h), true
+	case m.replyOpen:
+		return m.viewReply(w, h), true
 	case m.paletteOpen:
 		return m.viewPalette(w, h), true
 	}

@@ -3,7 +3,9 @@
 package supervisor
 
 import (
+	"errors"
 	"os/exec"
+	"strings"
 
 	"claude-dispatcher/internal/tmux"
 )
@@ -38,6 +40,30 @@ func EnsureFocusEvents() { tmux.EnsureFocusEvents() }
 func AttachSwitches() bool { return tmux.AttachSwitches() }
 
 // SendKeys types text into the session and presses Enter, as if at the prompt.
+//
+// The target is "=name:" — the session's current pane — not the "=name" every
+// session-level command here takes: send-keys wants a pane, and tmux (3.7b,
+// measured) answers "=name" with "can't find pane", so the plain form typed
+// nothing, ever, and the reply that used it said it had. The text goes with -l
+// and after --, so it is typed as written: without them tmux looks each
+// argument up as a key name first, and a reply of "Enter", "Up" or "C-c" would
+// be pressed rather than typed, and one starting with "-" read as a flag.
+// Enter is its own call because it is the one argument that must be a key.
 func SendKeys(name, text string) error {
-	return exec.Command("tmux", "send-keys", "-t", "="+name, text, "Enter").Run()
+	target := "=" + name + ":"
+	if out, err := exec.Command("tmux", "send-keys", "-t", target, "-l", "--", text).CombinedOutput(); err != nil {
+		return sendErr(out, err)
+	}
+	if out, err := exec.Command("tmux", "send-keys", "-t", target, "Enter").CombinedOutput(); err != nil {
+		return sendErr(out, err)
+	}
+	return nil
+}
+
+// sendErr carries tmux's own words when it gave any.
+func sendErr(out []byte, err error) error {
+	if msg := strings.TrimSpace(string(out)); msg != "" {
+		return errors.New(msg)
+	}
+	return err
 }

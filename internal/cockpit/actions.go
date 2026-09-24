@@ -183,18 +183,6 @@ func markDoneCmd(feature string) tea.Cmd {
 	}
 }
 
-// replyCmd sends text into the feature's live session, as if typed at the prompt.
-func replyCmd(feature, text string) tea.Cmd {
-	return func() tea.Msg {
-		rec := recordFor(feature)
-		if rec == nil || !supervisor.HasSession(rec.TmuxSession) {
-			return actionMsg{notice: "no live session to reply to"}
-		}
-		_ = supervisor.SendKeys(rec.TmuxSession, text)
-		return actionMsg{notice: "replied to \"" + feature + "\" · session resumed"}
-	}
-}
-
 // launchedMsg is a finished launch attempt, carrying the feature it was for as
 // well as the notice.
 //

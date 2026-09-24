@@ -1,6 +1,7 @@
 package state
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,5 +115,32 @@ func TestSaveLoadKeepsThePark(t *testing.T) {
 	}
 	if got["q"].Parked() {
 		t.Error("a record nobody parked came back parked")
+	}
+}
+
+func TestFailureTransient(t *testing.T) {
+	for e, want := range map[string]bool{
+		"overloaded": true, "server_error": true, "unknown": true, "max_output_tokens": true,
+		"rate_limit": false, "authentication_failed": false, "billing_error": false,
+		"invalid_request": false, "model_not_found": false,
+	} {
+		if got := (&Failure{Error: e}).Transient(); got != want {
+			t.Errorf("%s: got %v want %v", e, got, want)
+		}
+	}
+	if (*Failure)(nil).Transient() {
+		t.Error("no failure is not a transient one")
+	}
+}
+
+// A long message keeps its end, because the ask is at the end.
+func TestSetSaidKeepsTheEnd(t *testing.T) {
+	var d Dispatch
+	d.SetSaid(strings.Repeat("x", MaxSaid+10) + " Want me to merge it?")
+	if !strings.HasSuffix(d.Said, "Want me to merge it?") || !strings.HasPrefix(d.Said, "…") {
+		t.Fatalf("got …%q", d.Said[len(d.Said)-30:])
+	}
+	if n := len([]rune(d.Said)); n != MaxSaid+1 {
+		t.Fatalf("len %d", n)
 	}
 }

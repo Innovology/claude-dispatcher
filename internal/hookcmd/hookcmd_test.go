@@ -330,3 +330,77 @@ func TestApplyDoneRecordStillRecordsTheFanOut(t *testing.T) {
 			d.Status, d.SubagentsLive(), d.SubagentsDone())
 	}
 }
+
+// StopFailure fires instead of Stop when an API error ends the turn. Before it
+// was installed nothing fired at all and the record said "working" over a
+// session sitting at an idle prompt; the error has to land on the record, and
+// the idle prompt that follows a minute later must not paper over it.
+func TestApplyStopFailure(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	in := hookInput{Error: "overloaded", ErrorDetails: json.RawMessage(`"529 Overloaded"`)}
+	if !apply(d, "StopFailure", in) {
+		t.Fatal("StopFailure should report a change")
+	}
+	if d.Status != state.StatusNeedsInput || d.Failure == nil {
+		t.Fatalf("want needs-input with a failure, got %s %+v", d.Status, d.Failure)
+	}
+	if d.Failure.Error != "overloaded" || d.Failure.Detail != "529 Overloaded" {
+		t.Errorf("failure not recorded verbatim: %+v", d.Failure)
+	}
+	if d.StatusReason != "stopped on an API error: overloaded" {
+		t.Errorf("reason %q", d.StatusReason)
+	}
+	if apply(d, "Notification:idle_prompt", hookInput{}) {
+		t.Error("the idle prompt after a failed turn must keep the failure's account")
+	}
+
+	// A retry's own prompt reaches the hook as UserPromptSubmit; the count has
+	// to survive it and carry into the next failure, or the cap never bites.
+	d.Failure.Retries = 1
+	apply(d, "UserPromptSubmit", hookInput{})
+	if d.Status != state.StatusWorking || d.Failure == nil || d.Failure.Retries != 1 {
+		t.Fatalf("a prompt must not reset the retry count: %s %+v", d.Status, d.Failure)
+	}
+	apply(d, "StopFailure", hookInput{Error: "server_error"})
+	if d.Failure.Retries != 1 || d.Failure.Error != "server_error" {
+		t.Fatalf("a second failure keeps the count and takes the new error: %+v", d.Failure)
+	}
+
+	// A completed turn is the proof it got past it.
+	apply(d, "Stop", hookInput{})
+	if d.Failure != nil {
+		t.Fatalf("Stop must clear the failure, got %+v", d.Failure)
+	}
+}
+
+func TestApplyStopFailureWithoutCategory(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "StopFailure", hookInput{ErrorDetails: json.RawMessage(`{"code":"ENOTFOUND"}`)})
+	if d.Failure == nil || d.Failure.Error != "unknown" || d.Failure.Detail != `{"code":"ENOTFOUND"}` {
+		t.Fatalf("got %+v", d.Failure)
+	}
+}
+
+// done means live: an API error in a session that already shipped does not
+// put it back on the table.
+func TestApplyStopFailureOnDone(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusDone}
+	if apply(d, "StopFailure", hookInput{Error: "overloaded"}) || d.Failure != nil {
+		t.Fatalf("done must hold: %+v", d.Failure)
+	}
+}
+
+// The whole last message rides the Stop, and the next prompt clears it: by
+// then whatever it asked has been answered.
+func TestApplyRecordsWhatItSaid(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	msg := "PR #700 is open.\n\nWant me to merge it?"
+	apply(d, "Stop", hookInput{LastAssistantMessage: msg})
+	if d.Said != msg {
+		t.Fatalf("said %q", d.Said)
+	}
+	apply(d, "UserPromptSubmit", hookInput{})
+	if d.Said != "" {
+		t.Fatalf("a new prompt must clear what was said, got %q", d.Said)
+	}
+}

@@ -159,8 +159,15 @@ func waitBoot(ch chan bootUpdate) tea.Cmd {
 
 // trackRefreshCmd reconciles PR and deploy state, persisting any change; the
 // fsnotify watcher then reloads the records like any other status change.
+//
+// It is also where a turn an API error ended gets its "continue": the poll is
+// the one loop that runs whether or not anybody is looking, and nothing inside
+// the session can restart a turn once StopFailure has ended it (see
+// dispatch.RetryFailed). Like auto-done, it only happens while a cockpit is
+// open.
 func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 	return func() tea.Msg {
+		dispatchpkg.RetryFailed(state.LoadAll(), time.Now())
 		track.Refresh(state.LoadAll(), cfg)
 		return trackedMsg{}
 	}

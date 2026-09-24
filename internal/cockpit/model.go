@@ -107,6 +107,11 @@ type model struct {
 	parkOpen bool
 	parkText string
 	parkAt   *parkTarget
+	// The reply input over the triage lens (reply.go): one line typed into a
+	// waiting dispatcher's session without attaching to it.
+	replyOpen bool
+	replyText string
+	replyAt   *replyTarget
 
 	backlogCursor int
 	picked        map[string]bool

@@ -93,10 +93,11 @@ func TestDXSubmitAsksForTitleThenWhat(t *testing.T) {
 	}
 }
 
-// The prompt leads with the title, then the brief, then DONE WHEN's sentence
-// and the one that matches the mode.
+// The prompt leads with the title, then the brief, then DONE WHEN's sentence.
+// The mode's working contract is not the form's to add: Launch composes it for
+// every way in (dispatch.Contract), and adding it here too would say it twice.
 func TestDXPromptLeadsWithTheTitle(t *testing.T) {
-	got := dxPrompt("payment retries", "retry declined cards on a backoff", "ci is green", dispatchpkg.ModeAuto)
+	got := dxPrompt("payment retries", "retry declined cards on a backoff", "ci is green")
 	want := strings.Join([]string{
 		"payment retries",
 		"",
@@ -104,8 +105,6 @@ func TestDXPromptLeadsWithTheTitle(t *testing.T) {
 		"",
 		"done when: ci is green",
 		"Keep working until that is true.",
-		"",
-		"Commit as you go, open the PR, and fix your own CI failures without stopping to ask.",
 	}, "\n")
 	if got != want {
 		t.Errorf("prompt =\n%s\n\nwant\n%s", got, want)
@@ -113,16 +112,8 @@ func TestDXPromptLeadsWithTheTitle(t *testing.T) {
 
 	// With no brief the title stands alone rather than leaving a hole where the
 	// body would be.
-	if got := dxPrompt("payment retries", "", "", dispatchpkg.ModeManual); !strings.HasPrefix(got, "payment retries\n\nDo one pass") {
+	if got := dxPrompt("payment retries", "", ""); got != "payment retries" {
 		t.Errorf("prompt with no WHAT =\n%s", got)
-	}
-
-	// Plan mode gets its own closing sentence: telling a session that cannot
-	// change anything to commit as it goes would be an instruction it has to
-	// disobey, and the mode is not a two-position switch any more.
-	plan := dxPrompt("payment retries", "retry declined cards", "", dispatchpkg.ModePlan)
-	if strings.Contains(plan, "Commit as you go") || !strings.Contains(plan, "put the plan up for approval") {
-		t.Errorf("plan mode's prompt =\n%s", plan)
 	}
 }
 
@@ -298,5 +289,26 @@ func TestDXViewKeepsTheRepoListUnderALongWhat(t *testing.T) {
 		if !strings.Contains(out, "DONE WHEN") {
 			t.Errorf("h=%d: the fields below WHAT went missing:\n%s", h, out)
 		}
+	}
+}
+
+// Leaving DONE WHEN empty means something different per mode now that auto's
+// contract works the brief through: the hint and the launch notice must not
+// promise auto "one pass, then waits".
+func TestDXUngoaledCopyFollowsTheMode(t *testing.T) {
+	m := newModel()
+	m.dxMode = dispatchpkg.ModeAuto
+	if h := m.dxGoalHint(); strings.Contains(h, "one pass") {
+		t.Errorf("auto hint = %q", h)
+	}
+	if n := dxUngoaledNotice(dispatchpkg.ModeAuto); strings.Contains(n, "one pass") {
+		t.Errorf("auto notice = %q", n)
+	}
+	m.dxMode = dispatchpkg.ModeManual
+	if h := m.dxGoalHint(); !strings.Contains(h, "one pass") {
+		t.Errorf("manual hint = %q", h)
+	}
+	if n := dxUngoaledNotice(dispatchpkg.ModePlan); !strings.Contains(n, "one pass") {
+		t.Errorf("plan notice = %q", n)
 	}
 }

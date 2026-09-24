@@ -70,8 +70,9 @@ func TestLaunchKeepsALongPromptOutOfTheCommand(t *testing.T) {
 	}
 	// The record still carries the prompt it was sent: the file is the
 	// transport, not a replacement for the record. Trailing newlines are gone
-	// from both, so the record says exactly what the session was given.
-	if d.Prompt != strings.TrimRight(prompt, "\n") || d.Prompt != string(stored) {
+	// from both, so the record says exactly what the session was given — the
+	// brief closed with the mode's working contract (contract.go).
+	if d.Prompt != withContract(prompt, ModeAuto) || d.Prompt != string(stored) {
 		t.Error("the record and the prompt file disagree about what was dispatched")
 	}
 }

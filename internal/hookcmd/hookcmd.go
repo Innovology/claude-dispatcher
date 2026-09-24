@@ -7,6 +7,8 @@
 //	PostToolUse                    -> working, only to clear "blocked"
 //	Stop                           -> needs-input (turn complete), or working
 //	                                  if background tasks are still in flight
+//	StopFailure                    -> needs-input, with the API error that
+//	                                  ended the turn recorded as its Failure
 //	Notification:idle_prompt       -> needs-input (unless waiting on tasks)
 //	Notification:permission_prompt -> blocked
 //	SessionEnd                     -> exited (unless already done)
@@ -57,6 +59,32 @@ type hookInput struct {
 	// same as from the main thread.
 	AgentID   string `json:"agent_id"`
 	AgentType string `json:"agent_type"`
+	// StopFailure only: Claude Code's category for the API error that ended
+	// the turn, and whatever detail it sent with it. error_details is decoded
+	// loosely — its shape is Claude Code's business, and a detail we cannot
+	// read must not cost us the category beside it.
+	Error        string          `json:"error"`
+	ErrorDetails json.RawMessage `json:"error_details"`
+	// Stop/StopFailure: the text of the turn's last message, whole.
+	LastAssistantMessage string `json:"last_assistant_message"`
+}
+
+// detail renders error_details as one line: a JSON string is unquoted, any
+// other shape is kept as the JSON it arrived as.
+func (in hookInput) detail() string {
+	raw := strings.TrimSpace(string(in.ErrorDetails))
+	if raw == "" || raw == "null" {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(in.ErrorDetails, &s) == nil {
+		raw = s
+	}
+	raw = strings.Join(strings.Fields(raw), " ")
+	if len(raw) > 300 {
+		raw = raw[:300] + "…"
+	}
+	return raw
 }
 
 func Run(args []string) int {
@@ -75,6 +103,7 @@ func Run(args []string) int {
 			DispatcherID: dispatcherID,
 			SessionID:    in.SessionID,
 			Cwd:          in.Cwd,
+			Reason:       in.Error, // StopFailure's category; empty for the rest
 		})
 	}
 
@@ -236,6 +265,8 @@ func applyFanOut(d *state.Dispatch, event string, in hookInput) bool {
 func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 	switch event {
 	case "SessionStart":
+		d.Failure = nil // a new session has not failed at anything yet
+		d.Said = ""
 		if in.SessionID != "" {
 			d.SessionID = in.SessionID
 		}
@@ -249,6 +280,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "processing your prompt"
 		d.WaitingOnTasks = false
+		d.Said = "" // whatever it last asked has just been answered
 		// A prompt reaching the session answers the question it was parked on:
 		// the park said "I cannot answer that right now", and someone just did.
 		// No other event clears the shelf — a Stop, an idle prompt or a session
@@ -263,6 +295,10 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "permission approved, working"
 	case "Stop":
+		// A turn that completed is the proof whatever last failed is past it,
+		// and the only thing that resets the retry count.
+		d.Failure = nil
+		d.SetSaid(in.LastAssistantMessage)
 		d.WaitingOnTasks = len(in.BackgroundTasks) > 0
 		if d.WaitingOnTasks {
 			d.Status = state.StatusWorking
@@ -272,9 +308,31 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		}
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "turn complete — waiting on you"
+	case "StopFailure":
+		// Fired instead of Stop, so it is the only word the session gets out:
+		// without it the record went on saying "working". The retry count
+		// carries over from an earlier failure in the same stretch — the retry
+		// that led here is exactly what it is counting.
+		f := &state.Failure{Error: in.Error, Detail: in.detail(), At: time.Now()}
+		if f.Error == "" {
+			f.Error = "unknown"
+		}
+		if d.Failure != nil {
+			f.Retries, f.RetriedAt = d.Failure.Retries, d.Failure.RetriedAt
+		}
+		d.Failure = f
+		d.SetSaid(in.LastAssistantMessage)
+		d.WaitingOnTasks = false
+		d.Status = state.StatusNeedsInput
+		d.StatusReason = "stopped on an API error: " + strings.ReplaceAll(f.Error, "_", " ")
 	case "Notification:idle_prompt":
 		if d.WaitingOnTasks {
 			return false // paused on background work, not on the human
+		}
+		if d.Failure != nil && d.Status == state.StatusNeedsInput {
+			// The idle prompt a failed turn leaves behind a minute later. It
+			// is the same stop, and the failure is the better account of it.
+			return false
 		}
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "waiting for your next prompt"
@@ -282,6 +340,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusBlocked
 		d.StatusReason = "waiting on a permission approval"
 	case "SessionEnd":
+		d.Failure = nil // nothing left to retry
 		d.Stop(state.StatusExited, "session ended", time.Now())
 	default:
 		return false

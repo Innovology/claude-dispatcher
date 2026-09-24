@@ -28,6 +28,7 @@ var helpSections = []struct {
 		{"g / G", "first row · last row"},
 		{"f", "filter: all → wants you → running → history"},
 		{"⏎", "attach the session"},
+		{"r", "reply · type one line into a waiting session, no jump-in"},
 		{"y", "approve the merge, or mark it shipped once it has commits"},
 		{"x", "kill it · the branch and any dirty worktree survive"},
 		{"x", "on a ✓ row: dismiss it · nothing to kill, it goes to history"},

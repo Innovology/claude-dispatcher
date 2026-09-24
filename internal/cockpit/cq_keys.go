@@ -336,6 +336,14 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// already ran, and nothing has yet. Only a queue row can be parked:
 		// parking answers "it asked me something I cannot answer right now",
 		// and a running dispatcher has not asked anything.
+		// Reply opens its line the same way: nothing is typed into the
+		// session until enter. The row's lead rides along so the input shows
+		// the question being answered.
+		if k == "r" && replyable(r) {
+			m.replyOpen, m.replyText = true, ""
+			m.replyAt = &replyTarget{id: r.id, feature: r.feature, ask: r.why}
+			return m, nil, true
+		}
 		if k == "p" && r.kind == "queue" {
 			m.parkOpen, m.parkText = true, ""
 			m.parkAt = &parkTarget{id: r.id, feature: r.feature}

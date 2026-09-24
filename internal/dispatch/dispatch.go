@@ -133,7 +133,9 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 
 	mode = mode.Normalize()
 	model = model.Normalize()
-	prompt = withFanOut(prompt, fanOut)
+	// The working contract for the mode, then FAN OUT's sentence: how far to
+	// take it, then how widely. See contract.go.
+	prompt = withFanOut(withContract(prompt, mode), fanOut)
 	// Trailing newlines are dropped here rather than by the shell, so the two
 	// platforms send the same bytes and the record says exactly what the
 	// session was given: `$(cat …)` strips them and PowerShell's ReadAllText
