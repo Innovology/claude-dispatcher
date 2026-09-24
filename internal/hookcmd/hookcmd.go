@@ -227,11 +227,12 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 func stampWait(d *state.Dispatch, event string, wasWaiting bool) bool {
 	switch {
 	case !d.Waiting():
-		if d.WaitingSince == nil && d.StewardNote == "" {
+		if d.WaitingSince == nil && d.StewardNote == "" && d.Answer == "" {
 			return false
 		}
 		d.WaitingSince = nil
 		d.StewardNote, d.StewardNoteAt = "", nil
+		d.Answer, d.AnsweredAt = "", nil
 		return true
 	case !wasWaiting || event == "Stop" || event == "StopFailure":
 		now := time.Now()

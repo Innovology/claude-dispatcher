@@ -502,6 +502,12 @@ func cqQueueSignal(rec *state.Dispatch, kind string) string {
 	if note := rec.Note(); note != "" {
 		return "steward · " + note
 	}
+	// A line already typed into this wait, not yet picked up. Usually gone by
+	// the next load; if it stays, the reply did not take — which is exactly
+	// what the human needs to be able to see.
+	if ans := rec.Answered(); ans != "" {
+		return "answered · " + ans
+	}
 	if kind == "api-error" {
 		return cqFailSignal(rec, time.Now())
 	}

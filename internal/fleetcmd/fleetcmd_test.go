@@ -214,3 +214,33 @@ func TestNote(t *testing.T) {
 		t.Fatalf("a noted wait is handled: %+v", e[0])
 	}
 }
+
+// A reply marks the wait answered at the send, so --next does not wake the
+// steward for it again in the moment before the session's hook lands — the
+// race the first live steward run found.
+func TestReplyMarksTheWaitAnswered(t *testing.T) {
+	now := time.Now()
+	withStore(t, &state.Dispatch{ID: "a1", Feature: "asks", Status: state.StatusNeedsInput,
+		TmuxSession: "disp-asks", WaitingSince: &now})
+	withSessions(t, true, false, true)
+	var out, errOut bytes.Buffer
+	if code := Run("reply", []string{"a1", "steward: yes, write the tests"}, &out, &errOut); code != 0 {
+		t.Fatalf("reply: %s", errOut.String())
+	}
+	d, _ := find("a1")
+	if d.Answered() != "steward: yes, write the tests" || !d.Handled() {
+		t.Fatalf("answer = %q handled = %v", d.Answered(), d.Handled())
+	}
+	out.Reset()
+	prev := NextPoll
+	NextPoll = time.Millisecond
+	t.Cleanup(func() { NextPoll = prev })
+	if err := runNext(&out, 5*time.Millisecond, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	var n Next
+	_ = json.Unmarshal(out.Bytes(), &n)
+	if len(n.Waiting) != 0 {
+		t.Fatalf("an answered wait woke the steward again: %s", out.String())
+	}
+}

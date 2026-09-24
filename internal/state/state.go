@@ -163,6 +163,15 @@ type Dispatch struct {
 	// after WaitingSince) and is cleared when the next turn starts.
 	StewardNote   string     `json:"steward_note,omitempty"`
 	StewardNoteAt *time.Time `json:"steward_note_at,omitempty"`
+	// Answer is the line last typed into the session to end this wait — by the
+	// cockpit's r or the reply command, the human's or the steward's — stamped
+	// at the send, under the hook lock. The hook that proves it landed
+	// (UserPromptSubmit) comes a moment later, and in that moment the wait
+	// still looks open: a steward polling for open waits would answer it a
+	// second time. Cleared with the wait, so a reply that never took stays on
+	// the row for the human to see.
+	Answer     string     `json:"answer,omitempty"`
+	AnsweredAt *time.Time `json:"answered_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 	// FinishedAt is the instant this dispatcher's status first said it was over
@@ -250,6 +259,21 @@ func (d *Dispatch) Note() string {
 	}
 	return d.StewardNote
 }
+
+// Answered is the line typed into the current wait, or "".
+func (d *Dispatch) Answered() string {
+	if d.Answer == "" || d.AnsweredAt == nil || !d.Waiting() {
+		return ""
+	}
+	if d.WaitingSince != nil && d.AnsweredAt.Before(*d.WaitingSince) {
+		return ""
+	}
+	return d.Answer
+}
+
+// Handled reports whether the current wait has been acted on — answered, or
+// read by the steward and left for the human with a note.
+func (d *Dispatch) Handled() bool { return d.Note() != "" || d.Answered() != "" }
 
 // MaxSaid bounds Dispatch.Said. The record is rewritten on every hook event.
 const MaxSaid = 4000

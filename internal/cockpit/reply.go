@@ -19,6 +19,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"claude-dispatcher/internal/fleetcmd"
 	"claude-dispatcher/internal/supervisor"
 )
 
@@ -105,6 +106,9 @@ func replyCmd(id, text string) tea.Cmd {
 		if err := supervisor.SendKeys(rec.TmuxSession, text); err != nil {
 			return actionMsg{notice: "reply to \"" + rec.Feature + "\" failed: " + firstLine(err.Error())}
 		}
+		// On the record at once, so a steward polling for open waits cannot
+		// answer this one too in the moment before the session's hook lands.
+		fleetcmd.MarkAnswered(rec.ID, text)
 		return actionMsg{notice: "replied to \"" + rec.Feature + "\" · " + text}
 	}
 }

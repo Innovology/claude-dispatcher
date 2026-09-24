@@ -44,6 +44,8 @@ type Entry struct {
 	Repo    string `json:"repo"`
 	Product string `json:"product,omitempty"`
 	Branch  string `json:"branch,omitempty"`
+	// RepoPath is the repo on disk — where gh and git read its PR and history.
+	RepoPath string `json:"repo_path,omitempty"`
 	// Prompt is the brief it was dispatched with — what "inside the brief"
 	// is measured against.
 	Prompt string `json:"prompt,omitempty"`
@@ -79,7 +81,10 @@ type Entry struct {
 	// been looked at, and waking the steward for it again would be noise.
 	WaitingSince *time.Time `json:"waiting_since,omitempty"`
 	Note         string     `json:"note,omitempty"`
-	Handled      bool       `json:"handled,omitempty"`
+	// Answer is the line already typed into this wait, waiting for the
+	// session to pick it up.
+	Answer  string `json:"answer,omitempty"`
+	Handled bool   `json:"handled,omitempty"`
 
 	failure string // the row's failure clause, for the text form
 }
@@ -181,6 +186,8 @@ func (e Entry) headline() string {
 	switch {
 	case e.Note != "":
 		return "steward: " + e.Note
+	case e.Answer != "":
+		return "answered · " + e.Answer
 	case e.Ask != "":
 		return e.Ask
 	case e.Parked != "":
@@ -202,7 +209,7 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 		}
 		e := Entry{
 			ID: d.ID, Feature: d.Feature, Repo: d.RepoName, Product: d.Product,
-			Branch: d.Branch, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
+			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
 			Failure: d.Failure, Retrying: dispatch.RetryPending(d, now),
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
 			Mode: d.Mode, SubagentsLive: d.SubagentsLive(),
@@ -211,8 +218,9 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 			failure:      dispatch.FailureSummary(d, now),
 			WaitingSince: d.WaitingSince,
 			Note:         d.Note(),
+			Answer:       d.Answered(),
+			Handled:      d.Handled(),
 		}
-		e.Handled = e.Note != ""
 		if d.Status == state.StatusNeedsInput || d.Finished() {
 			e.Said, e.Ask = d.Said, ask.Of(d.Said)
 		}
@@ -281,8 +289,30 @@ func runReply(args []string, out io.Writer) error {
 	if err := sendKeys(d.TmuxSession, text); err != nil {
 		return err
 	}
+	MarkAnswered(d.ID, text)
 	_, _ = fmt.Fprintf(out, "replied to %q\n", d.Feature)
 	return nil
+}
+
+// MarkAnswered records a line just typed into a dispatcher's current wait, under
+// the hook lock and against a fresh read. Best-effort: the reply has already
+// been typed, and failing to write that it was must not turn it into an error.
+// A record that has already moved on (the hook beat us here) is left alone.
+func MarkAnswered(id, text string) {
+	release := state.Lock()
+	defer release()
+	for _, d := range state.LoadAll() {
+		if d.ID != id {
+			continue
+		}
+		if !d.Waiting() {
+			return
+		}
+		now := time.Now()
+		d.Answer, d.AnsweredAt = text, &now
+		_ = state.Save(d)
+		return
+	}
 }
 
 func runPark(args []string, out io.Writer) error {

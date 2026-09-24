@@ -438,3 +438,18 @@ func TestApplyStampsTheWait(t *testing.T) {
 		t.Error("a permission prompt is a wait")
 	}
 }
+
+// The answer rides the wait it was typed into: the prompt it caused clears it.
+func TestApplyClearsTheAnswerWhenWorkResumes(t *testing.T) {
+	now := time.Now()
+	d := &state.Dispatch{Status: state.StatusNeedsInput, WaitingSince: &now}
+	later := now.Add(time.Millisecond)
+	d.Answer, d.AnsweredAt = "merge it", &later
+	if !d.Handled() {
+		t.Fatal("an answered wait is handled")
+	}
+	apply(d, "UserPromptSubmit", hookInput{})
+	if d.Answer != "" || d.AnsweredAt != nil {
+		t.Fatalf("answer survived the turn it started: %q", d.Answer)
+	}
+}
