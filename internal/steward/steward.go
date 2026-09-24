@@ -76,7 +76,7 @@ func Start() error {
 		return err
 	}
 	trusted := trustDir(dir)
-	if err := newSession(Session, dir, dispatch.StewardCommand(Opening)); err != nil {
+	if err := newSession(Session, dir, dispatch.StewardCommand(os.Getenv("CLAUDE_DISPATCHER_STATE"), Opening)); err != nil {
 		return err
 	}
 	if !trusted {

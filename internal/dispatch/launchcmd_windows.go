@@ -41,8 +41,12 @@ func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) stri
 // the model are passed again because both are properties of the new session,
 // not of the transcript it reopens.
 // StewardCommand is the steward session's command — see the Unix build.
-func StewardCommand(opening string) string {
-	return psRun(fmt.Sprintf("claude%s %s", modeArgs(ModeAuto), psQuote(opening))) + " & pause"
+func StewardCommand(stateDir, opening string) string {
+	env := ""
+	if stateDir != "" {
+		env = `set "CLAUDE_DISPATCHER_STATE=` + stateDir + `" && `
+	}
+	return env + psRun(fmt.Sprintf("claude%s %s", modeArgs(ModeAuto), psQuote(opening))) + " & pause"
 }
 
 func resumeCommand(dispatcherID, sessionID, promptPath string, mode Mode, model Model) string {

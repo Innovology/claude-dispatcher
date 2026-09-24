@@ -42,6 +42,11 @@ func TestStartWritesTheBriefAndStartsTheSession(t *testing.T) {
 	if len(f.started) != 1 || !strings.HasPrefix(f.started[0], Session+"|"+Dir()+"|") {
 		t.Fatalf("started %q", f.started)
 	}
+	// tmux gives a session its server's environment, so a chosen store has to
+	// ride the command or the steward reads the default one.
+	if !strings.Contains(f.started[0], "CLAUDE_DISPATCHER_STATE="+"'"+os.Getenv("CLAUDE_DISPATCHER_STATE")+"'") {
+		t.Errorf("the store is not carried into the session: %s", f.started[0])
+	}
 	if strings.Contains(f.started[0], "CLAUDE_DISPATCHER_ID") {
 		t.Error("the steward is not a dispatcher; its hooks must not be attributed to one")
 	}
