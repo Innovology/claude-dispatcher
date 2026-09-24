@@ -15,7 +15,7 @@ import "strings"
 // together, from the one mode.
 //
 // The auto contract is written against what the transcripts show dispatchers
-// stopping for (ADR 0017): 28% of turn endings offered a next step or asked a
+// stopping for (ADR 0018): 28% of turn endings offered a next step or asked a
 // question, and 9% ended the turn to "check back once CI finishes". Claude
 // Code already has the machinery for the second — a background task or Monitor
 // keeps the turn alive and wakes it when the wait is over — so the contract

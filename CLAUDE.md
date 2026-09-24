@@ -443,6 +443,40 @@
   OUT switch itself shows as config beside the mode. Existing installs
   re-run `init` to get the two new hook entries. Full record:
   `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
+- **A stop says what it needs, and only the human's stops reach the human.**
+  Reported as "70% of the time I seem to just be pushing them along". Measured
+  over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
+  next step or asking, 18% asking to merge, 9% ending the turn to "check back
+  once CI finishes", and after 24 API errors the human typed `continue` 20 times
+  after a median 23 minutes. Four causes. The row did not say what it wanted:
+  SIGNAL read "it finished a turn" everywhere and the lead was each block's
+  *first line*, the headline, while the ask closes the message. So `Said` rides
+  the record from the `Stop` hook's `last_assistant_message` (whole, tail-capped,
+  cleared by the next prompt) and `ask.Of` quotes the question it closed on —
+  one extractor, shared by the row and `status`. Answering meant attaching:
+  `r` on a waiting row types one line into the session (never on a permission
+  prompt, which is a menu; never where claude has exited), and `SendKeys` now
+  targets the *pane* (`=name:`, `-l --`) — `-t =name` got "can't find pane" from
+  tmux 3.7b, so the old reply never typed anything and said it had. An API
+  error was invisible: `StopFailure` fires *instead of* `Stop` and was never
+  installed, so the record said working over a dead prompt. It writes a
+  `Failure` annotation now (Claude Code's category, verbatim), and the cockpit
+  poll retries the transient ones with `continue` on 1m/5m/15m
+  (`dispatch.RetryFailed`) — only into a live, non-parked session whose claude
+  is provably at its prompt, claimed under the hook lock; the count resets only
+  on `Stop`; a pending retry rides with the running rows and a retry two polls
+  overdue is the human's again. And auto dispatches were told how to start, not
+  how to wait or when to stop — and only the triage form told them anything. The
+  mode's working contract (`dispatch.Contract`) is composed at `Launch` for every
+  way in: wait on slow things with a background task or `Monitor` rather than
+  ending the turn, take the next step the brief implies, stop only for a
+  decision that is the human's and end on that one question. Claude Code's own
+  long-running machinery keeps the session going; the cockpit only acts where
+  nothing inside the session can. `status [--json]`/`reply`/`park`/`unpark` put
+  the triage table on the command line so a steward session can run the fleet —
+  the next step, and the owner of the LAND (merge-when-green) call this
+  deliberately did not make. Full record:
+  `docs/adr/0018-a-stop-says-what-it-needs.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
@@ -492,7 +526,8 @@
   speaks in tokens/effort, never dollars.
 
 ## Architecture map
-- `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`.
+- `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
+  fleet verbs `status`/`reply`/`park`/`unpark` (`internal/fleetcmd`).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
@@ -501,14 +536,21 @@
   subscribed to) through the platform's own command. The cockpit's
   `theme.go` polls it and pairs it with the terminal's 2031 reports.
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
-  state machine (launching/working/needs-input/blocked/done/exited).
+  state machine (launching/working/needs-input/blocked/done/exited), and keeps
+  the record's `Said` (the last message, whole) and `Failure` (StopFailure).
+- `internal/ask` — the question a stopped session closed on, quoted; shared by
+  the triage row and `status`.
+- `internal/fleetcmd` — the triage table's reading and hand-acts on the command
+  line, for a session stewarding the fleet.
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
   finished dispatcher's session reopened with `claude --resume <session id>`
   in its own worktree (rebuilt if it was reclaimed). A session ending never
   loses a dispatcher — triage's `h` and the product panel's `H` tab list every
-  finished one and resume it. `root.go` is where a feature branch starts: the
-  remote's own default, the human's named `Root`, and the branch list the forms
-  offer — and the reason none of it trusts `origin/HEAD`.
+  finished one and resume it. `contract.go` is the working contract every
+  launch closes with; `retry.go` is the `continue` a transient API error gets.
+  `root.go` is where a feature branch starts: the remote's own default, the
+  human's named `Root`, and the branch list the forms offer — and the reason
+  none of it trusts `origin/HEAD`.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over

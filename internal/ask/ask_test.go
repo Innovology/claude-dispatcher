@@ -2,7 +2,7 @@ package ask
 
 import "testing"
 
-// The fixtures are real turn endings from the transcripts ADR 0017 measured,
+// The fixtures are real turn endings from the transcripts ADR 0018 measured,
 // each followed in the log by the human attaching to type a one-line answer.
 func TestOf(t *testing.T) {
 	cases := []struct{ name, said, want string }{

@@ -252,7 +252,7 @@ type Failure struct {
 // Transient reports whether the error is one that "continue" can get past:
 // the API was briefly unavailable, or the reply ran out of room. It is what
 // the human typed after 20 of the 24 API errors in the transcripts measured
-// for ADR 0017. Everything else — a usage limit, a credential, a billing
+// for ADR 0018. Everything else — a usage limit, a credential, a billing
 // problem, a bad model name — is a fact the human has to act on, and typing
 // at it again only buries it.
 func (f *Failure) Transient() bool {

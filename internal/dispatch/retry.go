@@ -9,7 +9,7 @@ import (
 )
 
 // RetryText is what a retry types at the session: the word the human typed
-// after 20 of the 24 API-error turns measured in the transcripts (ADR 0017).
+// after 20 of the 24 API-error turns measured in the transcripts (ADR 0018).
 const RetryText = "continue"
 
 // RetryBackoff is how long after a failure each successive retry waits. Its
