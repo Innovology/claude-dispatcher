@@ -2,6 +2,8 @@ package dispatch
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"claude-dispatcher/internal/state"
@@ -137,4 +139,53 @@ func claimRetry(id string, now time.Time) (*state.Dispatch, bool) {
 		Reason:       f.Error,
 	})
 	return rec, true
+}
+
+// ErrorName is Claude Code's error category in words: "server_error" →
+// "server error".
+func ErrorName(f *state.Failure) string {
+	return strings.ReplaceAll(f.Error, "_", " ")
+}
+
+// FailureSummary is the one-line account for a dispatcher an API error stopped, or
+// "" for one no error touched. It says which error, and what is being done
+// about it: a retry coming (and when), a retry sent and the session going
+// again, or nothing more the machine will try.
+func FailureSummary(rec *state.Dispatch, now time.Time) string {
+	f := rec.Failure
+	if f == nil {
+		return ""
+	}
+	name := ErrorName(f)
+	steps := strconv.Itoa(len(RetryBackoff))
+	if rec.Status == state.StatusWorking {
+		if f.Retries == 0 {
+			return "" // the human answered it themselves; it is going again
+		}
+		return "retried after " + name + " · " + strconv.Itoa(f.Retries) + " of " + steps
+	}
+	if RetryPending(rec, now) {
+		due, at := RetryDue(rec, now)
+		next := strconv.Itoa(f.Retries+1) + " of " + steps
+		if due {
+			return "api error · " + name + " · retry " + next + " now"
+		}
+		return "api error · " + name + " · retry " + next + " in " + until(at, now)
+	}
+	if f.Transient() && f.Retries > 0 {
+		return "api error · " + name + " · " + strconv.Itoa(f.Retries) + " retries spent"
+	}
+	return "api error · " + name
+}
+
+// until is how long until t, in the triage table's age units.
+func until(t, now time.Time) string {
+	d := t.Sub(now)
+	switch {
+	case d < time.Minute:
+		return strconv.Itoa(int((d+time.Second-1)/time.Second)) + "s"
+	case d < time.Hour:
+		return strconv.Itoa(int((d+time.Minute-1)/time.Minute)) + "m"
+	}
+	return strconv.Itoa(int(d/time.Hour)) + "h"
 }

@@ -10,7 +10,6 @@ package cockpit
 // yields "", and the row falls back to saying the turn finished.
 
 import (
-	"strings"
 	"time"
 
 	"claude-dispatcher/internal/ask"
@@ -23,41 +22,13 @@ import (
 // table and a steward reading the fleet can never quote different asks.
 func cqAsk(said string) string { return ask.Of(said) }
 
-// cqErrorName is Claude Code's error category in words: "server_error" →
-// "server error".
-func cqErrorName(f *state.Failure) string {
-	return strings.ReplaceAll(f.Error, "_", " ")
-}
+// cqErrorName is Claude Code's error category in words.
+func cqErrorName(f *state.Failure) string { return dispatchpkg.ErrorName(f) }
 
-// cqFailSignal is the SIGNAL clause for a dispatcher an API error stopped, or
-// "" for one no error touched. It says which error, and what is being done
-// about it: a retry coming (and when), a retry sent and the session going
-// again, or nothing more the machine will try.
+// cqFailSignal is the SIGNAL clause for a dispatcher an API error stopped — see
+// dispatch.FailureSummary, which the status command shares.
 func cqFailSignal(rec *state.Dispatch, now time.Time) string {
-	f := rec.Failure
-	if f == nil {
-		return ""
-	}
-	name := cqErrorName(f)
-	steps := itoa(len(dispatchpkg.RetryBackoff))
-	if rec.Status == state.StatusWorking {
-		if f.Retries == 0 {
-			return "" // the human answered it themselves; it is going again
-		}
-		return "retried after " + name + " · " + itoa(f.Retries) + " of " + steps
-	}
-	if dispatchpkg.RetryPending(rec, now) {
-		due, at := dispatchpkg.RetryDue(rec, now)
-		next := itoa(f.Retries+1) + " of " + steps
-		if due {
-			return "api error · " + name + " · retry " + next + " now"
-		}
-		return "api error · " + name + " · retry " + next + " in " + cqUntil(at, now)
-	}
-	if f.Transient() && f.Retries > 0 {
-		return "api error · " + name + " · " + itoa(f.Retries) + " retries spent"
-	}
-	return "api error · " + name
+	return dispatchpkg.FailureSummary(rec, now)
 }
 
 // cqFailLead is the detail panel's sentence for a stopped-by-error row: the
@@ -72,16 +43,4 @@ func cqFailLead(rec *state.Dispatch) string {
 		return lead + ". This one is yours to fix; retrying would not get past it."
 	}
 	return lead + "."
-}
-
-// cqUntil is how long until t, in cqAge's units.
-func cqUntil(t, now time.Time) string {
-	d := t.Sub(now)
-	switch {
-	case d < time.Minute:
-		return itoa(int((d+time.Second-1)/time.Second)) + "s"
-	case d < time.Hour:
-		return itoa(int((d+time.Minute-1)/time.Minute)) + "m"
-	}
-	return itoa(int(d/time.Hour)) + "h"
 }

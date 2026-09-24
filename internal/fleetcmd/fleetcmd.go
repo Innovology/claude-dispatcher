@@ -70,6 +70,8 @@ type Entry struct {
 	Started      time.Time `json:"started"`
 	Session      string    `json:"session,omitempty"`
 	Worktree     string    `json:"worktree,omitempty"`
+
+	failure string // the row's failure clause, for the text form
 }
 
 // Run is the entry point for the four verbs; it returns the exit code.
@@ -124,6 +126,8 @@ func (e Entry) headline() string {
 		return e.Ask
 	case e.Parked != "":
 		return "parked · " + e.Parked
+	case e.failure != "":
+		return e.failure
 	}
 	return e.Reason
 }
@@ -145,6 +149,7 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 			Mode: d.Mode, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
 			Session: d.TmuxSession, Worktree: d.WorktreePath,
+			failure: dispatch.FailureSummary(d, now),
 		}
 		if d.Status == state.StatusNeedsInput || d.Finished() {
 			e.Said, e.Ask = d.Said, ask.Of(d.Said)
