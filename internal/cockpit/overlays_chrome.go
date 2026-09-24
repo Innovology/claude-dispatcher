@@ -35,6 +35,7 @@ var helpSections = []struct {
 		{"s", "skip · send it to the back, it comes round again"},
 		{"p", "park it · say why, it waits below the fleet · p unparks"},
 		{"d", "dispatch · pick a repo, say what it does"},
+		{"t", "steward on/off · it answers what the brief settles, notes the rest on your rows"},
 		{"ctrl+z", "put back the last thing you cleared"},
 	}},
 	{section: "what has finished", keys: []struct{ k, d string }{

@@ -320,6 +320,12 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 			return m.fleetSetFilter(fleetFilters[0]), nil, true
 		}
 		return m.dxReset().fleetSetFilter(fleetHistory), nil, true
+	case "t":
+		// The steward's switch. Global to the table rather than a row act: it
+		// is about the whole fleet, and it is flipped from wherever the cursor
+		// happens to be.
+		m.notice = stewardToggleVerb() + "…"
+		return m, stewardToggleCmd(), true
 	case "d":
 		// Dispatching leaves history behind: the form is drawn over the fleet,
 		// never over the history table, so opening it there would set a form up

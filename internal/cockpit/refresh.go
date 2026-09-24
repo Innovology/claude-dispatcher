@@ -9,6 +9,7 @@ import (
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/track"
 )
 
@@ -168,6 +169,10 @@ func waitBoot(ch chan bootUpdate) tea.Cmd {
 func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 	return func() tea.Msg {
 		dispatchpkg.RetryFailed(state.LoadAll(), time.Now())
+		// A switched-on steward whose session was taken away — a reboot, claude
+		// exiting in it — comes back here, at startup and on every poll, so
+		// the switch is the whole of the human's involvement (steward.Ensure).
+		_, _ = steward.Ensure()
 		track.Refresh(state.LoadAll(), cfg)
 		return trackedMsg{}
 	}

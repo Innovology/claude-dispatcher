@@ -500,6 +500,17 @@
   `steward · yours: …` or `answered · …`; the headline says `steward watching`.
   Verified against a real steward and scratch fleet. Full record:
   `docs/adr/0019-the-steward-pushes-what-the-brief-settles.md`.
+- **The steward is a switch, not a session you run.** "Should the steward not
+  be completely opaque to the user? Maybe a on off toggle in triage." `t` on
+  triage flips it in the background (no handover); the headline says `steward
+  on`/`steward starting`, nothing when off; the footer names `t start/stop
+  steward`. On is intent — `steward/enabled` in the state dir (never config:
+  a scratch store must not switch on the real one's) — and `steward.Ensure`
+  makes the fact follow it at startup and every poll: a gone session is
+  restarted, an exited claude (SessionIdle proves the shell) replaced, an
+  unknown answer left alone. Stop clears the switch before the kill, so no poll
+  can revive it in between. Its session is for reading; its output is the
+  notes on the rows. Full record: `docs/adr/0020-the-steward-is-a-switch.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main

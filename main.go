@@ -31,7 +31,8 @@ Usage:
                                shelve a dispatcher · unpark <id|feature> takes it back
   claude-dispatcher note <id|feature> <text>
                                the steward's reading of a dispatcher's wait
-  claude-dispatcher steward    start the fleet's steward session · steward stop ends it
+  claude-dispatcher steward    switch the fleet's steward on · steward stop switches it off
+                               (t on the triage table does the same)
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -89,11 +90,13 @@ func main() {
 // runSteward starts or stops the steward session (internal/steward).
 func runSteward(args []string) int {
 	if len(args) > 0 && args[0] == "stop" {
-		if err := steward.Stop(); err != nil {
+		// Stop switches it off before it looks for a session, so "not running"
+		// still leaves it off — which is what was asked for.
+		if err := steward.Stop(); err != nil && steward.Enabled() {
 			fmt.Fprintln(os.Stderr, "steward:", err)
 			return 1
 		}
-		fmt.Println("steward stopped")
+		fmt.Println("steward off")
 		return 0
 	}
 	if len(args) > 0 {
