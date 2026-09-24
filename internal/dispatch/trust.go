@@ -97,6 +97,56 @@ func InheritTrust(repoPath, worktree string) bool {
 	return writeAtomic(path, out) == nil
 }
 
+// TrustOwnDir marks a directory the dispatcher itself created as trusted, so a
+// session started there does not stop on Claude Code's trust dialog before it
+// reads its first word. It is the one place trust is written rather than
+// inherited, and it is only for a directory under the dispatcher's own state
+// (the steward's): InheritTrust will not invent trust for a human's repo, and
+// nothing should — but a folder we made, holding nothing but our own brief, has
+// no one else to ask.
+func TrustOwnDir(dir string) bool {
+	path := claudeConfigPath()
+	if path == "" || dir == "" {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var cfg map[string]json.RawMessage
+	if json.Unmarshal(raw, &cfg) != nil {
+		return false
+	}
+	var projects map[string]map[string]any
+	if p, ok := cfg["projects"]; ok {
+		if json.Unmarshal(p, &projects) != nil {
+			return false
+		}
+	}
+	if projects == nil {
+		projects = map[string]map[string]any{}
+	}
+	if trusted, _ := projects[dir]["hasTrustDialogAccepted"].(bool); trusted {
+		return true
+	}
+	entry := projects[dir]
+	if entry == nil {
+		entry = map[string]any{}
+	}
+	entry["hasTrustDialogAccepted"] = true
+	projects[dir] = entry
+	encoded, err := json.Marshal(projects)
+	if err != nil {
+		return false
+	}
+	cfg["projects"] = encoded
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return false
+	}
+	return writeAtomic(path, out) == nil
+}
+
 // writeAtomic replaces path in one rename, so a crash mid-write cannot leave
 // Claude Code with a truncated config.
 func writeAtomic(path string, data []byte) error {
