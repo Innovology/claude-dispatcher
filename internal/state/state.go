@@ -519,6 +519,11 @@ const (
 	EventDispatchFailed = "DispatchFailed"
 	// EventDispatchLaunched is a session actually started.
 	EventDispatchLaunched = "DispatchLaunched"
+	// EventRetried is the cockpit typing "continue" into a session whose turn
+	// a transient API error ended (dispatch.RetryFailed), with the error as
+	// the reason. Not a lifecycle event either: the UserPromptSubmit it causes
+	// is the one that says the session is working again.
+	EventRetried = "Retried"
 )
 
 // AppendEvent appends one line to events.jsonl; failures are swallowed because
