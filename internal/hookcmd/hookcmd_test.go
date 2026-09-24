@@ -404,3 +404,37 @@ func TestApplyRecordsWhatItSaid(t *testing.T) {
 		t.Fatalf("a new prompt must clear what was said, got %q", d.Said)
 	}
 }
+
+// WaitingSince marks each new wait, holds through the idle prompt that trails
+// a stop, and clears — with the steward's note on it — when work resumes.
+func TestApplyStampsTheWait(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "Stop", hookInput{})
+	if d.WaitingSince == nil {
+		t.Fatal("a stop must start a wait")
+	}
+	first := *d.WaitingSince
+	time.Sleep(2 * time.Millisecond)
+	apply(d, "Notification:idle_prompt", hookInput{})
+	if !d.WaitingSince.Equal(first) {
+		t.Error("the trailing idle prompt is the same wait")
+	}
+	now := time.Now()
+	d.StewardNote, d.StewardNoteAt = "yours: the merge", &now
+	if d.Note() == "" {
+		t.Fatal("a note written in this wait speaks for it")
+	}
+	time.Sleep(2 * time.Millisecond)
+	apply(d, "Stop", hookInput{}) // a turn that ended again said something new
+	if !d.WaitingSince.After(first) || d.Note() != "" {
+		t.Errorf("a new stop is a new wait; the old note is stale: since=%v note=%q", d.WaitingSince, d.Note())
+	}
+	apply(d, "UserPromptSubmit", hookInput{})
+	if d.WaitingSince != nil || d.StewardNote != "" {
+		t.Errorf("working again: since=%v note=%q", d.WaitingSince, d.StewardNote)
+	}
+	apply(d, "Notification:permission_prompt", hookInput{})
+	if d.WaitingSince == nil {
+		t.Error("a permission prompt is a wait")
+	}
+}

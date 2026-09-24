@@ -214,7 +214,31 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 	if d.Status == state.StatusDone && !reopensDone(event) {
 		return changed // done means live; only proof of life downgrades it
 	}
-	return applyStatus(d, event, in) || changed
+	wasWaiting := d.Waiting()
+	statusChanged := applyStatus(d, event, in)
+	return stampWait(d, event, wasWaiting) || statusChanged || changed
+}
+
+// stampWait keeps WaitingSince: set the moment a session stops to wait on
+// someone, and cleared while it works. Every Stop and StopFailure is a new wait
+// even from needs-input — a turn that ended again has said something new —
+// while the idle prompt that trails a stop a minute later is the same wait.
+// The steward's note is cleared with the wait it was written in.
+func stampWait(d *state.Dispatch, event string, wasWaiting bool) bool {
+	switch {
+	case !d.Waiting():
+		if d.WaitingSince == nil && d.StewardNote == "" {
+			return false
+		}
+		d.WaitingSince = nil
+		d.StewardNote, d.StewardNoteAt = "", nil
+		return true
+	case !wasWaiting || event == "Stop" || event == "StopFailure":
+		now := time.Now()
+		d.WaitingSince = &now
+		return true
+	}
+	return false
 }
 
 // applyFanOut keeps the Subagents annotation current. Every path a session

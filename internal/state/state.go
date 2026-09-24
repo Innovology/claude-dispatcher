@@ -150,9 +150,21 @@ type Dispatch struct {
 	// one line that needed no answer and cut the one that did. Cleared when the
 	// next turn starts, because by then it has been answered. Capped at
 	// MaxSaid, keeping the end, since the end is where the ask is.
-	Said      string    `json:"said,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Said string `json:"said,omitempty"`
+	// WaitingSince is when the session last stopped to wait on someone — a
+	// turn ending (Stop, StopFailure) or a permission prompt — and nil while it
+	// is working. It is what "handled" is measured against: a steward's note
+	// written before it is about an earlier wait.
+	WaitingSince *time.Time `json:"waiting_since,omitempty"`
+	// StewardNote is the steward session's reading of this dispatcher's
+	// current wait — "yours: the merge ships billing; CI green, no review" —
+	// written with `claude-dispatcher note`. An annotation like parking, never
+	// a Status. It only speaks for the wait it was written in (StewardNoteAt
+	// after WaitingSince) and is cleared when the next turn starts.
+	StewardNote   string     `json:"steward_note,omitempty"`
+	StewardNoteAt *time.Time `json:"steward_note_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 	// FinishedAt is the instant this dispatcher's status first said it was over
 	// — stamped by Stop, at the transition, and nowhere else. UpdatedAt cannot
 	// answer that question: Save stamps it on every write, and a finished record
@@ -219,6 +231,24 @@ type Subagent struct {
 	// subagent still running.
 	StartedAt time.Time  `json:"started_at"`
 	StoppedAt *time.Time `json:"stopped_at,omitempty"`
+}
+
+// Waiting reports whether the session has stopped for someone: its turn ended
+// on the human, or it is on a permission prompt.
+func (d *Dispatch) Waiting() bool {
+	return d.Status == StatusNeedsInput || d.Status == StatusBlocked
+}
+
+// Note is the steward's note on the current wait, or "" when there is none or
+// it was written about an earlier one.
+func (d *Dispatch) Note() string {
+	if d.StewardNote == "" || d.StewardNoteAt == nil || !d.Waiting() {
+		return ""
+	}
+	if d.WaitingSince != nil && d.StewardNoteAt.Before(*d.WaitingSince) {
+		return ""
+	}
+	return d.StewardNote
 }
 
 // MaxSaid bounds Dispatch.Said. The record is rewritten on every hook event.
