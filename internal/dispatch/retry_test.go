@@ -160,8 +160,8 @@ func TestRetryPending(t *testing.T) {
 		at   time.Duration
 		want bool
 	}{
-		{0, true},                          // scheduled
-		{time.Minute, true},                // due, the poll has not come round
+		{0, true},           // scheduled
+		{time.Minute, true}, // due, the poll has not come round
 		{time.Minute + RetryGrace - 1, true},
 		{time.Minute + RetryGrace, false}, // overdue: it is not coming
 	} {
