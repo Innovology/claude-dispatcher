@@ -268,7 +268,7 @@ func TestMarkDoneCmd(t *testing.T) {
 func TestReplyCmdNoSession(t *testing.T) {
 	saved := captureVars()
 	defer restoreVars(saved)
-	liveRecords = map[string]*state.Dispatch{}
+	liveByID = map[string]*state.Dispatch{}
 
 	msg := replyCmd("ghost", "hello")()
 	am, ok := msg.(actionMsg)
@@ -277,8 +277,8 @@ func TestReplyCmdNoSession(t *testing.T) {
 	}
 
 	// A record exists but its session is not live either.
-	withFakeRecord(t, "quiet", &state.Dispatch{Feature: "quiet", TmuxSession: "cockpit-test-nonexistent-9981"})
-	msg = replyCmd("quiet", "hello")()
+	liveByID = map[string]*state.Dispatch{"q1": {ID: "q1", Feature: "quiet", TmuxSession: "cockpit-test-nonexistent-9981"}}
+	msg = replyCmd("q1", "hello")()
 	am, ok = msg.(actionMsg)
 	if !ok || !strings.Contains(am.notice, "no live session to reply") {
 		t.Errorf("replyCmd(dead session) = %#v", msg)

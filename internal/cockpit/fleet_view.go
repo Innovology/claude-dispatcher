@@ -658,6 +658,9 @@ func (m model) cqFooterHelp() string {
 	if m.parkOpen {
 		return "type the reason · enter parks it · esc cancels"
 	}
+	if m.replyOpen {
+		return "type the answer · enter sends it · esc cancels"
+	}
 	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}

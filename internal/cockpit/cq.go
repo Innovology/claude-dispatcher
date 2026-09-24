@@ -273,10 +273,12 @@ func cqClashNote(rec *state.Dispatch, clash *cqClash) string {
 // y approve / n deny (nothing in this repo answers a Claude Code permission
 // prompt — v2's n only set a notice and denied nothing), o open pr (nothing
 // opens a URL), R retry (no rerun action, and gh.Run carries no id to target),
-// F follow (nothing here tails a session without attaching to it), and r reply
-// (replyCmd exists, but this screen has one text affordance and it belongs to
-// the dispatch form).  Attaching is the honest answer to all of them: it hands
-// you the session where the prompt actually is.
+// and F follow (nothing here tails a session without attaching to it).
+// Attaching is the honest answer to all of them: it hands you the session where
+// the prompt actually is. r reply is the exception, and a deliberate reversal:
+// it was left off because this screen's one text affordance was the dispatch
+// form, and the cost was measured — most answers are one line, and every one
+// was a jump-in (reply.go).
 func cqActs(rec *state.Dispatch, kind string) []cqAct {
 	// A finished dispatcher has no session to attach to and nothing left to
 	// approve or kill. What it has is a transcript, so ⏎ resumes it — and the
@@ -350,7 +352,14 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 			ok: "\"" + rec.Feature + "\" marked shipped"})
 	}
 	acts = append(acts,
-		cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""},
+		cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+	if kind != "permission" {
+		// No ok, like park: the key opens the reply line, and nothing is typed
+		// into the session until enter. Not on a permission prompt, which is a
+		// menu — typed characters would pick its options.
+		acts = append(acts, cqAct{k: "r", d: "reply"})
+	}
+	acts = append(acts,
 		// Park and skip carry no ok on purpose: neither is an act that has
 		// happened by the time the key lands. Skip is table rotation; park
 		// opens the reason input, and nothing is parked until the reason is

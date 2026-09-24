@@ -191,6 +191,10 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updatePark(k)
 		return mm, cmd
 	}
+	if m.replyOpen {
+		mm, cmd := m.updateReply(k)
+		return mm, cmd
+	}
 	if m.paletteOpen {
 		switch k {
 		case "esc":
