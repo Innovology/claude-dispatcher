@@ -10,60 +10,18 @@ package cockpit
 // yields "", and the row falls back to saying the turn finished.
 
 import (
-	"regexp"
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/ask"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 )
 
-// cqInvite matches a sentence that hands the next move to the human without a
-// question mark: "Say the word and I'll merge it." is the commonest ask in the
-// transcripts and has none.
-var cqInvite = regexp.MustCompile(`(?i)\b(say the word|let me know|tell me|your call|want me to|shall i|should i|would you like|do you want|ok to|okay to)\b`)
-
-// cqSentenceBreak splits prose at a sentence end followed by what starts one.
-var cqSentenceBreak = regexp.MustCompile(`([.!?])\s+([A-Z*` + "`" + `(\[])`)
-
-// cqAskParagraphs is how far from the end an ask is looked for. The ask closes
-// the message; a question five paragraphs up is one the message went on past.
-const cqAskParagraphs = 3
-
-// cqAsk is the question a stopped turn ended on, verbatim — the last sentence
-// in the closing paragraphs that is a question or hands the move over — or ""
-// when the message asks nothing.
-//
-// Measured against 949 real turn endings it finds an ask in 401; the rest are
-// reports, which is the right answer for them. Emphasis markers are dropped
-// because the terminal would print them as asterisks, and a list is split into
-// its items so "Say the word." does not run on into the bullet under it.
-func cqAsk(said string) string {
-	paras := strings.Split(strings.ReplaceAll(strings.TrimSpace(said), "\r\n", "\n"), "\n\n")
-	for i, seen := len(paras)-1, 0; i >= 0 && seen < cqAskParagraphs; i-- {
-		p := strings.TrimSpace(paras[i])
-		if p == "" {
-			continue
-		}
-		seen++
-		lines := strings.Split(p, "\n")
-		for j := len(lines) - 1; j >= 0; j-- {
-			line := strings.NewReplacer("**", "", "__", "").Replace(lines[j])
-			line = strings.TrimLeft(strings.TrimSpace(line), "-*•> ")
-			sents := strings.Split(cqSentenceBreak.ReplaceAllString(line, "$1\n$2"), "\n")
-			for k := len(sents) - 1; k >= 0; k-- {
-				s := strings.Join(strings.Fields(sents[k]), " ")
-				if s == "" {
-					continue
-				}
-				if strings.HasSuffix(s, "?") || cqInvite.MatchString(s) {
-					return s
-				}
-			}
-		}
-	}
-	return ""
-}
+// cqAsk is the question a stopped turn ended on, verbatim, or "" when the
+// message asks nothing — see ask.Of, which the status command shares so the
+// table and a steward reading the fleet can never quote different asks.
+func cqAsk(said string) string { return ask.Of(said) }
 
 // cqErrorName is Claude Code's error category in words: "server_error" →
 // "server error".

@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"claude-dispatcher/internal/cockpit"
+	"claude-dispatcher/internal/fleetcmd"
 	"claude-dispatcher/internal/hookcmd"
 	"claude-dispatcher/internal/initcmd"
 	"claude-dispatcher/internal/version"
@@ -21,6 +22,11 @@ const usage = `claude-dispatcher — dispatch cockpit for Claude Code sessions
 Usage:
   claude-dispatcher            open the cockpit (six lenses)
   claude-dispatcher init       write config, discover repos, install the status hook
+  claude-dispatcher status     the live fleet and what each dispatcher wants (--json)
+  claude-dispatcher reply <id|feature> <text>
+                               type one line into a waiting dispatcher's session
+  claude-dispatcher park <id|feature> <reason>
+                               shelve a dispatcher · unpark <id|feature> takes it back
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -47,6 +53,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "init:", err)
 			os.Exit(1)
 		}
+	case "status", "reply", "park", "unpark":
+		// The triage table's reading and its three hands, for a session
+		// stewarding the fleet — see internal/fleetcmd.
+		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
 	case "hook":
 		// Never fail loudly: a hook error must not disturb the Claude session.
 		os.Exit(hookcmd.Run(args[1:]))
