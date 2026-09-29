@@ -599,6 +599,11 @@ const (
 	// the reason. Not a lifecycle event either: the UserPromptSubmit it causes
 	// is the one that says the session is working again.
 	EventRetried = "Retried"
+	// EventTidied is a finished dispatcher's worktree removed by a tidy, or
+	// its node_modules removed from a worktree kept for its uncommitted work
+	// (dispatch.Tidy), with what was taken as the reason. Not a lifecycle
+	// event: the dispatcher had already ended.
+	EventTidied = "Tidied"
 )
 
 // AppendEvent appends one line to events.jsonl; failures are swallowed because
