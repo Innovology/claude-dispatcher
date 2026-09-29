@@ -511,6 +511,25 @@
   unknown answer left alone. Stop clears the switch before the kill, so no poll
   can revive it in between. Its session is for reading; its output is the
   notes on the rows. Full record: `docs/adr/0020-the-steward-is-a-switch.md`.
+- **A finished dispatcher leaves the disk when asked, and takes only what it
+  can prove is ours.** Reported as "we need a way to tidy up and completely
+  remove worktrees and their node-modules". Only kill ever removed a worktree,
+  so every dispatcher that ended any other way left its checkout and its
+  installs behind: measured, ~130 folders and ~100 GB, 98 behind finished
+  records, nearly all node_modules. `: tidy` (plan read in the background, then
+  the confirm bar) and `claude-dispatcher tidy [--yes]` (a listing that touches
+  no folder, then the act) run `dispatch.PlanTidy`/`Tidy`. Candidates are only
+  the `WorktreePath`s records name, grouped by file identity (`Aura`/`aura` on a
+  case-insensitive disk are one folder); the worktrees dir also holds a full
+  clone and session-made worktrees, and those are never listed. A folder goes
+  only when every record naming it is finished, unparked and sessionless (`done`
+  is the tracker's word, not the session's; an unaskable supervisor is "maybe
+  open"), after the ghost sweep. Clean: `git worktree remove` without --force,
+  so git still guards and ignored files go with it; the branch stays and
+  `Resume` rebuilds. Dirty: kept, minus the node_modules git ignores and tracks
+  nothing in. A detached HEAD no ref contains is kept. Each item is re-planned
+  at the moment of acting, and each act is a `Tidied` event. Full record:
+  `docs/adr/0021-a-finished-dispatcher-leaves-the-disk-when-asked.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
@@ -561,7 +580,7 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
-  fleet verbs `status`/`reply`/`park`/`unpark`/`note` (`internal/fleetcmd`)
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy` (`internal/fleetcmd`)
   and `steward [stop]` (`internal/steward`).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
@@ -586,6 +605,7 @@
   loses a dispatcher — triage's `h` and the product panel's `H` tab list every
   finished one and resume it. `contract.go` is the working contract every
   launch closes with; `retry.go` is the `continue` a transient API error gets.
+  `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
   `root.go` is where a feature branch starts: the remote's own default, the
   human's named `Root`, and the branch list the forms offer — and the reason
   none of it trusts `origin/HEAD`.
