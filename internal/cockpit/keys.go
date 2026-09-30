@@ -131,6 +131,10 @@ func (m model) runCommand() (model, tea.Cmd) {
 		m.notice = "starting the steward…"
 		return m, stewardStartCmd()
 	}
+	if c.name == "tidy" {
+		m.paletteOpen, m.paletteText = false, ""
+		return m.startTidy()
+	}
 	if c.name == "stop steward" {
 		m.paletteOpen, m.paletteText = false, ""
 		return m, stewardStopCmd()

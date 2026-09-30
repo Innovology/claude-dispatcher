@@ -160,6 +160,7 @@ var commands = []command{
 	{name: "pipelines", hint: "runs across github actions + azure pipelines"},
 	{name: "ship", hint: "mark shipped manually — done means live"},
 	{name: "kill", hint: "end the tmux session and mark exited"},
+	{name: "tidy", hint: "remove the worktrees and node_modules finished dispatchers left on disk"},
 	{name: "roots", hint: "edit the directories scanned for repos"},
 	{name: "settings", hint: "scan roots · Linear key · Azure org · weekly token budget"},
 }

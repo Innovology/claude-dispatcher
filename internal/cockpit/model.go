@@ -28,9 +28,10 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship"
+	kind          string // "kill" | "ship" | "tidy"
 	feature, repo string
-	features      []string // kill targets (marked set, or the one selected)
+	features      []string               // kill targets (marked set, or the one selected)
+	tidy          []dispatchpkg.TidyItem // the plan a tidy confirms
 }
 
 // model is the whole cockpit. Every lens reads and writes these fields; each
@@ -152,8 +153,10 @@ type model struct {
 	helpOpen bool
 
 	confirm *confirmState
-	undo    string
-	undoSeq int
+	// tidyReading is a tidy's plan being read in the background (see tidy.go).
+	tidyReading bool
+	undo        string
+	undoSeq     int
 
 	// install is how this build got onto the machine, and so what would upgrade
 	// it — see version.Detect.
@@ -538,6 +541,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm, cmd := m.onStewardStarted(msg)
 		return mm, cmd
 
+	case tidyPlannedMsg:
+		mm, cmd := m.onTidyPlanned(msg)
+		return mm, cmd
+
 	case attachReturnedMsg:
 		m.notice = ""
 		if msg.err != nil {
@@ -652,6 +659,11 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		mm, tick := m.startShip(x)
 		mm2, undo := mm.offerUndo("ship " + c.feature)
 		return mm2, tea.Batch(tick, shipCmd(c.feature), undo)
+	case "tidy":
+		// No undo offered: the folders are going, and an "undone" flash over a
+		// deletion already running would be the screen lying.
+		m.notice = "tidying…"
+		return m, tidyRunCmd(c.tidy)
 	}
 	return m, nil
 }

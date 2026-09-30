@@ -31,6 +31,8 @@ Usage:
                                shelve a dispatcher · unpark <id|feature> takes it back
   claude-dispatcher note <id|feature> <text>
                                the steward's reading of a dispatcher's wait
+  claude-dispatcher tidy       list the worktrees finished dispatchers left on disk
+                               · tidy --yes removes them (: tidy in the cockpit)
   claude-dispatcher steward    switch the fleet's steward on · steward stop switches it off
                                (t on the triage table does the same)
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
@@ -61,7 +63,7 @@ func main() {
 		}
 	case "steward":
 		os.Exit(runSteward(args[1:]))
-	case "status", "reply", "park", "unpark", "note":
+	case "status", "reply", "park", "unpark", "note", "tidy":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
