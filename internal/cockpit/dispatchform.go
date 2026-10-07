@@ -9,7 +9,7 @@ package cockpit
 // state across value-receiver Update copies. Submitting hands off to
 // launchDispatch, which does the real dispatch.
 //
-// ROOT, MODE, MODEL and FAN OUT are steps of their own rather than defaults
+// ROOT, MODE, MODEL, ACCOUNT and FAN OUT are steps of their own rather than defaults
 // this overlay picks quietly. MODE and MODEL reach the process as launch flags
 // (--permission-mode and --model), fan-out reaches it as the ultracode sentence
 // in the prompt (see dispatch/fanout.go), and ROOT is the branch the work is
@@ -76,8 +76,8 @@ type dispatchForm struct {
 	modeSel   int             // step 4: cursor into dispatchpkg.Modes()
 	modelSel  int             // step 5: cursor into dispatchpkg.Models()
 	acctSel   int             // step 6: cursor into model.accountNames()
-	fanoutSel int             // step 6: cursor into dispatchFanoutOptions
-	prompt    textinput.Model // step 7: the prompt
+	fanoutSel int             // step 7: cursor into dispatchFanoutOptions
+	prompt    textinput.Model // step 8: the prompt
 
 	errMsg string
 }

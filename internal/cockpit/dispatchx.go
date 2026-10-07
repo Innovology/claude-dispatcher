@@ -374,7 +374,7 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 
-	// MODE, MODEL and FAN OUT are switches, not fields: space walks the
+	// MODE, MODEL, ACCOUNT and FAN OUT are switches, not fields: space walks the
 	// positions, left/right steer within the line, and nothing else on them
 	// types. These have to sit above the text branch, because typedText turns
 	// a space into " ".
