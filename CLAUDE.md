@@ -530,6 +530,33 @@
   nothing in. A detached HEAD no ref contains is kept. Each item is re-planned
   at the moment of acting, and each act is a `Tidied` event. Full record:
   `docs/adr/0021-a-finished-dispatcher-leaves-the-disk-when-asked.md`.
+- **A subscription is a config directory, and what it has left is the status
+  line's to say.** "Allow multiple active subscriptions … select the
+  subscription and see next to it the % capacity left in the 5hr/weekly
+  limit." Claude Code keys a login — settings, transcripts, credentials, the
+  macOS keychain entry — to `CLAUDE_CONFIG_DIR`, so an **account** is a name
+  and a directory (`[accounts]`; `claude-dispatcher account add <name>` makes
+  it, installs our hooks and status line there, and logs it in). The human's
+  own login is `default` and sets no variable at all, because setting it to
+  `~/.claude` keys a different keychain entry. Who a directory is comes from
+  `claude auth status --json`; nothing reads a credential. What it has left
+  comes from the one documented place Claude Code says so: the status line's
+  `rate_limits.five_hour/seven_day` (`used_percentage`, `resets_at` epoch s —
+  captured from 2.1.281). `claude-dispatcher statusline` is installed in every
+  account, files the reading under the session's own config dir
+  (`state/accounts/`), and runs the human's old status line on the same input
+  (`--then`), so theirs still draws. ACCOUNT sits beside MODEL on both forms
+  with the least window's % on each name and the selected one in full with
+  its age; no reading says so rather than borrowing the usage lens's learned
+  estimate, and past `resets_at` a window reads full. Read when a form opens,
+  not on the poll. Each config dir reads only its own `settings.json`, so a
+  launch on an account with no login, no hooks or no first-run setup is
+  refused by name at the launch, on its failed row (ADR 0009) — each would
+  start and sit there.
+  The record carries `Account` and `ConfigDir`; Resume reopens under the
+  **dir**, because the transcript is there. Trust is inherited into the
+  account's own `.claude.json`. Full record:
+  `docs/adr/0022-a-subscription-is-a-config-directory.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
@@ -581,7 +608,8 @@
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
   fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy` (`internal/fleetcmd`)
-  and `steward [stop]` (`internal/steward`).
+  and `steward [stop]` (`internal/steward`), `account` (`internal/accountcmd`)
+  and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
@@ -589,6 +617,10 @@
 - `internal/appearance` — whether the OS is set light or dark, asked (never
   subscribed to) through the platform's own command. The cockpit's
   `theme.go` polls it and pairs it with the terminal's 2031 reports.
+- `internal/account` — the Claude subscriptions a dispatch can run under (config
+  directories), who each is (`claude auth status`), what each has left (the
+  status line's `rate_limits`, recorded under `state/accounts/`), and what
+  would stop a launch on one (ADR 0022).
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
   state machine (launching/working/needs-input/blocked/done/exited), and keeps
   the record's `Said` (the last message, whole) and `Failure` (StopFailure).
