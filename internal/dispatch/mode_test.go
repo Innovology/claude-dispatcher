@@ -102,7 +102,7 @@ func TestPermissionArgsSaysNothingWhenItCannotTell(t *testing.T) {
 func TestLaunchAndResumeCarryTheMode(t *testing.T) {
 	withModes(t, parseModeNames(modernHelp))
 
-	launch := launchCommand("abc123", "/prompts/abc123.txt", ModePlan, DefaultModel)
+	launch := launchCommand("abc123", "/prompts/abc123.txt", ModePlan, DefaultModel, "")
 	if !strings.Contains(launch, "--permission-mode plan") {
 		t.Errorf("launch command has no mode flag:\n%s", launch)
 	}
@@ -110,7 +110,7 @@ func TestLaunchAndResumeCarryTheMode(t *testing.T) {
 		t.Errorf("launch command lost the prompt file:\n%s", launch)
 	}
 
-	resume := resumeCommand("abc123", "sess-1", "", ModePlan, DefaultModel)
+	resume := resumeCommand("abc123", "sess-1", "", ModePlan, DefaultModel, "")
 	if !strings.Contains(resume, "--permission-mode plan") {
 		t.Errorf("resume command has no mode flag:\n%s", resume)
 	}
@@ -121,7 +121,7 @@ func TestLaunchAndResumeCarryTheMode(t *testing.T) {
 	// And with nothing to pass, the command is exactly what it always was — no
 	// stray spaces where the flag would have gone.
 	withModes(t, nil)
-	if got := launchCommand("abc123", "go", ModeAuto, DefaultModel); strings.Contains(got, "claude  ") {
+	if got := launchCommand("abc123", "go", ModeAuto, DefaultModel, ""); strings.Contains(got, "claude  ") {
 		t.Errorf("a missing flag left a double space:\n%s", got)
 	}
 }

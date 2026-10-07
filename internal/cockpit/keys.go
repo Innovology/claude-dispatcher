@@ -120,7 +120,7 @@ func (m model) runCommand() (model, tea.Cmd) {
 	if c.name == "dispatch" || c.name == "new dispatch" {
 		m.paletteOpen, m.paletteText = false, ""
 		m.dispatchForm = newDispatchForm(m.cfg)
-		return m, m.dispatchForm.filter.Focus()
+		return m, tea.Batch(m.dispatchForm.filter.Focus(), accountsCmd(m.cfg))
 	}
 	if c.name == "upgrade" {
 		m.paletteOpen, m.paletteText = false, ""
@@ -292,7 +292,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	}
 	if k == "+" {
 		m.dispatchForm = newDispatchForm(m.cfg)
-		return m, m.dispatchForm.filter.Focus()
+		return m, tea.Batch(m.dispatchForm.filter.Focus(), accountsCmd(m.cfg))
 	}
 	// `U` is the upgrade key and nothing else's: bound globally rather than
 	// per-lens because the version it acts on is in the footer, which every lens

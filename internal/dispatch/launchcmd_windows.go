@@ -28,9 +28,9 @@ import (
 // quotes is one cmd argument: the `&` inside it is PowerShell's call operator,
 // not a cmd separator, and the trailing `& pause` stays outside so the window
 // still waits when claude exits.
-func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) string {
-	return fmt.Sprintf(`set "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
-		dispatcherID, psRun(fmt.Sprintf("claude%s%s %s",
+func launchCommand(dispatcherID, promptPath string, mode Mode, model Model, configDir string) string {
+	return fmt.Sprintf(`%sset "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
+		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s %s",
 			modeArgs(mode), modelArgs(model), psReadFile(promptPath))))
 }
 
@@ -49,13 +49,13 @@ func StewardCommand(stateDir, opening string) string {
 	return env + psRun(fmt.Sprintf("claude%s %s", modeArgs(ModeAuto), psQuote(opening))) + " & pause"
 }
 
-func resumeCommand(dispatcherID, sessionID, promptPath string, mode Mode, model Model) string {
+func resumeCommand(dispatcherID, sessionID, promptPath string, mode Mode, model Model, configDir string) string {
 	arg := ""
 	if promptPath != "" {
 		arg = " " + psReadFile(promptPath)
 	}
-	return fmt.Sprintf(`set "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
-		dispatcherID, psRun(fmt.Sprintf("claude%s%s --resume %s%s",
+	return fmt.Sprintf(`%sset "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
+		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s --resume %s%s",
 			modeArgs(mode), modelArgs(model), psQuote(sessionID), arg)))
 }
 
@@ -100,4 +100,13 @@ func modelArgs(model Model) string {
 		return ""
 	}
 	return " " + strings.Join(args, " ")
+}
+
+// configDirSet is the account's CLAUDE_CONFIG_DIR as a leading cmd.exe set, or
+// "" for the default account, which sets nothing (see account.Account.Env).
+func configDirSet(configDir string) string {
+	if configDir == "" {
+		return ""
+	}
+	return `set "CLAUDE_CONFIG_DIR=` + configDir + `" && `
 }

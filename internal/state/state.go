@@ -93,7 +93,17 @@ type Dispatch struct {
 	// work across multiple agents where the task warranted it. The sentence
 	// itself lives in Prompt; this flag is what lets screens say so without
 	// grepping the prompt for a keyword.
-	FanOut         bool   `json:"fan_out,omitempty"`
+	FanOut bool `json:"fan_out,omitempty"`
+	// Account names the Claude subscription the session runs under — one of
+	// the config's [accounts], or "" for the human's own Claude Code login.
+	// ConfigDir is the CLAUDE_CONFIG_DIR it was launched with, kept beside the
+	// name because it is the fact Resume needs: the transcript --resume reads
+	// lives under that directory's projects/, and an account renamed or
+	// removed from the config since must not send a resume to the wrong login
+	// looking for a conversation that is not there. Both empty on the default
+	// account and on records from before accounts existed — the same session.
+	Account        string `json:"account,omitempty"`
+	ConfigDir      string `json:"config_dir,omitempty"`
 	TmuxSession    string `json:"tmux_session"`
 	SessionID      string `json:"session_id,omitempty"`
 	TranscriptPath string `json:"transcript_path,omitempty"`

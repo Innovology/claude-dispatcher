@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 
+	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/accountcmd"
 	"claude-dispatcher/internal/cockpit"
 	"claude-dispatcher/internal/fleetcmd"
 	"claude-dispatcher/internal/hookcmd"
@@ -35,6 +37,8 @@ Usage:
                                · tidy --yes removes them (: tidy in the cockpit)
   claude-dispatcher steward    switch the fleet's steward on · steward stop switches it off
                                (t on the triage table does the same)
+  claude-dispatcher account    the Claude subscriptions a dispatch can run under, and what
+                               each has left · account add <name> adds and logs one in
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -67,6 +71,13 @@ func main() {
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
+	case "account", "accounts":
+		os.Exit(accountcmd.Run(args[1:], os.Stdout, os.Stderr))
+	case "statusline":
+		// The status line every account runs: it records the subscription's
+		// 5-hour and weekly limits (internal/account), then draws whatever the
+		// human's own status line drew. Like the hook, it never fails.
+		os.Exit(account.RunStatusLine(args[1:]))
 	case "hook":
 		// Never fail loudly: a hook error must not disturb the Claude session.
 		os.Exit(hookcmd.Run(args[1:]))

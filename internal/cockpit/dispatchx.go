@@ -14,6 +14,7 @@ package cockpit
 //	ROOT       the branch it is cut from — blank for the repo's default
 //	MODE       auto, manual or plan — what it may do without asking
 //	MODEL      default, or an alias the installed claude advertises
+//	ACCOUNT    which Claude subscription it runs under, with what each has left
 //	FAN OUT    whether it may spread across agents when the task splits
 //
 // TITLE and WHAT used to be one field, and the branch was named from it. That
@@ -61,9 +62,11 @@ package cockpit
 import (
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"claude-dispatcher/internal/account"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/repos"
 )
@@ -82,6 +85,7 @@ const (
 	dxRootF
 	dxModeF
 	dxModelF
+	dxAccountF
 	dxFanoutF
 	dxFieldCount
 )
@@ -111,6 +115,7 @@ func (m model) dxReset() model {
 	m.dxRoot = ""
 	m.dxMode = dispatchpkg.DefaultMode
 	m.dxModel, m.dxFanOut = dispatchpkg.DefaultModel, false
+	m.dxAccount = account.Default
 	return m
 }
 
@@ -399,6 +404,17 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if field == dxAccountF {
+		names := m.accountNames()
+		i := m.dxAccountSel()
+		switch k {
+		case " ", "space", "right":
+			m.dxAccount = names[(i+1)%len(names)]
+		case "left":
+			m.dxAccount = names[(i+len(names)-1)%len(names)]
+		}
+		return m, nil
+	}
 	if field == dxFanoutF {
 		switch k {
 		case " ", "space", "left", "right":
@@ -484,6 +500,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	mdl := m.dxModel.Normalize()
 	root := dispatchpkg.Root(m.dxRoot).Normalize()
 	fanOut := m.dxFanOut
+	acct := m.acctNormalize(m.dxAccount)
 	feature, prompt := dxDispatch(m.dxTitle, m.dxWhat, goal)
 	if feature == "" {
 		// Empty *or* unslugabble: a title of nothing but punctuation passes a
@@ -529,6 +546,9 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	if !root.IsDefault() {
 		notice += " · from " + string(root)
 	}
+	if acct != account.Default {
+		notice += " · on " + acct
+	}
 	if fanOut {
 		notice += " · fans out"
 	}
@@ -540,7 +560,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	// table is empty. fleetSync re-keys the cursor over the row that just moved
 	// down; on an empty table it lands the cursor on the new row itself.
 	m = m.markPending(m.pendingFor(row.repo, feature, prompt)).fleetSync()
-	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, root, fanOut)
+	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, root, fanOut, acct)
 }
 
 // dxLaunch is the launch dxSubmit hands off to — see launchDispatch, which the
@@ -804,6 +824,38 @@ func (m model) dxModelSel() int {
 
 func (m model) dxModelHint() string { return m.dxModel.Hint() + " · space cycles" }
 
+// dxAccountWords are ACCOUNT's positions: each account by name, with the
+// least of its two limits' percentage left beside it where a status line has
+// reported one — the figure the choice is made on, on the line it is made.
+func (m model) dxAccountWords() []string {
+	now := time.Now()
+	names := m.accountNames()
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = n
+		if pct := m.acctPct(n, now); pct != "" {
+			out[i] += " " + pct
+		}
+	}
+	return out
+}
+
+func (m model) dxAccountSel() int {
+	cur := m.acctNormalize(m.dxAccount)
+	for i, n := range m.accountNames() {
+		if n == cur {
+			return i
+		}
+	}
+	return 0
+}
+
+// dxAccountHint is the chosen account in full: who it is, both windows and
+// the age of the reading — or what would stop it running a dispatch.
+func (m model) dxAccountHint() string {
+	return m.acctDetail(m.acctNormalize(m.dxAccount), time.Now()) + " · space cycles"
+}
+
 // dxFanoutWords are FAN OUT's two positions. "solo" rather than "off" because
 // the switch is about who does the work, and the off state is a working state,
 // not an absence.
@@ -844,6 +896,9 @@ func (m model) dxSummary() string {
 	}
 	if mdl := m.dxModel.Normalize(); mdl != dispatchpkg.DefaultModel {
 		s += " · " + string(mdl)
+	}
+	if acct := m.acctNormalize(m.dxAccount); acct != account.Default {
+		s += " · on " + acct
 	}
 	if m.dxFanOut {
 		s += " · fans out"
@@ -915,6 +970,7 @@ func (m model) dxView(w, h int) string {
 		cqFixed(dxHintRow(inner, m.dxRootHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModeF, "MODE", dxModeWords(), m.dxModeSel(), m.dxModeHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModelF, "MODEL", dxModelWords(), m.dxModelSel(), m.dxModelHint())),
+		cqFixed(dxSwitchRow(inner, m.dxField == dxAccountF, "ACCOUNT", m.dxAccountWords(), m.dxAccountSel(), m.dxAccountHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxFanoutF, "FAN OUT", dxFanoutWords(), m.dxFanoutSel(), m.dxFanoutHint())),
 		cqGap(6),
 		cqFixed(dxHintRow(inner, m.dxSummary())),

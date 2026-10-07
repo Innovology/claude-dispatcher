@@ -165,3 +165,24 @@ func TestTrustOwnDir(t *testing.T) {
 		t.Error("a key we do not own was lost")
 	}
 }
+
+// A second account's .claude.json has never heard of the repo; the human's
+// own trust in it is carried across, into that account's file.
+func TestInheritTrustForAnotherAccount(t *testing.T) {
+	writeClaudeConfig(t, map[string]any{
+		"/repos/shop": map[string]any{"hasTrustDialogAccepted": true, "allowedTools": []any{"Bash"}},
+	})
+	acct := t.TempDir()
+	_ = os.WriteFile(filepath.Join(acct, ".claude.json"), []byte(`{"hasCompletedOnboarding":true}`), 0o600)
+	if !InheritTrustFor(acct, "/repos/shop", "/state/worktrees/shop/w") {
+		t.Fatal("the worktree was not trusted for the account")
+	}
+	got := readProjects(t, acct)["/state/worktrees/shop/w"]
+	if trusted, _ := got["hasTrustDialogAccepted"].(bool); !trusted {
+		t.Errorf("entry = %v", got)
+	}
+	// Never invented: a repo nobody trusted under any login stays untrusted.
+	if InheritTrustFor(acct, "/repos/never", "/state/worktrees/never/w") {
+		t.Error("trusted a repo nobody vouched for")
+	}
+}
