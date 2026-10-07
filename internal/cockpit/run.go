@@ -10,6 +10,7 @@ import (
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/keymap"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // binaryName is this command as it is installed on PATH — what relaunch execs
@@ -40,6 +41,10 @@ func Run() error {
 	if cfg, err := config.Load(); err == nil {
 		m.cfg = cfg
 		applyConfigEnv(cfg)
+		// Said before any session is judged: a dispatcher left parked at this
+		// shell by an earlier run is read on the first load, long before a
+		// launch in this one could mention it.
+		supervisor.KnowShell(cfg.Shell)
 		// A bad `[keys]` line keeps the defaults and says so, rather than
 		// refusing to open: the cockpit is how you would find out what the
 		// action ids are, and a binding typo must not be the thing that stops

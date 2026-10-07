@@ -43,6 +43,13 @@ type Repo struct {
 	// Both default to something sensible and are overridable; see env.go.
 	Socket string
 	Env    string
+	// Shell is the interactive shell this repo's dispatch panes drop to when
+	// claude exits, or "" to let the session work it out from the tmux server
+	// it runs on. It rides on the repo because everything else a launch needs
+	// does, not because it varies by repo: it is one global setting today (see
+	// shellFor), and this is where a per-repo table would land if one is ever
+	// wanted.
+	Shell string
 	// Pinned reports that Path was named by the human in `[checkouts]` rather
 	// than chosen. Screens say which, because the two answer different
 	// questions: an automatic choice is a guess worth correcting, and a pin is
@@ -133,6 +140,7 @@ func Discover(cfg *config.Config) []Repo {
 		// Read from the checkout the repo actually works in, which the pin above
 		// may just have changed.
 		r.Env = envFor(cfg, r.Name, r.Path)
+		r.Shell = shellFor(cfg)
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {

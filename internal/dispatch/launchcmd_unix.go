@@ -24,9 +24,33 @@ import (
 // Reading the file inside the session leaves this command a fixed ~120 bytes
 // whatever the prompt is; the only ceiling left is the kernel's on one argv
 // (see MaxPromptBytes).
-func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) string {
-	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s %s; exec ${SHELL:-/bin/sh}",
-		dispatcherID, modeArgs(mode), modelArgs(model), readFileArg(promptPath))
+func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model) string {
+	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s %s%s",
+		dispatcherID, modeArgs(mode), modelArgs(model), readFileArg(promptPath), exitShell(shell))
+}
+
+// exitShell is the tail of the launch line: what the pane becomes once claude
+// has gone. The session stays open for inspection either way, and this decides
+// which shell is sitting in it.
+//
+// Four answers, first one that works. The configured shell (config.toml's
+// `shell`) is the human saying it outright. Failing that the pane asks its OWN
+// tmux server for `default-shell`, which is the setting their every other pane
+// already obeys — asked here, inside the pane, rather than resolved when the
+// line was built, because at that point the server did not exist yet and
+// because a tmux.conf may compute the value in a `run-shell` job (this
+// machine's does), leaving nothing in the file to parse. Then $SHELL, then
+// /bin/sh, which is the one shell a POSIX machine is required to have.
+//
+// `-x` rather than `-n` on the last check, so a shell named in config that is
+// not there, and a tmux that answered with something unrunnable, both fall
+// through instead of killing the pane the moment claude exits. Nothing here
+// touches the line claude is launched with: that is POSIX and runs under
+// /bin/sh whatever the human's shell is. Full record: docs/adr/0018.
+func exitShell(shell string) string {
+	return "; cdsh=" + shellQuote(strings.TrimSpace(shell)) +
+		`; [ -n "$cdsh" ] || cdsh=$(tmux display -p '#{default-shell}' 2>/dev/null)` +
+		`; [ -x "$cdsh" ] || cdsh=${SHELL:-/bin/sh}; exec "$cdsh"`
 }
 
 // resumeCommand is launchCommand for a session that already exists: claude
@@ -35,13 +59,13 @@ func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) stri
 // which claude would read as a first message with nothing in it. The mode and
 // the model are passed again because both are properties of the new session,
 // not of the transcript it reopens.
-func resumeCommand(dispatcherID, sessionID, promptPath string, mode Mode, model Model) string {
+func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model) string {
 	arg := ""
 	if promptPath != "" {
 		arg = " " + readFileArg(promptPath)
 	}
-	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s --resume %s%s; exec ${SHELL:-/bin/sh}",
-		dispatcherID, modeArgs(mode), modelArgs(model), shellQuote(sessionID), arg)
+	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s --resume %s%s%s",
+		dispatcherID, modeArgs(mode), modelArgs(model), shellQuote(sessionID), arg, exitShell(shell))
 }
 
 // readFileArg is the shell fragment that expands to a file's contents as ONE

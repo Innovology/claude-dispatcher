@@ -69,6 +69,21 @@ func envFor(cfg *config.Config, name, checkout string) string {
 	return NixDevelop
 }
 
+// shellFor is the interactive shell a dispatch pane drops to once claude
+// exits, or "" for "ask the session's own tmux server".
+//
+// It is global rather than per-repo, and deliberately so: a shell is a property
+// of the human at the keyboard, not of the code they are dispatching into. The
+// repo carries it anyway (Repo.Shell) because the launch reads everything it
+// needs off the repo, which is also what makes a [shells] table a one-line
+// change here if a repo ever needs its own.
+func shellFor(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Shell)
+}
+
 func hasFlake(checkout string) bool {
 	_, err := os.Stat(filepath.Join(checkout, "flake.nix"))
 	return err == nil

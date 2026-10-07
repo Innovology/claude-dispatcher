@@ -159,7 +159,7 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// since, and a session reopened somewhere else is a different session.
 	name := uniqueName(supervisor.Session{Name: base, Socket: d.TmuxSocket})
 	sess := supervisor.Session{Name: name, Socket: d.TmuxSocket}
-	if err := newSession(sess, dir, resumeCommand(d.ID, sid, promptPath, Mode(d.Mode), Model(d.Model)), d.EnvCommand); err != nil {
+	if err := newSession(sess, dir, resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model)), d.EnvCommand); err != nil {
 		return "", "", err
 	}
 

@@ -157,11 +157,11 @@ func TestLaunchAndResumeCarryTheModel(t *testing.T) {
 	withModes(t, parseModeNames(modernHelp))
 	withAliases(t, []string{"opus", "sonnet"})
 
-	launch := launchCommand("abc123", "/prompts/abc123.txt", ModeAuto, Model("opus"))
+	launch := launchCommand("abc123", "/prompts/abc123.txt", "", ModeAuto, Model("opus"))
 	if !strings.Contains(launch, "--model opus") {
 		t.Errorf("launch command has no model flag:\n%s", launch)
 	}
-	resume := resumeCommand("abc123", "sess-1", "", ModeAuto, Model("opus"))
+	resume := resumeCommand("abc123", "sess-1", "", "", ModeAuto, Model("opus"))
 	if !strings.Contains(resume, "--model opus") {
 		t.Errorf("resume command has no model flag:\n%s", resume)
 	}
@@ -169,7 +169,7 @@ func TestLaunchAndResumeCarryTheModel(t *testing.T) {
 	// And the default leaves the command exactly what it always was — no
 	// stray spaces where the flag would have gone.
 	withModes(t, nil)
-	if got := launchCommand("abc123", "go", ModeAuto, ModelDefault); strings.Contains(got, "claude  ") {
+	if got := launchCommand("abc123", "go", "", ModeAuto, ModelDefault); strings.Contains(got, "claude  ") {
 		t.Errorf("a missing flag left a double space:\n%s", got)
 	}
 }

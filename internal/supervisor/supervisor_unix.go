@@ -23,9 +23,15 @@ func NewSession(s Session, dir, shellCmd, env string) error {
 	return server(s).NewSession(s.Name, dir, shellCmd, env)
 }
 func AttachCmd(s Session, env string) *exec.Cmd { return server(s).AttachCmd(s.Name, env) }
-func KillSession(s Session) error               { return server(s).KillSession(s.Name) }
-func UniqueName(s Session) string               { return server(s).UniqueName(s.Name) }
-func SetStatusHint(s Session)                   { server(s).SetStatusHint(s.Name) }
+
+// KnowShell tells the backend about a shell a pane may be sitting at, so that
+// a session parked at it reads as idle rather than busy. The configured shell
+// is passed at startup, because a pane the cockpit did not launch in this run
+// is judged before anything else could teach it the name.
+func KnowShell(shell string)      { tmux.KnowShell(shell) }
+func KillSession(s Session) error { return server(s).KillSession(s.Name) }
+func UniqueName(s Session) string { return server(s).UniqueName(s.Name) }
+func SetStatusHint(s Session)     { server(s).SetStatusHint(s.Name) }
 
 // Servers is every server with a socket on this machine, by socket name. It
 // finds servers this cockpit never started — the per-project ones a human keeps

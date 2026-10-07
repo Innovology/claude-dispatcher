@@ -256,6 +256,10 @@ func SetStatusHint(sess Session)      {}
 func EnsureBackKey(sockets ...string) {}
 func EnsureFocusEvents()              {}
 
+// KnowShell is a no-op here: a console window has no pane command to read and
+// no shell to recognise, so there is nothing for a name to teach.
+func KnowShell(shell string) {}
+
 // AttachSwitches is true here for the same reason it is true inside tmux: the
 // Windows handover raises the session's own console window and returns at once,
 // so the human is over there and this command's exit is not their return. The

@@ -132,7 +132,11 @@ func TestResumeWithoutAPromptPassesNone(t *testing.T) {
 	if _, _, err := Resume(finished(t, initRepo(t)), ""); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(sup.started.cmd, "''") {
+	// The claude invocation only: the tail that picks the pane's shell carries
+	// an empty pair of quotes of its own when no shell is configured, and it is
+	// not an argument to anything (see exitShell).
+	claudePart, _, _ := strings.Cut(sup.started.cmd, "; cdsh=")
+	if strings.Contains(claudePart, "''") {
 		t.Errorf("empty prompt passed as an argument: %q", sup.started.cmd)
 	}
 }

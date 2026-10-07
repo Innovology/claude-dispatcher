@@ -156,6 +156,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		FanOut:       fanOut,
 		TmuxSocket:   r.Socket,
 		EnvCommand:   r.Env,
+		PaneShell:    r.Shell,
 		TmuxSession:  uniqueName(supervisor.Session{Name: "disp-" + slug, Socket: r.Socket}),
 		Status:       state.StatusLaunching,
 		CreatedAt:    time.Now(),
@@ -175,7 +176,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	// launchCommand is OS-specific (bash on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := launchCommand(d.ID, promptPath, mode, model)
+	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model)
 	if err := newSession(SessionOf(d), worktree, cmd, d.EnvCommand); err != nil {
 		return d, failLaunch(d, err)
 	}

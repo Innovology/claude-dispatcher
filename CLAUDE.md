@@ -116,7 +116,20 @@
   problem: it looked like `nix develop` taking over a minute. `tmux.NewSession`
   now passes `/bin/sh -c <line>` as separate arguments, which tmux 3.0+ execs
   directly, and nu/xonsh/elvish count as idle shells for the `exec ${SHELL}`
-  that follows claude.
+  that follows claude. **The shell the pane BECOMES is a different question**,
+  and it is layered rather than chosen: config's `shell`, else the pane's own
+  server asked for `default-shell` *from inside the pane* (the only time and
+  place a value a `run-shell` job computed can be read — there is nothing in
+  the file to parse, and at launch the server does not exist yet), else
+  `$SHELL`, else `/bin/sh`; `-x` on the last test so a shell named in config
+  and not installed falls through instead of killing the pane. It goes on the
+  record (`PaneShell`) so resume reopens the way it went out. And **a shell we
+  chose is one the idle check knows**: an unrecognised pane reads busy for
+  ever, which strands the session against reclaim and resume, so names are
+  learned as well as listed — the configured one at startup, a server's
+  `default-shell` the first time one of its panes shows a command we cannot
+  place, once per server per run. Full record:
+  `docs/adr/0018-a-panes-command-names-its-own-shell.md`.
 - **A ghost cannot clear itself, so every load looks.** That sweep ran in one
   place — `recheckCmd`, the reload after a jump-in — so a record whose session
   had been taken away claimed *working* for as long as the cockpit stayed open

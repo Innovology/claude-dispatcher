@@ -77,6 +77,20 @@ type Config struct {
 	// dark switch, live while the cockpit is open; a theme's name — "light",
 	// "dark" — holds that theme whatever the switch says. Edited in settings.
 	Theme string `toml:"theme,omitempty"`
+	// Shell is the interactive shell a dispatch pane drops to once claude
+	// exits. The launch line itself is POSIX and always runs under /bin/sh —
+	// that is not configurable, because a line written for sh handed to a shell
+	// that cannot parse it is a session that dies before claude ever starts.
+	// This names only what replaces it at the end, so the pane you jump into is
+	// the shell you use everywhere else.
+	//
+	// Empty is not "bash": it means ask tmux for the `default-shell` the pane
+	// is sitting in, and fall back to $SHELL. The key exists because that
+	// answer is only available from a running server — a tmux.conf may compute
+	// its default-shell in a `run-shell` job, as this machine's does, so there
+	// is nothing in the file to read — and because a shell we were told about
+	// is one the idle check can recognise by name.
+	Shell string `toml:"shell,omitempty"`
 }
 
 func Dir() string {
@@ -167,9 +181,18 @@ func Save(c *Config) error {
 	b.WriteString("# The cockpit's colours: \"system\" follows your light/dark switch, live while\n")
 	b.WriteString("# the cockpit is open; \"light\" or \"dark\" holds one. Edit in-app with `,`.\n")
 	if c.Theme == "" {
-		b.WriteString("# theme = \"system\"\n\n")
+		b.WriteString("# theme = \"system\"\n")
 	} else {
-		fmt.Fprintf(&b, "theme = %q\n\n", c.Theme)
+		fmt.Fprintf(&b, "theme = %q\n", c.Theme)
+	}
+	b.WriteString("# The shell a dispatch pane drops to when claude exits. Unset asks tmux for\n")
+	b.WriteString("# the default-shell of the server the pane runs on, then falls back to\n")
+	b.WriteString("# $SHELL. Name one here to be sure — a tmux.conf that sets default-shell\n")
+	b.WriteString("# from a run-shell job has nothing in the file for us to read.\n")
+	if c.Shell == "" {
+		b.WriteString("# shell = \"/usr/bin/fish\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "shell = %q\n\n", c.Shell)
 	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")

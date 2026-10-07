@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 func Available() bool {
@@ -219,9 +220,75 @@ var shellCommands = map[string]bool{
 	"nu": true, "xonsh": true, "elvish": true,
 }
 
+// learnedShells are shells this machine turned out to use that the list above
+// does not name: the one config.toml asked for, and the `default-shell` of a
+// server we have had to ask. A hardcoded list cannot be complete — a shell can
+// be a wrapper script with any name at all — and the cost of missing one is not
+// cosmetic: an unrecognised pane reads as busy for ever, so the session is
+// never reclaimed, Resume refuses to reopen it and a second dispatch of that
+// feature is refused with it. Learning the name we ourselves launched, or the
+// one tmux says it launches, closes that by construction.
+var (
+	learnedMu     sync.RWMutex
+	learnedShells = map[string]bool{}
+)
+
+// KnowShell teaches the idle check a shell, named by path or by command.
+func KnowShell(shell string) {
+	name := shellName(shell)
+	if name == "" {
+		return
+	}
+	learnedMu.Lock()
+	defer learnedMu.Unlock()
+	learnedShells[name] = true
+}
+
+// shellName is the bare command a shell reports as: no directory, and no
+// leading dash, which is how a login shell announces itself.
+func shellName(shell string) string {
+	s := strings.TrimSpace(shell)
+	if s == "" {
+		return ""
+	}
+	return strings.TrimPrefix(filepath.Base(s), "-")
+}
+
 // paneIdle reports whether a pane's current command is a shell waiting for
 // input rather than a process doing something.
-func paneIdle(cmd string) bool { return shellCommands[strings.TrimPrefix(cmd, "-")] }
+func paneIdle(cmd string) bool {
+	name := shellName(cmd)
+	if shellCommands[name] {
+		return true
+	}
+	learnedMu.RLock()
+	defer learnedMu.RUnlock()
+	return learnedShells[name]
+}
+
+// askedDefaultShell are the servers whose default-shell we have read. Only a
+// successful read is recorded, so a server that was not running when we asked
+// is asked again rather than written off.
+var askedDefaultShell sync.Map
+
+// learnDefaultShell asks this server what it launches panes with and adds that
+// to the known shells. It is called only when a pane is showing a command we do
+// not recognise, which is the one case where the answer can change a verdict,
+// and at most once per server per run: `default-shell` is a global option on a
+// server that already loaded the human's config, and polling it per sweep would
+// be the "never poll below the poll" rule broken for an answer that does not
+// move.
+func (s Server) learnDefaultShell() {
+	if _, done := askedDefaultShell.Load(s.Socket); done {
+		return
+	}
+	out, err := s.cmd("show", "-gv", "default-shell").Output()
+	if err != nil {
+		return
+	}
+	askedDefaultShell.Store(s.Socket, true)
+	KnowShell(string(out))
+}
 
 // SessionIdle reports whether every pane of a session is sitting at a shell
 // with nothing running under it — that is, whether the claude process it was
@@ -250,7 +317,17 @@ func (s Server) SessionIdle(name string) (idle, known bool) {
 	if err != nil {
 		return false, false
 	}
-	return panesIdle(parsePanes(string(out)), processParents)
+	panes := parsePanes(string(out))
+	// A command we cannot place is the only reason to ask the server anything:
+	// it is either something running (the answer stands) or a shell nobody told
+	// us about (the answer is wrong, and asking fixes it for good).
+	for _, p := range panes {
+		if !paneIdle(p.cmd) {
+			s.learnDefaultShell()
+			break
+		}
+	}
+	return panesIdle(panes, processParents)
 }
 
 // panesIdle is SessionIdle's verdict, over what was read rather than over what

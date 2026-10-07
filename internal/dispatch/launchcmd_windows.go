@@ -28,7 +28,10 @@ import (
 // quotes is one cmd argument: the `&` inside it is PowerShell's call operator,
 // not a cmd separator, and the trailing `& pause` stays outside so the window
 // still waits when claude exits.
-func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) string {
+// shell is accepted and ignored: a console window has no shell to drop to, it
+// has `pause`. config.toml's `shell` is a Unix setting, and a Windows build
+// silently doing something else with it would be worse than not reading it.
+func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model) string {
 	return fmt.Sprintf(`set "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
 		dispatcherID, psRun(fmt.Sprintf("claude%s%s %s",
 			modeArgs(mode), modelArgs(model), psReadFile(promptPath))))
@@ -40,7 +43,7 @@ func launchCommand(dispatcherID, promptPath string, mode Mode, model Model) stri
 // which claude would read as a first message with nothing in it. The mode and
 // the model are passed again because both are properties of the new session,
 // not of the transcript it reopens.
-func resumeCommand(dispatcherID, sessionID, promptPath string, mode Mode, model Model) string {
+func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model) string {
 	arg := ""
 	if promptPath != "" {
 		arg = " " + psReadFile(promptPath)

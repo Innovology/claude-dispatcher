@@ -152,6 +152,12 @@ type Dispatch struct {
 	// no background tasks is swept, because a subagent cannot outlive the turn
 	// unless it is one of those tasks.
 	Subagents []Subagent `json:"subagents,omitempty"`
+	// PaneShell is the interactive shell this dispatch's pane drops to when
+	// claude exits, as config named it at launch — "" for the sessions that
+	// work it out from their own tmux server. It is on the record for the
+	// reason TmuxSocket and EnvCommand are: a resumed dispatcher comes back the
+	// way it went out, not the way config has been edited since.
+	PaneShell string `json:"pane_shell,omitempty"`
 	// SessionStartedAt is the supervisor accepting the session: new-session
 	// returned, so at that instant the session existed. It is what makes a
 	// launching record's missing session evidence. Without it, a launching
