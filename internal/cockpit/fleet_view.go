@@ -405,10 +405,10 @@ const fleetWhyLines = 2
 // knowable from a model id) and the design's check trend (one sample cannot
 // make a trend).
 func fleetMeta(r fleetRow) string {
-	parts := make([]string, 0, 7)
+	parts := make([]string, 0, 8)
 	for _, p := range []string{
 		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode),
-		fleetRootLine(r.root), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
+		fleetRootLine(r.root), fleetAccountLine(r.account), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
 	} {
 		if p != "" {
 			parts = append(parts, p)
@@ -440,6 +440,16 @@ func fleetRootLine(root string) string {
 		return ""
 	}
 	return "from " + root
+}
+
+// fleetAccountLine names the subscription a dispatcher runs under when it is
+// not the human's own — the one that is worth saying, since its limits are
+// the ones this session is spending.
+func fleetAccountLine(acct string) string {
+	if acct == "" {
+		return ""
+	}
+	return "on " + acct
 }
 
 // fleetFanLine says the dispatch went out with the FAN OUT switch on. It sits

@@ -15,6 +15,7 @@ package cockpit
 import (
 	"strings"
 
+	"claude-dispatcher/internal/account"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
@@ -723,7 +724,7 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			// takes the defaults rather than inheriting the finished
 			// dispatcher's — the human typed a new brief, and choices made for
 			// the last run are not consent for this one.
-			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false)
+			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, account.Default)
 		}
 		m.resumeText = next
 		return m, nil

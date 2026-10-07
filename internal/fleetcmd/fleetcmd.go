@@ -68,6 +68,9 @@ type Entry struct {
 	PRState  string         `json:"pr_state,omitempty"`
 	PRURL    string         `json:"pr_url,omitempty"`
 	Mode     string         `json:"mode,omitempty"`
+	// Account is the Claude subscription it runs under; absent for the
+	// human's own login.
+	Account string `json:"account,omitempty"`
 	// SubagentsLive is the fan-out the hooks report running right now.
 	SubagentsLive int `json:"subagents_live,omitempty"`
 	// LastActivity is when the session last wrote its transcript — the one
@@ -214,7 +217,7 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
 			Failure: d.Failure, Retrying: dispatch.RetryPending(d, now),
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
-			Mode: d.Mode, SubagentsLive: d.SubagentsLive(),
+			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
 			Session: d.TmuxSession, Worktree: d.WorktreePath,
 			failure:      dispatch.FailureSummary(d, now),

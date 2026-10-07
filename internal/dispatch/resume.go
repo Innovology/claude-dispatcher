@@ -122,7 +122,7 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		if _, err := ensureWorktree(d.RepoPath, dir, d.Branch, RootDefault); err != nil {
 			return "", "", fmt.Errorf("rebuild %s: %w", dir, err)
 		}
-		InheritTrust(d.RepoPath, dir)
+		InheritTrustFor(d.ConfigDir, d.RepoPath, dir)
 	}
 
 	base := "disp-" + d.Slug
@@ -154,7 +154,7 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	}
 
 	name := uniqueName(base)
-	if err := newSession(name, dir, resumeCommand(d.ID, sid, promptPath, Mode(d.Mode), Model(d.Model))); err != nil {
+	if err := newSession(name, dir, resumeCommand(d.ID, sid, promptPath, Mode(d.Mode), Model(d.Model), d.ConfigDir)); err != nil {
 		return "", "", err
 	}
 

@@ -112,6 +112,10 @@ type fleetRow struct {
 	// started, and empty says nothing rather than naming the default: which
 	// branch that would have been is exactly what nobody wrote down.
 	root string
+	// account is the Claude subscription it runs under, straight off the
+	// record: "" for the human's own login, which is every record from
+	// before accounts existed too, and says nothing.
+	account string
 	// fanOut is the dispatch form's FAN OUT switch, straight off the record:
 	// the session was invited to spread across agents. subLive and subDone are
 	// what it actually did — the type names of the subagents the hooks have
@@ -403,6 +407,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, ask),
@@ -482,6 +487,7 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, "running"),
@@ -594,6 +600,7 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, "parked"),
@@ -654,6 +661,7 @@ func fleetEndedRow(ctx *collectCtx, s *snapshot, passes map[string]int,
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, kind),

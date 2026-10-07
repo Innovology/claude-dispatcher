@@ -333,7 +333,7 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		if m.fleetFilter() == fleetHistory {
 			m = m.fleetSetFilter(fleetFilters[0])
 		}
-		return m.dxOpen(""), nil, true
+		return m.dxOpen(""), accountsCmd(m.cfg), true
 	}
 
 	if r, ok := m.fleetSel(); ok {

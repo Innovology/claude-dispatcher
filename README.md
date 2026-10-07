@@ -69,6 +69,17 @@ There is no API for a Claude subscription's limits — so the cockpit **learns**
 
 ![The usage lens: 5-hour and weekly windows against learned caps](docs/usage.svg)
 
+## Several subscriptions
+
+Have more than one Claude subscription? Each one is a Claude Code config directory, and a dispatch can run under any of them:
+
+```sh
+claude-dispatcher account add work          # makes ~/.claude-work, installs the hooks, logs it in
+claude-dispatcher account                   # who each one is, and what each has left
+```
+
+Both dispatch forms then offer **ACCOUNT**, and beside each one the share of its **5-hour and weekly limits still left** — `default 59%  work 92%`, with both windows and the age of the reading on the selected one. The figures are Claude Code's own: it hands them to its status line, so `init` installs a status line in every account that records them (wrapping yours, if you have one, so it still draws what it drew). An account no session has drawn a status line for yet says so rather than guess. A dispatch on an account that is not logged in, has no hooks, or has never been opened is refused at launch, and its row names the command that fixes it: those sessions would otherwise start and sit there unattended. Resume reopens a dispatcher under the account it ran on, because that is where its transcript lives.
+
 ## Actions are real
 
 Every act the table offers is wired to the live session — the key hints show only what the selected dispatcher can actually do:
@@ -288,7 +299,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | key | action |
 |---|---|
 | `1`–`6` | switch lens (triage · products · backlog · usage · decisions · velocity) |
-| `+` | dispatch new work — repo → feature → root → mode → model → fan out → prompt |
+| `+` | dispatch new work — repo → feature → root → mode → model → account → fan out → prompt |
 | `j` / `k` · `g` / `G` | move · first row · last row |
 | `f` | cycle the triage filter (all · wants you · needs a look · running · history) |
 | `h` | history — every dispatcher you have dismissed, newest-worked first; `enter` resumes one |

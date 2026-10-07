@@ -76,6 +76,7 @@ func TestDispatchFormAcceptsBurstTyping(t *testing.T) {
 	m = press(m, "enter") // → root
 	m = press(m, "enter") // take the default → mode
 	m = press(m, "enter") // take the default → model
+	m = press(m, "enter") // take the default → account
 	m = press(m, "enter") // take the default → fan out
 	m = press(m, "enter") // take the default and go on to the prompt
 	m = typeBurst(m, "retry failed charges with backoff")
@@ -230,11 +231,23 @@ func TestDispatchFormFlow(t *testing.T) {
 		}
 	}
 	m = press(m, "enter")
-	if m.dispatchForm.step != dispatchFanout {
-		t.Fatalf("after model, step = %d, want fan out", m.dispatchForm.step)
+	if m.dispatchForm.step != dispatchAccount {
+		t.Fatalf("after model, step = %d, want account", m.dispatchForm.step)
 	}
 
-	// Step 6: fan out opens on solo, and down arms it — the choice is what
+	// Step 6: the account list opens on the human's own login, and says so.
+	if got := m.dfAccount(); got != "default" {
+		t.Fatalf("account opened on %q, want default", got)
+	}
+	if !strings.Contains(m.View(), "default") {
+		t.Error("the account step does not offer the default account")
+	}
+	m = press(m, "enter")
+	if m.dispatchForm.step != dispatchFanout {
+		t.Fatalf("after account, step = %d, want fan out", m.dispatchForm.step)
+	}
+
+	// Step 7: fan out opens on solo, and down arms it — the choice is what
 	// reaches the launch.
 	if m.dispatchForm.fanOut() {
 		t.Fatal("fan out opened armed, want solo")
@@ -252,7 +265,7 @@ func TestDispatchFormFlow(t *testing.T) {
 		t.Fatal("prompt step render empty")
 	}
 
-	// Step 7: empty prompt is rejected, then submitting launches and closes.
+	// Step 8: empty prompt is rejected, then submitting launches and closes.
 	m = press(m, "enter")
 	if m.dispatchForm == nil || m.dispatchForm.errMsg == "" {
 		t.Fatal("empty prompt should be rejected and keep the form open")
@@ -271,7 +284,7 @@ func TestDispatchFormFlow(t *testing.T) {
 	}
 }
 
-// TestDispatchFormEscBacksOut walks the esc chain: prompt → fan out → model →
+// TestDispatchFormEscBacksOut walks the esc chain: prompt → fan out → account → model →
 // mode → root → feature → repo → closed, mirroring the classic form's back
 // navigation.
 func TestDispatchFormEscBacksOut(t *testing.T) {
@@ -289,6 +302,7 @@ func TestDispatchFormEscBacksOut(t *testing.T) {
 	m = press(m, "enter") // → root
 	m = press(m, "enter") // → mode
 	m = press(m, "enter") // → model
+	m = press(m, "enter") // → account
 	m = press(m, "enter") // → fan out
 	m = press(m, "enter") // → prompt
 	if m.dispatchForm.step != dispatchPrompt {
@@ -299,8 +313,12 @@ func TestDispatchFormEscBacksOut(t *testing.T) {
 		t.Fatal("esc from prompt should go back to fan out")
 	}
 	m = press(m, "esc")
+	if m.dispatchForm.step != dispatchAccount {
+		t.Fatal("esc from fan out should go back to account")
+	}
+	m = press(m, "esc")
 	if m.dispatchForm.step != dispatchModel {
-		t.Fatal("esc from fan out should go back to model")
+		t.Fatal("esc from account should go back to model")
 	}
 	m = press(m, "esc")
 	if m.dispatchForm.step != dispatchMode {

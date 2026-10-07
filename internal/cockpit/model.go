@@ -224,6 +224,12 @@ type model struct {
 	dxMode   dispatchpkg.Mode  // MODE: auto / manual / plan — the session's permission mode
 	dxModel  dispatchpkg.Model // MODEL: default, or a claude alias — what the session runs
 	dxFanOut bool              // FAN OUT: may the session spread across agents when the task splits
+	// ACCOUNT: the Claude subscription it runs under, by name ("default" is
+	// the human's own login). See accounts.go.
+	dxAccount string
+	// accounts is what the account probe found when a dispatch form last
+	// opened: who each account is and how much of its limits is left.
+	accounts []acctInfo
 
 	// ---- theme ------------------------------------------------------------------
 	// themeMode is config's `theme`, normalised: "system" or a theme's name.
@@ -501,6 +507,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fleetSelID = ""
 		mm, load := m.fleetSync().requestLoad(loadPlain)
 		return mm, load
+
+	case accountsMsg:
+		m.accounts = msg.infos
+		return m, nil
 
 	case launchedMsg:
 		// A launch is the one action whose row was on screen before the action

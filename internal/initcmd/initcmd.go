@@ -1,6 +1,7 @@
 // Package initcmd performs first-run setup: config file, state directories,
 // environment checks, and — with explicit consent — installing the global
-// lifecycle hook into ~/.claude/settings.json. Hooks cannot be injected at
+// lifecycle hook and the usage status line into ~/.claude/settings.json and
+// every account's own settings.json (internal/account). Hooks cannot be injected at
 // launch time (Claude Code only reads them from settings files), which is why
 // a single machine-wide hook is the mechanism.
 package initcmd
@@ -12,8 +13,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
+	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -54,7 +57,7 @@ func Run() error {
 	rs := repos.Discover(cfg)
 	fmt.Printf("✓ discovered %d repos under %s\n", len(rs), strings.Join(cfg.Roots, ", "))
 
-	return installHook()
+	return installAll(cfg)
 }
 
 // hookSpec describes one settings.json hook entry we need.
@@ -118,10 +121,12 @@ func hookExe(exe, argv0 string, lookPath, eval func(string) (string, error)) str
 	return cand
 }
 
-func installHook() error {
+// installExe is the binary the hooks and the status line are baked to, or ""
+// when there is no durable one to bake (a `go run` build) — said, not hidden.
+func installExe() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
@@ -129,7 +134,7 @@ func installHook() error {
 	if strings.Contains(exe, "go-build") {
 		fmt.Println("\n! running via `go run` — install a real binary first (make install), then re-run init,")
 		fmt.Println("  otherwise the hook would point at a temporary build path.")
-		return nil
+		return "", nil
 	}
 	exe = hookExe(exe, os.Args[0], exec.LookPath, filepath.EvalSymlinks)
 	if strings.HasPrefix(exe, nixStore) {
@@ -137,8 +142,41 @@ func installHook() error {
 		fmt.Println("  this exact build — it stops firing at the next garbage collection. Install it")
 		fmt.Println("  into a profile (nix profile install / systemPackages) and re-run init.")
 	}
+	return exe, nil
+}
 
-	settingsPath := filepath.Join(claudeConfigDir(), "settings.json")
+// installAll installs into the human's own config directory and into every
+// account's. Each directory reads only its own settings.json, so a dispatch
+// under an account whose directory has no hooks reports nothing at all: it
+// would sit at "launching" until a sweep retired it, a ghost from birth.
+func installAll(cfg *config.Config) error {
+	exe, err := installExe()
+	if err != nil || exe == "" {
+		return err
+	}
+	for _, a := range account.List(cfg) {
+		if err := installInto(a.ConfigDir(), exe, a.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// InstallFor installs the hooks and the status line into one account's
+// config directory — `account add`, which has just made it.
+func InstallFor(a account.Account) error {
+	exe, err := installExe()
+	if err != nil || exe == "" {
+		return err
+	}
+	return installInto(a.ConfigDir(), exe, a.Name)
+}
+
+// installInto adds whatever of ours configDir's settings.json lacks, after
+// asking: the lifecycle hooks, and the status line that records how much of
+// the account's limits are left (account/limits.go).
+func installInto(configDir, exe, name string) error {
+	settingsPath := filepath.Join(configDir, "settings.json")
 	root := map[string]any{}
 	raw, readErr := os.ReadFile(settingsPath)
 	if readErr == nil {
@@ -147,42 +185,27 @@ func installHook() error {
 		}
 	}
 
-	hooks, _ := root["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-
-	added := 0
-	for _, spec := range hookSpecs() {
-		entries, _ := hooks[spec.event].([]any)
-		if hasOurHook(entries, spec.matcher) {
-			continue
-		}
-		entry := map[string]any{
-			"hooks": []any{map[string]any{
-				"type":    "command",
-				"command": fmt.Sprintf("%s hook %s", exe, spec.arg),
-			}},
-		}
-		if spec.matcher != "" {
-			entry["matcher"] = spec.matcher
-		}
-		hooks[spec.event] = append(entries, any(entry))
-		added++
-	}
-	if added == 0 {
-		fmt.Println("✓ lifecycle hook already installed in", settingsPath)
+	added := addHooks(root, exe)
+	line := addStatusLine(root, exe)
+	if added == 0 && line == "" {
+		fmt.Printf("✓ hooks and status line already installed in %s (%s)\n", settingsPath, name)
 		return nil
 	}
-	root["hooks"] = hooks
 
-	fmt.Printf("\nAbout to add %d hook entries to %s\n", added, settingsPath)
-	fmt.Printf("Each runs: %s hook <event>\n", exe)
-	fmt.Println("This fires on every Claude Code session machine-wide (that is how status")
-	fmt.Println("tracking works; sessions started outside the cockpit are logged too).")
+	fmt.Printf("\nAbout to change %s (account %s):\n", settingsPath, name)
+	if added > 0 {
+		fmt.Printf("  · add %d hook entries, each running: %s hook <event>\n", added, exe)
+		fmt.Println("    They fire on every Claude Code session using this config (that is how")
+		fmt.Println("    status tracking works; sessions started outside the cockpit are logged too).")
+	}
+	if line != "" {
+		fmt.Println("  · " + line)
+		fmt.Println("    It records how much of this subscription's 5-hour and weekly limits is")
+		fmt.Println("    left, which the dispatch forms show beside each account.")
+	}
 	fmt.Print("Proceed? [y/N] ")
-	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	if answer := strings.ToLower(strings.TrimSpace(line)); answer != "y" && answer != "yes" {
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
 		fmt.Println("Skipped. Status tracking will not work until the hook is installed;")
 		fmt.Println("re-run `claude-dispatcher init` when ready.")
 		return nil
@@ -205,9 +228,74 @@ func installHook() error {
 	if err := os.WriteFile(settingsPath, append(out, '\n'), 0o644); err != nil {
 		return err
 	}
-	fmt.Println("✓ hook installed in", settingsPath)
-	fmt.Println("\nAll set — run `claude-dispatcher` to open the cockpit.")
+	fmt.Println("✓ installed in", settingsPath)
 	return nil
+}
+
+// addHooks adds every hook entry root lacks and says how many it added.
+func addHooks(root map[string]any, exe string) int {
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	added := 0
+	for _, spec := range hookSpecs() {
+		entries, _ := hooks[spec.event].([]any)
+		if hasOurHook(entries, spec.matcher) {
+			continue
+		}
+		entry := map[string]any{
+			"hooks": []any{map[string]any{
+				"type":    "command",
+				"command": fmt.Sprintf("%s hook %s", exe, spec.arg),
+			}},
+		}
+		if spec.matcher != "" {
+			entry["matcher"] = spec.matcher
+		}
+		hooks[spec.event] = append(entries, any(entry))
+		added++
+	}
+	if added > 0 {
+		root["hooks"] = hooks
+	}
+	return added
+}
+
+// addStatusLine installs our status line in root, and describes the change —
+// "" when there is none to make.
+//
+// A status line the human already has is wrapped, not replaced: ours runs
+// theirs on the same input and prints what it prints (`--then`), so their
+// line looks exactly as it did. Every other key of theirs (padding and the
+// like) is kept. Windows is left alone where there is one already, because
+// the command there is not run by a POSIX shell and quoting it for one would
+// be a guess; that account's forms then say they have no reading.
+func addStatusLine(root map[string]any, exe string) string {
+	ours := exe + " statusline"
+	sl, _ := root["statusLine"].(map[string]any)
+	if sl == nil {
+		root["statusLine"] = map[string]any{"type": "command", "command": ours}
+		return "add a status line running: " + ours + " (it draws nothing)"
+	}
+	cmd, _ := sl["command"].(string)
+	if strings.Contains(cmd, account.StatusLineMarker) {
+		return ""
+	}
+	if strings.TrimSpace(cmd) == "" || runtime.GOOS == "windows" {
+		if strings.TrimSpace(cmd) == "" {
+			sl["type"], sl["command"] = "command", ours
+			return "add a status line running: " + ours + " (it draws nothing)"
+		}
+		return ""
+	}
+	sl["command"] = ours + " --then " + shellQuote(cmd)
+	return "wrap your status line so it also records usage: " + sl["command"].(string)
+}
+
+// shellQuote single-quotes s for a POSIX shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func hasOurHook(entries []any, matcher string) bool {
@@ -231,12 +319,4 @@ func hasOurHook(entries []any, matcher string) bool {
 		}
 	}
 	return false
-}
-
-func claudeConfigDir() string {
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude")
 }

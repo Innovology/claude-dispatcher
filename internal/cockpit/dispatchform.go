@@ -1,20 +1,25 @@
 package cockpit
 
 // dispatchform.go is the in-cockpit "new dispatch" overlay: the classic
-// cockpit's repo → feature → root → mode → model → fan out → prompt flow,
+// cockpit's repo → feature → root → mode → model → account → fan out → prompt
+// flow,
 // ported into v2 so ad-hoc work can be dispatched without a backlog ticket.
 // Open it with `+` or the palette's "dispatch" / "new dispatch" command. Like
 // settings, it lives behind a pointer on the model so its textinputs keep focus
 // state across value-receiver Update copies. Submitting hands off to
 // launchDispatch, which does the real dispatch.
 //
-// ROOT, MODE, MODEL and FAN OUT are steps of their own rather than defaults
+// ROOT, MODE, MODEL, ACCOUNT and FAN OUT are steps of their own rather than defaults
 // this overlay picks quietly. MODE and MODEL reach the process as launch flags
 // (--permission-mode and --model), fan-out reaches it as the ultracode sentence
 // in the prompt (see dispatch/fanout.go), and ROOT is the branch the work is
 // cut from — so a form that chose any of them on the human's behalf would be
 // deciding that silently every time. Each opens on its default with the list in
 // view, so taking the default is one keypress and changing it is two.
+//
+// ACCOUNT is the Claude subscription the session runs under, each one listed
+// with who it is logged in as and how much of its 5-hour and weekly limits is
+// left (see accounts.go) — the figure the choice is made on.
 //
 // ROOT is a filtered list rather than a switch because it is the only one of
 // the four whose choices are the repo's and not the product's: the repos this
@@ -26,10 +31,12 @@ package cockpit
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/repos"
@@ -43,6 +50,7 @@ const (
 	dispatchRoot
 	dispatchMode
 	dispatchModel
+	dispatchAccount
 	dispatchFanout
 	dispatchPrompt
 	dispatchStepCount
@@ -67,8 +75,9 @@ type dispatchForm struct {
 	roots     []dispatchpkg.RootChoice
 	modeSel   int             // step 4: cursor into dispatchpkg.Modes()
 	modelSel  int             // step 5: cursor into dispatchpkg.Models()
-	fanoutSel int             // step 6: cursor into dispatchFanoutOptions
-	prompt    textinput.Model // step 7: the prompt
+	acctSel   int             // step 6: cursor into model.accountNames()
+	fanoutSel int             // step 7: cursor into dispatchFanoutOptions
+	prompt    textinput.Model // step 8: the prompt
 
 	errMsg string
 }
@@ -142,7 +151,7 @@ func (df *dispatchForm) mdl() dispatchpkg.Model {
 	return all[clampCursor(df.modelSel, len(all))]
 }
 
-// fanOut is whether step 6 chose fanning out.
+// fanOut is whether step 7 chose fanning out.
 func (df *dispatchForm) fanOut() bool { return df.fanoutSel == 1 }
 
 // dispatchFanoutOptions are FAN OUT's two answers, in offer order: staying
@@ -371,6 +380,27 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
+			df.step = dispatchAccount
+			return m, nil
+		}
+		return m, nil
+
+	case dispatchAccount:
+		switch k {
+		case "esc":
+			df.step = dispatchModel
+			return m, nil
+		case "up", "ctrl+k", "left":
+			if df.acctSel > 0 {
+				df.acctSel--
+			}
+			return m, nil
+		case "down", "ctrl+j", "right":
+			if df.acctSel < len(m.accountNames())-1 {
+				df.acctSel++
+			}
+			return m, nil
+		case "enter":
 			df.step = dispatchFanout
 			return m, nil
 		}
@@ -379,7 +409,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 	case dispatchFanout:
 		switch k {
 		case "esc":
-			df.step = dispatchModel
+			df.step = dispatchAccount
 			return m, nil
 		case "up", "ctrl+k", "left":
 			if df.fanoutSel > 0 {
@@ -415,6 +445,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			mdl := df.mdl()
 			root := df.root()
 			fanOut := df.fanOut()
+			acct := m.dfAccount()
 			m.dispatchForm = nil
 			notice := "dispatching \"" + feature + "\" · " + string(mode)
 			if mdl != dispatchpkg.DefaultModel {
@@ -427,6 +458,9 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			if !root.IsDefault() {
 				notice += " · from " + string(root)
 			}
+			if acct != account.Default {
+				notice += " · on " + acct
+			}
 			if fanOut {
 				notice += " · fans out"
 			}
@@ -435,7 +469,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			// dispatch has to be on the triage table by the time the human gets
 			// there — see pending.go.
 			m = m.markPending(m.pendingFor(repo, feature, prompt)).fleetSync()
-			return m, launchDispatch(m.cfg, repo, feature, prompt, mode, mdl, root, fanOut)
+			return m, launchDispatch(m.cfg, repo, feature, prompt, mode, mdl, root, fanOut, acct)
 		default:
 			var cmd tea.Cmd
 			df.prompt, cmd = df.prompt.Update(m.inputMsg(k))
@@ -493,7 +527,7 @@ func (m model) viewDispatchForm(w, h int) string {
 	var lines []string
 	lines = append(lines, fg(cWhite, "new dispatch"))
 	lines = append(lines, fg(cDim, "step "+itoa(int(df.step)+1)+" of "+itoa(int(dispatchStepCount))+
-		" · repo → feature → root → mode → model → fan out → prompt · esc backs out"))
+		" · repo → feature → root → mode → model → account → fan out → prompt · esc backs out"))
 	lines = append(lines, "")
 
 	// Breadcrumb of what's already been chosen.
@@ -515,6 +549,9 @@ func (m model) viewDispatchForm(w, h int) string {
 	}
 	if df.step > dispatchModel {
 		lines = append(lines, row(iw, "", c("model", 10, cFaint), flexc(string(df.mdl()), cMid)))
+	}
+	if df.step > dispatchAccount {
+		lines = append(lines, row(iw, "", c("account", 10, cFaint), flexc(m.dfAccount(), cMid)))
 	}
 	if df.step > dispatchFanout {
 		lines = append(lines, row(iw, "", c("fan out", 10, cFaint), flexc(dispatchFanoutOptions[clampCursor(df.fanoutSel, len(dispatchFanoutOptions))].label, cMid)))
@@ -631,7 +668,32 @@ func (m model) viewDispatchForm(w, h int) string {
 			))
 		}
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "enter → fan out · esc → mode"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter → account · esc → mode"))
+
+	case dispatchAccount:
+		lines = append(lines, fg(cMid, "account")+fg(cFaint, "  the Claude subscription it runs under — and what each has left"))
+		lines = append(lines, "")
+		names := m.accountNames()
+		sel := clampCursor(df.acctSel, len(names))
+		now := time.Now()
+		for i, n := range names {
+			bg, marker, nameColor := cTransparent, " ", cFg
+			if i == sel {
+				bg, marker, nameColor = cSel, "▸", cWhite
+			}
+			detail, tone := m.acctDetail(n, now), cDim
+			if strings.HasPrefix(detail, "! ") {
+				tone = cAmber
+			}
+			lines = append(lines, row(iw, bg,
+				c(marker, 2, cMid),
+				c(n, 12, nameColor),
+				c(m.acctPct(n, now), 5, cMid),
+				flexc(detail, tone),
+			))
+		}
+		lines = append(lines, "")
+		lines = append(lines, blank(2)+fg(cFaint, "enter → fan out · esc → model"))
 
 	case dispatchFanout:
 		lines = append(lines, fg(cMid, "fan out")+fg(cFaint, "  may it spread across agents when the task splits"))
@@ -649,7 +711,7 @@ func (m model) viewDispatchForm(w, h int) string {
 			))
 		}
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "enter → prompt · esc → model"))
+		lines = append(lines, blank(2)+fg(cFaint, "enter → prompt · esc → account"))
 
 	case dispatchPrompt:
 		lines = append(lines, fg(cFaint, "prompt")+"  "+fg(cMid, df.repo.Name)+fg(cFaint, " · ")+fg(cMid, strings.TrimSpace(df.feature.Value())))
@@ -663,4 +725,13 @@ func (m model) viewDispatchForm(w, h int) string {
 		lines = append(lines, "", fg(cRed, "! "+df.errMsg))
 	}
 	return clampLines(gutter(vjoin(lines...), pad), h)
+}
+
+// dfAccount is the account the `+` overlay's ACCOUNT step has landed on.
+func (m model) dfAccount() string {
+	names := m.accountNames()
+	if m.dispatchForm == nil {
+		return account.Default
+	}
+	return names[clampCursor(m.dispatchForm.acctSel, len(names))]
 }

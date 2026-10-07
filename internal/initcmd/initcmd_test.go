@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -98,5 +99,33 @@ func TestHookExeKeepsTheBinaryWhenNothingResolves(t *testing.T) {
 
 	if got != real {
 		t.Fatalf("hookExe = %q, want the running binary %q", got, real)
+	}
+}
+
+// Our status line goes in where there is none, and wraps one the human has —
+// their line still draws, on the same input — and is never installed twice.
+func TestAddStatusLine(t *testing.T) {
+	root := map[string]any{}
+	if addStatusLine(root, "/bin/claude-dispatcher") == "" {
+		t.Fatal("no change reported for a settings file without a status line")
+	}
+	if got := root["statusLine"].(map[string]any)["command"]; got != "/bin/claude-dispatcher statusline" {
+		t.Errorf("command = %v", got)
+	}
+	if addStatusLine(root, "/bin/claude-dispatcher") != "" {
+		t.Error("installed twice")
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	root = map[string]any{"statusLine": map[string]any{"type": "command", "command": "bash ~/it's.sh", "padding": 2.0}}
+	addStatusLine(root, "/bin/claude-dispatcher")
+	sl := root["statusLine"].(map[string]any)
+	if got := sl["command"]; got != `/bin/claude-dispatcher statusline --then 'bash ~/it'\''s.sh'` {
+		t.Errorf("wrapped command = %v", got)
+	}
+	if sl["padding"] != 2.0 {
+		t.Error("the human's other status line settings were dropped")
 	}
 }
