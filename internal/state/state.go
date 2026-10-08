@@ -28,7 +28,7 @@ const (
 	StatusLaunching  Status = "launching"
 	StatusWorking    Status = "working"
 	StatusNeedsInput Status = "needs-input" // turn complete, waiting on the human
-	StatusBlocked    Status = "blocked"     // waiting on a permission approval
+	StatusBlocked    Status = "blocked"     // waiting on a menu: a permission approval, or a question
 	StatusDone       Status = "done"        // shipped ("done means live")
 	StatusExited     Status = "exited"
 )

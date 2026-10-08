@@ -443,6 +443,32 @@
   OUT switch itself shows as config beside the mode. Existing installs
   re-run `init` to get the two new hook entries. Full record:
   `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
+- **A question is a wait, and it is the one wait no hook reported.** A
+  dispatcher sat on a Claude Code question menu — four options, asking before
+  it wrote to another repo — while the table read `1 in flight · 0 want you ·
+  1 running clean` and the row's SIGNAL said `fan-out · 1 live`. The human
+  found it by attaching. Nothing in the status machine was wrong: a question
+  asked through the `AskUserQuestion` tool fires **nothing**, because the turn
+  has not ended (no `Stop`), the prompt is not idle (no
+  `Notification:idle_prompt`) and it is not a permission prompt (no
+  `Notification:permission_prompt`) — the three events that are the whole of
+  how a wait is reported. Worse, the session's fan-out *was* reporting:
+  measured on the record (`a45d6b48871d`, session `77ac6360`, status
+  `working`, reason "permission approved, working"), of 80 events 75 were
+  subagent ones, and after the last status-bearing event — a permission prompt
+  approved at 14:10:01 — the log holds nothing but `SubagentStop` every ~32
+  seconds for forty minutes. Liveness read as progress, which is the shape
+  that made the row look freshly active while it was stopped dead on a human.
+  So `init` installs a `PreToolUse` hook matched on `AskUserQuestion` (the
+  matcher for a tool-use hook is the tool's name) and the status machine marks
+  the record **blocked**. Blocked rather than needs-input, and for the reason
+  blocked exists: a menu is not a sentence `r` can type an answer into — the
+  keypress has to land in the pane, so the row must send the human in rather
+  than offer a reply line, which is exactly what a blocked row already does.
+  Nothing new clears it: `PostToolUse` already does, because answering the
+  question *is* the tool returning, the same way an approved permission prompt
+  clears. No ADR — one hook entry and one case, and the numbering is contested
+  between unmerged branches. Existing installs re-run `init` to get the entry.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
