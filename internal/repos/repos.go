@@ -54,6 +54,10 @@ type Repo struct {
 	// or "" for the state directory. Set only for a repo whose layout has a
 	// project folder to join (see worktreeRootFor).
 	WorktreeRoot string
+	// BranchPrefix is what this repo's dispatch branches are named before the
+	// feature's slug, or nil for the default (`feature/`). A pointer because
+	// an empty prefix is a real answer and must not be the zero value too.
+	BranchPrefix *string
 	// Pinned reports that Path was named by the human in `[checkouts]` rather
 	// than chosen. Screens say which, because the two answer different
 	// questions: an automatic choice is a guess worth correcting, and a pin is
@@ -146,6 +150,7 @@ func Discover(cfg *config.Config) []Repo {
 		r.Env = envFor(cfg, r.Name, r.Path)
 		r.Shell = shellFor(cfg)
 		r.WorktreeRoot = worktreeRootFor(cfg, r.GitDir)
+		r.BranchPrefix = branchPrefixFor(cfg)
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {

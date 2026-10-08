@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
@@ -114,7 +115,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		return nil, fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
 			live.Feature, live.RepoName, live.TmuxSession)
 	}
-	branch := "feature/" + slug
+	branch := branchFor(r, slug)
 	worktree := worktreePath(r, slug)
 	root = root.Normalize()
 	cutFrom, err := ensureWorktree(r.Path, worktree, branch, root)
@@ -204,6 +205,26 @@ func markSessionStarted(d *state.Dispatch, at time.Time) {
 		}
 		return
 	}
+}
+
+// branchFor is the branch this dispatch cuts: the repo's prefix and the
+// feature's slug.
+//
+// The default stays `feature/<slug>` — every dispatch works on a feature
+// branch, including in repos that ship from main, and the prefix is what says
+// at a glance that a branch is one. A repo may name a different one, or none
+// at all (config's `branch_prefix`), which is for the layout where a checkout
+// is a folder named after its branch: there a prefix makes every dispatch a
+// folder whose name is not its branch, and dropping it makes a dispatch
+// indistinguishable from a worktree cut by hand, which is the point.
+//
+// A nil prefix is the default rather than an empty one, so a Repo value nobody
+// configured cuts `feature/…` as it always did.
+func branchFor(r repos.Repo, slug string) string {
+	if r.BranchPrefix == nil {
+		return config.DefaultBranchPrefix + slug
+	}
+	return *r.BranchPrefix + slug
 }
 
 // worktreePath is where this dispatch's own checkout is cut.

@@ -125,7 +125,29 @@ type Config struct {
 	// dir at `<clone>/.git`, has no such folder, and falls back to the state
 	// directory rather than inventing one next to the clone.
 	Worktrees string `toml:"worktrees,omitempty"`
+	// BranchPrefix is what a dispatch's branch name starts with, before the
+	// feature's slug. Unset means "feature/", which is what every dispatch has
+	// always been cut as; `branch_prefix = ""` means none, so the branch is the
+	// slug and nothing else.
+	//
+	// It is a pointer because those two are different answers and a string
+	// cannot tell them apart: an absent key and an explicitly empty one both
+	// decode to "", and one of them has to mean the default while the other
+	// means the human asking for a bare name.
+	//
+	// Why anyone would: with `worktrees = "project"` the checkout is a folder
+	// named for the feature beside the repo's others, and a prefixed branch
+	// makes every one of them a folder whose name is not its branch — the
+	// mismatch a per-branch-folder layout exists to avoid. Dropping the prefix
+	// makes a dispatch indistinguishable from a worktree the human cut by
+	// hand, which on such a machine is the point.
+	BranchPrefix *string `toml:"branch_prefix,omitempty"`
 }
+
+// DefaultBranchPrefix is what a dispatch's branch is called when nobody says
+// otherwise: every dispatch works on a feature branch, including in repos that
+// ship from main.
+const DefaultBranchPrefix = "feature/"
 
 // WorktreesBesideProject reports whether a dispatch's checkout is cut beside
 // the repository's other ones rather than under the state directory.
@@ -257,9 +279,17 @@ func Save(c *Config) error {
 	b.WriteString("# keeps one folder per branch. A plain clone has no such folder and stays\n")
 	b.WriteString("# in the state directory either way.\n")
 	if c.Worktrees == "" {
-		b.WriteString("# worktrees = \"project\"\n\n")
+		b.WriteString("# worktrees = \"project\"\n")
 	} else {
-		fmt.Fprintf(&b, "worktrees = %q\n\n", c.Worktrees)
+		fmt.Fprintf(&b, "worktrees = %q\n", c.Worktrees)
+	}
+	b.WriteString("# What a dispatch's branch name starts with. Unset is \"feature/\"; an empty\n")
+	b.WriteString("# string is no prefix at all, so the branch is the feature's name and a\n")
+	b.WriteString("# checkout folder beside the project carries the same name as its branch.\n")
+	if c.BranchPrefix == nil {
+		b.WriteString("# branch_prefix = \"\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "branch_prefix = %q\n\n", *c.BranchPrefix)
 	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")

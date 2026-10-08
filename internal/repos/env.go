@@ -105,6 +105,18 @@ func worktreeRootFor(cfg *config.Config, gitDir string) string {
 	return filepath.Dir(gitDir)
 }
 
+// branchPrefixFor is what this repo's dispatch branches start with, or nil for
+// the default. nil rather than a resolved string, so a Repo nobody configured
+// — a test's, a demo's — still cuts `feature/…` rather than a bare slug: the
+// two answers must not share the zero value when one of them is "no prefix".
+func branchPrefixFor(cfg *config.Config) *string {
+	if cfg == nil || cfg.BranchPrefix == nil {
+		return nil
+	}
+	p := strings.TrimSpace(*cfg.BranchPrefix)
+	return &p
+}
+
 func hasFlake(checkout string) bool {
 	_, err := os.Stat(filepath.Join(checkout, "flake.nix"))
 	return err == nil
