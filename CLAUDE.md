@@ -287,7 +287,19 @@
   first frame is decided before the program starts (OS, else the terminal's
   background once), so boot never flashes the wrong theme. A third-party theme
   is one more table; which one `system` picks per side is one lookup
-  (`themeForAppearance`) waiting for a key. Full record:
+  (`themeForAppearance`) waiting for a key. **Two reporters were one short,
+  and the weak one was not free**: a NixOS/niri desktop answers the portal
+  `v u 0`, "no preference", while plainly in light mode — it publishes the
+  switch by writing the word to a file its own tmux.conf reads. "Nothing to
+  ask" stops the poll, but "asked, no preference" is not that, so the cockpit
+  spawned a `busctl` every 2s for the life of the session for an answer that
+  could not change. So config's **`appearance_file`** names that file
+  (`appearance.FromFile`), read *before* the OS and *instead of* it when it
+  answers — a read, not a subprocess — while a file that is missing or says
+  anything but light/dark falls through rather than pinning a theme; and a
+  poll whose last three answers were not answers drops to 30s
+  (`themePollQuiet`), any real answer restoring 2s, because a preference can
+  still be set later. Full record:
   `docs/adr/0016-a-colour-is-a-role-and-the-switch-is-news.md`.
 - **A dispatch that did not happen is a thing that happened.** Reported as
   "when the prompt is massive the dispatcher seems to just disappear", then

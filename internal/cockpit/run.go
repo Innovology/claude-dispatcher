@@ -86,7 +86,7 @@ func Run() error {
 	if m.cfg != nil {
 		configured = m.cfg.Theme
 	}
-	m = m.initTheme(configured)
+	m = m.initTheme(configured, m.cfg.AppearancePath())
 	if m.themeTerm {
 		// Whatever mode it ends in — settings can switch to system mid-run.
 		defer func() { _, _ = os.Stdout.WriteString(termThemeOff) }()

@@ -259,6 +259,12 @@ type model struct {
 	themeTerm    bool
 	themeNoOS    bool
 	themePolling bool
+	// themeFile is the file the human named as their switch (config's
+	// appearance_file, ~ already expanded), asked before the OS and instead of
+	// it when it answers. themeQuiet counts answers that were not answers in a
+	// row, which is what slows the poll down to themePollQuiet.
+	themeFile  string
+	themeQuiet int
 }
 
 func newModel() model {

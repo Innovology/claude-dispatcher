@@ -49,6 +49,38 @@ func TestShellSurvivesSaveAndLoad(t *testing.T) {
 	}
 }
 
+// The appearance file is the other top-level key added for this machine, and
+// it has the same "written before the first table" hazard. ~ is expanded on
+// the way out, because the human types the path their desktop writes to and
+// `os.ReadFile` has never heard of a home directory.
+func TestAppearanceFileSurvivesSaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	if err := Save(&Config{Roots: []string{dir}, AppearanceFile: "~/.config/tmux/mode"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.AppearanceFile != "~/.config/tmux/mode" {
+		t.Errorf("appearance_file = %q, want what was saved", got.AppearanceFile)
+	}
+	if want := dir + "/.config/tmux/mode"; got.AppearancePath() != want {
+		t.Errorf("AppearancePath = %q, want %q", got.AppearancePath(), want)
+	}
+	// Naming none is the ordinary case and must stay empty rather than
+	// becoming a path nobody asked for.
+	if (&Config{}).AppearancePath() != "" {
+		t.Error("an unset appearance file resolved to a path")
+	}
+	var nilCfg *Config
+	if nilCfg.AppearancePath() != "" {
+		t.Error("a nil config resolved to a path")
+	}
+}
+
 func containsLine(s, want string) bool {
 	for _, ln := range splitLines(s) {
 		if ln == want {

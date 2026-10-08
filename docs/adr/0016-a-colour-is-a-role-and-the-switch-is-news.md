@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-09-15)
+Accepted (2026-09-15, extended 2026-10-08)
 
 ## Context
 
@@ -94,3 +94,53 @@ waiting for a config key.
 - A terminal that follows neither the desktop nor 2031, on a machine with
   nothing to ask, gets the background read once at startup and nothing after.
   `theme = "light"` is the answer there.
+
+## Amendment (2026-10-08): a named source, and a poll that stops spinning
+
+Two reporters were not enough on the desktop this was reported from, and the
+weaker one was not merely silent — it was expensive.
+
+NixOS running niri with dankMaterialShell, measured:
+
+```
+$ busctl --user call org.freedesktop.portal.Desktop /org/freedesktop/portal/desktop \
+    org.freedesktop.portal.Settings ReadOne ss org.freedesktop.appearance color-scheme
+v u 0
+```
+
+`0` is "no preference". The desktop is in light mode at the time, and it
+publishes that fact the way its own consumers read it — by writing the word to
+a file, which that machine's `tmux.conf` then reads to pick its palette. The
+portal is simply not where this desktop keeps the answer, and no amount of
+asking it will produce one.
+
+The cost was in the gap between the two cases the original decision names.
+`appearance.ErrUnsupported` — nothing on this machine to ask — stops the poll.
+But a portal that *is* there and answers "no preference" is not unsupported, so
+the poll stayed at its two-second interval for the life of the cockpit: a
+`busctl` process roughly every two seconds, forever, for an answer that cannot
+change until the human sets a preference their desktop has no UI for. The
+theme still followed the switch, but only because ghostty speaks 2031 and tmux
+relays it. On that machine the OS reporter was pure overhead.
+
+So:
+
+- **The human may name the source.** `appearance_file` in config.toml is a
+  path whose contents are `light` or `dark` (`appearance.FromFile`), read
+  BEFORE the OS and INSTEAD of it when it answers. It is the one reporter that
+  needs no guessing, and it is a file read rather than a subprocess, so
+  following the switch through it costs nothing. A file that is missing, empty
+  or says something else falls through to the OS rather than pinning a theme:
+  a typo in a path must not decide what colour the cockpit is, and the absence
+  of the word "light" is not evidence of dark.
+- **A poll that keeps getting no answer slows down.** Three answers in a row
+  that are not answers — `Unknown`, or an error — and the interval drops from
+  two seconds to thirty (`themePollQuiet`). Any real answer restores it,
+  whether or not it differs from the last, because a source that starts
+  answering is news about the source. The poll never stops outright on this
+  path: a preference can be set at any time, and the cockpit that gave up
+  would never see it.
+
+The third reporter also covers a case neither of the first two does: a theme
+switch that is a shell script rather than a desktop environment, which is most
+tiling-WM setups.

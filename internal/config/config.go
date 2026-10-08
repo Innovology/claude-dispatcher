@@ -91,6 +91,29 @@ type Config struct {
 	// is nothing in the file to read — and because a shell we were told about
 	// is one the idle check can recognise by name.
 	Shell string `toml:"shell,omitempty"`
+	// AppearanceFile is a file whose contents are the word "light" or "dark":
+	// the light/dark switch as this machine's own desktop publishes it, read
+	// before the portal is asked.
+	//
+	// The portal is not universal. On a NixOS/niri desktop running
+	// dankMaterialShell it answers "no preference" while the desktop is in
+	// light mode and writes that word to a file its tmux config reads. A
+	// reporter that can only ask D-Bus is blind there, and a theme switch that
+	// is a script rather than a desktop environment is blind the same way.
+	//
+	// Naming one is cheaper as well as truer: it is a read rather than a
+	// subprocess, so following the switch costs nothing. A file that is
+	// missing or says something else is skipped, never obeyed — see
+	// appearance.FromFile.
+	AppearanceFile string `toml:"appearance_file,omitempty"`
+}
+
+// AppearancePath is AppearanceFile with ~ expanded, or "" when none is named.
+func (c *Config) AppearancePath() string {
+	if c == nil {
+		return ""
+	}
+	return ExpandHome(strings.TrimSpace(c.AppearanceFile))
 }
 
 func Dir() string {
@@ -190,9 +213,18 @@ func Save(c *Config) error {
 	b.WriteString("# $SHELL. Name one here to be sure — a tmux.conf that sets default-shell\n")
 	b.WriteString("# from a run-shell job has nothing in the file for us to read.\n")
 	if c.Shell == "" {
-		b.WriteString("# shell = \"/usr/bin/fish\"\n\n")
+		b.WriteString("# shell = \"/usr/bin/fish\"\n")
 	} else {
-		fmt.Fprintf(&b, "shell = %q\n\n", c.Shell)
+		fmt.Fprintf(&b, "shell = %q\n", c.Shell)
+	}
+	b.WriteString("# A file holding the word \"light\" or \"dark\" — your desktop's own\n")
+	b.WriteString("# light/dark switch, read before the freedesktop portal is asked. Name one\n")
+	b.WriteString("# when the portal reports \"no preference\" but your theme still changes,\n")
+	b.WriteString("# which is every setup whose switch is a script rather than a desktop.\n")
+	if c.AppearanceFile == "" {
+		b.WriteString("# appearance_file = \"~/.config/tmux/mode\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "appearance_file = %q\n\n", c.AppearanceFile)
 	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")

@@ -252,6 +252,22 @@ func (m model) applyTheme() { setTheme(m.currentTheme()) }
 // that does not report one itself.
 const themePollEvery = 2 * time.Second
 
+// themePollQuiet is how often a source that keeps saying "no preference" is
+// asked, and themeQuietAfter is how many of those answers in a row it takes to
+// drop to it.
+//
+// "Nothing to ask" and "asked, no answer" were one case too few.
+// appearance.ErrUnsupported stops the poll dead, but a desktop WITH a portal
+// that reports 0 — no preference — is not unsupported, so it was asked every
+// two seconds for the life of the cockpit: measured on a NixOS/niri box, a
+// busctl process roughly every two seconds, forever, for an answer that cannot
+// change until the human sets a preference that desktop has no UI for. It can
+// still change, so the poll continues; it just stops being a spin.
+const (
+	themePollQuiet  = 30 * time.Second
+	themeQuietAfter = 3
+)
+
 // themeQueryTimeout bounds one OS read. A portal that has hung must not hold
 // a goroutine, or the first frame, for longer than a beat.
 const themeQueryTimeout = time.Second
@@ -271,19 +287,47 @@ type themeOSMsg struct {
 	err        error
 }
 
-// queryAppearance reads the OS switch with the timeout applied.
-func queryAppearance() (appearance.Appearance, error) {
+// queryAppearance reads the OS switch with the timeout applied. A var, so a
+// test can count how often the OS is asked — which is the whole claim a named
+// appearance file makes.
+var queryAppearance = func() (appearance.Appearance, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), themeQueryTimeout)
 	defer cancel()
 	return appearance.Query(ctx)
 }
 
-// themePollCmd reads the OS switch after one poll interval.
-func themePollCmd() tea.Cmd {
-	return tea.Tick(themePollEvery, func(time.Time) tea.Msg {
-		a, err := queryAppearance()
+// queryAppearanceFrom is the switch as this machine reports it: the file the
+// human named, else the OS.
+//
+// The file wins when it answers, and the OS is then not asked at all — that is
+// the point of naming one. It is also the cheap half: a read rather than a
+// subprocess. A named file that is missing, empty or says something that is
+// neither word falls through to the OS rather than pinning a theme, because a
+// typo in a path must not decide what colour the cockpit is.
+func queryAppearanceFrom(file string) (appearance.Appearance, error) {
+	if strings.TrimSpace(file) != "" {
+		if a, err := appearance.FromFile(file); err == nil && a != appearance.Unknown {
+			return a, nil
+		}
+	}
+	return queryAppearance()
+}
+
+// themePollCmd reads the switch again after d.
+func themePollCmd(d time.Duration, file string) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
+		a, err := queryAppearanceFrom(file)
 		return themeOSMsg{appearance: a, err: err}
 	})
+}
+
+// themePollNext is how long to wait before asking again: the ordinary interval
+// until the answers stop being answers, then the quiet one.
+func (m model) themePollNext() time.Duration {
+	if m.themeQuiet >= themeQuietAfter {
+		return themePollQuiet
+	}
+	return themePollEvery
 }
 
 // termThemeCmd writes termThemeOn. It goes straight to stdout because Bubble
@@ -308,7 +352,8 @@ func stdoutIsTerminal() bool {
 // before the first frame — the boot screen is drawn in whatever this decides.
 // It reserves the poll for Init to issue, the way Run reserves the first
 // load: Init cannot record that it started one.
-func (m model) initTheme(configured string) model {
+func (m model) initTheme(configured, appearanceFile string) model {
+	m.themeFile = appearanceFile
 	mode, ok := themeModeOf(configured)
 	m.themeMode = mode
 	if !ok {
@@ -320,7 +365,7 @@ func (m model) initTheme(configured string) model {
 	}
 	m.themeTerm = stdoutIsTerminal()
 	if mode == themeSystem {
-		a, err := queryAppearance()
+		a, err := queryAppearanceFrom(m.themeFile)
 		m.themeNoOS = errors.Is(err, appearance.ErrUnsupported)
 		switch {
 		case a != appearance.Unknown:
@@ -350,7 +395,7 @@ func (m model) themeFollowCmds() tea.Cmd {
 		cmds = append(cmds, termThemeCmd())
 	}
 	if m.themePolling {
-		cmds = append(cmds, themePollCmd())
+		cmds = append(cmds, themePollCmd(m.themePollNext(), m.themeFile))
 	}
 	return tea.Batch(cmds...)
 }
@@ -372,7 +417,7 @@ func (m model) followSystem() (model, tea.Cmd) {
 	}
 	if !m.themePolling && !m.themeNoOS {
 		m.themePolling = true
-		cmds = append(cmds, themePollCmd())
+		cmds = append(cmds, themePollCmd(m.themePollNext(), m.themeFile))
 	}
 	return m, tea.Batch(cmds...)
 }
@@ -385,15 +430,28 @@ func (m model) onThemeOS(msg themeOSMsg) (model, tea.Cmd) {
 		m.themeNoOS = true
 		return m, nil
 	}
-	if msg.err == nil && msg.appearance != appearance.Unknown && msg.appearance != m.themeOS {
-		m.themeOS, m.themeSystem = msg.appearance, msg.appearance
-		m.applyTheme()
+	// An answer that is not an answer is counted, not acted on: enough of them
+	// in a row and the poll drops to its quiet interval (see themePollQuiet).
+	// Any real answer is the switch working again and restores the fast one,
+	// whether or not it differs from the last — a desktop that starts
+	// answering is news about the source, even when the side it names is the
+	// side already on screen.
+	if msg.err != nil || msg.appearance == appearance.Unknown {
+		if m.themeQuiet < themeQuietAfter {
+			m.themeQuiet++
+		}
+	} else {
+		m.themeQuiet = 0
+		if msg.appearance != m.themeOS {
+			m.themeOS, m.themeSystem = msg.appearance, msg.appearance
+			m.applyTheme()
+		}
 	}
 	if m.themeMode != themeSystem {
 		return m, nil
 	}
 	m.themePolling = true
-	return m, themePollCmd()
+	return m, themePollCmd(m.themePollNext(), m.themeFile)
 }
 
 // termThemeReport recognises the terminal's `CSI ? 997 ; 1|2 n`. Bubble Tea v1
