@@ -467,8 +467,25 @@
   than offer a reply line, which is exactly what a blocked row already does.
   Nothing new clears it: `PostToolUse` already does, because answering the
   question *is* the tool returning, the same way an approved permission prompt
-  clears. No ADR — one hook entry and one case, and the numbering is contested
-  between unmerged branches. Existing installs re-run `init` to get the entry.
+  clears. A question also **outranks "done means live"**, beside the permission
+  prompt it already let through (`reopensDone`): `track` flips a record to done
+  the moment its PR merges and a dispatcher told to merge and keep working
+  routinely merges mid-run, so letting one menu back onto the table and not the
+  other would have frozen a questioning dispatcher at done — invisible, which
+  is this same defect in the one state where marking it blocked is not enough.
+  **A menu is a menu, and the two kinds exist only to be worded apart.** Both
+  waits are `blocked`, so the status cannot tell them apart and the *reason*
+  does — `state.ReasonQuestion`, a constant because hookcmd writes it and the
+  cockpit matches it, and a drifting letter would not fail, it would file every
+  question under "approve a permission". What the human can *do* about either
+  is identical, because the answer to both is a keypress in the pane: `cqMenu`
+  is the one predicate every site asks (first rank, no `r`, no "mark shipped",
+  no quoting a mid-turn record's stale `Said`), tone needs no say in it at all
+  since it is taken from the blocked state both share, and a test pins the pair
+  to one key set and one rank while requiring the words to differ — the only
+  way to split them by accident is to edit that predicate. No ADR — one hook
+  entry and one case, and the numbering is contested between unmerged branches.
+  Existing installs re-run `init` to get the entry.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a

@@ -281,9 +281,15 @@ func runReply(args []string, out io.Writer) error {
 	if text == "" {
 		return errors.New("nothing to send")
 	}
-	// The same refusals the cockpit's r makes, for the same reasons.
+	// The same refusals the cockpit's r makes, for the same reasons. Blocked is
+	// either menu, so the refusal names the one it actually is: the reason is
+	// what tells them apart, exactly as cqKind reads it.
 	if d.Status == state.StatusBlocked {
-		return fmt.Errorf("%q is on a permission prompt — a menu, which typed text would answer; attach to it", d.Feature)
+		menu := "a permission prompt"
+		if d.StatusReason == state.ReasonQuestion {
+			menu = "a question"
+		}
+		return fmt.Errorf("%q is on %s — a menu, which typed text would answer; attach to it", d.Feature, menu)
 	}
 	if d.Finished() || !sessionAlive(d.TmuxSession) {
 		return fmt.Errorf("%q has no live session", d.Feature)
