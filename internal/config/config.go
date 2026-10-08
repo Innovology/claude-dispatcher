@@ -40,8 +40,14 @@ type Config struct {
 	// means retyping a key that has to match one exactly, in another file, with
 	// silence as the only feedback when it does not.
 	Linear map[string]string `toml:"linear,omitempty"`
-	// Gates names the ONE check that is a repo's verdict, keyed by repo
-	// directory name. A repository with an umbrella workflow has already
+	// Gates names the ONE check that is a repo's verdict, keyed by the repo
+	// NAME as the cockpit shows it — the name git knows the repository by,
+	// which is not always the name of the folder it sits in: a checkout whose
+	// origin remote names it something else is listed, grouped and dispatched
+	// under that name everywhere. Write the folder name instead and the key
+	// matches nothing, the cell stays exactly as it was, and nothing says so —
+	// so take the spelling from the products lens or the assignment editor
+	// rather than from the path. A repository with an umbrella workflow has already
 	// decided what "green" means — an aggregator job that depends on every lane
 	// and allow-lists the ones the active profile deliberately turned off — so
 	// the individual check conclusions beside it are noise: a lane skipped by
@@ -175,11 +181,13 @@ func Save(c *Config) error {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Linear[k])
 	}
 	b.WriteString("\n")
-	b.WriteString("# The one check that is a repo's verdict, keyed by repo directory name. A\n")
-	b.WriteString("# repo with an umbrella workflow has already decided what green means — an\n")
-	b.WriteString("# aggregator job depending on every lane — so name that job here and the\n")
-	b.WriteString("# repo's row reads it instead of every check at once. Unlisted repos keep\n")
-	b.WriteString("# reading every check, which is what they have always done.\n")
+	b.WriteString("# The one check that is a repo's verdict. A repo with an umbrella workflow\n")
+	b.WriteString("# has already decided what green means — an aggregator job depending on every\n")
+	b.WriteString("# lane — so name that job here and the repo's row reads it instead of every\n")
+	b.WriteString("# check at once. Unlisted repos keep reading every check, as they always have.\n")
+	b.WriteString("# Keyed by the repo NAME as the cockpit shows it, which is the name git knows\n")
+	b.WriteString("# the repository by and not always its folder's: a key spelled from the path\n")
+	b.WriteString("# matches nothing and changes nothing, silently. Copy it off the products lens.\n")
 	b.WriteString("# shop-api = \"All gates green\"\n")
 	b.WriteString("[gates]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Gates)) {

@@ -78,7 +78,11 @@ So the cockpit cannot discover the aggregator. It must be told, or say nothing.
 
 **A repository's verdict is the one check it names, and naming one is optional.**
 
-`[gates]` in `config.toml` maps a repo directory name to that check:
+`[gates]` in `config.toml` maps a repo to that check, keyed by the repo **name**
+as the cockpit shows it — the name git knows the repository by, which is not
+always the name of its folder. A key spelled from the path matches nothing, the
+cell stays exactly as it was, and nothing says so, which is the same silent
+failure the `[linear]` table's own key warns about.
 
 ```toml
 [gates]
