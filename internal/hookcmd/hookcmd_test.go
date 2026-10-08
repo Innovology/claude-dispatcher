@@ -67,9 +67,13 @@ func TestApplyReopensDone(t *testing.T) {
 	}
 }
 
-// A Stop with in-flight background tasks means the session is paused waiting
-// to be woken, not waiting on the human — and the later idle_prompt (which
-// carries no task info) must not undo that verdict.
+// A Stop with in-flight background tasks and a message that asks nothing means
+// the session is paused waiting to be woken, not waiting on the human — and the
+// later idle_prompt (which carries no task info) must not undo that verdict.
+//
+// "Asks nothing" is load-bearing and is why this case carries no
+// LastAssistantMessage: an ask outranks the background work, which is
+// TestAnAskOutranksBackgroundWork in question_test.go.
 func TestApplyBackgroundTaskWait(t *testing.T) {
 	tasks := []json.RawMessage{json.RawMessage(`{"task_id":"t1"}`), json.RawMessage(`{"task_id":"t2"}`)}
 	d := &state.Dispatch{Status: state.StatusWorking}

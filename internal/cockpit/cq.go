@@ -148,10 +148,13 @@ func cqKind(rec *state.Dispatch, st string) string {
 	if rec.Failure != nil {
 		return "api-error"
 	}
-	switch rec.StatusReason {
-	case "turn complete — waiting on you":
+	switch {
+	case strings.HasPrefix(rec.StatusReason, state.ReasonTurnComplete):
+		// A prefix, not the whole string: a turn that ended on a question with
+		// background work still running carries that too, and it is still a
+		// finished turn.
 		return "turn-done"
-	case "waiting for your next prompt":
+	case rec.StatusReason == "waiting for your next prompt":
 		return "idle"
 	}
 	return "needs"

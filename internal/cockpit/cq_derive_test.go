@@ -40,6 +40,11 @@ func TestCQKindFromRecord(t *testing.T) {
 		{"blocked on a question is a question ask", "blocked", state.ReasonQuestion, "question"},
 		{"an open PR is a merge ask", "review", "turn complete — waiting on you", "review"},
 		{"finished turn", "needs", "turn complete — waiting on you", "turn-done"},
+		// A turn that ended on a question while background work was still
+		// running carries both facts, and is still a finished turn — so the
+		// lead is matched as a prefix, not whole.
+		{"finished turn with background work", "needs",
+			state.ReasonTurnComplete + " · 2 background tasks still running", "turn-done"},
 		{"idle at the prompt", "needs", "waiting for your next prompt", "idle"},
 		{"anything else stopped", "needs", "something odd", "needs"},
 	}
