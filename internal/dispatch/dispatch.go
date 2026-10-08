@@ -115,7 +115,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 			live.Feature, live.RepoName, live.TmuxSession)
 	}
 	branch := "feature/" + slug
-	worktree := filepath.Join(state.WorktreesDir(), r.Name, slug)
+	worktree := worktreePath(r, slug)
 	root = root.Normalize()
 	cutFrom, err := ensureWorktree(r.Path, worktree, branch, root)
 	if err != nil {
@@ -204,6 +204,26 @@ func markSessionStarted(d *state.Dispatch, at time.Time) {
 		}
 		return
 	}
+}
+
+// worktreePath is where this dispatch's own checkout is cut.
+//
+// The default is the state directory, keyed by repo and feature, which keeps
+// this tool's bookkeeping inside this tool's own folder. A repo whose layout
+// has a project to join (config's `worktrees = "project"`, resolved in
+// repos.worktreeRootFor) gets its dispatch checkout beside the repo's other
+// ones instead, named for the feature exactly as the human's own are, because
+// a checkout git lists as a worktree of this repository and that is nowhere
+// near it is a checkout nobody will find.
+//
+// There is no repo component in the project case: the project folder IS the
+// repo, and `<project>/<repo>/<slug>` would be a directory named after the
+// repository inside the repository.
+func worktreePath(r repos.Repo, slug string) string {
+	if r.WorktreeRoot != "" {
+		return filepath.Join(r.WorktreeRoot, slug)
+	}
+	return filepath.Join(state.WorktreesDir(), r.Name, slug)
 }
 
 // MaxPromptBytes is the largest prompt a dispatch will carry.

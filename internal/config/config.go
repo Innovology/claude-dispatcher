@@ -106,6 +106,31 @@ type Config struct {
 	// missing or says something else is skipped, never obeyed — see
 	// appearance.FromFile.
 	AppearanceFile string `toml:"appearance_file,omitempty"`
+	// Worktrees is where a dispatch's own checkout is cut: "state" (the
+	// default, and what every install did before this key existed) puts it
+	// under ~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>, and
+	// "project" puts it beside the repository's other checkouts.
+	//
+	// The state directory is the safe default: a dispatch worktree is this
+	// tool's bookkeeping, `x` deletes a clean one, and deleting inside
+	// somebody's project directory on a keypress is a different proposition
+	// from deleting inside our own. It is the wrong default for a machine that
+	// already keeps one folder per branch beside a bare repo, where a dispatch
+	// is the only checkout that lives somewhere else — invisible in the project
+	// it belongs to, and listed by git as a worktree whose folder is not there.
+	//
+	// "project" needs a project to be beside, which is the layout where the
+	// repository's common git dir is NOT inside a working tree: `<project>/
+	// .bare` with the checkouts as siblings. An ordinary clone keeps its git
+	// dir at `<clone>/.git`, has no such folder, and falls back to the state
+	// directory rather than inventing one next to the clone.
+	Worktrees string `toml:"worktrees,omitempty"`
+}
+
+// WorktreesBesideProject reports whether a dispatch's checkout is cut beside
+// the repository's other ones rather than under the state directory.
+func (c *Config) WorktreesBesideProject() bool {
+	return c != nil && strings.EqualFold(strings.TrimSpace(c.Worktrees), "project")
 }
 
 // AppearancePath is AppearanceFile with ~ expanded, or "" when none is named.
@@ -222,9 +247,19 @@ func Save(c *Config) error {
 	b.WriteString("# when the portal reports \"no preference\" but your theme still changes,\n")
 	b.WriteString("# which is every setup whose switch is a script rather than a desktop.\n")
 	if c.AppearanceFile == "" {
-		b.WriteString("# appearance_file = \"~/.config/tmux/mode\"\n\n")
+		b.WriteString("# appearance_file = \"~/.config/tmux/mode\"\n")
 	} else {
-		fmt.Fprintf(&b, "appearance_file = %q\n\n", c.AppearanceFile)
+		fmt.Fprintf(&b, "appearance_file = %q\n", c.AppearanceFile)
+	}
+	b.WriteString("# Where a dispatch's own checkout is cut. \"state\" (the default) keeps it\n")
+	b.WriteString("# under ~/.local/state/claude-dispatcher/worktrees; \"project\" puts it beside\n")
+	b.WriteString("# the repo's other checkouts, for a <project>/.bare layout that already\n")
+	b.WriteString("# keeps one folder per branch. A plain clone has no such folder and stays\n")
+	b.WriteString("# in the state directory either way.\n")
+	if c.Worktrees == "" {
+		b.WriteString("# worktrees = \"project\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "worktrees = %q\n\n", c.Worktrees)
 	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")

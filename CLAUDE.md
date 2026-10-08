@@ -55,10 +55,26 @@
       default and the human's `Root` (see the root-branch decision below). Full
       record: `docs/adr/0017-a-repository-is-its-common-dir.md`.
   - *Worktree* is per-dispatch isolation: each dispatch gets its own git
-    worktree of its repo under
+    worktree of its repo, by default under
     `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so concurrent
     dispatches — and the human — never fight over one checkout. `x` removes a
-    clean worktree; a dirty one is kept for inspection. (Supersedes the
+    clean worktree; a dirty one is kept for inspection.
+    - **Where it is cut is the human's layout, not ours.** The state directory
+      is the right default — a dispatch worktree is our bookkeeping, and `x`
+      deleting a folder on a keypress belongs in our own directory rather than
+      in somebody's project — and the wrong one on a machine that already keeps
+      a folder per branch beside a bare repo: there the dispatch checkout is
+      the only one somewhere else, so git lists a worktree of `player-app`
+      whose folder is not in `player-app`, invisible to every tool that reads
+      the project directory. Config `worktrees = "project"` cuts it beside the
+      repo's other checkouts instead (`<project>/<slug>`, no repo component —
+      the project folder *is* the repo). "Project" means the layout where the
+      common git dir is not inside a working tree (`<project>/.bare`); an
+      ordinary clone has no such folder and keeps the state directory, because
+      scattering checkouts through whatever directory a clone happens to sit in
+      is not joining a convention, it is inventing one. The path goes on the
+      record, so a dispatch made before the setting changed resumes where it
+      was cut. (Supersedes the
     original "multi-repo, not multi-worktree" call, reversed the next day
     after two sessions collided in one working copy and a commit landed on
     the wrong branch.)

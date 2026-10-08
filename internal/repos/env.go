@@ -84,6 +84,27 @@ func shellFor(cfg *config.Config) string {
 	return strings.TrimSpace(cfg.Shell)
 }
 
+// worktreeRootFor is the directory a dispatch's own checkout is cut in, or ""
+// for the state directory this tool keeps its own under.
+//
+// A project here is the folder the checkouts share — the one holding the
+// common git dir, `<project>/.bare`, with `main` and every branch beside it.
+// That is the only layout where "put it with the others" names a real place.
+// An ordinary clone carries its git dir at `<clone>/.git`, so the parent is
+// wherever the human happens to keep their repositories, and cutting dispatch
+// checkouts into it would be scattering folders through somebody's source
+// directory rather than joining a convention they already keep. Those stay
+// where they were, which is also what every repo does until this is asked for.
+func worktreeRootFor(cfg *config.Config, gitDir string) string {
+	if !cfg.WorktreesBesideProject() || gitDir == "" {
+		return ""
+	}
+	if filepath.Base(gitDir) == ".git" {
+		return ""
+	}
+	return filepath.Dir(gitDir)
+}
+
 func hasFlake(checkout string) bool {
 	_, err := os.Stat(filepath.Join(checkout, "flake.nix"))
 	return err == nil

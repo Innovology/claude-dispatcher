@@ -50,6 +50,10 @@ type Repo struct {
 	// shellFor), and this is where a per-repo table would land if one is ever
 	// wanted.
 	Shell string
+	// WorktreeRoot is the directory this repo's dispatch checkouts are cut in,
+	// or "" for the state directory. Set only for a repo whose layout has a
+	// project folder to join (see worktreeRootFor).
+	WorktreeRoot string
 	// Pinned reports that Path was named by the human in `[checkouts]` rather
 	// than chosen. Screens say which, because the two answer different
 	// questions: an automatic choice is a guess worth correcting, and a pin is
@@ -141,6 +145,7 @@ func Discover(cfg *config.Config) []Repo {
 		// may just have changed.
 		r.Env = envFor(cfg, r.Name, r.Path)
 		r.Shell = shellFor(cfg)
+		r.WorktreeRoot = worktreeRootFor(cfg, r.GitDir)
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {
