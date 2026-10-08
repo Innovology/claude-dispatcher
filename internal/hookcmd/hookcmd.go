@@ -7,6 +7,7 @@
 //	PostToolUse                    -> working, only to clear "blocked"
 //	Stop                           -> needs-input (turn complete), or working
 //	                                  if background tasks are still in flight
+//	                                  AND the message asked nothing
 //	StopFailure                    -> needs-input, with the API error that
 //	                                  ended the turn recorded as its Failure
 //	Notification:idle_prompt       -> needs-input (unless waiting on tasks)
@@ -17,12 +18,14 @@
 //	                                  annotation on the record (state.Subagent)
 //
 // A Stop with a non-empty background_tasks payload means the session is
-// paused waiting for background work to wake it, not waiting on the human;
-// the idle_prompt payload carries no task info, so the Stop's verdict is
-// persisted (WaitingOnTasks) and idle_prompt defers to it.
+// paused waiting for background work to wake it, not waiting on the human —
+// unless its message asked something, in which case the ask wins and the
+// record is needs-input with both facts in its reason. The idle_prompt payload
+// carries no task info, so the Stop's verdict is persisted (WaitingOnTasks)
+// and idle_prompt defers to it either way.
 //
-// A done record is terminal for every event but the two that prove its session
-// is still going — see reopensDone.
+// A done record is terminal for every event but the three that prove its
+// session is still going — see reopensDone.
 //
 // Events are attributed to a dispatch by, in order: the CLAUDE_DISPATCHER_ID
 // env var (set at launch, inherited through tmux -> claude -> hook), the
@@ -44,6 +47,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/ask"
 	"claude-dispatcher/internal/state"
 )
 
@@ -355,14 +359,34 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Failure = nil
 		d.SetSaid(in.LastAssistantMessage)
 		d.WaitingOnTasks = len(in.BackgroundTasks) > 0
-		if d.WaitingOnTasks {
+		// Background work is not a human wait — until the message asks
+		// something, and then both are true and only one of them needs a
+		// human. This branch used to be taken on the task count alone, so a
+		// turn that ended on a question with an agent still running read as
+		// working and never reached the table.
+		//
+		// The ask is read off d.Said rather than the payload so that the
+		// status and the cockpit's SIGNAL cannot disagree: cqAsk is this same
+		// ask.Of over this same field, so a wait claimed here is a question
+		// the row can quote.
+		//
+		// WaitingOnTasks stays set either way. It is true, and the idle prompt
+		// that trails a stop defers to it; what changes is that it no longer
+		// decides the status on its own.
+		if d.WaitingOnTasks && ask.Of(d.Said) == "" {
 			d.Status = state.StatusWorking
 			d.StatusReason = fmt.Sprintf("waiting on %d background %s",
 				len(in.BackgroundTasks), plural(len(in.BackgroundTasks), "task"))
 			break
 		}
 		d.Status = state.StatusNeedsInput
-		d.StatusReason = "turn complete — waiting on you"
+		d.StatusReason = state.ReasonTurnComplete
+		if d.WaitingOnTasks {
+			// Both facts, so the row does not look like it has forgotten the
+			// background work it is also still waiting on.
+			d.StatusReason += fmt.Sprintf(" · %d background %s still running",
+				len(in.BackgroundTasks), plural(len(in.BackgroundTasks), "task"))
+		}
 	case "StopFailure":
 		// Fired instead of Stop, so it is the only word the session gets out:
 		// without it the record went on saying "working". The retry count

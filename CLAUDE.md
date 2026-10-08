@@ -517,9 +517,39 @@
   no quoting a mid-turn record's stale `Said`), tone needs no say in it at all
   since it is taken from the blocked state both share, and a test pins the pair
   to one key set and one rank while requiring the words to differ — the only
-  way to split them by accident is to edit that predicate. No ADR — one hook
-  entry and one case, and the numbering is contested between unmerged branches.
-  Existing installs re-run `init` to get the entry.
+  way to split them by accident is to edit that predicate.
+  **And the other half of it: an ask outranks background work.** Reported an
+  hour later from a live dispatcher that ended its turn on a prose question —
+  "One thing needs your confirmation … OK to keep that?" — and sat at an empty
+  prompt while the table read `2 in flight · 0 want you · 2 running clean`.
+  Its `Stop` carried background tasks (an adversarial review agent was still
+  going) and that branch was taken on the task count alone, so the ask was
+  never consulted: measured on the record (`d51bc11a5c5d`), status `working`,
+  reason "waiting on 2 background tasks". **This one is the tool's own
+  doing** — the auto contract this project composes at launch says in the same
+  breath to wait on something slow with a background task rather than ending
+  the turn, and to end the message on the one question that is the human's, so
+  a session obeying both lands exactly in the state the status machine read as
+  "not waiting on you". The rule that background work is no human wait is right
+  on its own and wrong the moment the message asks something, so at `Stop` the
+  ask wins (`ask.Of`, read off `Said` — the field and the function the
+  cockpit's `cqAsk` uses, so a wait claimed here is always a question the row
+  can quote) and the record is needs-input with **both** facts in its reason;
+  `WaitingOnTasks` stays set, because it is true and the trailing idle prompt
+  defers to it, it just no longer decides. `state.ReasonTurnComplete` is
+  therefore a **lead** rather than a whole reason, matched as a prefix by
+  `cqKind`, since a turn that ended on a question with an agent still running
+  is still a finished turn. `StopFailure` needs none of this — it is already
+  needs-input, so there is nothing for an ask to outrank, and the API error
+  stays the better account of why the turn ended. Nor does `reopensDone`: a
+  `Stop` is exactly what a shipped feature looks like, and `ask.Of` finds an
+  ask in 401 of 949 measured turn endings — mostly closers like "let me know
+  if…" — so admitting a Stop that asks would drag most of a day's finished work
+  back onto the table, which is the louder failure. A done dispatcher that
+  stops with an ask keeps its row anyway, under the `finished` divider, because
+  nothing retires a held row but `x`. No ADR — one hook entry and two cases,
+  and the numbering is contested between unmerged branches. Existing installs
+  re-run `init` to get the entry.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
