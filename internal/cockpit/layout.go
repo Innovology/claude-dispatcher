@@ -69,6 +69,20 @@ func cr(text string, w int, hex string) seg {
 // flex builds a cell that grows to fill the remaining row width.
 func flexc(text string, hex string) seg { return seg{text: text, flex: true, hex: hex} }
 
+// crTail builds a right-aligned cell of two colours inside ONE fixed width: a
+// lead figure and a quieter clause after it. A seg carries a single foreground,
+// so the only way to say "1 ready · 2 red" with the tail a shade down is two
+// segs — and they have to add up to the width the column already had, or every
+// cell to the left of them moves. The tail takes exactly what it needs and the
+// lead keeps the rest, so the pair right-aligns as the single cell did.
+func crTail(lead, tail string, w int, leadHex, tailHex string) []seg {
+	if tail == "" {
+		return []seg{cr(lead, w, leadHex)}
+	}
+	tw := mini(dispWidth(tail), w)
+	return []seg{cr(lead, w-tw, leadHex), cr(tail, tw, tailHex)}
+}
+
 // row composes segs into a single line exactly total columns wide. A shared
 // background bg (e.g. the selection highlight) is painted under every cell,
 // including the inter-cell padding, so the bar is unbroken.

@@ -40,6 +40,26 @@ type Config struct {
 	// means retyping a key that has to match one exactly, in another file, with
 	// silence as the only feedback when it does not.
 	Linear map[string]string `toml:"linear,omitempty"`
+	// Gates names the ONE check that is a repo's verdict, keyed by the repo
+	// NAME as the cockpit shows it — the name git knows the repository by,
+	// which is not always the name of the folder it sits in: a checkout whose
+	// origin remote names it something else is listed, grouped and dispatched
+	// under that name everywhere. Write the folder name instead and the key
+	// matches nothing, the cell stays exactly as it was, and nothing says so —
+	// so take the spelling from the products lens or the assignment editor
+	// rather than from the path. A repository with an umbrella workflow has already
+	// decided what "green" means — an aggregator job that depends on every lane
+	// and allow-lists the ones the active profile deliberately turned off — so
+	// the individual check conclusions beside it are noise: a lane skipped by
+	// design reads as neither pass nor fail, and a lane that failed is usually
+	// already reflected in the aggregator. Naming it here is the only way the
+	// cockpit can know: the branch-rules API that would say which check is
+	// required answers 403 on this plan, and GitHub's own mergeStateStatus
+	// disagrees with the gate (UNSTABLE, i.e. mergeable, on a pull request
+	// whose aggregator is FAILURE). Unlisted repos keep the old reading of
+	// every check at once, so this changes nothing for a repo that does not
+	// name a gate.
+	Gates map[string]string `toml:"gates,omitempty"`
 	// Accounts maps a name to a Claude Code config directory: each directory
 	// is its own login (Claude Code keys its credentials — the macOS keychain
 	// entry included — to CLAUDE_CONFIG_DIR), so each is one subscription a
@@ -159,6 +179,19 @@ func Save(c *Config) error {
 	b.WriteString("[linear]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Linear)) {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Linear[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# The one check that is a repo's verdict. A repo with an umbrella workflow\n")
+	b.WriteString("# has already decided what green means — an aggregator job depending on every\n")
+	b.WriteString("# lane — so name that job here and the repo's row reads it instead of every\n")
+	b.WriteString("# check at once. Unlisted repos keep reading every check, as they always have.\n")
+	b.WriteString("# Keyed by the repo NAME as the cockpit shows it, which is the name git knows\n")
+	b.WriteString("# the repository by and not always its folder's: a key spelled from the path\n")
+	b.WriteString("# matches nothing and changes nothing, silently. Copy it off the products lens.\n")
+	b.WriteString("# shop-api = \"All gates green\"\n")
+	b.WriteString("[gates]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Gates)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Gates[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Further Claude subscriptions a dispatch can run under: a name, and the\n")

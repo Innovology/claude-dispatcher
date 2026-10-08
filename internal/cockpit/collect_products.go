@@ -96,9 +96,14 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 	// repoGH caches per-repo gh work: open PRs, their checks, and the derived
 	// CI badge, so reviews and the repo grid share one fetch.
 	type repoGHData struct {
-		prs     []gh.OpenPR
-		checks  map[int]gh.Checks
+		prs    []gh.OpenPR
+		checks map[int]gh.Checks
+		// gates is what the repo's named gate concluded on each open pull
+		// request, one entry per PR that was read — "" for a pull request whose
+		// rollup does not carry it. Only collected for a repo that names one.
+		gates   []string
 		ci      string
+		ciTail  string
 		ciColor string
 	}
 	// Which repos have open PRs at all comes from one search rather than one
@@ -117,6 +122,12 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			return v
 		}
 		v := repoGHData{ci: "—", ciColor: cDim, checks: map[int]gh.Checks{}}
+		// The one check this repo calls its verdict, or "" for a repo that
+		// names none and keeps the reading of every check at once.
+		gate := ""
+		if cfg != nil {
+			gate = cfg.Gates[name]
+		}
 		r, ok := discByName[name]
 		if ghUp && ok && r.Path != "" && len(openPRs[name]) > 0 {
 			// One read per repo brings back every open PR with its rollup and
@@ -128,6 +139,11 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			for num, d := range open {
 				v.prs = append(v.prs, d.OpenPR)
 				v.checks[num] = d.Checks
+				if gate != "" {
+					// Read off the rollup this one request already brought
+					// back: naming a gate costs no further call.
+					v.gates = append(v.gates, d.GateState(gate))
+				}
 			}
 			if !asked {
 				// The detail read failed — a heavy rollup query GitHub declined,
@@ -139,24 +155,10 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 				v.prs = openPRs[name]
 			}
 			sort.Slice(v.prs, func(i, j int) bool { return v.prs[i].Number > v.prs[j].Number })
-			anyFail, anyRun, anyPass := false, false, false
-			for _, c := range v.checks {
-				switch {
-				case c.Failing > 0:
-					anyFail = true
-				case c.Running > 0:
-					anyRun = true
-				case c.Passed > 0:
-					anyPass = true
-				}
-			}
-			switch {
-			case anyFail:
-				v.ci, v.ciColor = "✗ failing", cRed
-			case anyRun:
-				v.ci, v.ciColor = "● deploying", cBlue
-			case anyPass:
-				v.ci, v.ciColor = "✓ green", cGreen
+			if gate != "" {
+				v.ci, v.ciTail, v.ciColor = prodGateCell(v.gates)
+			} else {
+				v.ci, v.ciColor = prodCICell(v.checks)
 			}
 		}
 		ghCache[name] = v
@@ -352,6 +354,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 				forge:   forge,
 				out:     openByRepo[name],
 				ci:      g.ci,
+				ciTail:  g.ciTail,
 				ciColor: g.ciColor,
 				last:    last,
 			})
@@ -636,6 +639,80 @@ func prodWaiting(decision string, mine bool) string {
 		}
 		return ""
 	}
+}
+
+// prodCICell is a repo row's CI cell for a repo that names no gate: over every
+// open pull request, anything red anywhere makes the repo red, else anything
+// running makes it deploying, else anything green makes it green. "—" when
+// there is nothing to go on, which means "we could not see".
+//
+// It is the reading the cell has always had and the default for every repo, so
+// it is a function of its own rather than a branch: a repo that opts into a
+// gate must not be able to change what a repo that did not says.
+func prodCICell(checks map[int]gh.Checks) (text, color string) {
+	anyFail, anyRun, anyPass := false, false, false
+	for _, c := range checks {
+		switch {
+		case c.Failing > 0:
+			anyFail = true
+		case c.Running > 0:
+			anyRun = true
+		case c.Passed > 0:
+			anyPass = true
+		}
+	}
+	switch {
+	case anyFail:
+		return "✗ failing", cRed
+	case anyRun:
+		return "● deploying", cBlue
+	case anyPass:
+		return "✓ green", cGreen
+	}
+	return "—", cDim
+}
+
+// prodGateCell is a repo row's CI cell for a repo that names a gate: what this
+// repository wants from the human, not whether anything in it is red.
+//
+// states is the gate's conclusion on each open pull request that was read. The
+// counts are of the gate alone — the lanes under it are noise once an
+// aggregator exists (a lane the active profile turned off is skipped by design,
+// and a lane that failed is already in the aggregator's own verdict), and
+// counting them is what made a repo with a trunk green and a pull request ready
+// to merge read "✗ failing".
+//
+// A pull request whose rollup carries no gate result is counted in NOTHING and
+// shown nowhere: the umbrella skips its aggregator on a targeted or dispatch
+// run, and no verdict is not a verdict. So a repo whose open pull requests all
+// predate the gate reads "—", the same absence the rest of the cockpit means by
+// it, rather than inventing a green it has no evidence for.
+//
+// The lead figure is what is ready, in amber, because that is the one state
+// here that is a claim about the HUMAN — a gate that has gone green on an open
+// pull request is asking to be merged. Red follows it dim, since a red gate is
+// the dispatcher's business and not a thing to be done. With nothing ready, red
+// leads on its own and takes the red role: leading with a "0 ready" would be
+// amber claiming a human is wanted for nothing.
+func prodGateCell(states []string) (text, tail, color string) {
+	ready, red := 0, 0
+	for _, s := range states {
+		switch s {
+		case "SUCCESS":
+			ready++
+		case "FAILURE":
+			red++
+		}
+	}
+	switch {
+	case ready > 0 && red > 0:
+		return itoa(ready) + " ready", " · " + itoa(red) + " red", cAmber
+	case ready > 0:
+		return itoa(ready) + " ready", "", cAmber
+	case red > 0:
+		return itoa(red) + " red", "", cRed
+	}
+	return "—", "", cDim
 }
 
 // prodChecks renders a CI checks summary like "✓ 4/4", "● 2/5", "✗ 1/4".

@@ -321,12 +321,11 @@ func (m model) productsRight(cw, pc int) []string {
 		out = append(out, fg(cFaint, productNoRepos+" — a to assign some"))
 	}
 	for _, r := range reposByProduct[name] {
-		out = append(out, row(cw, "",
+		out = append(out, row(cw, "", append([]seg{
 			flexc(r.name, cFg),
 			c(r.forge, 5, cDim),
 			cr(itoa(r.out)+" out", 7, cDim),
-			cr(r.ci, 22, r.ciColor),
-		))
+		}, crTail(r.ci, r.ciTail, 22, r.ciColor, cDim)...)...))
 	}
 
 	out = append(out, "")
