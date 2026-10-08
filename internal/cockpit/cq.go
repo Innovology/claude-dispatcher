@@ -134,6 +134,12 @@ func cqAllDigits(s string) bool {
 // the honest "it stopped".
 func cqKind(rec *state.Dispatch, st string) string {
 	if st == "blocked" {
+		// Both waits are blocked, so the reason is the only thing that tells
+		// them apart — and they are told apart only to be worded differently:
+		// see cqMenu for everything they share.
+		if rec.StatusReason == state.ReasonQuestion {
+			return "question"
+		}
 		return "permission"
 	}
 	if st == "review" {
@@ -151,10 +157,26 @@ func cqKind(rec *state.Dispatch, st string) string {
 	return "needs"
 }
 
+// cqMenu reports whether the ask is a menu: a permission prompt or a question.
+// The answer to either is a keypress inside the pane, not a line of text, so
+// the two behave identically everywhere it matters — first in the table, amber,
+// no reply key, no "mark shipped", `enter` to attach — and differ only in what
+// they say. Every site that used to compare against "permission" alone asks
+// this instead, so the one way to split them by accident is to edit this
+// function, which is the point of it.
+func cqMenu(kind string) bool {
+	return kind == "permission" || kind == "question"
+}
+
 func cqWant(kind string) string {
 	switch kind {
 	case "permission":
 		return "approve a permission"
+	case "question":
+		// Short, like its siblings: SIGNAL is the flex column and gets cut
+		// first on a narrow terminal. Where to answer it is the detail lead's
+		// to say, and the record's own reason says it there in full.
+		return "answer a question"
 	case "review":
 		return "approve a merge"
 	case "turn-done":
@@ -205,7 +227,9 @@ func cqLeadOf(s *snapshot, rec *state.Dispatch, kind string) string {
 	if kind == "api-error" {
 		return cqFailLead(rec)
 	}
-	if kind != "permission" {
+	// A menu's wait is mid-turn, so rec.Said is the last thing it said on some
+	// earlier turn: stale, and never the menu that is on the screen now.
+	if !cqMenu(kind) {
 		if ask := cqAsk(rec.Said); ask != "" {
 			return ask
 		}
@@ -216,7 +240,12 @@ func cqLeadOf(s *snapshot, rec *state.Dispatch, kind string) string {
 	if sr := cqSentence(rec.StatusReason); sr != "" {
 		return sr
 	}
-	if kind == "permission" {
+	// Reached only by a record whose reason is empty, which is why these say
+	// so little: there is nothing left to read.
+	switch kind {
+	case "question":
+		return "It asked you a question. Answer it in the session."
+	case "permission":
 		return "It is blocked and waiting on you."
 	}
 	return "It stopped and is waiting on you."
@@ -347,16 +376,17 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		// real (shipCmd) rather than just marking the record done.
 		acts = append(acts, cqAct{k: "y", d: "approve merge",
 			ok: "merging #" + itoa(rec.PRNumber) + " into " + rec.RepoName})
-	case kind != "permission" && len(rec.Commits) > 0:
+	case !cqMenu(kind) && len(rec.Commits) > 0:
 		acts = append(acts, cqAct{k: "y", d: "mark shipped",
 			ok: "\"" + rec.Feature + "\" marked shipped"})
 	}
 	acts = append(acts,
 		cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
-	if kind != "permission" {
+	if !cqMenu(kind) {
 		// No ok, like park: the key opens the reply line, and nothing is typed
-		// into the session until enter. Not on a permission prompt, which is a
-		// menu — typed characters would pick its options.
+		// into the session until enter. Not on a permission prompt or a
+		// question, which are menus — typed characters would pick their
+		// options rather than answer them.
 		acts = append(acts, cqAct{k: "r", d: "reply"})
 	}
 	acts = append(acts,

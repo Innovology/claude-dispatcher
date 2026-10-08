@@ -18,6 +18,7 @@ import (
 func TestCQWantCoversEveryKind(t *testing.T) {
 	cases := map[string]string{
 		"permission": "approve a permission",
+		"question":   "answer a question",
 		"review":     "approve a merge",
 		"turn-done":  "it finished a turn",
 		"idle":       "it is waiting on you",
@@ -36,6 +37,7 @@ func TestCQKindFromRecord(t *testing.T) {
 		name, st, reason, want string
 	}{
 		{"blocked is a permission ask", "blocked", "", "permission"},
+		{"blocked on a question is a question ask", "blocked", state.ReasonQuestion, "question"},
 		{"an open PR is a merge ask", "review", "turn complete — waiting on you", "review"},
 		{"finished turn", "needs", "turn complete — waiting on you", "turn-done"},
 		{"idle at the prompt", "needs", "waiting for your next prompt", "idle"},
@@ -45,6 +47,78 @@ func TestCQKindFromRecord(t *testing.T) {
 		if got := cqKind(&state.Dispatch{StatusReason: c.reason}, c.st); got != c.want {
 			t.Errorf("%s: cqKind = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// A question and a permission prompt are two kinds so they can be worded
+// differently, and for no other reason: the answer to either is a keypress in
+// the pane, so everything the human can DO about them has to stay identical.
+// This pins that — same urgency, same tone, same keys, and no reply line on
+// either — so that a later edit wording them apart cannot quietly hand one of
+// them an `r` that types at a menu, or drop it down the table.
+func TestAMenuIsAMenuWhicheverKindItIs(t *testing.T) {
+	const (
+		perm = "permission"
+		ques = "question"
+	)
+	if !cqMenu(perm) || !cqMenu(ques) {
+		t.Fatal("both asks must count as menus; everything below follows from it")
+	}
+
+	if cqUrgency(fleetRow{ask: ques}) != cqUrgency(fleetRow{ask: perm}) {
+		t.Error("a question must rank with a permission prompt — nothing moves until either is answered")
+	}
+	if cqUrgency(fleetRow{ask: ques}) >= cqUrgency(fleetRow{ask: "needs"}) {
+		t.Error("a question must outrank a finished turn")
+	}
+
+	// Tone is taken from the floor state, which is "blocked" for both, so they
+	// cannot drift apart — assert the shared answer rather than each kind's.
+	if got := cqToneOf("blocked", gh.Checks{}, gh.Review{}, nil); got != "amber" {
+		t.Errorf("a blocked row's tone = %q, want amber for both menus", got)
+	}
+
+	// The same record, so any difference in the keys is the kind's doing. Five
+	// commits, because "mark shipped" appears only once there are some and a
+	// menu must refuse it either way.
+	rec := testRec("one", 5)
+	keys := func(kind string) string {
+		var ks []string
+		for _, a := range cqActs(rec, kind) {
+			ks = append(ks, a.k+":"+a.d)
+		}
+		return strings.Join(ks, " ")
+	}
+	if keys(ques) != keys(perm) {
+		t.Errorf("acts differ: question %q, permission %q", keys(ques), keys(perm))
+	}
+	if strings.Contains(keys(ques), "r:") {
+		t.Errorf("a question offers r reply (%q) — typing at a menu picks its options", keys(ques))
+	}
+	if strings.Contains(keys(ques), "y:") {
+		t.Errorf("a question offers y (%q) — it is mid-turn, not shippable", keys(ques))
+	}
+	for _, ask := range []string{perm, ques} {
+		if replyable(fleetRow{kind: "queue", ask: ask}) {
+			t.Errorf("%s must not open a reply line", ask)
+		}
+	}
+
+	// And the one thing that must NOT match: what the row says.
+	if cqWant(ques) == cqWant(perm) {
+		t.Errorf("both menus say %q — the kinds exist to be worded apart", cqWant(ques))
+	}
+	lead := func(kind, reason string) string {
+		return cqLeadOf(&snapshot{saidBy: map[string]string{}},
+			&state.Dispatch{StatusReason: reason}, kind)
+	}
+	// The record's own reason leads where there is one, which is how the
+	// detail says where to answer; with none, the fallbacks differ too.
+	if got := lead(ques, state.ReasonQuestion); !strings.Contains(got, "question") {
+		t.Errorf("question lead = %q, want the reason it was blocked on", got)
+	}
+	if lead(ques, "") == lead(perm, "") {
+		t.Errorf("both menus fall back to %q", lead(ques, ""))
 	}
 }
 

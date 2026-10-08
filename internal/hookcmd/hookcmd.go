@@ -11,6 +11,7 @@
 //	                                  ended the turn recorded as its Failure
 //	Notification:idle_prompt       -> needs-input (unless waiting on tasks)
 //	Notification:permission_prompt -> blocked
+//	PreToolUse:AskUserQuestion     -> blocked (a menu, so attach to answer it)
 //	SessionEnd                     -> exited (unless already done)
 //	SubagentStart/SubagentStop     -> no status change; the fan-out is an
 //	                                  annotation on the record (state.Subagent)
@@ -184,7 +185,7 @@ func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
 	return nil
 }
 
-// reopensDone names the two events that outrank "done means live".
+// reopensDone names the three events that outrank "done means live".
 //
 // internal/track flips a record to done the moment its PR merges, and a
 // dispatcher told to open and merge its own PR and keep working routinely
@@ -195,13 +196,23 @@ func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
 // working rows, a live dispatcher waiting on an approval vanished from the
 // cockpit entirely, which then showed the empty-fleet dispatch form.
 //
-// A permission prompt and a human's new prompt are proof the session is not
-// finished, and both mean it wants something — and anything that wants
-// something belongs on the table. Every other event (a Stop, an idle prompt, a
-// session ending) is what a shipped feature looks like and still cannot
-// downgrade done. track re-flips it once the turn ends; see track.midWork.
+// A permission prompt, a question and a human's new prompt are proof the
+// session is not finished, and all three mean it wants something — and anything
+// that wants something belongs on the table. Every other event (a Stop, an idle
+// prompt, a session ending) is what a shipped feature looks like and still
+// cannot downgrade done. track re-flips it once the turn ends; see
+// track.midWork.
+//
+// The question belongs here for the reason the permission prompt does, and
+// leaving it out was indefensible once they were spelt side by side: a shipped
+// dispatcher that stops to ask permission comes back onto the table, and one
+// that stops to ask a question would have frozen at done and stayed invisible
+// — a menu nobody could see, which is the whole defect this event was added to
+// fix, surviving in the one state where it still bit.
 func reopensDone(event string) bool {
-	return event == "Notification:permission_prompt" || event == "UserPromptSubmit"
+	return event == "Notification:permission_prompt" ||
+		event == "PreToolUse:AskUserQuestion" ||
+		event == "UserPromptSubmit"
 }
 
 // apply mutates the dispatch for the event; it reports whether anything
@@ -312,8 +323,27 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		// dying with the machine are all things a parked dispatcher is allowed
 		// to do while it waits.
 		d.ParkedReason, d.ParkedAt = "", nil
+	case "PreToolUse:AskUserQuestion":
+		// The one wait no other hook reports. A session that asks through the
+		// question tool has not ended its turn, so no Stop fires; it is not
+		// idle at the prompt, so no idle notification fires; and it is not a
+		// permission prompt. Measured on a live dispatcher sitting on a menu
+		// with four options: the only hooks arriving were its background
+		// agent's SubagentStops, every 32 seconds, which read as a session
+		// working away — "0 want you" over a question with the human's name
+		// on it.
+		//
+		// Blocked rather than needs-input, and for the reason blocked exists:
+		// a menu is not a sentence you can reply to. `r` types a line at the
+		// prompt, and the prompt is not what has the keyboard — the answer is
+		// a keypress in the pane, so the row has to send the human in.
+		d.Status = state.StatusBlocked
+		d.StatusReason = state.ReasonQuestion
+		d.WaitingOnTasks = false
 	case "PostToolUse":
-		// A tool completing means any permission prompt was approved.
+		// A tool completing means any permission prompt was approved — or a
+		// question answered, which arrives the same way: the tool returns once
+		// the human has picked.
 		if d.Status != state.StatusBlocked {
 			return false
 		}

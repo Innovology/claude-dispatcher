@@ -28,10 +28,19 @@ const (
 	StatusLaunching  Status = "launching"
 	StatusWorking    Status = "working"
 	StatusNeedsInput Status = "needs-input" // turn complete, waiting on the human
-	StatusBlocked    Status = "blocked"     // waiting on a permission approval
+	StatusBlocked    Status = "blocked"     // waiting on a menu: a permission approval, or a question
 	StatusDone       Status = "done"        // shipped ("done means live")
 	StatusExited     Status = "exited"
 )
+
+// ReasonQuestion is the StatusReason behind a record blocked on a question
+// menu, as against a permission prompt. Both are blocked, so the status alone
+// cannot tell them apart and the reason is what does — which makes this string
+// an interface between two packages rather than a sentence: hookcmd writes it
+// and the cockpit's cqKind matches it. A drifting letter would not fail, it
+// would quietly file every question under "approve a permission", so neither
+// side spells it out.
+const ReasonQuestion = "asked you a question — ⏎ to answer it in the session"
 
 // Priority orders statuses by how urgently they need the human's attention.
 func (s Status) Priority() int {
