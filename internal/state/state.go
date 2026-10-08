@@ -42,6 +42,13 @@ const (
 // side spells it out.
 const ReasonQuestion = "asked you a question — ⏎ to answer it in the session"
 
+// ReasonTurnComplete leads the StatusReason of a record whose turn ended with
+// something for the human. It is a lead rather than the whole reason: a turn
+// that ended on a question while background work was still running carries
+// both facts, and only one of them needs a human. The cockpit's cqKind matches
+// this prefix to classify the ask, which is the other half of why it is named.
+const ReasonTurnComplete = "turn complete — waiting on you"
+
 // Priority orders statuses by how urgently they need the human's attention.
 func (s Status) Priority() int {
 	switch s {
