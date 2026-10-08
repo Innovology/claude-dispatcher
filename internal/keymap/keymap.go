@@ -129,6 +129,8 @@ var Defaults = []Binding{
 	{Action: "fold.leave", Scope: Fold, Key: "esc"},
 
 	// ---- search -------------------------------------------------------------
+	{Action: "sessions.mark", Scope: Products, Key: "space", Help: "in your sessions: mark one · a adopts every marked one", Section: "products · lens 2"},
+	{Action: "sessions.adopt", Scope: Products, Key: "A", Help: "in your sessions: adopt it · the session keeps running and starts reporting", Section: "products · lens 2"},
 	{Action: "search.open", Scope: Products, Key: "/", Help: "search · fzf matching, live, in place", Section: "search"},
 	{Action: "search.open", Scope: Editor, Key: "/"},
 	{Action: "search.next", Scope: Search, Key: "n", Help: "jump to the next match", Section: "search"},

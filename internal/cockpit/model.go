@@ -163,6 +163,14 @@ type model struct {
 	// sessionCursor is the Y tab: which session of the human's own is under
 	// the cursor.
 	sessionCursor int
+	// sessionMarked is which of the human's own sessions are ticked for
+	// adoption, keyed by socket/name — the whole address, because the same
+	// name on two servers is two sessions. adoptOpenInput/adoptText/adoptAt
+	// are the naming input a single adoption opens (see adopt.go).
+	sessionMarked  map[string]bool
+	adoptOpenInput bool
+	adoptText      string
+	adoptAt        *adoptTarget
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.
@@ -300,6 +308,7 @@ func newModel() model {
 		clExpanded:     map[string]bool{},
 		cqSuppressed:   map[string]bool{},
 		fleetDismissed: map[string]bool{},
+		sessionMarked:  map[string]bool{},
 		// How this build was installed cannot change while it runs, so it is
 		// read once here rather than from the footer, which redraws on every
 		// frame. Holding it on the model is also what lets a test drive the

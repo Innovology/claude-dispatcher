@@ -817,6 +817,20 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			// repo's environment so the panes they open once they are in there
 			// see what this repo's sessions are supposed to see.
 			return m.attachSession(supervisor.Session{Name: s.name, Socket: s.socket}, s.env)
+		case "space":
+			if len(items) == 0 {
+				return m, nil
+			}
+			s := items[clampCursor(m.sessionCursor, len(items))]
+			key := s.socket + "/" + s.name
+			if m.sessionMarked[key] {
+				delete(m.sessionMarked, key)
+			} else {
+				m.sessionMarked[key] = true
+			}
+			return m, nil
+		case "A":
+			return m.adoptOpen(items)
 		}
 		return m, nil
 	case "team", "overview":

@@ -65,6 +65,11 @@ func SessionList(socket string) []SessionInfo {
 // false when the backend cannot tell, which is never the same answer as "idle".
 func SessionIdle(s Session) (idle, known bool) { return server(s).SessionIdle(s.Name) }
 
+// SessionPIDs is every process running in a session, pane processes first.
+// Adoption uses it to learn which Claude Code conversation a session it did
+// not start is running; an empty list means we could not tell.
+func SessionPIDs(s Session) []int { return server(s).SessionPIDs(s.Name) }
+
 // EnsureBackKey binds the prefix-free "back to the cockpit" key (Ctrl-\) on
 // every server a dispatch may live on. It is bound server-wide, so a server
 // this cockpit has never started a session on has never been told about it.

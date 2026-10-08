@@ -56,6 +56,12 @@ type ownSession struct {
 func unclaimedSessions(records []*state.Dispatch) []supervisor.SessionInfo {
 	claimed := map[supervisor.Session]bool{}
 	for _, d := range records {
+		// A released record is the human handing an adopted session back, so
+		// it stops claiming it and the session is listed here again. The
+		// record stays in history as the account of the time it was managed.
+		if d.ReleasedAt != nil {
+			continue
+		}
 		if d.TmuxSession != "" {
 			claimed[supervisor.Session{Name: d.TmuxSession, Socket: d.TmuxSocket}] = true
 		}

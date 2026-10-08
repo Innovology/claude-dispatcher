@@ -312,8 +312,27 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		// dying with the machine are all things a parked dispatcher is allowed
 		// to do while it waits.
 		d.ParkedReason, d.ParkedAt = "", nil
+	case "PreToolUse:AskUserQuestion":
+		// The one wait no other hook reports. A session that asks through the
+		// question tool has not ended its turn, so no Stop fires; it is not
+		// idle at the prompt, so no idle notification fires; and it is not a
+		// permission prompt. Measured on a live dispatcher sitting on a menu
+		// with four options: the only hooks arriving were its background
+		// agent's SubagentStops, every 32 seconds, which read as a session
+		// working away — "0 want you" over a question with the human's name
+		// on it.
+		//
+		// Blocked rather than needs-input, and for the reason blocked exists:
+		// a menu is not a sentence you can reply to. `r` types a line at the
+		// prompt, and the prompt is not what has the keyboard — the answer is
+		// a keypress in the pane, so the row has to send the human in.
+		d.Status = state.StatusBlocked
+		d.StatusReason = "asked you a question — ⏎ to answer it in the session"
+		d.WaitingOnTasks = false
 	case "PostToolUse":
-		// A tool completing means any permission prompt was approved.
+		// A tool completing means any permission prompt was approved — or a
+		// question answered, which arrives the same way: the tool returns once
+		// the human has picked.
 		if d.Status != state.StatusBlocked {
 			return false
 		}

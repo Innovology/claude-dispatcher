@@ -278,6 +278,41 @@
   whole tab invisible on a machine with no products assigned, which is every
   machine on its first run. Full record:
   `docs/adr/0015-the-sessions-you-started-yourself.md`.
+- **A session you already trust can be adopted.** Listing those sessions says
+  where they are and never what they want, so moving onto this tool meant
+  leaving behind the orchestrators that hold the context — reported as "if
+  there's something for me to call on in those sessions i won't see it in the
+  tool". The cockpit is already told: the hook is machine-wide, and 2,732 of
+  the last 3,000 events in the reporting log came from sessions it never
+  started, every one dropped for matching no record. `space` marks in the
+  sessions tab and `A` adopts: a record is wrapped around the session and
+  **nothing else changes** — no branch, no worktree, no claude, no prompt.
+  The conversation is identified from the **process** (claude holds its
+  transcript open, named for the session id) rather than from the log, which
+  only knows which conversation last reported from a *directory* and cannot
+  choose between two orchestrators in one checkout; the log is the fallback
+  and refuses rather than guesses. The record **does not own its directory**
+  (`AdoptedAt`, `OwnsWorktree()`): the kill key's cleanup and the disk reclaim
+  both ask first, because that directory is the human's checkout and was there
+  before us. `x` **releases** rather than kills — not ours to end — clearing
+  the session id so a released record stops answering hooks, and keeping its
+  place in history. `BaseSHA` is the commit at adoption, so provenance credits
+  what happens under management and not the feature it walked in with. Full
+  record: `docs/adr/0026-a-session-you-already-trust-can-be-adopted.md`.
+- **A question is a wait, and only one hook reports it.** A dispatcher sat on
+  a four-option menu ("May I write the coach-side fix?") while the table said
+  *0 want you · 1 running clean*. Nothing was broken in the status machine:
+  the question tool does not end the turn (no `Stop`), does not leave the
+  prompt idle (no `Notification:idle_prompt`) and is not a permission prompt —
+  and the only hooks arriving under the menu were the session's background
+  agent's `SubagentStop`s, every 32 seconds, which read as a session getting
+  on with it. So `init` installs **`PreToolUse` matched on `AskUserQuestion`**
+  (the tool's own name, verified in the reporting session's transcript), which
+  fires the moment the menu appears, and the record goes **blocked** — not
+  needs-input, because a menu is not a sentence `r` can answer: the keypress
+  has to happen in the pane, so the row sends the human in. The existing
+  `PostToolUse` clears it, since answering is the tool returning. Existing
+  installs re-run `init` for the new entry.
 - **A colour is a role, and the switch is news.** The cockpit paints only
   foregrounds onto the terminal's own ground, and it painted the dark design's
   hexes whatever that ground was: on a light terminal (NixOS/niri, ghostty

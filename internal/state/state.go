@@ -162,6 +162,25 @@ type Dispatch struct {
 	// no background tasks is swept, because a subagent cannot outlive the turn
 	// unless it is one of those tasks.
 	Subagents []Subagent `json:"subagents,omitempty"`
+	// AdoptedAt is when the human handed this cockpit a session it did not
+	// start — an orchestrator they had been running for hours, with the
+	// context that makes it worth keeping. Everything after it is ordinary:
+	// the hooks report, the row waits, `r` replies, history remembers.
+	//
+	// Two things are NOT ordinary, and both are about the directory. An
+	// adopted dispatcher runs in the human's own checkout rather than a
+	// worktree we cut, so nothing may delete it — not the kill key's
+	// CleanupWorktree, not the disk reclaim — and `x` releases the record
+	// instead of killing a session this cockpit never started (ADR 0015).
+	// WorktreePath still names the directory, because every screen that shows
+	// where a dispatcher works reads it; the flag is what says we do not own
+	// it.
+	AdoptedAt *time.Time `json:"adopted_at,omitempty"`
+	// ReleasedAt is the human giving an adopted session back: the record stops
+	// claiming it, so it returns to the sessions tab, and stays in history as
+	// the account of the time it was managed. Only ever set on an adopted
+	// record.
+	ReleasedAt *time.Time `json:"released_at,omitempty"`
 	// PaneShell is the interactive shell this dispatch's pane drops to when
 	// claude exits, as config named it at launch — "" for the sessions that
 	// work it out from their own tmux server. It is on the record for the
@@ -252,6 +271,35 @@ func (d *Dispatch) Finished() bool {
 // nobody has said they have seen it (DismissedAt).
 func (d *Dispatch) Held() bool {
 	return d.Finished() && d.FinishedAt != nil && d.DismissedAt == nil
+}
+
+// Adopted reports that this record was wrapped around a session the cockpit
+// did not start, and still claims it. Every caller that deletes a directory,
+// or offers to kill a session, asks this first.
+func (d *Dispatch) Adopted() bool {
+	return d != nil && d.AdoptedAt != nil && d.ReleasedAt == nil
+}
+
+// OwnsWorktree reports whether WorktreePath is a checkout this cockpit cut and
+// may therefore remove. An adopted dispatcher's directory is the human's own,
+// and was there before the record.
+func (d *Dispatch) OwnsWorktree() bool {
+	return d != nil && d.WorktreePath != "" && d.AdoptedAt == nil
+}
+
+// Release gives an adopted session back: the record stops claiming it, so the
+// sessions tab lists it again, and it is finished and read, so it goes to
+// history rather than sitting on the triage table asking to be dismissed.
+func (d *Dispatch) Release(now time.Time) {
+	d.ReleasedAt = &now
+	// The join key goes with it. The session keeps running and keeps firing
+	// hooks, and a record still answering to its id would be dragged back to
+	// "working" by the next turn of a session it no longer claims. The
+	// transcript path stays: history reads it, and it is a fact about what
+	// happened rather than a claim on what is happening.
+	d.SessionID = ""
+	d.Stop(StatusExited, "released — its session is yours again", now)
+	d.Dismiss(now)
 }
 
 // Stop moves a dispatcher into a finished status and stamps when it got there.

@@ -89,7 +89,11 @@ type ownerOf struct {
 func worktreeOwners(ds []*state.Dispatch) []*ownerOf {
 	var out []*ownerOf
 	for _, d := range ds {
-		if d.WorktreePath == "" {
+		// OwnsWorktree, not WorktreePath: an adopted dispatcher names the
+		// human's own checkout, which this cockpit did not cut and will not
+		// reclaim. Reclaiming disk must never be how somebody loses a working
+		// copy they had open.
+		if !d.OwnsWorktree() {
 			continue
 		}
 		info, err := os.Stat(d.WorktreePath)

@@ -81,6 +81,10 @@ func hookSpecs() []hookSpec {
 		// A claude too old to know these event names ignores the entries.
 		{event: "SubagentStart", arg: "SubagentStart"},
 		{event: "SubagentStop", arg: "SubagentStop"},
+		// A question asked through the question tool: the only wait that fires
+		// no other hook, because the turn has not ended and the prompt is not
+		// idle. The matcher is the tool's name, as PreToolUse matchers are.
+		{event: "PreToolUse", matcher: "AskUserQuestion", arg: "PreToolUse:AskUserQuestion"},
 		{event: "Notification", matcher: "idle_prompt", arg: "Notification:idle_prompt"},
 		{event: "Notification", matcher: "permission_prompt", arg: "Notification:permission_prompt"},
 	}

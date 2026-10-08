@@ -127,7 +127,10 @@ func killCmd(features []string) tea.Cmd {
 			// row asking them to dismiss the thing they just killed.
 			rec.Dismiss(now)
 			_ = state.Save(rec)
-			if rec.WorktreePath != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
+			// An adopted dispatcher's directory is the human's own checkout,
+			// which existed before the record and outlives it. OwnsWorktree is
+			// the only thing standing between `x` and somebody's working copy.
+			if rec.OwnsWorktree() && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
 				kept++
 			}
 			n++

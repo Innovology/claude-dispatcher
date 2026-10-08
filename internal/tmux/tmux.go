@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -354,6 +355,76 @@ func panesIdle(panes []pane, parentsOf func() map[string]bool) (idle, known bool
 		}
 	}
 	return true, true
+}
+
+// SessionPIDs is every process running in a session's panes: the pane's own
+// process first, then everything descended from it, nearest first.
+//
+// It exists for adoption, which has to learn which Claude Code conversation a
+// session is running. The pane's process is a shell, so the answer is always a
+// child of it — the same reason SessionIdle reads the process table rather
+// than the pane's command. Best-effort by the same rule as everything else
+// here: an unreadable process table is an empty list, never a wrong one.
+func (s Server) SessionPIDs(name string) []int {
+	out, err := s.cmd("list-panes", "-t", "="+name, "-F", "#{pane_pid}").Output()
+	if err != nil {
+		return nil
+	}
+	var roots []int
+	for _, ln := range strings.Split(string(out), "\n") {
+		if pid, err := strconv.Atoi(strings.TrimSpace(ln)); err == nil && pid > 0 {
+			roots = append(roots, pid)
+		}
+	}
+	return append(roots, descendants(roots, childTable())...)
+}
+
+// childTable is the process table as parent → children. One read, because a
+// session's panes are asked about together.
+func childTable() map[int][]int {
+	out, err := exec.Command("ps", "-ax", "-o", "pid=,ppid=").Output()
+	if err != nil {
+		return nil
+	}
+	kids := map[int][]int{}
+	for _, ln := range strings.Split(string(out), "\n") {
+		f := strings.Fields(ln)
+		if len(f) < 2 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(f[0])
+		ppid, err2 := strconv.Atoi(f[1])
+		if err1 == nil && err2 == nil {
+			kids[ppid] = append(kids[ppid], pid)
+		}
+	}
+	return kids
+}
+
+// descendants walks the table breadth-first from roots. Breadth-first because
+// the process we are looking for is usually the pane shell's own child, and
+// the first match wins.
+func descendants(roots []int, kids map[int][]int) []int {
+	seen := map[int]bool{}
+	for _, r := range roots {
+		seen[r] = true
+	}
+	var out []int
+	for queue := roots; len(queue) > 0; {
+		var next []int
+		for _, pid := range queue {
+			for _, kid := range kids[pid] {
+				if seen[kid] {
+					continue // a cycle cannot happen in a process table, but a bad read can
+				}
+				seen[kid] = true
+				out = append(out, kid)
+				next = append(next, kid)
+			}
+		}
+		queue = next
+	}
+	return out
 }
 
 // pane is one line of the list-panes read: the process tmux started for the

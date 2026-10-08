@@ -260,6 +260,11 @@ func EnsureFocusEvents()              {}
 // no shell to recognise, so there is nothing for a name to teach.
 func KnowShell(shell string) {}
 
+// SessionPIDs has no console-window answer: a detached window is not a
+// process tree we can enumerate from here. Adoption falls back to the event
+// log, which is platform-independent.
+func SessionPIDs(sess Session) []int { return nil }
+
 // AttachSwitches is true here for the same reason it is true inside tmux: the
 // Windows handover raises the session's own console window and returns at once,
 // so the human is over there and this command's exit is not their return. The
