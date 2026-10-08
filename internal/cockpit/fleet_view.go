@@ -300,6 +300,12 @@ func (m model) fleetHeadline(inner int, rows []fleetRow) string {
 	if parked > 0 {
 		left += "   " + fg(cFaint, itoa(parked)+" parked")
 	}
+	// Said only while it is switched on: a clause saying it is off would be a
+	// nag on every screen of a cockpit that has never wanted one — the footer's
+	// t is how it is found.
+	if clause := stewardClause(); clause != "" {
+		left += "   " + fg(cFaint, clause)
+	}
 	// Appended only when the whole cell fits. flSpread's overflow answer is to
 	// truncate the left side, which would leave "≈10h t…" hanging off the end of
 	// a narrow terminal — a clause half-said is worse than one not said, and it
@@ -399,10 +405,10 @@ const fleetWhyLines = 2
 // knowable from a model id) and the design's check trend (one sample cannot
 // make a trend).
 func fleetMeta(r fleetRow) string {
-	parts := make([]string, 0, 7)
+	parts := make([]string, 0, 8)
 	for _, p := range []string{
 		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode),
-		fleetRootLine(r.root), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
+		fleetRootLine(r.root), fleetAccountLine(r.account), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
 	} {
 		if p != "" {
 			parts = append(parts, p)
@@ -434,6 +440,16 @@ func fleetRootLine(root string) string {
 		return ""
 	}
 	return "from " + root
+}
+
+// fleetAccountLine names the subscription a dispatcher runs under when it is
+// not the human's own — the one that is worth saying, since its limits are
+// the ones this session is spending.
+func fleetAccountLine(acct string) string {
+	if acct == "" {
+		return ""
+	}
+	return "on " + acct
 }
 
 // fleetFanLine says the dispatch went out with the FAN OUT switch on. It sits
@@ -658,6 +674,9 @@ func (m model) cqFooterHelp() string {
 	if m.parkOpen {
 		return "type the reason · enter parks it · esc cancels"
 	}
+	if m.replyOpen {
+		return "type the answer · enter sends it · esc cancels"
+	}
 	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}
@@ -672,6 +691,6 @@ func (m model) cqFooterHelp() string {
 		// footer only names keys that work right now.
 		return strings.Join(append(parts, "j/k move", "h back to the fleet", "? keys"), " · ")
 	}
-	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "ctrl+z undo", "? keys")
+	parts = append(parts, "j/k move", "f filter", "h history", "d dispatch", "t "+stewardToggleVerb(), "ctrl+z undo", "? keys")
 	return strings.Join(parts, " · ")
 }

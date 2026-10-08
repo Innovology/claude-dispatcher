@@ -50,7 +50,7 @@ func TestWorktreeAndBranchCanCarryTheSameName(t *testing.T) {
 	d, err := Launch(repos.Repo{
 		Name: "player-app", Path: repo,
 		WorktreeRoot: project, BranchPrefix: strptr(""),
-	}, "dispatch test 2", "go", ModeAuto, DefaultModel, DefaultRoot, false)
+	}, "dispatch test 2", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

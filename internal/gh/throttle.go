@@ -50,6 +50,17 @@ var (
 	thUntil time.Time
 )
 
+// ResetThrottle lifts a park. It exists for tests that stand a fake gh up: the
+// park is process-wide, so a refusal earned by one test (or by a real gh the
+// suite reached by accident) would otherwise blank every read in every test
+// after it, fake or not — which is how a cockpit suite came to fail on main
+// whenever GitHub's secondary limit happened to bite.
+func ResetThrottle() {
+	thMu.Lock()
+	thUntil = time.Time{}
+	thMu.Unlock()
+}
+
 // Throttled reports whether GitHub has refused us for quota and when the window
 // resets. The cockpit shows this rather than an empty forge: "—" in every check
 // column is a claim about the repositories, and this is a fact about us.

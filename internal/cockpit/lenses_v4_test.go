@@ -87,6 +87,21 @@ func TestVelDwellSinceKeepsDispatchersApart(t *testing.T) {
 	}
 }
 
+// A turn an API error ended is a stopped session, not a working one: the
+// interval after StopFailure is billed as waiting, the same as after a Stop.
+func TestVelDwellSinceBillsStopFailureAsWaiting(t *testing.T) {
+	t0 := time.Now().Add(-time.Hour)
+	writeEvents(t,
+		ev(t0, 0, "UserPromptSubmit", "a"),
+		ev(t0, 5*time.Minute, "StopFailure", "a"),
+		ev(t0, 28*time.Minute, "UserPromptSubmit", "a"),
+	)
+	d := velDwellSince(t0.Add(-time.Hour))
+	if d.working != 5*time.Minute || d.waiting != 23*time.Minute {
+		t.Errorf("dwell = %+v, want 5m working then 23m waiting", d)
+	}
+}
+
 func TestVelDwellSinceIgnoresEventsBeforeTheCut(t *testing.T) {
 	t0 := time.Now().Add(-90 * time.Minute)
 	writeEvents(t,

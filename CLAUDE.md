@@ -58,7 +58,10 @@
     worktree of its repo, by default under
     `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so concurrent
     dispatches — and the human — never fight over one checkout. `x` removes a
-    clean worktree; a dirty one is kept for inspection.
+    clean worktree; a dirty one is kept for inspection. (Supersedes the
+    original "multi-repo, not multi-worktree" call, reversed the next day
+    after two sessions collided in one working copy and a commit landed on
+    the wrong branch.)
     - **Where it is cut is the human's layout, not ours.** The state directory
       is the right default — a dispatch worktree is our bookkeeping, and `x`
       deleting a folder on a keypress belongs in our own directory rather than
@@ -74,10 +77,9 @@
       scattering checkouts through whatever directory a clone happens to sit in
       is not joining a convention, it is inventing one. The path goes on the
       record, so a dispatch made before the setting changed resumes where it
-      was cut. (Supersedes the
-    original "multi-repo, not multi-worktree" call, reversed the next day
-    after two sessions collided in one working copy and a commit landed on
-    the wrong branch.)
+      was cut. A branch keeps its `feature/` prefix unless config's
+      `branch_prefix` says otherwise, so on a layout whose folders are named
+      after their branches the two can be made to read the same.
     - The feature branch is cut from the repo's **default branch as the
       remote sees it**, after a best-effort fetch — never from the repo's
       HEAD. Git's default would inherit whatever branch the human left
@@ -145,7 +147,7 @@
   learned as well as listed — the configured one at startup, a server's
   `default-shell` the first time one of its panes shows a command we cannot
   place, once per server per run. Full record:
-  `docs/adr/0018-a-panes-command-names-its-own-shell.md`.
+  `docs/adr/0025-a-panes-command-names-its-own-shell.md`.
 - **A ghost cannot clear itself, so every load looks.** That sweep ran in one
   place — `recheckCmd`, the reload after a jump-in — so a record whose session
   had been taken away claimed *working* for as long as the cockpit stayed open
@@ -420,6 +422,38 @@
   `fleetMoved` keeps its `max` for live rows — a hook save there is real
   liveness. Full record:
   `docs/adr/0012-a-dispatch-that-ends-is-not-a-dispatch-that-goes-away.md`.
+- **The record is the truth; the screen must not wait for it.** Reported as
+  "dismiss should move it to history" — thirty-six seconds after a dismissal
+  the event log shows landing perfectly on the record. Nothing about the record
+  was wrong: `dismissCmd` writes it and asks for a reload, and a reload reads
+  every record, repo and forge — 4.5s warm and 61s cold on 94 records (ADR
+  0007), serialised one at a time, ten to fifteen seconds measured against the
+  reporting store's 212. For all of it the row sat under the `finished` divider
+  it had just been taken off, the headline went on counting it, and `h` — the
+  one place the flash names by hand, "h for history" — was built from the same
+  stale fleet and did not have it. So `fleetNow` applies **this session's own
+  dismissals over the collector's rows**, and `fleetAll`/`fleetPast` read
+  nothing else: the row reads as history at once, re-ranked into history's own
+  order, without the `x` just pressed on it, every other field still the
+  record's. Set on the way back from the write (`dismissedMsg` carries the id;
+  a dismissal that found no record moves nothing), because a row moved for a
+  write that then failed is the screen promising on its own; retired by the
+  snapshot that reads it back, where a **stale** load still saying "held"
+  leaves it alone and one saying the row is alive again — a resume clears the
+  ending — retires it, since a stale dismissal must never hide a running
+  dispatcher. And **an ending the human asked for is already read**: `kill`,
+  `approve merge` and `mark shipped` dismiss as they stop, so they go to
+  history instead of coming back as an unread ✓ row on the next cockpit start,
+  asking to dismiss a merge from hours ago; the hold is for endings nobody
+  watched (`SessionEnd`, the tracker, the ghost sweep, a launch that would not
+  start), and every one of those still holds. That also fixes what `cqSuppressed`
+  had become: it hid a row "until the id leaves the fleet", which stopped
+  happening when a finished dispatcher started keeping a row for good, so a
+  killed dispatcher was missing from the triage table *and* from history for
+  the rest of the session — it is retired by the row reaching a finished kind,
+  which is the record catching up, the thing it was always waiting for. Full
+  record:
+  `docs/adr/0013-the-record-is-the-truth-the-screen-must-not-wait-for-it.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only
@@ -508,7 +542,7 @@
   is **lit, not filtered**, because a row's neighbours are often the point of it
   and a shrinking table makes the count at the top a different number from the
   one you were reading. `n`/`ctrl+n` jump between hits. Full record:
-  `docs/adr/0013-a-key-sheet-that-can-lie-is-worse-than-none.md`.
+  `docs/adr/0024-a-key-sheet-that-can-lie-is-worse-than-none.md`.
 - **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
   a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
   a lens that wants its own capital U never sees the key — the assignment
@@ -611,6 +645,120 @@
   OUT switch itself shows as config beside the mode. Existing installs
   re-run `init` to get the two new hook entries. Full record:
   `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
+- **A stop says what it needs, and only the human's stops reach the human.**
+  Reported as "70% of the time I seem to just be pushing them along". Measured
+  over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
+  next step or asking, 18% asking to merge, 9% ending the turn to "check back
+  once CI finishes", and after 24 API errors the human typed `continue` 20 times
+  after a median 23 minutes. Four causes. The row did not say what it wanted:
+  SIGNAL read "it finished a turn" everywhere and the lead was each block's
+  *first line*, the headline, while the ask closes the message. So `Said` rides
+  the record from the `Stop` hook's `last_assistant_message` (whole, tail-capped,
+  cleared by the next prompt) and `ask.Of` quotes the question it closed on —
+  one extractor, shared by the row and `status`. Answering meant attaching:
+  `r` on a waiting row types one line into the session (never on a permission
+  prompt, which is a menu; never where claude has exited), and `SendKeys` now
+  targets the *pane* (`=name:`, `-l --`) — `-t =name` got "can't find pane" from
+  tmux 3.7b, so the old reply never typed anything and said it had. An API
+  error was invisible: `StopFailure` fires *instead of* `Stop` and was never
+  installed, so the record said working over a dead prompt. It writes a
+  `Failure` annotation now (Claude Code's category, verbatim), and the cockpit
+  poll retries the transient ones with `continue` on 1m/5m/15m
+  (`dispatch.RetryFailed`) — only into a live, non-parked session whose claude
+  is provably at its prompt, claimed under the hook lock; the count resets only
+  on `Stop`; a pending retry rides with the running rows and a retry two polls
+  overdue is the human's again. And auto dispatches were told how to start, not
+  how to wait or when to stop — and only the triage form told them anything. The
+  mode's working contract (`dispatch.Contract`) is composed at `Launch` for every
+  way in: wait on slow things with a background task or `Monitor` rather than
+  ending the turn, take the next step the brief implies, stop only for a
+  decision that is the human's and end on that one question. Claude Code's own
+  long-running machinery keeps the session going; the cockpit only acts where
+  nothing inside the session can. `status [--json]`/`reply`/`park`/`unpark` put
+  the triage table on the command line so a steward session can run the fleet —
+  the next step, and the owner of the LAND (merge-when-green) call this
+  deliberately did not make. Full record:
+  `docs/adr/0018-a-stop-says-what-it-needs.md`.
+- **The steward pushes what the brief settles, and leaves the rest with a
+  note.** Asked for as "its own claude code session … to monitor, observe, kick
+  along, pause, and act as the lead". A push is judgement ("does the brief
+  already answer this?") and the cockpit never guesses, so the steward is a
+  Claude Code session of the dispatcher's own (`claude-dispatcher steward`,
+  `: steward`), not a rule: tmux `disp_steward` (underscore — outside every
+  slug's namespace), its brief the `CLAUDE.md` of a folder under the state dir,
+  its settings allowing the fleet verbs and read-only gh/git and denying
+  Edit/Write, the folder trusted by `TrustOwnDir` (the one place trust is
+  written, only for our own folder). Not a dispatcher: no record, no
+  `CLAUDE_DISPATCHER_ID`. It sleeps on `status --next` as a background task —
+  Claude Code's own long-running machinery, not a timer — which exits when a
+  wait is unhandled. Handled lives on the record: `WaitingSince` (stamped per
+  Stop/StopFailure/permission prompt, cleared while working), a steward `note`
+  written during it, or an `Answer` stamped by any reply (`r` or `reply`) at
+  the send, under the lock — found by a live run, where the moment between a
+  reply and its UserPromptSubmit hook woke the steward for the same wait. It
+  replies (`steward: …`) only where the brief settles the stop, and notes
+  everything leaving the branch (merge, deploy, messages, deletion, spend,
+  access), anything outside the brief, and permission prompts. Rows read
+  `steward · yours: …` or `answered · …`; the headline says `steward watching`.
+  Verified against a real steward and scratch fleet. Full record:
+  `docs/adr/0019-the-steward-pushes-what-the-brief-settles.md`.
+- **The steward is a switch, not a session you run.** "Should the steward not
+  be completely opaque to the user? Maybe a on off toggle in triage." `t` on
+  triage flips it in the background (no handover); the headline says `steward
+  on`/`steward starting`, nothing when off; the footer names `t start/stop
+  steward`. On is intent — `steward/enabled` in the state dir (never config:
+  a scratch store must not switch on the real one's) — and `steward.Ensure`
+  makes the fact follow it at startup and every poll: a gone session is
+  restarted, an exited claude (SessionIdle proves the shell) replaced, an
+  unknown answer left alone. Stop clears the switch before the kill, so no poll
+  can revive it in between. Its session is for reading; its output is the
+  notes on the rows. Full record: `docs/adr/0020-the-steward-is-a-switch.md`.
+- **A finished dispatcher leaves the disk when asked, and takes only what it
+  can prove is ours.** Reported as "we need a way to tidy up and completely
+  remove worktrees and their node-modules". Only kill ever removed a worktree,
+  so every dispatcher that ended any other way left its checkout and its
+  installs behind: measured, ~130 folders and ~100 GB, 98 behind finished
+  records, nearly all node_modules. `: tidy` (plan read in the background, then
+  the confirm bar) and `claude-dispatcher tidy [--yes]` (a listing that touches
+  no folder, then the act) run `dispatch.PlanTidy`/`Tidy`. Candidates are only
+  the `WorktreePath`s records name, grouped by file identity (`Aura`/`aura` on a
+  case-insensitive disk are one folder); the worktrees dir also holds a full
+  clone and session-made worktrees, and those are never listed. A folder goes
+  only when every record naming it is finished, unparked and sessionless (`done`
+  is the tracker's word, not the session's; an unaskable supervisor is "maybe
+  open"), after the ghost sweep. Clean: `git worktree remove` without --force,
+  so git still guards and ignored files go with it; the branch stays and
+  `Resume` rebuilds. Dirty: kept, minus the node_modules git ignores and tracks
+  nothing in. A detached HEAD no ref contains is kept. Each item is re-planned
+  at the moment of acting, and each act is a `Tidied` event. Full record:
+  `docs/adr/0021-a-finished-dispatcher-leaves-the-disk-when-asked.md`.
+- **A subscription is a config directory, and what it has left is the status
+  line's to say.** "Allow multiple active subscriptions … select the
+  subscription and see next to it the % capacity left in the 5hr/weekly
+  limit." Claude Code keys a login — settings, transcripts, credentials, the
+  macOS keychain entry — to `CLAUDE_CONFIG_DIR`, so an **account** is a name
+  and a directory (`[accounts]`; `claude-dispatcher account add <name>` makes
+  it, installs our hooks and status line there, and logs it in). The human's
+  own login is `default` and sets no variable at all, because setting it to
+  `~/.claude` keys a different keychain entry. Who a directory is comes from
+  `claude auth status --json`; nothing reads a credential. What it has left
+  comes from the one documented place Claude Code says so: the status line's
+  `rate_limits.five_hour/seven_day` (`used_percentage`, `resets_at` epoch s —
+  captured from 2.1.281). `claude-dispatcher statusline` is installed in every
+  account, files the reading under the session's own config dir
+  (`state/accounts/`), and runs the human's old status line on the same input
+  (`--then`), so theirs still draws. ACCOUNT sits beside MODEL on both forms
+  with the least window's % on each name and the selected one in full with
+  its age; no reading says so rather than borrowing the usage lens's learned
+  estimate, and past `resets_at` a window reads full. Read when a form opens,
+  not on the poll. Each config dir reads only its own `settings.json`, so a
+  launch on an account with no login, no hooks or no first-run setup is
+  refused by name at the launch, on its failed row (ADR 0009) — each would
+  start and sit there.
+  The record carries `Account` and `ConfigDir`; Resume reopens under the
+  **dir**, because the transcript is there. Trust is inherited into the
+  account's own `.claude.json`. Full record:
+  `docs/adr/0022-a-subscription-is-a-config-directory.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
@@ -660,7 +808,10 @@
   speaks in tokens/effort, never dollars.
 
 ## Architecture map
-- `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`.
+- `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy` (`internal/fleetcmd`)
+  and `steward [stop]` (`internal/steward`), `account` (`internal/accountcmd`)
+  and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
@@ -679,15 +830,30 @@
 - `internal/appearance` — whether the OS is set light or dark, asked (never
   subscribed to) through the platform's own command. The cockpit's
   `theme.go` polls it and pairs it with the terminal's 2031 reports.
+- `internal/account` — the Claude subscriptions a dispatch can run under (config
+  directories), who each is (`claude auth status`), what each has left (the
+  status line's `rate_limits`, recorded under `state/accounts/`), and what
+  would stop a launch on one (ADR 0022).
 - `internal/hookcmd` — receives lifecycle hook events, drives the status
-  state machine (launching/working/needs-input/blocked/done/exited).
+  state machine (launching/working/needs-input/blocked/done/exited), and keeps
+  the record's `Said` (the last message, whole) and `Failure` (StopFailure).
+- `internal/ask` — the question a stopped session closed on, quoted; shared by
+  the triage row and `status`.
+- `internal/fleetcmd` — the triage table's reading and hand-acts on the command
+  line, for a session stewarding the fleet: `status [--json|--next]`, `reply`,
+  `note`, `park`, `unpark`.
+- `internal/steward` — the steward session: its folder, brief (`brief.go`),
+  settings and start/stop.
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
   finished dispatcher's session reopened with `claude --resume <session id>`
   in its own worktree (rebuilt if it was reclaimed). A session ending never
   loses a dispatcher — triage's `h` and the product panel's `H` tab list every
-  finished one and resume it. `root.go` is where a feature branch starts: the
-  remote's own default, the human's named `Root`, and the branch list the forms
-  offer — and the reason none of it trusts `origin/HEAD`.
+  finished one and resume it. `contract.go` is the working contract every
+  launch closes with; `retry.go` is the `continue` a transient API error gets.
+  `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
+  `root.go` is where a feature branch starts: the remote's own default, the
+  human's named `Root`, and the branch list the forms offer — and the reason
+  none of it trusts `origin/HEAD`.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
   `collect_sessions.go` is the one collector that reads the machine rather than

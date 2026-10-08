@@ -33,7 +33,7 @@ func TestLaunchRecordsTheServerAndTheEnvironmentItUsed(t *testing.T) {
 	t.Cleanup(func() { newSession, uniqueName, sessionAlive = prevNew, prevUniq, prevAlive })
 
 	r := repos.Repo{Name: "playerpulse", Path: repo, Socket: "player-app", Env: repos.NixDevelop}
-	d, err := Launch(r, "login fix", "fix it", ModeAuto, DefaultModel, DefaultRoot, false)
+	d, err := Launch(r, "login fix", "fix it", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestLaunchWithoutARepoEnvironmentIsUnchanged(t *testing.T) {
 	sessionAlive = func(supervisor.Session) bool { return false }
 	t.Cleanup(func() { newSession, uniqueName, sessionAlive = prevNew, prevUniq, prevAlive })
 
-	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "plain", "do it", ModeAuto, DefaultModel, DefaultRoot, false)
+	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "plain", "do it", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}

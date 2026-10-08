@@ -141,3 +141,48 @@ func TestInheritTrustIsIdempotent(t *testing.T) {
 		t.Error("trust was lost on the second pass")
 	}
 }
+
+// TrustOwnDir trusts the dispatcher's own folder, keeping every key it does not
+// understand, and leaves an existing entry's settings alone.
+func TestTrustOwnDir(t *testing.T) {
+	home := writeClaudeConfig(t, map[string]any{
+		"/state/steward": map[string]any{"allowedTools": []any{"Read"}},
+	})
+	if !TrustOwnDir("/state/steward") || !TrustOwnDir("/state/other") {
+		t.Fatal("TrustOwnDir reported failure")
+	}
+	p := readProjects(t, home)
+	if p["/state/steward"]["hasTrustDialogAccepted"] != true || p["/state/other"]["hasTrustDialogAccepted"] != true {
+		t.Fatalf("not trusted: %v", p)
+	}
+	if p["/state/steward"]["allowedTools"] == nil {
+		t.Error("an existing entry's settings were dropped")
+	}
+	raw, _ := os.ReadFile(filepath.Join(home, ".claude.json"))
+	var cfg map[string]any
+	_ = json.Unmarshal(raw, &cfg)
+	if cfg["someOtherSetting"] != "must survive" {
+		t.Error("a key we do not own was lost")
+	}
+}
+
+// A second account's .claude.json has never heard of the repo; the human's
+// own trust in it is carried across, into that account's file.
+func TestInheritTrustForAnotherAccount(t *testing.T) {
+	writeClaudeConfig(t, map[string]any{
+		"/repos/shop": map[string]any{"hasTrustDialogAccepted": true, "allowedTools": []any{"Bash"}},
+	})
+	acct := t.TempDir()
+	_ = os.WriteFile(filepath.Join(acct, ".claude.json"), []byte(`{"hasCompletedOnboarding":true}`), 0o600)
+	if !InheritTrustFor(acct, "/repos/shop", "/state/worktrees/shop/w") {
+		t.Fatal("the worktree was not trusted for the account")
+	}
+	got := readProjects(t, acct)["/state/worktrees/shop/w"]
+	if trusted, _ := got["hasTrustDialogAccepted"].(bool); !trusted {
+		t.Errorf("entry = %v", got)
+	}
+	// Never invented: a repo nobody trusted under any login stays untrusted.
+	if InheritTrustFor(acct, "/repos/never", "/state/worktrees/never/w") {
+		t.Error("trusted a repo nobody vouched for")
+	}
+}

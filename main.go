@@ -7,12 +7,17 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
+	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/accountcmd"
 	"claude-dispatcher/internal/cockpit"
+	"claude-dispatcher/internal/fleetcmd"
 	"claude-dispatcher/internal/hookcmd"
 	"claude-dispatcher/internal/initcmd"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/version"
 )
 
@@ -21,6 +26,19 @@ const usage = `claude-dispatcher — dispatch cockpit for Claude Code sessions
 Usage:
   claude-dispatcher            open the cockpit (six lenses)
   claude-dispatcher init       write config, discover repos, install the status hook
+  claude-dispatcher status     the live fleet and what each dispatcher wants (--json)
+  claude-dispatcher reply <id|feature> <text>
+                               type one line into a waiting dispatcher's session
+  claude-dispatcher park <id|feature> <reason>
+                               shelve a dispatcher · unpark <id|feature> takes it back
+  claude-dispatcher note <id|feature> <text>
+                               the steward's reading of a dispatcher's wait
+  claude-dispatcher tidy       list the worktrees finished dispatchers left on disk
+                               · tidy --yes removes them (: tidy in the cockpit)
+  claude-dispatcher steward    switch the fleet's steward on · steward stop switches it off
+                               (t on the triage table does the same)
+  claude-dispatcher account    the Claude subscriptions a dispatch can run under, and what
+                               each has left · account add <name> adds and logs one in
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -47,6 +65,19 @@ func main() {
 			fmt.Fprintln(os.Stderr, "init:", err)
 			os.Exit(1)
 		}
+	case "steward":
+		os.Exit(runSteward(args[1:]))
+	case "status", "reply", "park", "unpark", "note", "tidy":
+		// The triage table's reading and its three hands, for a session
+		// stewarding the fleet — see internal/fleetcmd.
+		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
+	case "account", "accounts":
+		os.Exit(accountcmd.Run(args[1:], os.Stdout, os.Stderr))
+	case "statusline":
+		// The status line every account runs: it records the subscription's
+		// 5-hour and weekly limits (internal/account), then draws whatever the
+		// human's own status line drew. Like the hook, it never fails.
+		os.Exit(account.RunStatusLine(args[1:]))
 	case "hook":
 		// Never fail loudly: a hook error must not disturb the Claude session.
 		os.Exit(hookcmd.Run(args[1:]))
@@ -67,6 +98,36 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		os.Exit(2)
 	}
+}
+
+// runSteward starts or stops the steward session (internal/steward).
+func runSteward(args []string) int {
+	if len(args) > 0 && args[0] == "stop" {
+		// Stop switches it off before it looks for a session, so "not running"
+		// still leaves it off — which is what was asked for.
+		if err := steward.Stop(); err != nil && steward.Enabled() {
+			fmt.Fprintln(os.Stderr, "steward:", err)
+			return 1
+		}
+		fmt.Println("steward off")
+		return 0
+	}
+	if len(args) > 0 {
+		fmt.Fprintf(os.Stderr, "steward: unknown argument %q (steward | steward stop)\n", args[0])
+		return 2
+	}
+	switch err := steward.Start(); {
+	case errors.Is(err, steward.ErrUntrusted):
+		fmt.Println("steward " + err.Error() + " · tmux attach -t =" + steward.Session)
+	case errors.Is(err, steward.ErrRunning):
+		fmt.Println("steward already running · jump in from the cockpit (: steward) or tmux attach -t =" + steward.Session)
+	case err != nil:
+		fmt.Fprintln(os.Stderr, "steward:", err)
+		return 1
+	default:
+		fmt.Println("steward started in " + steward.Dir() + " · jump in from the cockpit (: steward) or tmux attach -t =" + steward.Session)
+	}
+	return 0
 }
 
 func runCockpit() {

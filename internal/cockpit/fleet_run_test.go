@@ -32,8 +32,11 @@ func fakeGHOnPath(t *testing.T, rollupState string) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// A park earned before this test would refuse the fake as surely as the
+	// real thing, and the cache could serve another test's answers.
 	gh.InvalidateCache()
-	t.Cleanup(gh.InvalidateCache)
+	gh.ResetThrottle()
+	t.Cleanup(func() { gh.InvalidateCache(); gh.ResetThrottle() })
 }
 
 // The regression this file exists for: a WORKING dispatcher with an open PR

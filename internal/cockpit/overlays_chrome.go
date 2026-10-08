@@ -48,7 +48,7 @@ var helpNotes = map[string][]helpRow{
 	},
 	"what has finished": {
 		{"", "a dispatcher that ends keeps its row until you dismiss it"},
-		{"⏎","resume it · its own transcript, in its own worktree"},
+		{"⏎", "resume it · its own transcript, in its own worktree"},
 		{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
 	},
 	"products · lens 2": {

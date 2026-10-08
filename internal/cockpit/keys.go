@@ -122,11 +122,24 @@ func (m model) runCommand() (model, tea.Cmd) {
 	if c.name == "dispatch" || c.name == "new dispatch" {
 		m.paletteOpen, m.paletteText = false, ""
 		m.dispatchForm = newDispatchForm(m.cfg)
-		return m, m.dispatchForm.filter.Focus()
+		return m, tea.Batch(m.dispatchForm.filter.Focus(), accountsCmd(m.cfg))
 	}
 	if c.name == "upgrade" {
 		m.paletteOpen, m.paletteText = false, ""
 		return m.startUpgrade()
+	}
+	if c.name == "steward" {
+		m.paletteOpen, m.paletteText = false, ""
+		m.notice = "starting the steward…"
+		return m, stewardStartCmd()
+	}
+	if c.name == "tidy" {
+		m.paletteOpen, m.paletteText = false, ""
+		return m.startTidy()
+	}
+	if c.name == "stop steward" {
+		m.paletteOpen, m.paletteText = false, ""
+		return m, stewardStopCmd()
 	}
 	direct := map[string]string{
 		"backlog": "backlog", "usage": "usage",
@@ -191,6 +204,10 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	// every letter as a fleet key.
 	if m.parkOpen {
 		mm, cmd := m.updatePark(k)
+		return mm, cmd
+	}
+	if m.replyOpen {
+		mm, cmd := m.updateReply(k)
 		return mm, cmd
 	}
 	if m.paletteOpen {
@@ -284,7 +301,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	}
 	if k == "+" {
 		m.dispatchForm = newDispatchForm(m.cfg)
-		return m, m.dispatchForm.filter.Focus()
+		return m, tea.Batch(m.dispatchForm.filter.Focus(), accountsCmd(m.cfg))
 	}
 	// `U` is the upgrade key and nothing else's: bound globally rather than
 	// per-lens because the version it acts on is in the footer, which every lens

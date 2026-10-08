@@ -68,6 +68,14 @@ type Config struct {
 	// refused by name at startup rather than dropped — a silently ignored line
 	// presents as a key that stopped working.
 	Keys map[string]string `toml:"keys,omitempty"`
+	// Accounts maps a name to a Claude Code config directory: each directory
+	// is its own login (Claude Code keys its credentials — the macOS keychain
+	// entry included — to CLAUDE_CONFIG_DIR), so each is one subscription a
+	// dispatch can run under. The human's own login is always there as
+	// "default" and is never listed here. Added with `claude-dispatcher
+	// account add`, which also logs the directory in and installs the hooks
+	// and status line it needs.
+	Accounts map[string]string `toml:"accounts,omitempty"`
 	// WeeklyTokenLimit is the subscription's weekly token budget. There is no
 	// API to read it (Claude Code exposes usage only interactively), so it is a
 	// user setting; 0 means unknown and the usage lens shows raw tokens instead
@@ -299,6 +307,15 @@ func Save(c *Config) error {
 	b.WriteString("[linear]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Linear)) {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Linear[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# Further Claude subscriptions a dispatch can run under: a name, and the\n")
+	b.WriteString("# Claude Code config directory logged in to it (CLAUDE_CONFIG_DIR). Your own\n")
+	b.WriteString("# login is always \"default\". Add one with `claude-dispatcher account add <name>`.\n")
+	b.WriteString("# work = \"~/.claude-work\"\n")
+	b.WriteString("[accounts]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Accounts)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Accounts[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Map product names to repo directory names for the portfolio roll-up.\n")

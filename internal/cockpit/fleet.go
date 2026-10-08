@@ -112,6 +112,10 @@ type fleetRow struct {
 	// started, and empty says nothing rather than naming the default: which
 	// branch that would have been is exactly what nobody wrote down.
 	root string
+	// account is the Claude subscription it runs under, straight off the
+	// record: "" for the human's own login, which is every record from
+	// before accounts existed too, and says nothing.
+	account string
 	// fanOut is the dispatch form's FAN OUT switch, straight off the record:
 	// the session was invited to spread across agents. subLive and subDone are
 	// what it actually did — the type names of the subagents the hooks have
@@ -369,6 +373,11 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	clash := cqCollision(touched, rec)
 	ask := cqKind(rec, st)
 	tone := cqToneOf(st, checks, review, clash)
+	if ask == "api-error" && tone == "normal" {
+		// Like a blocked row: stopped, and nothing more will get it going on
+		// its own — a retry still coming files it with the running rows.
+		tone = "amber"
+	}
 	goal, goalLabel := cqGoal(rec)
 	u, ctxKnown := transcript.LastUsage(rec.TranscriptPath)
 	est, codedKnown := s.effortBy[rec.Feature]
@@ -385,7 +394,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		ref:        cqRef(forge, rec),
 		stage:      cqPhase(s.tailLines[rec.Feature], rec),
 		pass:       passes[rec.ID],
-		signal:     cqWant(ask),
+		signal:     cqQueueSignal(rec, ask),
 		tone:       tone,
 		why:        cqWhy(s, rec, ask, tone, clash),
 		goal:       goal,
@@ -398,6 +407,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, ask),
@@ -434,7 +444,10 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 	// the checks are reported: a count the hooks measured, no louder than the
 	// ci clause it sits with. Live subagents come first — they are what the
 	// session is doing now; the PR is where what it did stands.
-	signal := cqJoin(cqFanSignal(len(subLive)), cqShipDetail(forge, rec))
+	// A turn an API error ended, with a retry on its way, rides here too
+	// (floorState) — and its clause leads, because it is why this row is not
+	// moving right now.
+	signal := cqJoin(cqFailSignal(rec, time.Now()), cqFanSignal(len(subLive)), cqShipDetail(forge, rec))
 	// The record exists and no hook has fired for it: it was launched, and
 	// nothing has been heard from the session since. cqShipDetail has nothing to
 	// say about a dispatcher with no PR, so the cell would be blank — which on
@@ -474,6 +487,7 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, "running"),
@@ -481,6 +495,36 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
 	}, mt
+}
+
+// cqQueueSignal is a waiting row's SIGNAL: what an API error did to it, else
+// the question it closed on in its own words, else the generic want. The
+// generic "it finished a turn" on every row was why the table could not be
+// triaged without opening each session to read what it wanted.
+func cqQueueSignal(rec *state.Dispatch, kind string) string {
+	// The steward's reading of this wait leads when there is one: it has looked,
+	// decided the call is the human's, and said why — "yours: merge #71 — CI
+	// green, no review". The ask it answered stays in the detail lead.
+	if note := rec.Note(); note != "" {
+		return "steward · " + note
+	}
+	// A line already typed into this wait, not yet picked up. Usually gone by
+	// the next load; if it stays, the reply did not take — which is exactly
+	// what the human needs to be able to see.
+	if ans := rec.Answered(); ans != "" {
+		return "answered · " + ans
+	}
+	if kind == "api-error" {
+		return cqFailSignal(rec, time.Now())
+	}
+	// A review row's ask is quoted too: "approve a merge" is our reading of an
+	// open PR, and the session often closed on something else entirely.
+	if kind != "permission" {
+		if ask := cqAsk(rec.Said); ask != "" {
+			return ask
+		}
+	}
+	return cqWant(kind)
 }
 
 // fleetSubagents splits the record's fan-out into the type names of the
@@ -556,6 +600,7 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, "parked"),
@@ -616,6 +661,7 @@ func fleetEndedRow(ctx *collectCtx, s *snapshot, passes map[string]int,
 		mode:       rec.Mode,
 		root:       rec.Root,
 		fanOut:     rec.FanOut,
+		account:    rec.Account,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, kind),
@@ -759,14 +805,15 @@ func (m model) fleetFilter() string {
 // that have been dismissed — and everything that finished before this build
 // existed, which has no FinishedAt and so was never held — are history.
 func (m model) fleetAll() []fleetRow {
-	byID := make(map[string]fleetRow, len(fleet))
-	for _, r := range fleet {
+	rows := m.fleetNow()
+	byID := make(map[string]fleetRow, len(rows))
+	for _, r := range rows {
 		if r.kind != "past" {
 			byID[r.id] = r
 		}
 	}
-	out := make([]fleetRow, 0, len(fleet))
-	placed := make(map[string]bool, len(fleet))
+	out := make([]fleetRow, 0, len(rows))
+	placed := make(map[string]bool, len(rows))
 	for _, id := range m.cqOrder {
 		// Parked and held rows sit out the user's ordering: both groups are
 		// always below the live table, and an id `s` ordered while it was still
@@ -779,7 +826,7 @@ func (m model) fleetAll() []fleetRow {
 			placed[id] = true
 		}
 	}
-	for _, r := range fleet {
+	for _, r := range rows {
 		if r.kind != "past" && !placed[r.id] && !m.cqSuppressed[r.id] {
 			out = append(out, r)
 		}
@@ -800,13 +847,73 @@ func (m model) fleetAll() []fleetRow {
 // row cleared moments ago does not reappear under `h` while the record catches
 // up.
 func (m model) fleetPast() []fleetRow {
-	out := make([]fleetRow, 0, len(fleet))
-	for _, r := range fleet {
+	rows := m.fleetNow()
+	out := make([]fleetRow, 0, len(rows))
+	for _, r := range rows {
 		if r.kind == "past" && !m.cqSuppressed[r.id] {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// fleetNow is the collector's fleet with this session's own dismissals already
+// applied, and it is the only thing the two tables above read.
+//
+// A dismissal is written to the record and nowhere else (dismissCmd), which is
+// right — kept in the model it would come back on the next load, and come back
+// for every finished dispatcher the moment the cockpit restarted. But the
+// record is not the screen, and the screen used to wait for a whole snapshot to
+// catch up with it: a load reads every record, every repo and every forge, and
+// on a real portfolio takes seconds to a minute (see load.go), all of it with
+// the dismissed row still sitting under the "finished" divider and the history
+// the flash had just named — "h for history" — not containing it. Measured on
+// the reporting store, 212 records: ten to fifteen seconds with nothing running,
+// and the human filed this thirty-six seconds after pressing the key.
+//
+// So the act shows now and the record still decides. The map is what the human
+// did; every field on the row still comes from the collector.
+func (m model) fleetNow() []fleetRow {
+	if len(m.fleetDismissed) == 0 {
+		return fleet
+	}
+	out := make([]fleetRow, len(fleet))
+	copy(out, fleet)
+	moved := false
+	for i, r := range out {
+		// Only a held row is turned over. A snapshot that has caught up already
+		// says "past" and there is nothing to do; a record that came back alive —
+		// a resume clears the ending, see state.Save — is a live row again, and
+		// must not be hidden by a dismissal it no longer carries. That is also
+		// what retires the entry: see cqReconcile.
+		if r.kind == "done" && m.fleetDismissed[r.id] {
+			out[i] = fleetDismissedRow(r)
+			moved = true
+		}
+	}
+	if moved {
+		// Re-ranked, so it takes its place in history by the same rule as
+		// everything else there rather than wherever it sat on the live table.
+		fleetSort(out)
+	}
+	return out
+}
+
+// fleetDismissedRow is the held row as history: the same dispatcher a rank
+// lower, without the key that has just been pressed on it. Everything else is
+// left alone, because dismissing changes nothing about the dispatcher — see
+// fleetEndedRow, which builds both kinds for the same reason.
+func fleetDismissedRow(r fleetRow) fleetRow {
+	r.kind = "past"
+	r.rank = fleetRank("past", r.tone)
+	acts := make([]cqAct, 0, len(r.acts))
+	for _, a := range r.acts {
+		if a.k != "x" {
+			acts = append(acts, a)
+		}
+	}
+	r.acts = acts
+	return r
 }
 
 // fleetRows is what the table actually draws: fleetAll narrowed by `f`, or the

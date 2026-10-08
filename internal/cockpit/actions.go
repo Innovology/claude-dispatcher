@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
@@ -108,21 +109,24 @@ func killCmd(features []string) tea.Cmd {
 				continue
 			}
 			_ = supervisor.KillSession(dispatchpkg.SessionOf(rec))
+			now := time.Now()
 			// The kill takes the session's subagents with it, and no hook
 			// will fire to say so: settle the fan-out with the record.
-			swept := rec.SweepSubagents(time.Now())
-			if rec.Parked() || rec.Status != state.StatusDone {
-				// A kill is abandonment, not shelving: clear the park so the
-				// record cannot haunt the parked group, whose whole claim is
-				// "you will come back to this".
-				rec.ParkedReason, rec.ParkedAt = "", nil
-				if rec.Status != state.StatusDone {
-					rec.Stop(state.StatusExited, "killed from cockpit", time.Now())
-				}
-				_ = state.Save(rec)
-			} else if swept {
-				_ = state.Save(rec)
+			rec.SweepSubagents(now)
+			// A kill is abandonment, not shelving: clear the park so the
+			// record cannot haunt the parked group, whose whole claim is
+			// "you will come back to this".
+			rec.ParkedReason, rec.ParkedAt = "", nil
+			if rec.Status != state.StatusDone {
+				rec.Stop(state.StatusExited, "killed from cockpit", now)
 			}
+			// And it is read: the human ended this one themselves and was told
+			// so. The triage table holds a finished dispatcher because an ending
+			// nobody watched is news (see state.Dispatch.Held), which an ending
+			// they asked for is not — unheld, it would come back as an unread ✓
+			// row asking them to dismiss the thing they just killed.
+			rec.Dismiss(now)
+			_ = state.Save(rec)
 			if rec.WorktreePath != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
 				kept++
 			}
@@ -160,7 +164,11 @@ func shipCmd(feature string) tea.Cmd {
 			}
 			merged = fmt.Sprintf(" · #%d squash-merged", rec.PRNumber)
 		}
-		rec.Stop(state.StatusDone, "shipped from cockpit", time.Now())
+		now := time.Now()
+		rec.Stop(state.StatusDone, "shipped from cockpit", now)
+		// Shipped by the human, so it is already read — the same rule the kill
+		// follows: the held row exists for endings nobody watched.
+		rec.Dismiss(now)
 		_ = state.Save(rec)
 		gh.InvalidateCache() // the merge just changed what the forge would say
 		return actionMsg{notice: "✓ " + feature + " marked live" + merged}
@@ -174,21 +182,11 @@ func markDoneCmd(feature string) tea.Cmd {
 		if rec == nil {
 			return actionMsg{notice: "\"" + feature + "\" has no record to mark"}
 		}
-		rec.Stop(state.StatusDone, "marked shipped", time.Now())
+		now := time.Now()
+		rec.Stop(state.StatusDone, "marked shipped", now)
+		rec.Dismiss(now) // the human's own ending, and so already read
 		_ = state.Save(rec)
 		return actionMsg{notice: "\"" + feature + "\" marked shipped"}
-	}
-}
-
-// replyCmd sends text into the feature's live session, as if typed at the prompt.
-func replyCmd(feature, text string) tea.Cmd {
-	return func() tea.Msg {
-		rec := recordFor(feature)
-		if rec == nil || !supervisor.HasSession(dispatchpkg.SessionOf(rec)) {
-			return actionMsg{notice: "no live session to reply to"}
-		}
-		_ = supervisor.SendKeys(dispatchpkg.SessionOf(rec), text)
-		return actionMsg{notice: "replied to \"" + feature + "\" · session resumed"}
 	}
 }
 
@@ -270,10 +268,19 @@ func resumedAt(rec *state.Dispatch, name string) supervisor.Session {
 // launchCmd dispatches a new feature into repoName with prompt, in the
 // permission mode the form chose, on the model it chose, cut from the root
 // branch it chose, fanning out across agents if the form asked for that.
-func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, fanOut bool) tea.Cmd {
+//
+// acctName is the account it runs under, resolved here against the config
+// rather than carried as a struct from the form, so an account removed between
+// the form and the launch is a launch that says so instead of one that runs on
+// a directory nobody configured any more.
+func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, fanOut bool, acctName string) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
 			return launchFailed(feature, "no config — cannot dispatch")
+		}
+		acct, ok := account.Find(cfg, acctName)
+		if !ok {
+			return launchFailed(feature, "no account named "+acctName+" — claude-dispatcher account")
 		}
 		var found *repos.Repo
 		for _, r := range repos.Discover(cfg) {
@@ -286,7 +293,7 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 		if found == nil {
 			return launchFailed(feature, "repo not found: "+repoName)
 		}
-		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, root, fanOut)
+		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, root, fanOut, acct)
 		if err != nil {
 			return launchFailed(feature, err.Error())
 		}

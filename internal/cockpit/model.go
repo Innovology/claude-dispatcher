@@ -29,9 +29,10 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship"
+	kind          string // "kill" | "ship" | "tidy"
 	feature, repo string
-	features      []string // kill targets (marked set, or the one selected)
+	features      []string               // kill targets (marked set, or the one selected)
+	tidy          []dispatchpkg.TidyItem // the plan a tidy confirms
 }
 
 // model is the whole cockpit. Every lens reads and writes these fields; each
@@ -108,6 +109,11 @@ type model struct {
 	parkOpen bool
 	parkText string
 	parkAt   *parkTarget
+	// The reply input over the triage lens (reply.go): one line typed into a
+	// waiting dispatcher's session without attaching to it.
+	replyOpen bool
+	replyText string
+	replyAt   *replyTarget
 
 	backlogCursor int
 	picked        map[string]bool
@@ -181,8 +187,10 @@ type model struct {
 	helpOpen bool
 
 	confirm *confirmState
-	undo    string
-	undoSeq int
+	// tidyReading is a tidy's plan being read in the background (see tidy.go).
+	tidyReading bool
+	undo        string
+	undoSeq     int
 
 	// install is how this build got onto the machine, and so what would upgrade
 	// it — see version.Detect.
@@ -205,8 +213,14 @@ type model struct {
 	// model holds only what the user did to it: the order they left it in, what
 	// they have already acted on, and what they are typing.
 	cqOrder      []string        // item ids, front first; `s` rotates, new asks land at the back
-	cqSuppressed map[string]bool // acted on, hidden until the record leaves the queue for real
+	cqSuppressed map[string]bool // acted on, hidden until the record catches up with the act
 	cqCleared    int             // "N things handled" this session
+	// fleetDismissed is the finished dispatchers this human has taken off the
+	// table whose snapshot has not caught up yet: the record on disk is what a
+	// dismissal IS, and this is only the screen agreeing with it now instead of
+	// in a load's time. Every entry is retired by the snapshot that reads it
+	// back — see fleetNow and cqReconcile.
+	fleetDismissed map[string]bool
 
 	cqFlash     string // an act's confirmation, held on screen for cqFlashLinger
 	cqFlashKeep bool   // the flashing act did not clear the item (attach)
@@ -244,6 +258,12 @@ type model struct {
 	dxMode   dispatchpkg.Mode  // MODE: auto / manual / plan — the session's permission mode
 	dxModel  dispatchpkg.Model // MODEL: default, or a claude alias — what the session runs
 	dxFanOut bool              // FAN OUT: may the session spread across agents when the task splits
+	// ACCOUNT: the Claude subscription it runs under, by name ("default" is
+	// the human's own login). See accounts.go.
+	dxAccount string
+	// accounts is what the account probe found when a dispatch form last
+	// opened: who each account is and how much of its limits is left.
+	accounts []acctInfo
 
 	// ---- theme ------------------------------------------------------------------
 	// themeMode is config's `theme`, normalised: "system" or a theme's name.
@@ -269,16 +289,17 @@ type model struct {
 
 func newModel() model {
 	return model{
-		lens:         "floor",
-		pane:         "list",
-		rightTab:     "overview",
-		srcFilter:    "all",
-		picked:       map[string]bool{},
-		clPane:       "repos",
-		clMarked:     map[string]bool{},
-		clMap:        map[string]string{},
-		clExpanded:   map[string]bool{},
-		cqSuppressed: map[string]bool{},
+		lens:           "floor",
+		pane:           "list",
+		rightTab:       "overview",
+		srcFilter:      "all",
+		picked:         map[string]bool{},
+		clPane:         "repos",
+		clMarked:       map[string]bool{},
+		clMap:          map[string]string{},
+		clExpanded:     map[string]bool{},
+		cqSuppressed:   map[string]bool{},
+		fleetDismissed: map[string]bool{},
 		// How this build was installed cannot change while it runs, so it is
 		// read once here rather than from the footer, which redraws on every
 		// frame. Holding it on the model is also what lets a test drive the
@@ -513,6 +534,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
 
+	case dismissedMsg:
+		// The record on disk is the dismissal; this is the table saying so at
+		// once rather than in a load's time — see fleetNow. It is set here, on
+		// the way back from the write, and never on the way in: a flash is a
+		// promise that the act already ran, and a row moved for a write that
+		// then failed would be the screen making that promise on its own.
+		m.notice = msg.notice
+		m.fleetDismissed[msg.id] = true
+		// The cursor stays where it is and the next row comes up under it, the
+		// way parking leaves it: dismissing is putting the thing down, and a
+		// stack of finished rows is cleared with one key.
+		m.fleetSelID = ""
+		mm, load := m.fleetSync().requestLoad(loadPlain)
+		return mm, load
+
+	case accountsMsg:
+		m.accounts = msg.infos
+		return m, nil
+
 	case launchedMsg:
 		// A launch is the one action whose row was on screen before the action
 		// finished, so its outcome has a placeholder to answer to. A failure
@@ -543,6 +583,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// resume) and pick the record's new state up on the next load.
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
+
+	case stewardToggledMsg:
+		mm, cmd := m.onStewardToggled(msg)
+		return mm, cmd
+
+	case stewardStartedMsg:
+		mm, cmd := m.onStewardStarted(msg)
+		return mm, cmd
+
+	case tidyPlannedMsg:
+		mm, cmd := m.onTidyPlanned(msg)
+		return mm, cmd
 
 	case attachReturnedMsg:
 		m.notice = ""
@@ -658,6 +710,11 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		mm, tick := m.startShip(x)
 		mm2, undo := mm.offerUndo("ship " + c.feature)
 		return mm2, tea.Batch(tick, shipCmd(c.feature), undo)
+	case "tidy":
+		// No undo offered: the folders are going, and an "undone" flash over a
+		// deletion already running would be the screen lying.
+		m.notice = "tidying…"
+		return m, tidyRunCmd(c.tidy)
 	}
 	return m, nil
 }

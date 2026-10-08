@@ -3,7 +3,9 @@
 package supervisor
 
 import (
+	"errors"
 	"os/exec"
+	"strings"
 
 	"claude-dispatcher/internal/tmux"
 )
@@ -85,11 +87,44 @@ func EnsureFocusEvents() { tmux.Default.EnsureFocusEvents() }
 func AttachSwitches(s Session) bool { return server(s).AttachSwitches() }
 
 // SendKeys types text into the session and presses Enter, as if at the prompt.
+//
+// The target is "=name:" — the session's current pane — not the "=name" every
+// session-level command here takes: send-keys wants a pane, and tmux (3.7b,
+// measured) answers "=name" with "can't find pane", so the plain form typed
+// nothing, ever, and the reply that used it said it had. The text goes with -l
+// and after --, so it is typed as written: without them tmux looks each
+// argument up as a key name first, and a reply of "Enter", "Up" or "C-c" would
+// be pressed rather than typed, and one starting with "-" read as a flag.
+// Enter is its own call because it is the one argument that must be a key.
+//
+// It takes the whole address rather than a name: a repo's sessions live on
+// that repo's own server (ADR 0014), and a reply typed at the default server
+// is typed at a session that is not there.
 func SendKeys(s Session, text string) error {
-	args := []string{}
-	if s.Socket != "" {
-		args = append(args, "-L", s.Socket)
+	target := "=" + s.Name + ":"
+	if out, err := sendKeysCmd(s, "-t", target, "-l", "--", text).CombinedOutput(); err != nil {
+		return sendErr(out, err)
 	}
-	args = append(args, "send-keys", "-t", "="+s.Name, text, "Enter")
-	return exec.Command("tmux", args...).Run()
+	if out, err := sendKeysCmd(s, "-t", target, "Enter").CombinedOutput(); err != nil {
+		return sendErr(out, err)
+	}
+	return nil
+}
+
+// sendKeysCmd is one send-keys invocation against the session's own server.
+func sendKeysCmd(s Session, args ...string) *exec.Cmd {
+	argv := []string{}
+	if s.Socket != "" {
+		argv = append(argv, "-L", s.Socket)
+	}
+	argv = append(argv, "send-keys")
+	return exec.Command("tmux", append(argv, args...)...)
+}
+
+// sendErr carries tmux's own words when it gave any.
+func sendErr(out []byte, err error) error {
+	if msg := strings.TrimSpace(string(out)); msg != "" {
+		return errors.New(msg)
+	}
+	return err
 }

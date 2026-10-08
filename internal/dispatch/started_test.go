@@ -80,7 +80,7 @@ func TestLaunchStampsTheSessionOnlyOnceItStarted(t *testing.T) {
 			sessionAlive = func(supervisor.Session) bool { return false }
 			t.Cleanup(func() { newSession, uniqueName, sessionAlive = prevNew, prevUniq, prevAlive })
 
-			d, _ := Launch(repos.Repo{Name: "acme", Path: repo}, "stamp", "go", ModeAuto, DefaultModel, DefaultRoot, false)
+			d, _ := Launch(repos.Repo{Name: "acme", Path: repo}, "stamp", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
 			if d == nil {
 				t.Fatal("Launch returned no record")
 			}

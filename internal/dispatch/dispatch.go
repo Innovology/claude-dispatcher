@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -81,7 +82,14 @@ func capSlug(s string) string {
 // human named on the form, or RootDefault for the repo's default branch as the
 // remote sees it. Unlike the other three it is not carried to Resume — a branch
 // is cut once, and a resumed dispatcher goes back to the branch it has.
-func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root Root, fanOut bool) (d *state.Dispatch, err error) {
+//
+// acct is the Claude subscription the session runs under (internal/account):
+// its config directory goes on the command line as CLAUDE_CONFIG_DIR and on
+// the record, because Resume has to reopen the session under the same login —
+// its transcript is in that directory. An account that would leave the session
+// sitting unattended (no login, no hooks, never opened) is refused here, by
+// name, before anything is created.
+func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root Root, fanOut bool, acct account.Account) (d *state.Dispatch, err error) {
 	// The audit, opened before anything is created and closed on every way out.
 	// A launch that fails here fails before state.Save, so without this the
 	// whole event is a notice in a footer that the next keypress replaces —
@@ -111,6 +119,9 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		return nil, fmt.Errorf("the prompt is %d bytes and the limit is %d — put the detail in a file in the repo and point the prompt at it",
 			n, MaxPromptBytes)
 	}
+	if problems := account.Problems(acct, probeAccount(acct)); len(problems) > 0 {
+		return nil, fmt.Errorf("the %s account cannot run a dispatch: %s", acct.Name, strings.Join(problems, "; "))
+	}
 	if live := liveDispatch(slug); live != nil {
 		return nil, fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
 			live.Feature, live.RepoName, live.TmuxSession)
@@ -125,7 +136,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	// A fresh worktree is a folder Claude Code has never seen, and it blocks on
 	// its trust prompt before reading the prompt we launched it with. Inherit
 	// the repo's own trust decision so an unattended session can actually start.
-	InheritTrust(r.Path, worktree)
+	InheritTrustFor(acct.Env(), r.Path, worktree)
 
 	baseSHA := ""
 	if out, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output(); err == nil {
@@ -134,7 +145,9 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 
 	mode = mode.Normalize()
 	model = model.Normalize()
-	prompt = withFanOut(prompt, fanOut)
+	// The working contract for the mode, then FAN OUT's sentence: how far to
+	// take it, then how widely. See contract.go.
+	prompt = withFanOut(withContract(prompt, mode), fanOut)
 	// Trailing newlines are dropped here rather than by the shell, so the two
 	// platforms send the same bytes and the record says exactly what the
 	// session was given: `$(cat …)` strips them and PowerShell's ReadAllText
@@ -158,6 +171,8 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		TmuxSocket:   r.Socket,
 		EnvCommand:   r.Env,
 		PaneShell:    r.Shell,
+		Account:      accountName(acct),
+		ConfigDir:    acct.Env(),
 		TmuxSession:  uniqueName(supervisor.Session{Name: "disp-" + slug, Socket: r.Socket}),
 		Status:       state.StatusLaunching,
 		CreatedAt:    time.Now(),
@@ -177,7 +192,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	// launchCommand is OS-specific (bash on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model)
+	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir)
 	if err := newSession(SessionOf(d), worktree, cmd, d.EnvCommand); err != nil {
 		return d, failLaunch(d, err)
 	}
@@ -292,6 +307,26 @@ func SessionOf(d *state.Dispatch) supervisor.Session {
 		return supervisor.Session{}
 	}
 	return supervisor.Session{Name: d.TmuxSession, Socket: d.TmuxSocket}
+}
+
+// probeAccount is the seam Launch asks who an account is through. The default
+// account is never asked: account.Problems has nothing to say about it, and
+// a launch on it must not wait on a subprocess it has no use for.
+var probeAccount = func(a account.Account) account.Auth {
+	if a.IsDefault() {
+		return account.Auth{}
+	}
+	return account.Probe(a)
+}
+
+// accountName is what the record calls a's account: "" for the default, so a
+// record from before accounts existed and one launched on the default since
+// say the same thing, which they are.
+func accountName(a account.Account) string {
+	if a.IsDefault() {
+		return ""
+	}
+	return a.Name
 }
 
 // idOf is a dispatch's id, or "" when the launch failed before there was one.

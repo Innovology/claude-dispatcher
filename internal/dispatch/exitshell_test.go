@@ -12,7 +12,7 @@ import (
 // must stay that way: the shell setting names what the pane BECOMES, never what
 // parses the launch. That distinction is the whole of the nu report.
 func TestTheLaunchLineStaysPOSIXWhateverTheShellIs(t *testing.T) {
-	line := launchCommand("abc123", "/prompts/abc123.txt", "/bin/nu", ModeAuto, DefaultModel)
+	line := launchCommand("abc123", "/prompts/abc123.txt", "/bin/nu", ModeAuto, DefaultModel, "")
 	head, _, found := strings.Cut(line, "; cdsh=")
 	if !found {
 		t.Fatalf("no exit-shell tail in:\n%s", line)
@@ -70,7 +70,7 @@ func TestExitShellQuotesTheShell(t *testing.T) {
 // Resume reopens the way the dispatch went out, which includes the pane it
 // leaves behind when the reopened session ends.
 func TestResumeCarriesTheShellToo(t *testing.T) {
-	line := resumeCommand("abc123", "sess-1", "", "/usr/bin/fish", ModeAuto, DefaultModel)
+	line := resumeCommand("abc123", "sess-1", "", "/usr/bin/fish", ModeAuto, DefaultModel, "")
 	if !strings.Contains(line, `cdsh='/usr/bin/fish'`) {
 		t.Errorf("resume dropped the shell:\n%s", line)
 	}

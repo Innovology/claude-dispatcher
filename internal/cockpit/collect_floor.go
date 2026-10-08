@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/effort"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
@@ -185,6 +186,13 @@ func floorState(rec *state.Dispatch) string {
 	case state.StatusBlocked:
 		return "blocked"
 	case state.StatusNeedsInput:
+		// A turn an API error ended, with a retry on its way, is the machine's
+		// to get going again, not the human's: it rides with the running rows,
+		// saying when the retry comes (cqFailSignal), until the retry is spent
+		// or overdue — then it is an ask like any other.
+		if dispatchpkg.RetryPending(rec, time.Now()) {
+			return "working"
+		}
 		// A complete turn with an open, undeployed PR is a review row, not an
 		// input request — the code exists but is not live.
 		if rec.PRNumber > 0 && rec.PRState == "OPEN" && rec.DeployedAt == nil {

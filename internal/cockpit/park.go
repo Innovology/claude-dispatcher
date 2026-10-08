@@ -96,6 +96,13 @@ func parkCmd(id, reason string) tea.Cmd {
 	}
 }
 
+// dismissedMsg is a dismissal that reached the record, carrying the id it was
+// written for. It is its own message rather than an actionMsg because the id is
+// the point: the table moves that row to history on the strength of this,
+// without waiting for the load it also asks for (see fleetNow). A dismissal
+// that found no record is an ordinary actionMsg — nothing moved.
+type dismissedMsg struct{ id, notice string }
+
 // dismissCmd takes a finished dispatcher off the triage table: the ending has
 // been read, and the record goes to history.
 //
@@ -112,7 +119,8 @@ func dismissCmd(id string) tea.Cmd {
 		}
 		rec.Dismiss(time.Now())
 		_ = state.Save(rec)
-		return actionMsg{notice: "dismissed \"" + rec.Feature + "\" · h for history"}
+		return dismissedMsg{id: id,
+			notice: "dismissed \"" + rec.Feature + "\" · h for history"}
 	}
 }
 

@@ -31,9 +31,9 @@ import (
 // shell is accepted and ignored: a console window has no shell to drop to, it
 // has `pause`. config.toml's `shell` is a Unix setting, and a Windows build
 // silently doing something else with it would be worse than not reading it.
-func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model) string {
-	return fmt.Sprintf(`set "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
-		dispatcherID, psRun(fmt.Sprintf("claude%s%s %s",
+func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model, configDir string) string {
+	return fmt.Sprintf(`%sset "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
+		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s %s",
 			modeArgs(mode), modelArgs(model), psReadFile(promptPath))))
 }
 
@@ -43,13 +43,22 @@ func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Mode
 // which claude would read as a first message with nothing in it. The mode and
 // the model are passed again because both are properties of the new session,
 // not of the transcript it reopens.
-func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model) string {
+// StewardCommand is the steward session's command — see the Unix build.
+func StewardCommand(stateDir, opening string) string {
+	env := ""
+	if stateDir != "" {
+		env = `set "CLAUDE_DISPATCHER_STATE=` + stateDir + `" && `
+	}
+	return env + psRun(fmt.Sprintf("claude%s %s", modeArgs(ModeAuto), psQuote(opening))) + " & pause"
+}
+
+func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model, configDir string) string {
 	arg := ""
 	if promptPath != "" {
 		arg = " " + psReadFile(promptPath)
 	}
-	return fmt.Sprintf(`set "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
-		dispatcherID, psRun(fmt.Sprintf("claude%s%s --resume %s%s",
+	return fmt.Sprintf(`%sset "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
+		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s --resume %s%s",
 			modeArgs(mode), modelArgs(model), psQuote(sessionID), arg)))
 }
 
@@ -94,4 +103,13 @@ func modelArgs(model Model) string {
 		return ""
 	}
 	return " " + strings.Join(args, " ")
+}
+
+// configDirSet is the account's CLAUDE_CONFIG_DIR as a leading cmd.exe set, or
+// "" for the default account, which sets nothing (see account.Account.Env).
+func configDirSet(configDir string) string {
+	if configDir == "" {
+		return ""
+	}
+	return `set "CLAUDE_CONFIG_DIR=` + configDir + `" && `
 }

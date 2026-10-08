@@ -24,9 +24,37 @@ import (
 // Reading the file inside the session leaves this command a fixed ~120 bytes
 // whatever the prompt is; the only ceiling left is the kernel's on one argv
 // (see MaxPromptBytes).
-func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model) string {
-	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s %s%s",
-		dispatcherID, modeArgs(mode), modelArgs(model), readFileArg(promptPath), exitShell(shell))
+//
+// configDir is the account's CLAUDE_CONFIG_DIR, carried inline for the same
+// reason the id is: tmux starts a session with its server's environment, not
+// ours. "" — the default account — sets nothing at all (see account.Env).
+func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model, configDir string) string {
+	return fmt.Sprintf("%sCLAUDE_DISPATCHER_ID=%s claude%s%s %s%s",
+		configDirEnv(configDir), dispatcherID, modeArgs(mode), modelArgs(model),
+		readFileArg(promptPath), exitShell(shell))
+}
+
+// StewardCommand is the command the steward session runs: claude in auto mode,
+// opening on a short first message — its standing brief is the CLAUDE.md in
+// its own folder, which claude loads itself and which survives compaction and
+// restarts where a first message would not. No CLAUDE_DISPATCHER_ID: the
+// steward is not a dispatcher, and its hooks must not be attributed to one.
+//
+// stateDir, when set, is carried inline the way CLAUDE_DISPATCHER_ID is for a
+// dispatch: tmux starts a session with its server's environment, not the
+// caller's, so a store chosen with CLAUDE_DISPATCHER_STATE would otherwise be
+// lost on the way in and the steward would read — and reply into — the default
+// one.
+//
+// It ends in the same exit shell a dispatch does, naming none of its own: the
+// steward's pane is a pane like any other, and the human who jumps into it
+// should land where they land everywhere else.
+func StewardCommand(stateDir, opening string) string {
+	env := ""
+	if stateDir != "" {
+		env = "CLAUDE_DISPATCHER_STATE=" + shellQuote(stateDir) + " "
+	}
+	return fmt.Sprintf("%sclaude%s %s%s", env, modeArgs(ModeAuto), shellQuote(opening), exitShell(""))
 }
 
 // exitShell is the tail of the launch line: what the pane becomes once claude
@@ -46,7 +74,7 @@ func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Mode
 // not there, and a tmux that answered with something unrunnable, both fall
 // through instead of killing the pane the moment claude exits. Nothing here
 // touches the line claude is launched with: that is POSIX and runs under
-// /bin/sh whatever the human's shell is. Full record: docs/adr/0018.
+// /bin/sh whatever the human's shell is. Full record: docs/adr/0025.
 func exitShell(shell string) string {
 	return "; cdsh=" + shellQuote(strings.TrimSpace(shell)) +
 		`; [ -n "$cdsh" ] || cdsh=$(tmux display -p '#{default-shell}' 2>/dev/null)` +
@@ -58,14 +86,17 @@ func exitShell(shell string) string {
 // empty prompt is left off entirely rather than passed as an empty argument,
 // which claude would read as a first message with nothing in it. The mode and
 // the model are passed again because both are properties of the new session,
-// not of the transcript it reopens.
-func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model) string {
+// not of the transcript it reopens. The account is passed again for a harder
+// reason: the transcript lives in that account's config directory, and claude
+// started under any other cannot find the conversation at all.
+func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model, configDir string) string {
 	arg := ""
 	if promptPath != "" {
 		arg = " " + readFileArg(promptPath)
 	}
-	return fmt.Sprintf("CLAUDE_DISPATCHER_ID=%s claude%s%s --resume %s%s%s",
-		dispatcherID, modeArgs(mode), modelArgs(model), shellQuote(sessionID), arg, exitShell(shell))
+	return fmt.Sprintf("%sCLAUDE_DISPATCHER_ID=%s claude%s%s --resume %s%s%s",
+		configDirEnv(configDir), dispatcherID, modeArgs(mode), modelArgs(model),
+		shellQuote(sessionID), arg, exitShell(shell))
 }
 
 // readFileArg is the shell fragment that expands to a file's contents as ONE
@@ -99,4 +130,13 @@ func modelArgs(model Model) string {
 // shellQuote single-quotes a string for POSIX shells, escaping embedded quotes.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// configDirEnv is the account's CLAUDE_CONFIG_DIR as a leading assignment, or
+// "" for the default account.
+func configDirEnv(configDir string) string {
+	if configDir == "" {
+		return ""
+	}
+	return "CLAUDE_CONFIG_DIR=" + shellQuote(configDir) + " "
 }

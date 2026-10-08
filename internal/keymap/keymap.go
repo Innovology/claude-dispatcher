@@ -87,11 +87,13 @@ var Defaults = []Binding{
 	{Action: "fleet.last", Scope: Fleet, Key: "G"},
 	{Action: "fleet.filter", Scope: Fleet, Key: "f", Help: "filter: all → wants you → running → history", Section: "work the fleet"},
 	{Action: "fleet.attach", Scope: Fleet, Key: "enter", Help: "attach the session", Section: "work the fleet"},
+	{Action: "fleet.reply", Scope: Fleet, Key: "r", Help: "reply · type one line into a waiting session, no jump-in", Section: "work the fleet"},
 	{Action: "fleet.approve", Scope: Fleet, Key: "y", Help: "approve the merge, or mark it shipped once it has commits", Section: "work the fleet"},
 	{Action: "fleet.kill", Scope: Fleet, Key: "x", Help: "kill it · the branch and any dirty worktree survive", Section: "work the fleet"},
 	{Action: "fleet.skip", Scope: Fleet, Key: "s", Help: "skip · send it to the back, it comes round again", Section: "work the fleet"},
 	{Action: "fleet.park", Scope: Fleet, Key: "p", Help: "park it · say why, it waits below the fleet · again unparks", Section: "work the fleet"},
 	{Action: "fleet.dispatch", Scope: Fleet, Key: "d", Help: "dispatch · pick a repo, say what it does", Section: "work the fleet"},
+	{Action: "fleet.steward", Scope: Fleet, Key: "t", Help: "steward on/off · it answers what the brief settles, notes the rest on your rows", Section: "work the fleet"},
 	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher you have dismissed, newest worked first", Section: "what has finished"},
 	{Action: "fleet.openpr", Scope: Fleet, Key: "o", Help: "open its pull request", Section: "what has finished"},
 

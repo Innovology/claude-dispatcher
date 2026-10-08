@@ -24,6 +24,7 @@ import (
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/supervisor"
 )
 
@@ -45,6 +46,9 @@ type snapshot struct {
 
 	fleet        []fleetRow
 	cqLastOutput time.Time
+	// stewardOn is whether the steward's session was up when this load asked;
+	// stewardEnabled whether the human has it switched on (steward.Enabled).
+	stewardOn, stewardEnabled bool
 
 	products       []product
 	reposByProduct map[string][]repoRef
@@ -263,6 +267,12 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	if len(unclaimed) > 0 {
 		sessionsFound += " · " + countOf(len(unclaimed), "session", "sessions") + " of your own"
 	}
+	// The steward is not a record either, so the sweep does not see it; one
+	// probe, in the same stage, for the same reason.
+	stewardOn, stewardEnabled := steward.Running(), steward.Enabled()
+	if stewardOn {
+		sessionsFound += " · steward on"
+	}
 	r.done(bootSessions, sessionsFound, false)
 
 	roots := cfg.ExpandedRoots()
@@ -291,6 +301,7 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	var s snapshot
 	s.dataMode = "live"
 	s.recordsAt = recordsAt
+	s.stewardOn, s.stewardEnabled = stewardOn, stewardEnabled
 	s.discovered = ctx.repos
 	s.ownSessions = sessionsByProduct(ctx.repos, unclaimed)
 	s.recordsByID = make(map[string]*state.Dispatch, len(ctx.records))
@@ -403,6 +414,8 @@ func applySnapshot(s snapshot) {
 	// session has a readable transcript, which is an observation the view must
 	// show, and a stale instant left in place would be a lie about liveness.
 	cqLastOutput = s.cqLastOutput
+	// Booleans have no "unread" value to protect.
+	stewardOn, stewardEnabled = s.stewardOn, s.stewardEnabled
 	if s.products != nil {
 		products = s.products
 	}

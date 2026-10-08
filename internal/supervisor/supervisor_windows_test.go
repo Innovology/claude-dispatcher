@@ -127,7 +127,7 @@ func TestWindowMatches(t *testing.T) {
 // clear error, never a silent success or a panic.
 func TestSendKeysUnknownSession(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	if err := SendKeys("disp-nope", "hello"); err == nil {
+	if err := SendKeys(Session{Name: "disp-nope"}, "hello"); err == nil {
 		t.Error("SendKeys on an unknown session returned nil, want a clear error")
 	}
 }

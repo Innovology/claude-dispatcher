@@ -123,7 +123,7 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		if _, err := ensureWorktree(d.RepoPath, dir, d.Branch, RootDefault); err != nil {
 			return "", "", fmt.Errorf("rebuild %s: %w", dir, err)
 		}
-		InheritTrust(d.RepoPath, dir)
+		InheritTrustFor(d.ConfigDir, d.RepoPath, dir)
 	}
 
 	base := "disp-" + d.Slug
@@ -154,12 +154,14 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		promptPath = p
 	}
 
-	// The same server and the same environment it went out in, both read off
-	// the record rather than resolved again: a repo's config may have changed
-	// since, and a session reopened somewhere else is a different session.
+	// The same server, environment, shell and account it went out in, every
+	// one read off the record rather than resolved again: config may have
+	// changed since, and a session reopened somewhere else — on another
+	// server, under another login — is a different session.
 	name := uniqueName(supervisor.Session{Name: base, Socket: d.TmuxSocket})
 	sess := supervisor.Session{Name: name, Socket: d.TmuxSocket}
-	if err := newSession(sess, dir, resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model)), d.EnvCommand); err != nil {
+	cmd := resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model), d.ConfigDir)
+	if err := newSession(sess, dir, cmd, d.EnvCommand); err != nil {
 		return "", "", err
 	}
 

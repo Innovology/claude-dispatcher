@@ -214,7 +214,7 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
 	}()
 
-	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto, DefaultModel, DefaultRoot, false)
+	_, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
 	if err == nil {
 		t.Fatal("expected a duplicate of a live feature to be refused")
 	}
@@ -239,7 +239,7 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 		t.Errorf("a leftover login shell reported as a live dispatcher: %#v", got)
 	}
 	withAliases(t, []string{"fable", "opus", "sonnet"})
-	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModePlan, Model("opus"), DefaultRoot, true)
+	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "payment retry", "go", ModePlan, Model("opus"), DefaultRoot, true, ownAccount)
 	if err != nil {
 		t.Errorf("re-dispatching a finished feature was refused: %v", err)
 	}
