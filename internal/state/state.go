@@ -185,6 +185,13 @@ type Dispatch struct {
 	// where a dispatcher works reads it; the flag is what says we do not own
 	// it.
 	AdoptedAt *time.Time `json:"adopted_at,omitempty"`
+	// AdoptBriefAt is when an adopted session was handed the one convention a
+	// dispatched one is launched with — end your message on the question you
+	// need answered, because a turn that ends is the hook that says so. Nil on
+	// an adopted record still owed it, and on every record that was dispatched
+	// (those carry it in the prompt). Stamped before the keys are sent, so a
+	// brief is spent once however many loads race.
+	AdoptBriefAt *time.Time `json:"adopt_brief_at,omitempty"`
 	// ReleasedAt is the human giving an adopted session back: the record stops
 	// claiming it, so it returns to the sessions tab, and stays in history as
 	// the account of the time it was managed. Only ever set on an adopted

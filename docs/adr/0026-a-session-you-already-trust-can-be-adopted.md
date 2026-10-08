@@ -82,3 +82,44 @@ feature.
   hooks. The ghost sweep retires it; adopting again is one keypress.
 - The sessions tab stays what it was for everything unadopted. Second class is
   the right class for a session nobody has asked the cockpit to manage.
+
+## Amendment (2026-10-08): the convention travels with the adoption
+
+Adoption as decided above makes the hooks land. It does not make the session
+*emit* what the cockpit reads, and those are different problems.
+
+A dispatch is launched with a working contract in its prompt (`contract.go`).
+The load-bearing sentence is "end your message on that one question": status
+comes from hooks, and a turn that ends is the hook that says the human's turn
+has come. A session started outside the cockpit never saw it, and cannot be
+given it the way a dispatch is — the prompt was typed hours ago by somebody
+else. Adopting without it is half a migration: the record exists, the hooks
+land, and the session goes on asking mid-turn where nothing can report it.
+
+Reported from exactly that state, on a *dispatched* session whose build
+predated the contract: the turn ended on "OK to keep that?" while the table
+read `0 want you`.
+
+So the convention is sent as a message, the way the human would send one.
+`AdoptBrief` is two sentences; it asks for the signal rather than a change of
+behaviour, and names the question tool too, since a menu is the other shape
+the cockpit can see.
+
+**When it is sent is the whole of the care.** `DeliverBriefs` runs from the
+poll under RetryFailed's rules, and adds one:
+
+- never while the record is **blocked** — a blocked session is sitting on a
+  menu, and typing at a menu picks one of its options. This is the only way
+  this feature could do real harm, and it is the reason the brief is not typed
+  at adoption time, when nothing is known about the session yet;
+- never mid-turn: a brief queued behind an hour of work arrives detached from
+  the moment it explains, and the state it is about is a turn ending;
+- never where claude has exited, or where the supervisor cannot say, because
+  that text lands in the shell behind the pane;
+- once: stamped under the hook lock against a fresh read before the keys go,
+  so two racing polls cannot both send it, and a send that fails spends the
+  stamp rather than retrying in a loop.
+
+A dispatched record is never briefed — it has the contract already, and a
+second copy arriving as a message would be the cockpit talking over the brief
+the human wrote.

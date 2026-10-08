@@ -297,8 +297,21 @@
   before us. `x` **releases** rather than kills — not ours to end — clearing
   the session id so a released record stops answering hooks, and keeping its
   place in history. `BaseSHA` is the commit at adoption, so provenance credits
-  what happens under management and not the feature it walked in with. Full
-  record: `docs/adr/0026-a-session-you-already-trust-can-be-adopted.md`.
+  what happens under management and not the feature it walked in with. **And
+  an adopted session is handed the convention a dispatched one is launched
+  with**: a dispatch carries the working contract in its prompt, whose load-
+  bearing sentence is *end your message on the one question you need
+  answered* — a turn that ends is the hook that says "your move" — and a
+  session somebody else started hours ago cannot be given it that way. So
+  `dispatch.AdoptBrief` is **sent as a message**, the way the human would send
+  one, and only into a session the poll has found at its prompt
+  (`DeliverBriefs`, RetryFailed's rules): never while **blocked**, because
+  typing at a menu picks one of its options; never mid-turn, because a brief
+  queued behind an hour of work arrives detached from the moment it explains;
+  never where claude has exited or cannot be asked, because that text lands in
+  the shell. Stamped (`AdoptBriefAt`) under the hook lock before the keys go,
+  so it is spent once however many polls race. Full record:
+  `docs/adr/0026-a-session-you-already-trust-can-be-adopted.md`.
 - **A colour is a role, and the switch is news.** The cockpit paints only
   foregrounds onto the terminal's own ground, and it painted the dark design's
   hexes whatever that ground was: on a light terminal (NixOS/niri, ghostty
