@@ -307,6 +307,40 @@
   otherwise tell a quiet portfolio from a locked-out client. The cockpit says
   so — "—" in every check column is a claim about the repositories when it is
   a fact about us.
+- **A repository's verdict is the gate it names.** Reported as `player-app`
+  showing "✗ failing" with its trunk green and a pull request sitting ready to
+  merge. The repo row's CI cell asked "is anything red": over every open pull
+  request, any failing check anywhere made the whole repo red. That is the
+  wrong unit. A repo with an umbrella workflow has already decided what green
+  means — `pre-merge.yml`'s `All gates green` job, which depends on every lane,
+  runs `if: always()` and is profile-aware, allow-listing a lane the active
+  profile deliberately turned off while failing on a lane skipped for any other
+  reason; its own comment says "the aggregator is the ONLY required check". The
+  lanes beside it are therefore noise: SKIPPED is usually a design decision (no
+  Android emulation on the Mac pool while the Nix box is free) and a FAILURE is
+  usually already inside the aggregator's verdict. So `[gates]` names that one
+  check per repo and the row reads **it** — the count of open pull requests
+  whose gate is SUCCESS, in amber, because a green gate on an open PR is the one
+  fact here that is a claim about the HUMAN, with the red count dim behind it
+  (`· 2 red`) since a red gate is the dispatcher's business. The cockpit cannot
+  discover this for itself and does not try: the branch-rules API answers 403 on
+  this plan, and GitHub's own `mergeStateStatus` disagrees with the gate —
+  measured on PR 670, `UNSTABLE`/`MERGEABLE` while `All gates green` was
+  FAILURE. It is **optional, and the default is unchanged**: a repo with no
+  entry renders exactly the old cell, which is a function of its own
+  (`prodCICell`) rather than a branch, so an opt-in cannot alter what a repo
+  that did not opt in says. A pull request with **no gate result is counted in
+  nothing and shown nowhere** — the umbrella skips its aggregator on a targeted
+  or dispatch run, and four of that repo's seven open pull requests carry no
+  gate entry at all, so a rule that read them would swing the cell on how a run
+  was started; and a repo where no open pull request carries the gate reads "—",
+  the absence the rest of the cockpit means by it, never a green we have no
+  evidence for. The cost is **nothing**: the conclusion is lifted off the rollup
+  `gh.RepoPRs` already fetched in its one `pr list` per repo
+  (`PRDetail.GateState`), and the gate's name is deliberately not a parameter of
+  that read, because a name in the cache key would buy the same payload again
+  for every caller that spelled it differently. Full record:
+  `docs/adr/0023-a-repos-verdict-is-the-gate-it-names.md`.
 - **The Linear backlog is one token per product, and team scope belongs on the
   token.** A single `linear_api_key` was the whole of the Linear source:
   everything one token could see, in one undifferentiated list, tagged with no

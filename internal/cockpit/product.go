@@ -270,10 +270,10 @@ func (m model) productOverviewBody(cw int, name string) []string {
 		out = append(out, fg(cFaint, productNoRepos+" — esc, then a to assign some"))
 	}
 	for _, r := range reposByProduct[name] {
-		out = append(out, row(cw, "",
+		out = append(out, row(cw, "", append([]seg{
 			flexc(r.name, cMid),
 			cr(itoa(r.out)+" out", 9, cDim),
-			cr(r.ci, 21, r.ciColor)))
+		}, crTail(r.ci, r.ciTail, 21, r.ciColor, cDim)...)...))
 	}
 
 	out = append(out, "")

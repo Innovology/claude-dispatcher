@@ -40,6 +40,20 @@ type Config struct {
 	// means retyping a key that has to match one exactly, in another file, with
 	// silence as the only feedback when it does not.
 	Linear map[string]string `toml:"linear,omitempty"`
+	// Gates names the ONE check that is a repo's verdict, keyed by repo
+	// directory name. A repository with an umbrella workflow has already
+	// decided what "green" means — an aggregator job that depends on every lane
+	// and allow-lists the ones the active profile deliberately turned off — so
+	// the individual check conclusions beside it are noise: a lane skipped by
+	// design reads as neither pass nor fail, and a lane that failed is usually
+	// already reflected in the aggregator. Naming it here is the only way the
+	// cockpit can know: the branch-rules API that would say which check is
+	// required answers 403 on this plan, and GitHub's own mergeStateStatus
+	// disagrees with the gate (UNSTABLE, i.e. mergeable, on a pull request
+	// whose aggregator is FAILURE). Unlisted repos keep the old reading of
+	// every check at once, so this changes nothing for a repo that does not
+	// name a gate.
+	Gates map[string]string `toml:"gates,omitempty"`
 	// Accounts maps a name to a Claude Code config directory: each directory
 	// is its own login (Claude Code keys its credentials — the macOS keychain
 	// entry included — to CLAUDE_CONFIG_DIR), so each is one subscription a
@@ -159,6 +173,17 @@ func Save(c *Config) error {
 	b.WriteString("[linear]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Linear)) {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Linear[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# The one check that is a repo's verdict, keyed by repo directory name. A\n")
+	b.WriteString("# repo with an umbrella workflow has already decided what green means — an\n")
+	b.WriteString("# aggregator job depending on every lane — so name that job here and the\n")
+	b.WriteString("# repo's row reads it instead of every check at once. Unlisted repos keep\n")
+	b.WriteString("# reading every check, which is what they have always done.\n")
+	b.WriteString("# shop-api = \"All gates green\"\n")
+	b.WriteString("[gates]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Gates)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Gates[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Further Claude subscriptions a dispatch can run under: a name, and the\n")

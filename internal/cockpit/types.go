@@ -76,6 +76,12 @@ type repoRef struct {
 	name, forge string
 	out         int
 	ci, ciColor string
+	// ciTail is the quieter half of the verdict cell — " · 2 red" under a
+	// gate's ready count. It is a second field rather than more of ci because a
+	// seg carries one colour, and the whole point of the clause is that it
+	// reads a shade below the figure it follows. Empty for every cell that is
+	// one colour, which is all of them until a repo names a gate.
+	ciTail string
 	// last is how long since the repo's last commit ("3d", "—" when git could
 	// not say). The assignment editor shows it so a repo nobody has touched in
 	// months is obvious while you are deciding where it belongs.
