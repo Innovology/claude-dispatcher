@@ -299,20 +299,6 @@
   place in history. `BaseSHA` is the commit at adoption, so provenance credits
   what happens under management and not the feature it walked in with. Full
   record: `docs/adr/0026-a-session-you-already-trust-can-be-adopted.md`.
-- **A question is a wait, and only one hook reports it.** A dispatcher sat on
-  a four-option menu ("May I write the coach-side fix?") while the table said
-  *0 want you · 1 running clean*. Nothing was broken in the status machine:
-  the question tool does not end the turn (no `Stop`), does not leave the
-  prompt idle (no `Notification:idle_prompt`) and is not a permission prompt —
-  and the only hooks arriving under the menu were the session's background
-  agent's `SubagentStop`s, every 32 seconds, which read as a session getting
-  on with it. So `init` installs **`PreToolUse` matched on `AskUserQuestion`**
-  (the tool's own name, verified in the reporting session's transcript), which
-  fires the moment the menu appears, and the record goes **blocked** — not
-  needs-input, because a menu is not a sentence `r` can answer: the keypress
-  has to happen in the pane, so the row sends the human in. The existing
-  `PostToolUse` clears it, since answering is the tool returning. Existing
-  installs re-run `init` for the new entry.
 - **A colour is a role, and the switch is news.** The cockpit paints only
   foregrounds onto the terminal's own ground, and it painted the dark design's
   hexes whatever that ground was: on a light terminal (NixOS/niri, ghostty
@@ -680,6 +666,49 @@
   OUT switch itself shows as config beside the mode. Existing installs
   re-run `init` to get the two new hook entries. Full record:
   `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
+- **A question is a wait, and it is the one wait no hook reported.** A
+  dispatcher sat on a Claude Code question menu — four options, asking before
+  it wrote to another repo — while the table read `1 in flight · 0 want you ·
+  1 running clean` and the row's SIGNAL said `fan-out · 1 live`. The human
+  found it by attaching. Nothing in the status machine was wrong: a question
+  asked through the `AskUserQuestion` tool fires **nothing**, because the turn
+  has not ended (no `Stop`), the prompt is not idle (no
+  `Notification:idle_prompt`) and it is not a permission prompt (no
+  `Notification:permission_prompt`) — the three events that are the whole of
+  how a wait is reported. Worse, the session's fan-out *was* reporting:
+  measured on the record (`a45d6b48871d`, session `77ac6360`, status
+  `working`, reason "permission approved, working"), of 80 events 75 were
+  subagent ones, and after the last status-bearing event — a permission prompt
+  approved at 14:10:01 — the log holds nothing but `SubagentStop` every ~32
+  seconds for forty minutes. Liveness read as progress, which is the shape
+  that made the row look freshly active while it was stopped dead on a human.
+  So `init` installs a `PreToolUse` hook matched on `AskUserQuestion` (the
+  matcher for a tool-use hook is the tool's name) and the status machine marks
+  the record **blocked**. Blocked rather than needs-input, and for the reason
+  blocked exists: a menu is not a sentence `r` can type an answer into — the
+  keypress has to land in the pane, so the row must send the human in rather
+  than offer a reply line, which is exactly what a blocked row already does.
+  Nothing new clears it: `PostToolUse` already does, because answering the
+  question *is* the tool returning, the same way an approved permission prompt
+  clears. A question also **outranks "done means live"**, beside the permission
+  prompt it already let through (`reopensDone`): `track` flips a record to done
+  the moment its PR merges and a dispatcher told to merge and keep working
+  routinely merges mid-run, so letting one menu back onto the table and not the
+  other would have frozen a questioning dispatcher at done — invisible, which
+  is this same defect in the one state where marking it blocked is not enough.
+  **A menu is a menu, and the two kinds exist only to be worded apart.** Both
+  waits are `blocked`, so the status cannot tell them apart and the *reason*
+  does — `state.ReasonQuestion`, a constant because hookcmd writes it and the
+  cockpit matches it, and a drifting letter would not fail, it would file every
+  question under "approve a permission". What the human can *do* about either
+  is identical, because the answer to both is a keypress in the pane: `cqMenu`
+  is the one predicate every site asks (first rank, no `r`, no "mark shipped",
+  no quoting a mid-turn record's stale `Said`), tone needs no say in it at all
+  since it is taken from the blocked state both share, and a test pins the pair
+  to one key set and one rank while requiring the words to differ — the only
+  way to split them by accident is to edit that predicate. No ADR — one hook
+  entry and one case, and the numbering is contested between unmerged branches.
+  Existing installs re-run `init` to get the entry.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a

@@ -31,9 +31,9 @@ import (
 type replyTarget struct{ id, feature, ask string }
 
 // replyable reports whether r is a row whose session is waiting at a text
-// prompt: a queue row that is not a permission prompt.
+// prompt: a queue row whose ask is not a menu.
 func replyable(r fleetRow) bool {
-	return r.kind == "queue" && r.ask != "permission"
+	return r.kind == "queue" && !cqMenu(r.ask)
 }
 
 // updateReply drives the reply input while it owns the keyboard. Enter with

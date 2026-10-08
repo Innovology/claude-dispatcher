@@ -329,10 +329,10 @@ func fleetSort(rows []fleetRow) {
 }
 
 // cqUrgency mirrors state.Status.Priority across the two asks the top of the
-// table admits: a permission prompt (blocked) outranks a finished turn, because
-// nothing moves at all until it is answered.
+// table admits: a menu (blocked — a permission prompt or a question) outranks a
+// finished turn, because nothing moves at all until it is answered.
 func cqUrgency(r fleetRow) int {
-	if r.ask == "permission" {
+	if cqMenu(r.ask) {
 		return 0
 	}
 	return 1
@@ -518,8 +518,11 @@ func cqQueueSignal(rec *state.Dispatch, kind string) string {
 		return cqFailSignal(rec, time.Now())
 	}
 	// A review row's ask is quoted too: "approve a merge" is our reading of an
-	// open PR, and the session often closed on something else entirely.
-	if kind != "permission" {
+	// open PR, and the session often closed on something else entirely. Not a
+	// menu's, whose wait is mid-turn: rec.Said is an earlier turn's parting
+	// words there, and quoting them over a question on the screen now would be
+	// the stalest thing on the row.
+	if !cqMenu(kind) {
 		if ask := cqAsk(rec.Said); ask != "" {
 			return ask
 		}
