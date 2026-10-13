@@ -294,7 +294,16 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// "h" into the repo filter instead — with nothing in flight, the form is
 		// always up, so `h` would be unreachable exactly when history is the only
 		// thing left to look at.
-		navKey := isLensDigit(k) || k == ":" || k == "d" || k == "h"
+		//
+		// And `d` and `h` stay keys only on the form that stands in for an empty
+		// table. A form the human opened with `d` is a text field they asked
+		// for, with the caret in WHERE: there both are letters, and esc is the
+		// way out. Reported as "I can't really type design-system" — every repo
+		// starting with d or h was unreachable by typing, and the d vanished
+		// without a trace. The digits and `:` still leave an untouched form of
+		// either kind; a repo whose name starts with one is a filter typed
+		// from its second character.
+		navKey := isLensDigit(k) || k == ":" || (!m.cqDispatch && (k == "d" || k == "h"))
 		if m.dxTouched() || !navKey {
 			mm, cmd := m.dxKey(k)
 			return mm, cmd, true

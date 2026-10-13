@@ -313,17 +313,50 @@ func TestCQFormFallThrough(t *testing.T) {
 		t.Fatalf("a digit should leave an untouched form, lens = %q", m2.lens)
 	}
 
-	// Once anything is typed, those same keys are letters again. The form opens
-	// on WHERE, so they land in the repo filter.
+	// A form the human opened is a text field: letters type from the first
+	// one, `d` included, and they land in the repo filter it opens on.
 	m = press(m, "d")
 	m = press(m, "a")
 	m = press(m, "w")
-	if m.dxFilter != "aw" || !m.cqDispatch {
-		t.Fatalf("a touched form should take w as text: %q open=%v", m.dxFilter, m.cqDispatch)
+	if m.dxFilter != "daw" || !m.cqDispatch {
+		t.Fatalf("an opened form should take every letter as text: %q open=%v", m.dxFilter, m.cqDispatch)
 	}
 	m = press(m, "backspace")
-	if m.dxFilter != "a" {
+	if m.dxFilter != "da" {
 		t.Errorf("backspace: %q", m.dxFilter)
+	}
+}
+
+// Reported as "I can't really type design-system": on a form opened with `d`,
+// a filter starting with d or h was swallowed as the key it also stands for.
+func TestCQOpenedFormTypesDAndH(t *testing.T) {
+	m := cqModel(t)
+	m = press(m, "d")
+	for _, k := range strings.Split("design-system", "") {
+		m = press(m, k)
+	}
+	if m.dxFilter != "design-system" {
+		t.Errorf("typed %q into WHERE", m.dxFilter)
+	}
+	m = press(m, "esc")
+	m = press(m, "d")
+	m = press(m, "h")
+	if m.dxFilter != "h" || m.fleetFilter() == fleetHistory {
+		t.Errorf("h on an opened form should type: filter %q, history %v", m.dxFilter, m.fleetFilter() == fleetHistory)
+	}
+}
+
+// The form standing in for an empty table is the only screen there is, so
+// while it is untouched h still reaches history — the one place left to look.
+func TestCQStandInFormKeepsHForHistory(t *testing.T) {
+	m := cqModel(t)
+	fleet = nil
+	if !m.cqFormOn() || m.cqDispatch {
+		t.Fatalf("precondition: the form should be up on its own (on=%v opened=%v)", m.cqFormOn(), m.cqDispatch)
+	}
+	m = press(m, "h")
+	if m.fleetFilter() != fleetHistory || m.dxFilter != "" {
+		t.Errorf("h on the stand-in form: history %v, filter %q", m.fleetFilter() == fleetHistory, m.dxFilter)
 	}
 }
 

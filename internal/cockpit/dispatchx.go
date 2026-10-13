@@ -913,6 +913,11 @@ func (m model) dxFooterHelp() string {
 	if m.dxTouched() {
 		return "enter next field · tab moves · ctrl+d dispatch · esc cancel"
 	}
+	if !m.cqDispatch {
+		// The form standing in for an empty table, where h is still the way to
+		// history (cq_keys.go).
+		return "dispatch · enter next field · tab moves · h history · 1…6 sections"
+	}
 	return "dispatch · enter next field · tab moves · esc cancel · 1…6 sections"
 }
 
