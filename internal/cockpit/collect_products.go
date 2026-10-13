@@ -234,12 +234,21 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			if rec.Status != state.StatusDone && rec.Status != state.StatusExited {
 				inflight++
 			}
-			if rec.Status == state.StatusBlocked || rec.Status == state.StatusNeedsInput {
-				needs++
-				waits = append(waits, now.Sub(rec.UpdatedAt))
-			}
-			if rec.PRNumber > 0 && rec.PRState == "OPEN" {
-				review++
+			// What wants the human is what triage says wants them, asked of the
+			// same function: blocked, needs input, or stopped on an open PR,
+			// and not parked. Counting every open PR instead put a dispatcher
+			// still working on its branch, and an exited one whose PR was left
+			// open, into WANTS YOU, and a stopped one with an open PR into both
+			// counts at once.
+			if rec.ParkedAt == nil {
+				switch floorState(rec) {
+				case "blocked", "needs":
+					needs++
+					waits = append(waits, now.Sub(prodWaitingSince(rec)))
+				case "review":
+					review++
+					waits = append(waits, now.Sub(prodWaitingSince(rec)))
+				}
 			}
 			if rec.CreatedAt.After(weekAgo) {
 				dispatched7d++
@@ -515,6 +524,17 @@ func warmProductForge(ctx *collectCtx, discByName map[string]repos.Repo, ghUp bo
 }
 
 // ---- helpers (prod-prefixed to avoid collisions) ---------------------------
+
+// prodWaitingSince is when a waiting record started waiting: the stop that
+// began it, else its last save. UpdatedAt alone read "waiting on you 0m" for a
+// session that had been waiting an hour, because the bookkeeping writes that
+// go on touching a record restamp it on every poll.
+func prodWaitingSince(rec *state.Dispatch) time.Time {
+	if rec.WaitingSince != nil {
+		return *rec.WaitingSince
+	}
+	return rec.UpdatedAt
+}
 
 // prodLiveAt returns when a record went live: its deploy time, else the PR
 // merge time.

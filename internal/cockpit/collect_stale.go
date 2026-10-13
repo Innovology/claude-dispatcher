@@ -54,7 +54,7 @@ func collectStale(ctx *collectCtx, s *snapshot) {
 			repo:    r.Name,
 			product: r.Product,
 			days:    days,
-			note:    strconv.Itoa(days) + "d untouched",
+			note:    "untouched",
 		})
 	}
 	sort.SliceStable(stale, func(i, j int) bool { return stale[i].days > stale[j].days })
@@ -87,10 +87,19 @@ func stqActive(st state.Status) bool {
 	return false
 }
 
-// stqDaysSinceCommit returns whole days since the repo's last commit. The bool
-// is false when git is unavailable or the output cannot be parsed.
+// stqDaysSinceCommit returns whole days since the repo's last commit on any
+// branch, local or remote. The bool is false when git is unavailable or the
+// output cannot be parsed.
+//
+// Any branch, not the checkout's HEAD: a repository is one row however many
+// worktrees it has (ADR 0017), and the checkout the row reads is often the
+// one nobody works in. Measured here, claude-dispatcher read "49d untouched"
+// off a main worktree last pulled seven weeks earlier while its branches had
+// commits eleven minutes old — on a list headed "nothing dispatched, nothing
+// merged".
 func stqDaysSinceCommit(repoPath string) (int, bool) {
-	out, err := exec.Command("git", "-C", repoPath, "log", "-1", "--format=%ct").Output()
+	out, err := exec.Command("git", "-C", repoPath, "for-each-ref", "--sort=-committerdate", "--count=1",
+		"--format=%(committerdate:unix)", "refs/heads", "refs/remotes").Output()
 	if err != nil {
 		return 0, false
 	}

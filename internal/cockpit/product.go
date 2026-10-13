@@ -286,7 +286,7 @@ func (m model) productOverviewBody(cw int, name string) []string {
 	}
 
 	out = append(out, "")
-	out = append(out, line("in flight · working → claims done → review → live", cw, cDim, ""))
+	out = append(out, line("in flight · working → claims done → review", cw, cDim, ""))
 	feats := productsFocusFeatures(name)
 	if len(feats) == 0 {
 		out = append(out, fg(cFaint, productNoFlight))

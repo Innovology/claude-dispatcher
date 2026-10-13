@@ -30,7 +30,11 @@
       is **canonical**, because twenty call sites stand *inside* `Repo.Path`
       and a bare repo has no working tree of its own; and the worktree list
       comes from **git's registry**, not the scan, which skips hidden dirs and
-      so would report nothing for the common `.worktrees/<name>` layout. It is
+      so would report nothing for the common `.worktrees/<name>` layout. A
+      repo-wide figure reads the whole repo, not the canonical checkout: the
+      stale list's "untouched" is the newest commit on any branch, because
+      claude-dispatcher read "49d untouched" off a `main` worktree nobody had
+      pulled while its branches had commits that hour. It is
       an extension, not a replacement: the walk is unchanged, a plain clone
       resolves to itself byte-for-byte as before, and unreadable metadata falls
       back to being a repo of one named for its folder. Evidence of a repo buys

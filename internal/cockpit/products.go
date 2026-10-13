@@ -27,20 +27,17 @@ type productsFocusItem struct {
 // product + state) concatenated with WORKING (tagged working, product derived
 // from the repo), filtered to the selected product, first eight only.
 func productsFocusFeatures(name string) []productsFocusItem {
+	// The floor's rows are every dispatcher once, with the age triage shows.
+	// The working list was appended after them, so every running dispatcher
+	// came twice — once with its last activity, once with its start — and a
+	// feature live days ago sat in a list headed "in flight".
 	var out []productsFocusItem
 	for _, d := range dispatches {
-		if d.product != name {
+		if d.product != name || d.state == "live" {
 			continue
 		}
 		sm := stateMetaBy[d.state]
 		out = append(out, productsFocusItem{d.feature, d.repo, d.age, sm.glyph, sm.color})
-	}
-	for _, w := range working {
-		if repoProduct(w.repo) != name {
-			continue
-		}
-		sm := stateMetaBy["working"]
-		out = append(out, productsFocusItem{w.feature, w.repo, w.age, sm.glyph, sm.color})
 	}
 	if len(out) > 8 {
 		out = out[:8]
@@ -165,7 +162,15 @@ func (m model) productsLeft(cw, pc int, wide bool) []string {
 	if s := m.searchLine(); s != "" {
 		loose, looseColor = s, cSearchHit
 	}
-	out = append(out, spread(fg(cDim, "portfolio · a product is many repos"), fg(looseColor, loose), cw+2*pad))
+	// Laid out in cw, as every other line here is: productsPane adds the
+	// gutter, and spread adding its own as well pushed this line two columns
+	// right of the rest and cut its last two off. The subtitle gives way
+	// before the count does.
+	title := "portfolio · a product is many repos"
+	if dispWidth(title)+1+dispWidth(loose) > cw {
+		title = "portfolio"
+	}
+	out = append(out, usageFill(cw, fg(cDim, title), fg(looseColor, loose)))
 
 	// With nothing mapped, the table below would be a single "unassigned" row
 	// explaining nothing. Say what a product is for and how to make one.
