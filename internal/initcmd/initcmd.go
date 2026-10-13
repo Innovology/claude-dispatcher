@@ -85,6 +85,11 @@ func hookSpecs() []hookSpec {
 		// no other hook, because the turn has not ended and the prompt is not
 		// idle. The matcher is the tool's name, as PreToolUse matchers are.
 		{event: "PreToolUse", matcher: "AskUserQuestion", arg: "PreToolUse:AskUserQuestion"},
+		// Every dialog as it goes up — questions included — with whose it is:
+		// a subagent's carries its agent_id, so only that agent's tool
+		// completing closes it. The permission_prompt notification below says
+		// neither, and stays for a claude too old to send this one.
+		{event: "PermissionRequest", arg: "PermissionRequest"},
 		{event: "Notification", matcher: "idle_prompt", arg: "Notification:idle_prompt"},
 		{event: "Notification", matcher: "permission_prompt", arg: "Notification:permission_prompt"},
 	}

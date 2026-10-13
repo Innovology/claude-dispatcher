@@ -185,6 +185,10 @@ type Dispatch struct {
 	// no background tasks is swept, because a subagent cannot outlive the turn
 	// unless it is one of those tasks.
 	Subagents []Subagent `json:"subagents,omitempty"`
+	// Menus are the dialogs the session has on screen for the human — a
+	// permission prompt or a question — and whose each one is. A record with
+	// one open is blocked, whatever else the session is doing; see Menu.
+	Menus []Menu `json:"menus,omitempty"`
 	// AdoptedAt is when the human handed this cockpit a session it did not
 	// start — an orchestrator they had been running for hours, with the
 	// context that makes it worth keeping. Everything after it is ordinary:
@@ -554,6 +558,100 @@ func (d *Dispatch) SubagentsDone() int {
 		}
 	}
 	return n
+}
+
+// Menu is one dialog waiting on the human, and whose it is.
+//
+// A blocked record used to be one fact, cleared by any tool completing, on the
+// reasoning that the tool returns once the human has picked. With a fan-out
+// that stopped being true: a session sat on a question while its background
+// agent ran 29 tools in five minutes, the first of which cleared the wait, and
+// the table read "0 want you" for the hour the question stood. Measured on
+// claude 2.1.296, every hook a subagent fires carries its agent_id — the
+// PermissionRequest that opens a dialog for it and the PostToolUse that closes
+// it — so a dialog can be closed by its own agent and by nobody else's. Two
+// can be open at once (a question on the session and a subagent's permission
+// prompt queued behind it), which is why this is a list.
+type Menu struct {
+	// Agent is the subagent the dialog is for, "" for the session itself.
+	Agent string `json:"agent,omitempty"`
+	// Tool is what it is about: "AskUserQuestion" for a question, the tool
+	// asking permission otherwise. "" is a dialog only a Notification told us
+	// of — that hook says neither whose nor what — which any tool completing
+	// closes, because that is all an install without PermissionRequest knows.
+	Tool string    `json:"tool,omitempty"`
+	At   time.Time `json:"at"`
+}
+
+// QuestionTool is the tool a session asks the human a question through.
+const QuestionTool = "AskUserQuestion"
+
+// OpenMenu records a dialog going up. The same agent's dialog for the same tool
+// is one dialog however many hooks report it — a question is announced by both
+// its PreToolUse and its PermissionRequest. It reports whether anything changed.
+func (d *Dispatch) OpenMenu(agent, tool string, at time.Time) bool {
+	for _, m := range d.Menus {
+		if m.Agent == agent && m.Tool == tool {
+			return false
+		}
+	}
+	d.Menus = append(d.Menus, Menu{Agent: agent, Tool: tool, At: at})
+	return true
+}
+
+// SettleMenus closes what a tool completing proves answered: the agent's dialog
+// for that tool, or — when it has none — every dialog that agent had, since it
+// has moved past them. That second half is how a refusal is ever seen: denying
+// a prompt fires no hook at all, and the agent simply goes on to its next tool.
+// A dialog nobody named closes on any tool. Another agent's tools close nothing.
+func (d *Dispatch) SettleMenus(agent, tool string) bool {
+	exact := false
+	for _, m := range d.Menus {
+		if m.Agent == agent && m.Tool == tool {
+			exact = true
+		}
+	}
+	kept := d.Menus[:0]
+	for _, m := range d.Menus {
+		mine := m.Agent == agent && (!exact || m.Tool == tool)
+		if !mine && m.Tool != "" {
+			kept = append(kept, m)
+		}
+	}
+	return d.keepMenus(kept)
+}
+
+// DropMenus closes every dialog an agent had: it ended (SubagentStop), or for
+// the session itself, its turn did. A dialog nobody named goes with the
+// session's, since the session is the one that cannot say whose it was.
+func (d *Dispatch) DropMenus(agent string) bool {
+	kept := d.Menus[:0]
+	for _, m := range d.Menus {
+		if m.Agent != agent && m.Tool != "" {
+			kept = append(kept, m)
+		}
+	}
+	return d.keepMenus(kept)
+}
+
+func (d *Dispatch) keepMenus(kept []Menu) bool {
+	changed := len(kept) != len(d.Menus)
+	d.Menus = kept
+	if len(d.Menus) == 0 {
+		d.Menus = nil
+	}
+	return changed
+}
+
+// MenuAsks reports whether one of the open dialogs is a question rather than
+// a permission prompt.
+func (d *Dispatch) MenuAsks() bool {
+	for _, m := range d.Menus {
+		if m.Tool == QuestionTool {
+			return true
+		}
+	}
+	return false
 }
 
 func Dir() string {

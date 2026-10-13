@@ -800,9 +800,27 @@
   blocked exists: a menu is not a sentence `r` can type an answer into — the
   keypress has to land in the pane, so the row must send the human in rather
   than offer a reply line, which is exactly what a blocked row already does.
-  Nothing new clears it: `PostToolUse` already does, because answering the
-  question *is* the tool returning, the same way an approved permission prompt
-  clears. A question also **outranks "done means live"**, beside the permission
+  `PostToolUse` clears it, because answering the question *is* the tool
+  returning — but **only its own agent's tool**. "Any tool completing" shipped
+  first and failed on the same record the same evening: the question went up at
+  21:10:26 while a background worker beside it ran 29 tools in five minutes,
+  the first of which put the row back to working for the hour the question
+  stood. So the record keeps the dialogs that are open and whose each is
+  (`state.Menu`): measured on claude 2.1.296, every hook a subagent fires
+  carries its `agent_id`, and `PermissionRequest` (installed by `init`) reports
+  every dialog, questions included, with the tool and the agent it is for. A
+  dialog closes on its own tool completing; on its agent completing a
+  different one or ending, because denying a prompt fires no hook at all and
+  that is how a refusal is seen; and on the session's own turn ending, for its
+  own. Two can be open at once — a question with a subagent's prompt queued
+  behind it — and the record stays blocked until both are answered, whatever
+  the session does meanwhile. `Notification:permission_prompt` says neither
+  whose nor what, and 2.1.296 sends one six seconds after every question, which
+  re-worded each of them as a permission prompt; it now counts only where
+  nothing else reported the dialog, and that dialog any tool closes, as every
+  block was before `PermissionRequest`. Existing installs re-run `init` for it;
+  without it a question is still exact, and a permission prompt is what it was.
+  A question also **outranks "done means live"**, beside the permission
   prompt it already let through (`reopensDone`): `track` flips a record to done
   the moment its PR merges and a dispatcher told to merge and keep working
   routinely merges mid-run, so letting one menu back onto the table and not the
