@@ -250,9 +250,6 @@ func TestDetectAlwaysAnswers(t *testing.T) {
 	} else if in.Hint() == "" {
 		t.Error("Hint must explain why there is no command")
 	}
-	if in.Hint() != UpgradeHint() {
-		t.Error("UpgradeHint must be Detect().Hint()")
-	}
 }
 
 // nixProfileSelector reads real files; point it at a temp profile and check it

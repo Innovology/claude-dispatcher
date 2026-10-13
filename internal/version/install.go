@@ -6,7 +6,7 @@ package version
 //
 // The answer is read off the running binary's own path, resolved through its
 // symlinks — that is the only evidence on the machine that cannot disagree
-// with itself. A guess by GOOS (what UpgradeHint used to do) tells a Nix user
+// with itself. A guess by GOOS (what the upgrade hint used to do) tells a Nix user
 // to run brew.
 //
 // Nothing here shells out. Detection must be cheap and must never hang: it
@@ -272,8 +272,3 @@ func manifestSelector(raw []byte, resolved string) (string, bool) {
 	}
 	return "", false
 }
-
-// UpgradeHint is the command that upgrades this build in place, or why there
-// is none. It used to answer from GOOS alone, which told every non-Homebrew
-// unix install to run brew; it now answers from the binary's own path.
-func UpgradeHint() string { return Detect().Hint() }

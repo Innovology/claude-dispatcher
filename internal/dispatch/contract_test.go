@@ -7,7 +7,7 @@ import (
 
 func TestWithContractClosesWithTheModesContract(t *testing.T) {
 	got := withContract("fix the flaky upload", ModeAuto)
-	if !strings.HasPrefix(got, "fix the flaky upload\n\n") || !strings.HasSuffix(got, Contract(ModeAuto)) {
+	if !strings.HasPrefix(got, "fix the flaky upload\n\n") || !strings.HasSuffix(got, strings.Join(contractSentences[ModeAuto], " ")) {
 		t.Fatalf("got\n%s", got)
 	}
 	// Auto asks for Claude Code's own waiting machinery by name, and every

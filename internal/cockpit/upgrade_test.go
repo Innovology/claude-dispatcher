@@ -528,7 +528,7 @@ func TestFooterShedsTheUpgradeCommandBeforeTheVersion(t *testing.T) {
 	if !strings.Contains(footer, "v2.1.1 → v2.2.0") {
 		t.Errorf("narrow footer lost the version: %q", footer)
 	}
-	if strings.Contains(footer, version.UpgradeHint()) {
+	if strings.Contains(footer, version.Detect().Hint()) {
 		t.Errorf("narrow footer kept the upgrade command it had no room for: %q", footer)
 	}
 }

@@ -48,11 +48,6 @@ var contractSentences = map[Mode][]string{
 	},
 }
 
-// Contract is the mode's closing sentences, as one paragraph.
-func Contract(mode Mode) string {
-	return strings.Join(contractSentences[mode.Normalize()], " ")
-}
-
 // withContract closes the prompt with the mode's contract, leaving out any
 // sentence the prompt already carries.
 func withContract(prompt string, mode Mode) string {

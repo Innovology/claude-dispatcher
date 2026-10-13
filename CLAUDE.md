@@ -1123,7 +1123,6 @@
   windows around the cursor and counts what it hides rather than stopping mute.
   `prodDay` normalises to **local** before truncating: forge timestamps are UTC
   and the clock's are local, and a day compared across the two is never equal.
-- `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
 - `internal/effort` — the hand-coding equivalent: how long a senior developer
   would have taken to write a diff by hand. The ONLY figure in the product
   that is a model rather than a measurement, so every screen showing it says

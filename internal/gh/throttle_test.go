@@ -21,7 +21,7 @@ func TestAQuotaRefusalStopsEveryRead(t *testing.T) {
 esac`)
 
 	repo := t.TempDir()
-	Issues(repo) // the read that gets refused
+	RepoPRs(repo) // the read that gets refused
 
 	until, throttled := Throttled()
 	if !throttled {
@@ -34,7 +34,7 @@ esac`)
 	// Everything after it is answered without spawning anything.
 	before := len(calls())
 	for i := 0; i < 20; i++ {
-		Issues(t.TempDir())
+		RepoPRs(t.TempDir())
 		PRChecksFor(t.TempDir(), i)
 		RunsForBranch(t.TempDir(), "feature/x")
 	}
@@ -53,7 +53,7 @@ func TestASecondaryLimitParksBlind(t *testing.T) {
   *) echo "You have exceeded a secondary rate limit" >&2; exit 1 ;;
 esac`)
 
-	Issues(t.TempDir())
+	RepoPRs(t.TempDir())
 
 	until, throttled := Throttled()
 	if !throttled {
@@ -71,7 +71,7 @@ func TestAnOrdinaryFailureDoesNotPark(t *testing.T) {
 	t.Cleanup(clearThrottle)
 	fakeGH(t, `echo "no git remotes found" >&2; exit 1`)
 
-	Issues(t.TempDir())
+	RepoPRs(t.TempDir())
 
 	if _, throttled := Throttled(); throttled {
 		t.Error("one repo without a remote stood down every read in the package")
@@ -90,7 +90,7 @@ func TestNothingCollectedWhileParkedIsCached(t *testing.T) {
 esac`)
 
 	repo := t.TempDir()
-	Issues(repo)
+	RepoPRs(repo)
 
 	mu.Lock()
 	n := len(cache)

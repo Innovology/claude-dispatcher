@@ -157,25 +157,6 @@ func DeploySignal(repoPath string, since time.Time, override string) (deployed b
 	return false, time.Time{}, true
 }
 
-// PRsCreatedToday counts PRs the user launched today across all of GitHub —
-// one search call, no per-repo fan-out. ok=false when gh is unavailable.
-func PRsCreatedToday() (count int, ok bool) {
-	if !Available() {
-		return 0, false
-	}
-	out, err := run(exec.Command("gh", "search", "prs",
-		"--author=@me", "--created="+time.Now().Format("2006-01-02"),
-		"--json", "url", "--limit", "200"))
-	if err != nil {
-		return 0, false
-	}
-	var rows []struct{}
-	if json.Unmarshal(out, &rows) != nil {
-		return 0, false
-	}
-	return len(rows), true
-}
-
 func command(repoPath string, args ...string) *exec.Cmd {
 	cmd := exec.Command("gh", args...)
 	cmd.Dir = repoPath

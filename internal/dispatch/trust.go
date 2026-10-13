@@ -31,18 +31,14 @@ func claudeConfigPath() string {
 	return filepath.Join(home, ".claude.json")
 }
 
-// InheritTrust marks worktree as trusted when repo already is. It reports
+// InheritTrustFor marks worktree as trusted when repo already is, in the
+// config directory a session runs under ("" is the human's own). It reports
 // whether the worktree will start without a trust prompt, so the caller can say
 // so rather than leaving the user to wonder why a session is idle.
-func InheritTrust(repoPath, worktree string) bool {
-	return InheritTrustFor("", repoPath, worktree)
-}
-
-// InheritTrustFor is InheritTrust for a session running under another
-// account's config directory ("" is the human's own). Trust lives in that
-// directory's .claude.json, so a worktree trusted for the default login is a
-// stranger to every other one, and a second subscription's session would sit
-// on the trust dialog with nobody to answer it.
+//
+// Trust lives in that directory's .claude.json, so a worktree trusted for the
+// default login is a stranger to every other one, and a second subscription's
+// session would sit on the trust dialog with nobody to answer it.
 //
 // The repo's trust is read from the account's own file first and then from
 // the default one. Trusting a folder is the human's judgement about the code,
@@ -109,7 +105,7 @@ func InheritTrustFor(configDir, repoPath, worktree string) bool {
 // session started there does not stop on Claude Code's trust dialog before it
 // reads its first word. It is the one place trust is written rather than
 // inherited, and it is only for a directory under the dispatcher's own state
-// (the steward's): InheritTrust will not invent trust for a human's repo, and
+// (the steward's): InheritTrustFor will not invent trust for a human's repo, and
 // nothing should — but a folder we made, holding nothing but our own brief, has
 // no one else to ask.
 func TrustOwnDir(dir string) bool {
