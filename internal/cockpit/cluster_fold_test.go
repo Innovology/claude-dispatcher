@@ -353,3 +353,57 @@ func TestClFoldWindowsAroundTheCursor(t *testing.T) {
 		t.Errorf("the window should have moved off the top of the list:\n%s", body)
 	}
 }
+
+// Pinning a checkout also makes its branch the repo's root branch: picking the
+// dev folder is saying where this repo's work lives, and a dispatch cut from
+// origin's main afterwards read as the pin not working. They stay two entries,
+// so unpinning clears the root only if it is still the one the pin wrote.
+func TestClFoldPinSetsTheRootBranchToo(t *testing.T) {
+	m, home := clPinFixture(t)
+	m, _, _ = m.updateCluster("p")
+	m, _, _ = m.updateCluster("j") // onto dev
+	m, cmd, _ := m.updateCluster("enter")
+	if got := m.cfg.RootBranchFor("playerpulse"); got != "dev" {
+		t.Fatalf("root branch after pinning the dev checkout = %q", got)
+	}
+	body, _ := os.ReadFile(filepath.Join(home, ".config", "claude-dispatcher", "config.toml"))
+	if !strings.Contains(string(body), "[root_branches]\nplayerpulse = \"dev\"") {
+		t.Errorf("the root should reach the file as its own entry:\n%s", body)
+	}
+	if msg, _ := cmd().(actionMsg); !strings.Contains(msg.notice, "cut from dev") {
+		t.Errorf("notice = %q", msg.notice)
+	}
+
+	// Unpinning takes back the root the pin set…
+	reposByProduct[clUnassigned][0].path = "/src/playerpulse-dev"
+	reposByProduct[clUnassigned][0].pinned = true
+	m, _, _ = m.updateCluster("enter")
+	if got := m.cfg.RootBranchFor("playerpulse"); got != "" {
+		t.Errorf("unpinning left the root the pin set: %q", got)
+	}
+
+	// …but not one set by hand to something else.
+	m.cfg.Checkouts = map[string]string{"playerpulse": "/src/playerpulse-dev"}
+	m.cfg.RootBranches = map[string]string{"playerpulse": "release/24"}
+	m, _, _ = m.updateCluster("enter")
+	if got := m.cfg.RootBranchFor("playerpulse"); got != "release/24" {
+		t.Errorf("unpinning cleared a root set by hand: %q", got)
+	}
+}
+
+// A detached checkout has no branch to offer, so the root stays as it was.
+func TestClFoldPinningADetachedCheckoutLeavesTheRoot(t *testing.T) {
+	m, _ := clPinFixture(t)
+	reposByProduct[clUnassigned][0].worktrees[2].branch = ""
+	m.cfg.RootBranches = map[string]string{"playerpulse": "dev"}
+	m, _, _ = m.updateCluster("p")
+	m, _, _ = m.updateCluster("j")
+	m, _, _ = m.updateCluster("j") // onto the detached one
+	m, cmd, _ := m.updateCluster("enter")
+	if got := m.cfg.RootBranchFor("playerpulse"); got != "dev" {
+		t.Errorf("a detached pin changed the root to %q", got)
+	}
+	if msg, _ := cmd().(actionMsg); !strings.Contains(msg.notice, "detached") {
+		t.Errorf("notice = %q", msg.notice)
+	}
+}

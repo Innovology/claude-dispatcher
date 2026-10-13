@@ -51,9 +51,16 @@
       pin naming a path git does not list as a worktree of that repo is ignored,
       since a pin chooses between the checkouts that exist rather than inventing
       one. A pinned checkout is **not** a root branch — it decides what the row
-      reads, while which branch a feature is cut from stays with the remote's
-      default and the human's `Root` (see the root-branch decision below). Full
-      record: `docs/adr/0017-a-repository-is-its-common-dir.md`.
+      reads, while which branch a feature is cut from is `[root_branches]`,
+      else the remote's default, else the human's `Root` on the form (see the
+      root-branch decision below). **Pinning sets both**: it writes the
+      checkout's branch to `[root_branches]` as a snapshot, because picking
+      the dev folder is saying where the work lives and a dispatch then cut
+      from main read as the pin not working. They stay two entries because a
+      folder is not a branch — switch the clone to a feature and the pin
+      follows the folder while dispatches must still start from origin/dev —
+      so unpinning clears the root only if it is still the one the pin wrote.
+      Full record: `docs/adr/0017-a-repository-is-its-common-dir.md`.
   - *Worktree* is per-dispatch isolation: each dispatch gets its own git
     worktree of its repo, by default under
     `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so concurrent

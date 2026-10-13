@@ -196,6 +196,13 @@ func clFold(r clRepoRow, cw, focus int, hi []map[int]bool) []string {
 	// screen says: a dispatch starts on this server, under this command, and
 	// every pane opened in it afterwards sees what that command put on PATH.
 	out = append(out, row(cw, "", lead, flexc(clElide(clServerLine(r), inner), cFaint)))
+	// And where its new work starts, which is not the folder above: a checkout
+	// holds whatever is out there today, and a dispatch is cut from origin.
+	rootLine := "new dispatches are cut from origin's default branch"
+	if r.root != "" {
+		rootLine = "new dispatches are cut from " + r.root + " · [root_branches]"
+	}
+	out = append(out, row(cw, "", lead, flexc(clElide(rootLine, inner), cFaint)))
 
 	// One checkout is one directory, and "1 checkouts" beneath its own path is
 	// a sentence about nothing.

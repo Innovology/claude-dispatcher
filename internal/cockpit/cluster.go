@@ -36,6 +36,9 @@ type clRepoRow struct {
 	path                       string
 	pinned                     bool
 	worktrees                  []repoWorktree
+	// root is the branch new dispatches are cut from when the form names none
+	// ([root_branches]), or "" for origin's default.
+	root string
 	// socket is the tmux server this repo's sessions live on, and env what they
 	// are launched under. Both are resolved answers rather than config: the
 	// editor shows what a dispatch would actually do.
@@ -64,6 +67,7 @@ func (m model) clRepos() []clRepoRow {
 			out = append(out, clRepoRow{
 				name: r.name, forge: r.forge, product: p, out: r.out, last: last,
 				path: r.path, pinned: r.pinned, worktrees: r.worktrees,
+				root: m.cfg.RootBranchFor(r.name),
 			})
 		}
 	}
@@ -202,6 +206,16 @@ func (m model) clPersist() tea.Cmd {
 // this screen removes one, and "back to choosing automatically" is a state the
 // human has to be able to get back to.
 //
+// Pinning also sets the repo's root branch ([root_branches]) to the branch the
+// checkout has out: picking "the dev folder" was the human saying where this
+// repo's work lives, and a dispatch still cut from origin's main afterwards
+// read as the pin not working. The two stay separate entries, because a folder
+// is not a branch — switch the clone to a feature and the pin follows the
+// folder, while dispatches must keep starting from dev. So the root is a
+// snapshot taken at the pin, and unpinning clears it only if it is still the
+// one the pin wrote; a root set by hand to something else is left alone. A
+// detached checkout has no branch to offer and leaves the root as it was.
+//
 // Same write discipline as clPersist and clSetLinearKey — a copy saved first,
 // and only a save that worked published into the cockpit's own config, so the
 // file on disk and the config every collector reads are never two different
@@ -210,23 +224,47 @@ func (m model) clPinCheckout(r clRepoRow, path string) (model, tea.Cmd) {
 	if m.cfg == nil {
 		return m, func() tea.Msg { return actionMsg{notice: "no config — nothing saved"} }
 	}
+	branch := ""
+	for _, w := range r.worktrees {
+		if w.path == path {
+			branch = w.branch
+		}
+	}
 	next := map[string]string{}
 	maps.Copy(next, m.cfg.Checkouts)
+	roots := map[string]string{}
+	maps.Copy(roots, m.cfg.RootBranches)
 	unpin := r.pinned && r.path == path
 	if unpin {
 		delete(next, r.name)
+		if branch != "" && roots[r.name] == branch {
+			delete(roots, r.name)
+		}
 	} else {
 		next[r.name] = path
+		if branch != "" {
+			roots[r.name] = branch
+		}
 	}
 	cfg := *m.cfg
-	cfg.Checkouts = next
+	cfg.Checkouts, cfg.RootBranches = next, roots
 	if err := config.Save(&cfg); err != nil {
 		return m, func() tea.Msg { return actionMsg{notice: "could not save the checkout: " + err.Error()} }
 	}
-	m.cfg.Checkouts = next
+	m.cfg.Checkouts, m.cfg.RootBranches = next, roots
 	notice := r.name + " works in " + filepath.Base(path)
-	if unpin {
+	switch {
+	case unpin:
 		notice = r.name + " chooses its checkout again"
+		if rb := roots[r.name]; rb != "" {
+			notice += " · dispatches still cut from " + rb + " ([root_branches])"
+		} else {
+			notice += " · dispatches cut from origin's default"
+		}
+	case branch != "":
+		notice += " · dispatches cut from " + branch
+	default:
+		notice += " · detached, so the root branch is unchanged"
 	}
 	// The notice rides the message because the reload it queues sets one of its
 	// own: Repo.Path is what the next snapshot reads every repo through.
