@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -49,11 +50,12 @@ func socketFor(cfg *config.Config, name string) string {
 
 // envFor is the command prefix a repo's sessions are launched under.
 //
-// A checkout with a flake.nix, on a machine with nix, is a repo that has said
-// where its toolchain comes from — so we use it, and nobody types anything. The
-// second half of that is not optional: plenty of repos carry a flake as an
-// optional convenience, and on a machine without nix, launching under one would
-// turn every dispatch into a launch that dies. This is the same rule the mode
+// A checkout with a flake.nix, on a machine whose nix runs flakes, is a repo
+// that has said where its toolchain comes from — so we use it, and nobody types
+// anything. The second half of that is not optional: plenty of repos carry a
+// flake as an optional convenience, and on a machine without a nix that runs
+// flakes (nixAvailable), launching under one would turn every dispatch into a
+// launch that dies. This is the same rule the mode
 // and model flags follow — what we cannot vouch for, we do not pass.
 //
 // An explicit [session_env] entry wins, including an empty one, which is how a
@@ -152,10 +154,37 @@ func hasFlake(checkout string) bool {
 	return err == nil
 }
 
-// nixAvailable is read once. Discover runs on every load, over every repo in
-// the portfolio, and this answer cannot change while the cockpit is open in any
-// way that matters more than the PATH lookups would cost.
+// nixAvailable reports a nix that can run `nix develop` on a flake, read once.
+// Discover runs on every load, over every repo in the portfolio, and this
+// answer cannot change while the cockpit is open in any way that matters more
+// than asking would cost.
+//
+// A nix binary is not enough. Flakes and the `nix` command are experimental
+// features, off by default in the installer most people use on macOS and on
+// Linux outside NixOS, and there `nix develop` refuses before it starts — every
+// dispatch and every jump-in for a repo carrying a flake.nix would fail, on a
+// machine whose owner never asked for nix to be involved. So the features are
+// asked for (`nix config show experimental-features`, which itself fails when
+// the nix command is off). Determinate Nix ships flakes as stable rather than
+// experimental, so its build counts whatever that list says.
 var nixAvailable = sync.OnceValue(func() bool {
-	_, err := exec.LookPath("nix")
-	return err == nil
+	if _, err := exec.LookPath("nix"); err != nil {
+		return false
+	}
+	out, err := exec.Command("nix", "config", "show", "experimental-features").Output()
+	if err != nil {
+		return false
+	}
+	version, _ := exec.Command("nix", "--version").Output()
+	return flakesOn(string(out), string(version))
 })
+
+// flakesOn reads the two answers nixAvailable asks for: the enabled features,
+// and the version line, which names Determinate Nix where it is that build.
+func flakesOn(features, version string) bool {
+	if strings.Contains(version, "Determinate") {
+		return true
+	}
+	f := strings.Fields(features)
+	return slices.Contains(f, "flakes") && slices.Contains(f, "nix-command")
+}

@@ -133,3 +133,23 @@ func TestEnvInNamesTheCheckoutsFlakeWhereTheWorktreeHasNone(t *testing.T) {
 		t.Errorf("EnvIn(spaced checkout) = %q", got)
 	}
 }
+
+// A nix that cannot run flakes is no nix for a dispatch: `nix develop` would
+// refuse before the session started, on the installers that leave the features
+// off by default. Determinate Nix ships flakes as stable, whatever the list says.
+func TestNixCountsOnlyWhereFlakesRun(t *testing.T) {
+	for _, tc := range []struct {
+		features, version string
+		want              bool
+	}{
+		{"fetch-tree flakes nix-command\n", "nix (Nix) 2.34.8\n", true},
+		{"nix-command\n", "nix (Nix) 2.24.0\n", false},
+		{"flakes\n", "nix (Nix) 2.24.0\n", false},
+		{"", "nix (Nix) 2.24.0\n", false},
+		{"nix-command\n", "nix (Determinate Nix 3.8.2) 2.30.1\n", true},
+	} {
+		if got := flakesOn(tc.features, tc.version); got != tc.want {
+			t.Errorf("flakesOn(%q, %q) = %v, want %v", tc.features, tc.version, got, tc.want)
+		}
+	}
+}
