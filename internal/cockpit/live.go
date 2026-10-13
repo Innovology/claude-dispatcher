@@ -294,40 +294,74 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 		s.recordsByID[rec.ID] = rec
 	}
 
-	r.begin(bootDispatchers, "reading transcripts, diffs and prs…")
-	collectFloor(ctx, &s)
-	// collectFleet must follow collectFloor: it reads the forge, diff and
-	// transcript work that load already did rather than paying for it twice.
-	collectFleet(ctx, &s)
-	r.done(bootDispatchers, countOf(len(s.dispatches), "dispatcher", "dispatchers")+" in flight", false)
+	// The collectors run at once, because nearly all of a load is waiting —
+	// on GitHub, at 0.3s a round trip and over a second a search, and on the
+	// week's transcripts — and none of them waits on another except where it
+	// reads what another wrote. Measured on a 27-repo portfolio they summed to
+	// about eleven seconds one after another, and the load now costs its
+	// slowest chain instead. Each writes only its own fields of s, and the only
+	// reads across them are velocity's, of the products and the effort figures,
+	// which wait on the two stages that write those. The opening screen shows
+	// the stages running side by side, each timed from its own start.
+	var wg sync.WaitGroup
+	stage := func(fn func()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fn()
+		}()
+	}
+	floorDone, productsDone := make(chan struct{}), make(chan struct{})
 
-	r.begin(bootProducts, "grouping repos by product…")
-	collectProducts(ctx, &s)
-	r.done(bootProducts, countOf(namedProducts(s.products), "product", "products"), false)
-
-	r.begin(bootBacklog, "fetching assigned issues…")
-	collectBacklog(ctx, &s)
-	r.done(bootBacklog, countOf(len(s.backlogTickets), "ticket", "tickets"), false)
-
-	r.begin(bootDecisions, "scanning repos for adrs and decision logs…")
-	collectDecisions(ctx, &s)
-	r.done(bootDecisions, countOf(countDecisions(s.decisions), "record", "records")+
-		" in "+countOf(len(s.decisionRepoOrder), "repo", "repos"), false)
-
-	r.begin(bootUsage, "totalling this week's tokens…")
-	collectUsage(ctx, &s)
-	r.done(bootUsage, countOf(len(s.usageModels), "model", "models")+" this week", false)
-
-	r.begin(bootVelocity, "measuring what reached production…")
-	collectVelocity(ctx, &s)
-	// Deploys, not len(doraWeeks): the week series is a fixed six-week window
-	// the collector always emits, so its length would report "6 weeks of
-	// history" on a portfolio that has never shipped anything.
-	r.done(bootVelocity, countOf(countDeploys(s.doraWeeks), "deploy", "deploys")+" in 6 weeks", false)
-
-	r.begin(bootStale, "looking for repos nothing is working on…")
-	collectStale(ctx, &s)
-	r.done(bootStale, countOf(len(s.staleRepos), "repo", "repos")+" gone quiet", false)
+	stage(func() {
+		defer close(floorDone)
+		r.begin(bootDispatchers, "reading transcripts, diffs and prs…")
+		collectFloor(ctx, &s)
+		// collectFleet must follow collectFloor: it reads the forge, diff and
+		// transcript work that load already did rather than paying for it twice.
+		collectFleet(ctx, &s)
+		r.done(bootDispatchers, countOf(len(s.dispatches), "dispatcher", "dispatchers")+" in flight", false)
+	})
+	stage(func() {
+		defer close(productsDone)
+		r.begin(bootProducts, "grouping repos by product…")
+		collectProducts(ctx, &s)
+		r.done(bootProducts, countOf(namedProducts(s.products), "product", "products"), false)
+	})
+	stage(func() {
+		r.begin(bootBacklog, "fetching assigned issues…")
+		collectBacklog(ctx, &s)
+		r.done(bootBacklog, countOf(len(s.backlogTickets), "ticket", "tickets"), false)
+	})
+	stage(func() {
+		r.begin(bootDecisions, "scanning repos for adrs and decision logs…")
+		collectDecisions(ctx, &s)
+		r.done(bootDecisions, countOf(countDecisions(s.decisions), "record", "records")+
+			" in "+countOf(len(s.decisionRepoOrder), "repo", "repos"), false)
+	})
+	stage(func() {
+		r.begin(bootUsage, "totalling this week's tokens…")
+		collectUsage(ctx, &s)
+		r.done(bootUsage, countOf(len(s.usageModels), "model", "models")+" this week", false)
+	})
+	stage(func() {
+		r.begin(bootStale, "looking for repos nothing is working on…")
+		collectStale(ctx, &s)
+		r.done(bootStale, countOf(len(s.staleRepos), "repo", "repos")+" gone quiet", false)
+	})
+	stage(func() {
+		// Velocity reads the products and the effort figures, so it starts when
+		// both are written.
+		<-floorDone
+		<-productsDone
+		r.begin(bootVelocity, "measuring what reached production…")
+		collectVelocity(ctx, &s)
+		// Deploys, not len(doraWeeks): the week series is a fixed six-week window
+		// the collector always emits, so its length would report "6 weeks of
+		// history" on a portfolio that has never shipped anything.
+		r.done(bootVelocity, countOf(countDeploys(s.doraWeeks), "deploy", "deploys")+" in 6 weeks", false)
+	})
+	wg.Wait()
 
 	return s
 }

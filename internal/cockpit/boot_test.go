@@ -2,6 +2,7 @@ package cockpit
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,14 +31,18 @@ func bootAt(w, h int) model {
 func TestBootSequenceCoversEveryReportedStep(t *testing.T) {
 	// An empty state dir and an empty config give a portfolio with no records
 	// and no roots, so every stage runs and reports without touching the
-	// developer's own dispatches. The reporter is called from
-	// loadSnapshotReporting's own goroutine, in order, so the map needs no
-	// guarding.
+	// developer's own dispatches. The stages run concurrently, so the reporter
+	// is called from several goroutines and the map is guarded.
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 	defer restoreVars(captureVars())
 
+	var mu sync.Mutex
 	seen := map[string]bool{}
-	loadSnapshotReporting(&config.Config{}, func(u bootUpdate) { seen[u.id] = true })
+	loadSnapshotReporting(&config.Config{}, func(u bootUpdate) {
+		mu.Lock()
+		seen[u.id] = true
+		mu.Unlock()
+	})
 
 	for _, s := range bootSequence {
 		if !seen[s.id] {
