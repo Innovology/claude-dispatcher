@@ -168,28 +168,45 @@ func prChecksRollup(repoPath string, number int) Checks {
 
 // rollupNode is one entry of a PR's statusCheckRollup. GitHub returns two
 // shapes through it: check runs, which report status plus conclusion, and the
-// older status contexts, which report a single state.
+// older status contexts, which report a single state. The two shapes name
+// themselves differently too — a check run has a `name`, a status context a
+// `context` — and both are asked for so a gate can be found by either.
 type rollupNode struct {
 	State      string `json:"state"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
+	Name       string `json:"name"`
+	Context    string `json:"context"`
+}
+
+// label is what a rollup entry calls itself, whichever shape it arrived in.
+func (r rollupNode) label() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.Context
 }
 
 func countRollup(nodes []rollupNode) Checks {
 	var c Checks
 	for _, r := range nodes {
 		c.Total++
-		s := r.State
-		if s == "" {
-			if r.Status != "" && r.Status != "COMPLETED" {
-				s = r.Status
-			} else {
-				s = r.Conclusion
-			}
-		}
-		classifyCheck(s, &c)
+		classifyCheck(rollupState(r), &c)
 	}
 	return c
+}
+
+// rollupState reduces one rollup entry to a single state word, whichever of the
+// two shapes it arrived in: a status context reports `state`, a check run
+// reports `status` while it is running and `conclusion` once it has finished.
+func rollupState(r rollupNode) string {
+	if r.State != "" {
+		return r.State
+	}
+	if r.Status != "" && r.Status != "COMPLETED" {
+		return r.Status
+	}
+	return r.Conclusion
 }
 
 func classifyCheck(state string, c *Checks) {

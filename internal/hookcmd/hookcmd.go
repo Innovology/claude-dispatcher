@@ -12,6 +12,7 @@
 //	                                  ended the turn recorded as its Failure
 //	Notification:idle_prompt       -> needs-input (unless waiting on tasks)
 //	Notification:permission_prompt -> blocked
+//	PreToolUse:AskUserQuestion     -> blocked (a menu, so attach to answer it)
 //	SessionEnd                     -> exited (unless already done)
 //	SubagentStart/SubagentStop     -> no status change; the fan-out is an
 //	                                  annotation on the record (state.Subagent)

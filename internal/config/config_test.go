@@ -95,6 +95,53 @@ func TestSaveLoadLinearTokens(t *testing.T) {
 	}
 }
 
+// TestSaveLoadGates proves the per-repo gate table survives the hand-written
+// template Save regenerates, and that the tables after it are still readable —
+// a table emitted in the wrong place swallows whatever follows it. The name is
+// a check name, so it carries spaces and has to come back verbatim: "All gates
+// green" is the aggregator job on the repository this landed for.
+func TestSaveLoadGates(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	in := &Config{
+		Roots: []string{"~/repos"},
+		Gates: map[string]string{
+			"player-app": "All gates green",
+			"shop-api":   "ci/required",
+		},
+		Products: map[string][]string{"bluefin": {"bluefin-core"}},
+		Accounts: map[string]string{"work": "~/.claude-work"},
+	}
+	if err := Save(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Gates["player-app"] != "All gates green" || out.Gates["shop-api"] != "ci/required" {
+		t.Errorf("gates = %v", out.Gates)
+	}
+	if out.Accounts["work"] != "~/.claude-work" {
+		t.Errorf("accounts after the gates table = %v", out.Accounts)
+	}
+	if !slices.Equal(out.Products["bluefin"], []string{"bluefin-core"}) {
+		t.Errorf("products after the gates table = %v", out.Products)
+	}
+	// A config naming no gate must not grow one: an unlisted repo keeps the
+	// reading of every check it has always had, and an empty table is how the
+	// key documents itself without turning the feature on.
+	if err := Save(&Config{Roots: []string{"~/repos"}}); err != nil {
+		t.Fatal(err)
+	}
+	bare, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bare.Gates) != 0 {
+		t.Errorf("a config naming no gate loaded %v", bare.Gates)
+	}
+}
+
 func TestWriteDefaultDoesNotOverwrite(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if _, created, err := WriteDefault(); err != nil || !created {
