@@ -32,6 +32,12 @@ type Config struct {
 	// when it names a path git does not list as a worktree of that repo, since a
 	// pin is a choice between the checkouts that exist, not a way to invent one.
 	Checkouts map[string]string `toml:"checkouts,omitempty"`
+	// RootBranches is the branch a repo's dispatches are cut from when the form
+	// names none, keyed by repo name. Unlisted repos are cut from the remote's
+	// default branch, read from origin at launch (dispatch/root.go). A pinned
+	// checkout is not this: [checkouts] decides what a row reads, and a repo
+	// whose work merges into `dev` while origin's HEAD says `main` needs both.
+	RootBranches map[string]string `toml:"root_branches,omitempty"`
 	// Sockets names the supervisor server a repo's sessions live on, keyed by
 	// repo name. Unlisted repos use their own name, so every repo is its own
 	// server without anyone configuring anything; an entry is for a human who
@@ -156,6 +162,15 @@ type Config struct {
 // otherwise: every dispatch works on a feature branch, including in repos that
 // ship from main.
 const DefaultBranchPrefix = "feature/"
+
+// RootBranchFor is the branch repo's dispatches are cut from when the form
+// names none, or "" for the remote's default.
+func (c *Config) RootBranchFor(repo string) string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.RootBranches[repo])
+}
 
 // EffectiveBranchPrefix is the prefix a dispatch is cut with when nobody
 // changes it on the form: branch_prefix as written, or DefaultBranchPrefix
@@ -356,6 +371,15 @@ func Save(c *Config) error {
 	b.WriteString("[checkouts]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Checkouts)) {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Checkouts[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# The branch a repo's dispatches are cut from when the form names no root,\n")
+	b.WriteString("# keyed by repo name. Unlisted repos are cut from origin's default branch.\n")
+	b.WriteString("# A ROOT typed on a dispatch form still wins, for that dispatch.\n")
+	b.WriteString("# shop-api = \"dev\"\n")
+	b.WriteString("[root_branches]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.RootBranches)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.RootBranches[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# The tmux server each repo's sessions live on, keyed by repo name. Unlisted\n")

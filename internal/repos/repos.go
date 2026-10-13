@@ -58,6 +58,10 @@ type Repo struct {
 	// feature's slug, or nil for the default (`feature/`). A pointer because
 	// an empty prefix is a real answer and must not be the zero value too.
 	BranchPrefix *string
+	// RootBranch is the branch this repo's dispatches are cut from when the
+	// form names none (config's [root_branches]), or "" for the remote's
+	// default.
+	RootBranch string
 	// Pinned reports that Path was named by the human in `[checkouts]` rather
 	// than chosen. Screens say which, because the two answer different
 	// questions: an automatic choice is a guess worth correcting, and a pin is
@@ -151,6 +155,7 @@ func Discover(cfg *config.Config) []Repo {
 		r.Shell = shellFor(cfg)
 		r.WorktreeRoot = worktreeRootFor(cfg, r.GitDir)
 		r.BranchPrefix = branchPrefixFor(cfg)
+		r.RootBranch = cfg.RootBranchFor(r.Name)
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {

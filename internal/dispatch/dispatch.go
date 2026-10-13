@@ -129,7 +129,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	branch := branchFor(r, slug)
 	worktree := worktreePath(r, slug)
 	root = root.Normalize()
-	cutFrom, err := ensureWorktree(r.Path, worktree, branch, root)
+	cutFrom, err := ensureWorktreeFrom(r.Path, worktree, branch, root, r.RootBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -575,6 +575,14 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 // is invisible from anywhere else, which is how a dead one went unnoticed until
 // a launch finally failed on it.
 func ensureWorktree(repoPath, path, branch string, root Root) (string, error) {
+	return ensureWorktreeFrom(repoPath, path, branch, root, "")
+}
+
+// ensureWorktreeFrom is ensureWorktree for a repo with a root branch of its own
+// (config's [root_branches]): the branch a new feature is cut from when root
+// is the default. It is used only to cut — a feature branch that already exists
+// is reused as it is, exactly as with no root branch configured.
+func ensureWorktreeFrom(repoPath, path, branch string, root Root, repoRoot string) (string, error) {
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		on := strings.TrimSpace(string(out))
 		if on == branch {
@@ -606,7 +614,7 @@ func ensureWorktree(repoPath, path, branch string, root Root) (string, error) {
 		// the base is normally a remote-tracking ref, and inheriting it as
 		// upstream would make a later plain `git push` refuse: push.default
 		// simple rejects a branch whose upstream carries a different name.
-		base, err := baseRef(repoPath, root)
+		base, err := baseRefFrom(repoPath, root, repoRoot)
 		if err != nil {
 			return "", err
 		}

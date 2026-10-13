@@ -102,7 +102,7 @@ type rootOption struct {
 func (df *dispatchForm) rootOptions() []rootOption {
 	out := []rootOption{{
 		name: string(dispatchpkg.RootDefault),
-		hint: dispatchpkg.RootDefault.Hint(),
+		hint: dispatchpkg.RootDefault.HintFor(df.repo.RootBranch),
 	}}
 	for _, b := range df.roots {
 		hint := "last commit " + usgAgo(b.When) + " ago"
@@ -142,6 +142,17 @@ func (df *dispatchForm) root() dispatchpkg.Root {
 		return dispatchpkg.RootDefault
 	}
 	return dispatchpkg.Root(vis[clampCursor(df.rootSel, len(vis))].name).Normalize()
+}
+
+// rootLabel is the ROOT choice as the breadcrumb shows it: the branch named,
+// or "default" — with the repo's own root branch beside it when config names
+// one, since that is what "default" will cut from.
+func (df *dispatchForm) rootLabel() string {
+	r := df.root()
+	if r.IsDefault() && df.repo.RootBranch != "" {
+		return string(r) + " · " + df.repo.RootBranch
+	}
+	return string(r)
 }
 
 // mode is the permission mode step 4 has landed on. The cursor is the state
@@ -494,9 +505,12 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			// Named only when a branch was named. "default" is the absence of a
 			// choice, and the branch it resolves to is not known until the launch
 			// asks the remote — printing one here would be a guess on the line
-			// that reports what happened.
+			// that reports what happened. A repo's own root branch is named, in
+			// config, so it is no guess.
 			if !root.IsDefault() {
 				notice += " · from " + string(root)
+			} else if rb := df.repo.RootBranch; rb != "" {
+				notice += " · from " + rb
 			}
 			if acct != account.Default {
 				notice += " · on " + acct
@@ -582,7 +596,7 @@ func (m model) viewDispatchForm(w, h int) string {
 		lines = append(lines, row(iw, "", c("feature", 10, cFaint), flexc(df.branchPreview(), cMid)))
 	}
 	if df.step > dispatchRoot {
-		lines = append(lines, row(iw, "", c("root", 10, cFaint), flexc(string(df.root()), cMid)))
+		lines = append(lines, row(iw, "", c("root", 10, cFaint), flexc(df.rootLabel(), cMid)))
 	}
 	if df.step > dispatchMode {
 		lines = append(lines, row(iw, "", c("mode", 10, cFaint), flexc(string(df.mode()), cMid)))

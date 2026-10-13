@@ -269,3 +269,39 @@ func TestRootBranches(t *testing.T) {
 		t.Error("origin/HEAD is offered as a branch; it is a cache, and it may not resolve at all")
 	}
 }
+
+// A repo can name a root branch of its own ([root_branches]), and a dispatch
+// that names none on the form is cut from it rather than from origin's HEAD.
+// Reported on playerpulse: work merges into `dev`, origin's HEAD says `main`,
+// and a dispatch with ROOT left blank was cut from main — which on that repo
+// also lacked the flake, so it never started.
+func TestARepoRootBranchStandsInForTheDefault(t *testing.T) {
+	clone, _ := clonedRepo(t, "main")
+	gitIn(t, clone, "branch", "dev")
+	gitIn(t, clone, "push", "--quiet", "origin", "dev")
+	gitIn(t, clone, "fetch", "--quiet", "origin")
+
+	got, err := baseRefFrom(clone, DefaultRoot, "dev")
+	if err != nil || got != "refs/remotes/origin/dev" {
+		t.Fatalf("baseRefFrom(default, repo root dev) = %q, %v; want origin's dev", got, err)
+	}
+	// A ROOT typed on the form still wins, for that dispatch.
+	if got, _ := baseRefFrom(clone, Root("main"), "dev"); got != "refs/remotes/origin/main" {
+		t.Errorf("a named root lost to the repo's: %q", got)
+	}
+	// A configured branch that has gone is refused by name, not swapped for
+	// main without a word.
+	if _, err := baseRefFrom(clone, DefaultRoot, "develop"); err == nil || !strings.Contains(err.Error(), "root_branches") {
+		t.Errorf("a [root_branches] entry for a missing branch: err = %v", err)
+	}
+	// And the record says where it was actually cut from.
+	wt := filepath.Join(t.TempDir(), "feat")
+	if from, err := ensureWorktreeFrom(clone, wt, "feature/feat", DefaultRoot, "dev"); err != nil || from != "origin/dev" {
+		t.Fatalf("cut from %q, %v; want origin/dev", from, err)
+	}
+	// Re-dispatching the same feature reuses its branch, root branch or not: the
+	// repo's root only ever chooses where a NEW branch is cut.
+	if _, err := ensureWorktreeFrom(clone, wt, "feature/feat", DefaultRoot, "dev"); err != nil {
+		t.Errorf("re-dispatch with a repo root branch was refused: %v", err)
+	}
+}

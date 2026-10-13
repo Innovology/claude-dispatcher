@@ -158,3 +158,26 @@ func TestANeverStartedRowOffersToStartAgain(t *testing.T) {
 		t.Errorf("a dispatcher with a conversation should resume it: %+v", acts[0])
 	}
 }
+
+// A blank ROOT on a repo with a root branch of its own says that branch, on
+// both forms — "as origin sees it" would be describing a launch that will not
+// happen.
+func TestFormsNameTheRepoRootBranch(t *testing.T) {
+	m := dxFormModel(t)
+	m.cfg.RootBranches = map[string]string{"shop-api": "dev"}
+	if h := m.dxRootHint(); !strings.Contains(h, "dev") || strings.Contains(h, "as origin sees it") {
+		t.Errorf("dx ROOT hint = %q", h)
+	}
+	m.dxTitle = "payment retries"
+	if s := m.dxSummary(); !strings.Contains(s, "from dev") {
+		t.Errorf("dx summary = %q", s)
+	}
+	df := &dispatchForm{}
+	df.repo.RootBranch = "dev"
+	if o := df.rootOptions()[0]; !strings.Contains(o.hint, "dev") {
+		t.Errorf("+ overlay default row = %+v", o)
+	}
+	if df.rootLabel() != "default · dev" {
+		t.Errorf("+ overlay breadcrumb = %q", df.rootLabel())
+	}
+}

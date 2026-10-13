@@ -433,7 +433,13 @@
   ref it *was* cut from goes on the record (`Root`, e.g. `origin/main`). Stale
   remote-tracking refs are deliberately **not** pruned: `--prune` edits the
   human's repo and can strand commits, so the form may offer a branch origin
-  retired and the launch refuses it by name. Full record:
+  retired and the launch refuses it by name. **A repo can name its own root**
+  (`[root_branches]`, repo → branch): a blank ROOT then cuts from that branch
+  instead of origin's default, both forms say which, and a ROOT typed on the
+  form still wins. It is consulted only to cut a new branch — re-dispatching a
+  feature reuses its branch as before — and a configured branch that has gone
+  is refused by name rather than swapped for main. Asked for on playerpulse,
+  whose work merges into `dev` while origin's HEAD says `main`. Full record:
   `docs/adr/0010-origin-head-is-a-cache-not-an-answer.md`.
 - **A dispatch that ends is not a dispatch that goes away — and history is
   ordered by work, not by our own writes.** Reported as "the history needs to

@@ -126,3 +126,21 @@ func TestProductFor(t *testing.T) {
 		t.Errorf("unmapped repo should be empty, got %q", got)
 	}
 }
+
+// [root_branches] survives the cockpit's own save, which rewrites the whole
+// file from what it holds: a table it did not write back would be lost the
+// first time anyone changed a setting in-app.
+func TestRootBranchesSurviveSave(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	c := &Config{RootBranches: map[string]string{"playerpulse": "dev"}}
+	if err := Save(c); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.RootBranchFor("playerpulse") != "dev" || back.RootBranchFor("other") != "" {
+		t.Errorf("root_branches after a save = %v", back.RootBranches)
+	}
+}

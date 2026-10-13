@@ -698,7 +698,20 @@ func (m model) dxRootHint() string {
 	if !root.IsDefault() {
 		return "cut from " + string(root) + " instead of the default branch"
 	}
+	if rb := m.dxRepoRoot(); rb != "" {
+		return "optional · blank cuts from " + rb + ", this repo's root branch (config)"
+	}
 	return "optional · blank cuts from the repo's default branch, as origin sees it"
+}
+
+// dxRepoRoot is the picked repo's own root branch (config's [root_branches]),
+// which a blank ROOT cuts from, or "" when it has none or nothing is picked.
+func (m model) dxRepoRoot() string {
+	row, ok := m.dxPicked()
+	if !ok {
+		return ""
+	}
+	return m.cfg.RootBranchFor(row.repo)
 }
 
 // dxPrefixNote sits at the right of PREFIX: whether this is the default or a
@@ -974,6 +987,8 @@ func (m model) dxSummary() string {
 	s := row.repo + " · " + m.dxBranch() + " · " + m.dxMode.Summary()
 	if root := dispatchpkg.Root(m.dxRoot).Normalize(); !root.IsDefault() {
 		s += " · from " + string(root)
+	} else if rb := m.dxRepoRoot(); rb != "" {
+		s += " · from " + rb
 	}
 	if mdl := m.dxModel.Normalize(); mdl != dispatchpkg.DefaultModel {
 		s += " · " + string(mdl)
