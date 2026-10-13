@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"claude-dispatcher/internal/gh"
@@ -106,10 +107,10 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 	// as "no open PRs" only after gh has actually answered. It decides who is
 	// worth asking, and gh.RepoPRs then asks those repos for the detail — the
 	// search cannot carry a check rollup, a head branch or a diff size.
-	openPRs, _ := gh.OpenPRs()
+	//
 	// Merged PRs are a fact about the repository whoever opened them, which is
 	// how work done outside the dispatcher still registers.
-	mergedByRepo, _ := gh.MergedPRs(7)
+	openPRs, mergedByRepo := warmProductForge(ctx, discByName, ghUp)
 
 	ghCache := map[string]repoGHData{}
 	repoGHFor := func(name string) repoGHData {
@@ -460,6 +461,60 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 
 // prodLiveAt returns when a record went live: its deploy time, else the PR
 // merge time.
+// warmProductForge asks the forge everything collectProducts will ask, at once,
+// and returns the two searches it needs by value; the per-repo answers land in
+// gh's cache, where the loops below find them.
+//
+// The stage was 19 seconds on the opening screen of a 27-repo portfolio, and
+// measured it was nearly all waiting on gh one call at a time: a deploy lookup
+// per repo (14.5s — 1–2s each for the five with a deploy workflow, 0.4s each
+// for the 22 asking only to learn they have none), then the open and merged
+// searches (2.0s and 1.6s), then each repo with open PRs. None of them depends
+// on another except the PR detail, which waits only for the search that says
+// which repos have any. So they go together, bounded by forEach, and the stage
+// costs its slowest call rather than the sum of them. The requests are the same
+// requests: nothing here asks GitHub anything the serial version did not.
+func warmProductForge(ctx *collectCtx, discByName map[string]repos.Repo, ghUp bool) (map[string][]gh.OpenPR, map[string][]gh.OpenPR) {
+	var openPRs, merged map[string][]gh.OpenPR
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		openPRs, _ = gh.OpenPRs()
+		if !ghUp {
+			return
+		}
+		var withOpen []repos.Repo
+		for name, prs := range openPRs {
+			if r, ok := discByName[name]; ok && r.Path != "" && len(prs) > 0 {
+				withOpen = append(withOpen, r)
+			}
+		}
+		forEach(withOpen, func(_ int, r repos.Repo) { gh.RepoPRs(r.Path) })
+	}()
+	go func() {
+		defer wg.Done()
+		merged, _ = gh.MergedPRs(7)
+	}()
+	if ghUp {
+		// One per name, as the per-product loop reads them (discByName), with
+		// the same override, so every key warmed here is a key read there.
+		all := make([]repos.Repo, 0, len(discByName))
+		for _, r := range discByName {
+			all = append(all, r)
+		}
+		forEach(all, func(_ int, r repos.Repo) {
+			override := ""
+			if ctx.cfg != nil {
+				override = ctx.cfg.DeployWorkflows[r.Name]
+			}
+			gh.DeployStatus(r.Path, override)
+		})
+	}
+	wg.Wait()
+	return openPRs, merged
+}
+
 func prodLiveAt(rec *state.Dispatch) (time.Time, bool) {
 	if rec.DeployedAt != nil {
 		return *rec.DeployedAt, true
