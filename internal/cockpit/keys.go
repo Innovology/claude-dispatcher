@@ -119,6 +119,10 @@ func (m model) runCommand() (model, tea.Cmd) {
 		m.settings = newSettings(m.cfg)
 		return m, nil
 	}
+	if c.name == "config" {
+		m.paletteOpen, m.paletteText = false, ""
+		return m.editConfig()
+	}
 	if c.name == "dispatch" || c.name == "new dispatch" {
 		m.paletteOpen, m.paletteText = false, ""
 		m.dispatchForm = newDispatchForm(m.cfg)

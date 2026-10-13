@@ -606,6 +606,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm, cmd := m.onTidyPlanned(msg)
 		return mm, cmd
 
+	case configEditedMsg:
+		mm, cmd := m.onConfigEdited(msg)
+		return mm, cmd
+
 	case attachReturnedMsg:
 		m.notice = ""
 		if msg.err != nil {

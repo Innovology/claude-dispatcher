@@ -171,6 +171,9 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 	switch k {
 	case "esc", "q", ",":
 		m.settings = nil
+	case "e":
+		// Everything this screen does not show is in the file (editconfig.go).
+		return m.editConfig()
 	case "j", "down":
 		if st.cursor < len(st.fields)-1 {
 			st.cursor++
@@ -245,7 +248,7 @@ func (m model) viewSettings(w, h int) string {
 	iw := w - 2*pad
 	var lines []string
 	lines = append(lines, fg(cWhite, "settings"))
-	lines = append(lines, fg(cDim, "config.toml · enter edits · esc closes · env vars override secrets"))
+	lines = append(lines, fg(cDim, "config.toml · enter edits · e opens the whole file in your editor · esc closes · env vars override secrets"))
 	lines = append(lines, "")
 	for i, f := range st.fields {
 		marker := "  "
@@ -259,6 +262,9 @@ func (m model) viewSettings(w, h int) string {
 		switch {
 		case f.kind == setSecret && val != "":
 			display = "•••••••• (set)"
+		case f.key == "branch_prefix" && val == "":
+			// Empty is an answer here — no prefix — not a field left blank.
+			display = "none" + fg(cFaint, " · the branch is the feature's name")
 		case val == "":
 			display = fg(cFaint, "— not set")
 		case f.key == "theme" && m.themeMode == themeSystem:
