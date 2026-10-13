@@ -81,12 +81,18 @@ func memo[T any](key string, ttl time.Duration, fetch func() T) T {
 			return val.(T)
 		}
 	}
+	if v, ok := fromDisk[T](key, ttl); ok {
+		cache[key] = &entry{val: v, at: disk[key].At}
+		mu.Unlock()
+		return v
+	}
 	pending := &entry{ready: make(chan struct{})}
 	cache[key] = pending
 	mu.Unlock()
 
 	val := fetch()
 
+	kept := false
 	mu.Lock()
 	if _, parked := Throttled(); parked {
 		// What comes back from a locked-out read is not an answer, and caching
@@ -98,9 +104,13 @@ func memo[T any](key string, ttl time.Duration, fetch func() T) T {
 		delete(cache, key)
 	} else {
 		cache[key] = &entry{val: val, at: time.Now()}
+		kept = toDisk(key, ttl, val)
 	}
 	mu.Unlock()
 	close(pending.ready)
+	if kept {
+		persistSettled()
+	}
 	return val
 }
 
@@ -110,4 +120,5 @@ func InvalidateCache() {
 	mu.Lock()
 	cache = map[string]*entry{}
 	mu.Unlock()
+	forgetSettled()
 }
