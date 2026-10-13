@@ -314,6 +314,16 @@ func cqClashNote(rec *state.Dispatch, clash *cqClash) string {
 	return ""
 }
 
+// cqKillAct is x on a live row: kill for a dispatcher this cockpit started,
+// release for a session it adopted, which was the human's before the record
+// and is theirs again after it (killCmd).
+func cqKillAct(rec *state.Dispatch) cqAct {
+	if rec.Adopted() {
+		return cqAct{k: "x", d: "release", ok: "released \"" + rec.Feature + "\" — its session is yours again"}
+	}
+	return cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""}
+}
+
 // cqActs offers only acts wired to a real action today.
 //
 // Deliberately absent, and not to be added without the action behind them:
@@ -377,7 +387,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		acts = append(acts, cqAct{k: "p", d: "unpark",
 			ok: "\"" + rec.Feature + "\" back on the fleet", keep: true})
 		if rec.Status != state.StatusExited {
-			acts = append(acts, cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+			acts = append(acts, cqKillAct(rec))
 		}
 		return acts
 	}
@@ -388,7 +398,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 	// answer and nothing to skip past: it can be watched or stopped, and that is
 	// the whole list.
 	if kind == "running" {
-		return append(acts, cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+		return append(acts, cqKillAct(rec))
 	}
 	// Marking a dispatcher shipped that produced nothing would be a lie about
 	// "done means live", so the act only appears once there are commits. The key
@@ -405,7 +415,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 			ok: "\"" + rec.Feature + "\" marked shipped"})
 	}
 	acts = append(acts,
-		cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+		cqKillAct(rec))
 	if !cqMenu(kind) {
 		// No ok, like park: the key opens the reply line, and nothing is typed
 		// into the session until enter. Not on a permission prompt or a

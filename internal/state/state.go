@@ -193,7 +193,7 @@ type Dispatch struct {
 	// adopted dispatcher runs in the human's own checkout rather than a
 	// worktree we cut, so nothing may delete it — not the kill key's
 	// CleanupWorktree, not the disk reclaim — and `x` releases the record
-	// instead of killing a session this cockpit never started (ADR 0015).
+	// instead of killing a session this cockpit never started (ADR 0026).
 	// WorktreePath still names the directory, because every screen that shows
 	// where a dispatcher works reads it; the flag is what says we do not own
 	// it.

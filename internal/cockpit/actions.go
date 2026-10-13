@@ -102,14 +102,24 @@ func (m model) attachSession(sess supervisor.Session, env string) (model, tea.Cm
 // says how many were kept.
 func killCmd(features []string) tea.Cmd {
 	return func() tea.Msg {
-		n, kept := 0, 0
+		n, kept, released := 0, 0, 0
 		for _, f := range features {
 			rec := recordFor(f)
 			if rec == nil {
 				continue
 			}
-			_ = supervisor.KillSession(dispatchpkg.SessionOf(rec))
 			now := time.Now()
+			// An adopted session was the human's before the record and is
+			// theirs after it: x lets go of it and leaves it running. Killing
+			// it would end an orchestrator this cockpit never started, along
+			// with everything in its context.
+			if rec.Adopted() {
+				rec.Release(now)
+				_ = state.Save(rec)
+				released++
+				continue
+			}
+			_ = supervisor.KillSession(dispatchpkg.SessionOf(rec))
 			// The kill takes the session's subagents with it, and no hook
 			// will fire to say so: settle the fan-out with the record.
 			rec.SweepSubagents(now)
@@ -135,14 +145,17 @@ func killCmd(features []string) tea.Cmd {
 			}
 			n++
 		}
-		if n == 0 {
+		if n == 0 && released == 0 {
 			return actionMsg{notice: "nothing to kill"}
 		}
-		word := "dispatcher"
-		if n != 1 {
-			word += "s"
+		var parts []string
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("killed %d %s", n, plural(n, "dispatcher", "dispatchers")))
 		}
-		notice := fmt.Sprintf("killed %d %s", n, word)
+		if released > 0 {
+			parts = append(parts, fmt.Sprintf("released %d adopted %s, still running", released, plural(released, "session", "sessions")))
+		}
+		notice := strings.Join(parts, " · ")
 		if kept > 0 {
 			notice += fmt.Sprintf(" · %d worktree(s) kept (uncommitted changes)", kept)
 		}
