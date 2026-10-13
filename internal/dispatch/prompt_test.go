@@ -211,6 +211,11 @@ func TestOccupiedWorktreeSaysWhatItIsOn(t *testing.T) {
 			t.Errorf("the refusal does not name %q: %v", want, err)
 		}
 	}
+	// Beside a clone the folder may be one of the human's own checkouts, named
+	// the way a dispatch's would be: the refusal must not tell them to delete it.
+	if strings.Contains(err.Error(), "remove") {
+		t.Errorf("the refusal suggests removing a checkout that may be the human's: %v", err)
+	}
 }
 
 // ownAccount is the human's own login: what every launch ran on before there

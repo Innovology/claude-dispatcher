@@ -294,18 +294,19 @@ func PrefixProblem(prefix string) string {
 //
 // The default is the state directory, keyed by repo and feature, which keeps
 // this tool's bookkeeping inside this tool's own folder. A repo whose layout
-// has a project to join (config's `worktrees = "project"`, resolved in
-// repos.worktreeRootFor) gets its dispatch checkout beside the repo's other
+// has a place to join (config's `worktrees = "project"`, resolved in
+// repos.worktreeLayoutFor) gets its dispatch checkout beside the repo's other
 // ones instead, named for the feature exactly as the human's own are, because
 // a checkout git lists as a worktree of this repository and that is nowhere
 // near it is a checkout nobody will find.
 //
-// There is no repo component in the project case: the project folder IS the
-// repo, and `<project>/<repo>/<slug>` would be a directory named after the
-// repository inside the repository.
+// There is no repo component there: a project folder IS the repo, so
+// `<project>/<repo>/<slug>` would be a directory named after the repository
+// inside the repository, and beside a clone the folder already starts with
+// the clone's name (`app-<slug>`), because that is how the others read.
 func worktreePath(r repos.Repo, slug string) string {
 	if r.WorktreeRoot != "" {
-		return filepath.Join(r.WorktreeRoot, slug)
+		return filepath.Join(r.WorktreeRoot, r.WorktreePrefix+slug)
 	}
 	return filepath.Join(state.WorktreesDir(), r.Name, slug)
 }
@@ -595,8 +596,10 @@ func ensureWorktreeFrom(repoPath, path, branch string, root Root, repoRoot strin
 		// feature renaming its own branch — two worktrees in the reporter's own
 		// fleet sit on fix/… branches their dispatchers moved them to — and the
 		// worktree is kept rather than reset, because it may hold work nobody
-		// has pushed.
-		return "", fmt.Errorf("its worktree %s is on %s, not %s — a previous session moved it; switch it back or remove it",
+		// has pushed. Since dispatches can be cut beside the human's own
+		// checkouts, named the way theirs are, the folder may also simply be one
+		// of theirs, so the refusal says that too and never suggests removing it.
+		return "", fmt.Errorf("%s is already a checkout, on %s rather than %s — an earlier session of this feature moved it, or it is one of your own; name the feature differently or switch it back",
 			path, on, branch)
 	}
 	// Recover bookkeeping for worktree dirs deleted behind git's back.

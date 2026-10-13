@@ -23,6 +23,15 @@ func TestWorktreeGoesBesideTheProjectWhenTheRepoSaysSo(t *testing.T) {
 	}
 }
 
+// Beside a clone, the folder is named the way the clone's own worktrees are.
+func TestWorktreeGoesBesideTheCloneUnderItsName(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	r := repos.Repo{Name: "playerpulse", WorktreeRoot: "/src/org", WorktreePrefix: "playerpulse-"}
+	if got, want := worktreePath(r, "explore-code"), "/src/org/playerpulse-explore-code"; got != want {
+		t.Errorf("worktreePath = %q, want %q", got, want)
+	}
+}
+
 // Everything else is where it has always been.
 func TestWorktreeStaysUnderTheStateDirOtherwise(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())

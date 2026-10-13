@@ -262,7 +262,7 @@ Everything else is in the file itself, and **`e`** on the settings screen (or `:
 | `[linear]` | a Linear token per product (below) |
 | `[accounts]` | extra Claude subscriptions (`claude-dispatcher account add`) |
 | `[keys]` | rebind any action `?` lists, by its id |
-| `worktrees` | `"project"` cuts dispatch checkouts beside a `<project>/.bare` layout's own instead of under the state directory |
+| `worktrees` | `"project"` cuts dispatch checkouts beside the repo's own instead of under the state directory: `<project>/<slug>` for a `<project>/.bare` layout, `app-<slug>` for a clone whose worktrees sit beside it as `app-<name>` |
 | `branch_prefix` | as in settings |
 | `shell` | the shell a pane drops to when claude exits (a full path); unset asks tmux |
 | `appearance_file` | a file holding `light` or `dark`, for desktops that publish their switch that way |

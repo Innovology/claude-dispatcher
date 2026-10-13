@@ -155,6 +155,13 @@ func TestDiscoverCloneWithSiblingWorktrees(t *testing.T) {
 	if len(r.Worktrees) != 3 || !r.Worktrees[0].Main || r.Worktrees[0].Path != clone {
 		t.Fatalf("worktrees: want the clone first and marked main, got %+v", r.Worktrees)
 	}
+
+	// And with `worktrees = "project"` that layout is where a dispatch's own
+	// checkout goes: beside the clone, named the way its worktrees are.
+	r = only(t, Discover(&config.Config{Roots: []string{f.root}, Worktrees: "project"}))
+	if r.WorktreeRoot != f.root || r.WorktreePrefix != "playerpulse-" {
+		t.Errorf("dispatch checkouts: got %q + %q, want %q + playerpulse-", r.WorktreeRoot, r.WorktreePrefix, f.root)
+	}
 }
 
 // The layout neither of the above is: worktrees in a hidden folder inside the

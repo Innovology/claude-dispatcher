@@ -150,11 +150,13 @@ type Config struct {
 	// is the only checkout that lives somewhere else — invisible in the project
 	// it belongs to, and listed by git as a worktree whose folder is not there.
 	//
-	// "project" needs a project to be beside, which is the layout where the
-	// repository's common git dir is NOT inside a working tree: `<project>/
-	// .bare` with the checkouts as siblings. An ordinary clone keeps its git
-	// dir at `<clone>/.git`, has no such folder, and falls back to the state
-	// directory rather than inventing one next to the clone.
+	// "project" needs somewhere the others already are. That is the layout
+	// where the repository's common git dir is NOT inside a working tree
+	// (`<project>/.bare` with the checkouts as siblings, giving
+	// `<project>/<slug>`), or a clone whose own worktrees sit beside it named
+	// after it (`app` with `app-login` next to it, giving `app-<slug>`). A
+	// clone with no worktree there falls back to the state directory rather
+	// than inventing a convention next to it.
 	Worktrees string `toml:"worktrees,omitempty"`
 	// BranchPrefix is what a dispatch's branch name starts with, before the
 	// feature's slug. Unset means "feature/", which is what every dispatch has
@@ -324,9 +326,9 @@ func Save(c *Config) error {
 	}
 	b.WriteString("# Where a dispatch's own checkout is cut. \"state\" (the default) keeps it\n")
 	b.WriteString("# under ~/.local/state/claude-dispatcher/worktrees; \"project\" puts it beside\n")
-	b.WriteString("# the repo's other checkouts, for a <project>/.bare layout that already\n")
-	b.WriteString("# keeps one folder per branch. A plain clone has no such folder and stays\n")
-	b.WriteString("# in the state directory either way.\n")
+	b.WriteString("# the repo's other checkouts: <project>/<slug> for a <project>/.bare layout,\n")
+	b.WriteString("# app-<slug> for a clone whose worktrees sit beside it as app-<name>. A\n")
+	b.WriteString("# clone with no worktrees beside it stays in the state directory either way.\n")
 	if c.Worktrees == "" {
 		b.WriteString("# worktrees = \"project\"\n")
 	} else {

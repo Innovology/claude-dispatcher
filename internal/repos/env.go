@@ -116,25 +116,72 @@ func shellFor(cfg *config.Config) string {
 	return strings.TrimSpace(cfg.Shell)
 }
 
-// worktreeRootFor is the directory a dispatch's own checkout is cut in, or ""
-// for the state directory this tool keeps its own under.
+// worktreeLayoutFor is the directory a dispatch's own checkout is cut in and
+// what its folder is called there before the feature's slug, or "" for the
+// state directory this tool keeps its own under.
 //
-// A project here is the folder the checkouts share — the one holding the
-// common git dir, `<project>/.bare`, with `main` and every branch beside it.
-// That is the only layout where "put it with the others" names a real place.
-// An ordinary clone carries its git dir at `<clone>/.git`, so the parent is
-// wherever the human happens to keep their repositories, and cutting dispatch
-// checkouts into it would be scattering folders through somebody's source
-// directory rather than joining a convention they already keep. Those stay
-// where they were, which is also what every repo does until this is asked for.
-func worktreeRootFor(cfg *config.Config, gitDir string) string {
+// Two layouts have a place for one, and both are read off what git already
+// lists rather than assumed:
+//
+//   - A project: the folder the checkouts share, holding the common git dir
+//     (`<project>/.bare`) with `main` and every branch beside it. The checkout
+//     is `<project>/<slug>`.
+//   - A clone whose worktrees sit beside it: `<dir>/app`, with `<dir>/app-login`
+//     and `<dir>/app-billing` registered as its worktrees. The checkout is
+//     `<dir>/app-<slug>`, named the way the human's are. playerpulse grew
+//     twenty of these, and while only the first layout counted, its dispatches
+//     were the one checkout of it that lived somewhere else.
+//
+// A clone with no such worktree stays in the state directory: its parent is
+// wherever the human keeps their repositories, and cutting into it would be
+// scattering folders through somebody's source directory rather than joining a
+// convention they already keep. One worktree made that way is the convention.
+func worktreeLayoutFor(cfg *config.Config, gitDir string, wts []Worktree) (root, prefix string) {
 	if !cfg.WorktreesBesideProject() || gitDir == "" {
-		return ""
+		return "", ""
 	}
-	if filepath.Base(gitDir) == ".git" {
-		return ""
+	if filepath.Base(gitDir) != ".git" {
+		return filepath.Dir(gitDir), ""
 	}
-	return filepath.Dir(gitDir)
+	for _, w := range wts {
+		if !w.Main {
+			continue
+		}
+		if sep := siblingSeparator(w.Path, wts); sep != "" {
+			return filepath.Dir(w.Path), filepath.Base(w.Path) + sep
+		}
+	}
+	return "", ""
+}
+
+// siblingSeparator is what joins a clone's name to the names of its worktrees
+// beside it — "-" for `app-login` next to `app`, the commonest where they
+// differ — or "" when none sit there. A worktree anywhere else (Claude Code's
+// `.claude/worktrees/…` inside the clone, the state directory, one made by
+// hand in /tmp) says nothing about this layout.
+func siblingSeparator(clone string, wts []Worktree) string {
+	parent, base := filepath.Dir(clone), filepath.Base(clone)
+	seps := []string{"-", "_", "."}
+	count := map[string]int{}
+	for _, w := range wts {
+		if w.Main || filepath.Dir(w.Path) != parent {
+			continue
+		}
+		name := filepath.Base(w.Path)
+		for _, sep := range seps {
+			if len(name) > len(base+sep) && strings.HasPrefix(name, base+sep) {
+				count[sep]++
+				break
+			}
+		}
+	}
+	best := ""
+	for _, sep := range seps {
+		if count[sep] > count[best] {
+			best = sep
+		}
+	}
+	return best
 }
 
 // branchPrefixFor is what this repo's dispatch branches start with, or nil for

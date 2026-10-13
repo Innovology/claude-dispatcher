@@ -82,9 +82,13 @@
       whose folder is not in `player-app`, invisible to every tool that reads
       the project directory. Config `worktrees = "project"` cuts it beside the
       repo's other checkouts instead (`<project>/<slug>`, no repo component —
-      the project folder *is* the repo). "Project" means the layout where the
-      common git dir is not inside a working tree (`<project>/.bare`); an
-      ordinary clone has no such folder and keeps the state directory, because
+      the project folder *is* the repo). "Project" means somewhere the others
+      already are: the layout where the common git dir is not inside a working
+      tree (`<project>/.bare`), or a clone whose own registered worktrees sit
+      beside it named after it — playerpulse, twenty `playerpulse-<what>`
+      folders next to the clone, whose dispatches were still the one checkout
+      cut elsewhere — which gets `playerpulse-<slug>`, named the way those are.
+      A clone with no worktree there keeps the state directory, because
       scattering checkouts through whatever directory a clone happens to sit in
       is not joining a convention, it is inventing one. The path goes on the
       record, so a dispatch made before the setting changed resumes where it

@@ -165,7 +165,13 @@ the form's ROOT, else `[root_branches]`, else the remote's default (ADR 0010).
 **A dispatch's checkout can be cut beside the project's own.** Config
 `worktrees = "project"` puts it at `<project>/<slug>` for a repo whose common
 dir is `<project>/.bare`, so git's worktree list and every tool reading the
-project folder agree. The state directory stays the default, and an ordinary
-clone keeps it whatever the setting says: scattering checkouts through
-whatever directory a clone sits in is inventing a convention, not joining one.
-`x` deletes only a clean worktree the record says it cut, wherever it is.
+project folder agree. The state directory stays the default. A clone has a
+place to join only when git already lists worktrees of it beside it, named
+after it: playerpulse's twenty `playerpulse-<what>` folders sit next to the
+clone, and its dispatches were still cut under the state directory, the one
+checkout of it that was not with the others. Those get `playerpulse-<slug>`,
+joined with whichever separator the human's own use. A clone with no worktree
+there keeps the state directory whatever the setting says: scattering
+checkouts through whatever directory a clone sits in is inventing a
+convention, not joining one. `x` deletes only a clean worktree the record says
+it cut, wherever it is.

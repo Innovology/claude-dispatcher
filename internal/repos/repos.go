@@ -51,9 +51,12 @@ type Repo struct {
 	// wanted.
 	Shell string
 	// WorktreeRoot is the directory this repo's dispatch checkouts are cut in,
-	// or "" for the state directory. Set only for a repo whose layout has a
-	// project folder to join (see worktreeRootFor).
-	WorktreeRoot string
+	// or "" for the state directory, and WorktreePrefix what each one's folder
+	// is called there before the feature's slug: nothing in a project folder,
+	// "app-" beside a clone whose own worktrees are named that way. Set only
+	// for a repo whose layout has a place to join (see worktreeLayoutFor).
+	WorktreeRoot   string
+	WorktreePrefix string
 	// BranchPrefix is what this repo's dispatch branches are named before the
 	// feature's slug, or nil for the default (`feature/`). A pointer because
 	// an empty prefix is a real answer and must not be the zero value too.
@@ -153,7 +156,7 @@ func Discover(cfg *config.Config) []Repo {
 		// may just have changed.
 		r.Env = envFor(cfg, r.Name, r.Path)
 		r.Shell = shellFor(cfg)
-		r.WorktreeRoot = worktreeRootFor(cfg, r.GitDir)
+		r.WorktreeRoot, r.WorktreePrefix = worktreeLayoutFor(cfg, r.GitDir, wts)
 		r.BranchPrefix = branchPrefixFor(cfg)
 		r.RootBranch = cfg.RootBranchFor(r.Name)
 		out = append(out, r)
