@@ -5,6 +5,7 @@ package cockpit
 // than filtered.
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -216,7 +217,7 @@ func TestSearchInTheFoldMatchesBranchesAndPaintsOnlyTheFolder(t *testing.T) {
 		t.Errorf("the fold cursor landed on %q, want r2w-wearables", got)
 	}
 	for i, set := range m.clFoldHighlights(row) {
-		n := len([]rune(baseName(row.worktrees[i].path)))
+		n := len([]rune(filepath.Base(row.worktrees[i].path)))
 		for p := range set {
 			if p >= n {
 				t.Errorf("checkout %d highlights offset %d, outside the %d-rune folder name", i, p, n)

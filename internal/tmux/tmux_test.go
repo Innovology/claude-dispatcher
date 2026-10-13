@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -208,13 +209,11 @@ func TestTheEnvironmentPrefixStandsInTheSession(t *testing.T) {
 	}
 }
 
-func TestPathOfSessionMatchesTheWholeName(t *testing.T) {
-	out := "disp-app-2\t/src/app-2\ndisp-app\t/src/app\n"
-	if got := pathOfSession(out, "disp-app"); got != "/src/app" {
-		t.Errorf("pathOfSession(disp-app) = %q", got)
-	}
-	if got := pathOfSession(out, "disp"); got != "" {
-		t.Errorf("a prefix matched: %q", got)
+func TestASessionListIsReadWholeNameAndPath(t *testing.T) {
+	got := parseSessionList("disp-app-2\t/src/app-2\ndisp-app\t/src/app \r\n\nnot-a-row\n")
+	want := []SessionInfo{{Name: "disp-app-2", Path: "/src/app-2"}, {Name: "disp-app", Path: "/src/app"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseSessionList = %+v, want %+v", got, want)
 	}
 }
 

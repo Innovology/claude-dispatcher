@@ -350,7 +350,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 					last = itoa(d) + "d"
 				}
 				for _, w := range r.Worktrees {
-					wts = append(wts, repoWorktree{path: w.Path, branch: w.Branch, main: w.Main})
+					wts = append(wts, repoWorktree{path: w.Path, branch: w.Branch})
 				}
 			}
 			g := repoGHFor(name)

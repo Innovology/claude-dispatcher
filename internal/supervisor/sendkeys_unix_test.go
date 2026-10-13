@@ -21,18 +21,21 @@ func TestSendKeysTypesLiterally(t *testing.T) {
 	// Dot-free, like every real session name (slugs are [a-z0-9-]): tmux reads
 	// a "." in a target as the window.pane separator.
 	name := "disp-sendkeys-test-" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	if err := exec.Command("tmux", "new-session", "-d", "-s", name, "-x", "80", "-y", "10", "cat").Run(); err != nil {
+	// On a server of its own, which is also the address a real reply uses: a
+	// developer's default server is not the test's to add sessions to.
+	sock := name
+	if err := exec.Command("tmux", "-L", sock, "-f", "/dev/null", "new-session", "-d", "-s", name, "-x", "80", "-y", "10", "cat").Run(); err != nil {
 		t.Skipf("tmux will not start a session here: %v", err)
 	}
-	defer func() { _ = exec.Command("tmux", "kill-session", "-t", "="+name).Run() }()
+	defer func() { _ = exec.Command("tmux", "-L", sock, "kill-server").Run() }()
 
 	text := "-n C-c Enter merge it"
-	if err := SendKeys(Session{Name: name}, text); err != nil {
+	if err := SendKeys(Session{Name: name, Socket: sock}, text); err != nil {
 		t.Fatalf("SendKeys: %v", err)
 	}
 	var pane string
 	for i := 0; i < 20; i++ {
-		out, _ := exec.Command("tmux", "capture-pane", "-p", "-t", "="+name+":").Output()
+		out, _ := exec.Command("tmux", "-L", sock, "capture-pane", "-p", "-t", "="+name+":").Output()
 		pane = string(out)
 		if strings.Count(pane, text) >= 2 { // the tty's echo, then cat's copy
 			return

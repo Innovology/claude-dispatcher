@@ -41,7 +41,8 @@ import (
 )
 
 // Root is the branch a dispatch's feature branch is cut from — a branch name,
-// or RootDefault for the repo's default branch as the remote sees it.
+// or RootDefault for the repo's own root branch ([root_branches]) where it
+// names one, else its default branch as the remote sees it.
 type Root string
 
 // RootDefault resolves at launch rather than naming a branch. A form cannot
@@ -175,7 +176,9 @@ func rootRef(repoPath, branch string) string {
 	return ""
 }
 
-// baseRef resolves the start point for a new feature branch.
+// baseRefFrom resolves the start point for a new feature branch: the root the
+// form names, else the repo's own root branch (repoRoot, from config's
+// [root_branches]), else the remote's default.
 //
 // Letting git default the start point to the repo's HEAD — what `worktree add
 // -b` does with no explicit base — silently cuts the branch from whatever the
@@ -185,15 +188,11 @@ func rootRef(repoPath, branch string) string {
 //
 // It fetches first, so every candidate below is judged against what origin has
 // now rather than whenever the human last pulled.
-func baseRef(repoPath string, root Root) (string, error) {
-	return baseRefFrom(repoPath, root, "")
-}
-
-// baseRefFrom is baseRef for a repo that names a root branch of its own
-// (config's [root_branches]), which stands in for the remote's default when
-// the form names none. Reported on playerpulse, whose work merges into `dev`
-// while origin's HEAD says `main`: every dispatch had to have ROOT typed, and
-// the one that was not was cut from a branch the repo's work does not go to.
+//
+// The repo's own root is for a repo whose work does not go where origin's HEAD
+// points. Reported on playerpulse, which merges into `dev` while origin says
+// `main`: every dispatch had to have ROOT typed, and the one that was not was
+// cut from a branch the repo's work does not go to.
 func baseRefFrom(repoPath string, root Root, repoRoot string) (string, error) {
 	fetchOrigin(repoPath)
 

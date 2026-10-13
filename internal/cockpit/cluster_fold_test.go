@@ -37,7 +37,7 @@ func clFoldFixture(t *testing.T) model {
 			{
 				name: "ordain", forge: "gh", out: 0, last: "4d",
 				path:      "/home/dev/ord-ai-n",
-				worktrees: []repoWorktree{{path: "/home/dev/ord-ai-n", branch: "main", main: true}},
+				worktrees: []repoWorktree{{path: "/home/dev/ord-ai-n", branch: "main"}},
 			},
 		},
 	}
@@ -155,7 +155,7 @@ func TestClFoldKeepsTheCursorVisible(t *testing.T) {
 		refs = append(refs, repoRef{
 			name: "repo-" + n, forge: "gh", last: "1d", path: "/src/" + n,
 			worktrees: []repoWorktree{
-				{path: "/src/" + n, branch: "main", main: true},
+				{path: "/src/" + n, branch: "main"},
 				{path: "/src/" + n + "-wt", branch: "wip"},
 			},
 		})
@@ -211,7 +211,7 @@ func clPinFixture(t *testing.T) (model, string) {
 			name: "playerpulse", forge: "gh", last: "7d",
 			path: "/src/playerpulse",
 			worktrees: []repoWorktree{
-				{path: "/src/playerpulse", branch: "main", main: true},
+				{path: "/src/playerpulse", branch: "main"},
 				{path: "/src/playerpulse-dev", branch: "dev"},
 				{path: "/src/playerpulse-o6", branch: "o6"},
 			},

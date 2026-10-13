@@ -79,8 +79,8 @@ func capSlug(s string) string {
 // Prompt is the prompt the session actually received.
 //
 // root is where the feature branch is cut from (see root.go): a branch the
-// human named on the form, or RootDefault for the repo's default branch as the
-// remote sees it. Unlike the other three it is not carried to Resume — a branch
+// human named on the form, or RootDefault for the repo's [root_branches] entry,
+// else its default branch as the remote sees it. Unlike the other three it is not carried to Resume — a branch
 // is cut once, and a resumed dispatcher goes back to the branch it has.
 //
 // acct is the Claude subscription the session runs under (internal/account):

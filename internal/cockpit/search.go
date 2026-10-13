@@ -18,7 +18,7 @@ package cockpit
 // the one you were reading a second ago.
 
 import (
-	"strings"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -59,7 +59,7 @@ func (m model) searchCandidates() []string {
 		for _, w := range row.worktrees {
 			// Both halves are searchable, because both are how a checkout is
 			// referred to: the directory it sits in and the branch it holds.
-			out = append(out, baseName(w.path)+" "+w.branch)
+			out = append(out, filepath.Base(w.path)+" "+w.branch)
 		}
 		return out
 	case searchRepos:
@@ -116,7 +116,7 @@ func (m model) clFoldHighlights(r clRepoRow) []map[int]bool {
 		if h.Index >= len(r.worktrees) {
 			continue
 		}
-		n := len([]rune(baseName(r.worktrees[h.Index].path)))
+		n := len([]rune(filepath.Base(r.worktrees[h.Index].path)))
 		set := map[int]bool{}
 		for _, p := range h.Pos {
 			if p < n {
@@ -241,13 +241,4 @@ func (m model) searchLine() string {
 	// than one that names the two keys and trusts the arrow between them.
 	return "/" + m.searchText + " · " + itoa(at) + "/" + itoa(len(hits)) +
 		" · " + m.keys.KeyFor("search.prev") + "◂▸" + m.keys.KeyFor("search.next")
-}
-
-// baseName is the last path segment, without dragging path/filepath into the
-// hot path of a redraw.
-func baseName(p string) string {
-	if i := strings.LastIndexByte(p, '/'); i >= 0 {
-		return p[i+1:]
-	}
-	return p
 }

@@ -5,6 +5,7 @@
 package tmux
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -379,8 +380,13 @@ func (s Server) SessionPIDs(name string) []int {
 	return append(roots, descendants(roots, childTable())...)
 }
 
-// childTable is the process table as parent → children. One read, because a
-// session's panes are asked about together.
+// childTable is the process table as parent → children, nil when it could not
+// be read. One read, because a session's panes are asked about together.
+//
+// `ps -ax -o pid=,ppid=` is the portable spelling: it is the same on macOS and
+// on the Linux distributions this runs under. pgrep -P would be shorter and is
+// not dependable — under a sandboxed process table it reports no children for a
+// parent that plainly has one, which is the exact wrong answer here.
 func childTable() map[int][]int {
 	out, err := exec.Command("ps", "-ax", "-o", "pid=,ppid=").Output()
 	if err != nil {
@@ -443,27 +449,17 @@ func parsePanes(out string) []pane {
 	return ps
 }
 
-// processParents is the set of pids that have at least one live child, read in
-// one pass over the process table. nil when the table could not be read, which
-// callers must treat as "unknown" rather than as "no children".
-//
-// `ps -ax -o pid=,ppid=` is the portable spelling: it is the same on macOS and
-// on the Linux distributions this runs under. pgrep -P would be shorter and is
-// not dependable — under a sandboxed process table it reports no children for a
-// parent that plainly has one, which is the exact wrong answer here.
+// processParents is the set of pids that have at least one live child, from
+// childTable. nil when the table could not be read, which callers must treat
+// as "unknown" rather than as "no children".
 func processParents() map[string]bool {
-	out, err := exec.Command("ps", "-ax", "-o", "pid=,ppid=").Output()
-	if err != nil {
-		return nil
-	}
-	parents := make(map[string]bool)
-	for _, ln := range strings.Split(string(out), "\n") {
-		if f := strings.Fields(ln); len(f) >= 2 {
-			parents[f[1]] = true
-		}
-	}
-	if len(parents) == 0 {
+	kids := childTable()
+	if len(kids) == 0 {
 		return nil // a process table with no processes in it is a failed read
+	}
+	parents := make(map[string]bool, len(kids))
+	for ppid := range kids {
+		parents[strconv.Itoa(ppid)] = true
 	}
 	return parents
 }
@@ -499,21 +495,41 @@ func (s Server) AttachCmd(name, env string) *exec.Cmd {
 // =name` prints an empty path on tmux 3.7b, and `-t name:` matches by prefix,
 // so the exact match is made here instead.
 func (s Server) sessionPath(name string) string {
-	out, err := s.cmd("list-sessions", "-F", "#{session_name}\t#{session_path}").Output()
-	if err != nil {
-		return ""
-	}
-	return pathOfSession(string(out), name)
-}
-
-// pathOfSession finds name's path in list-sessions output of name<TAB>path.
-func pathOfSession(out, name string) string {
-	for _, ln := range strings.Split(out, "\n") {
-		if n, p, ok := strings.Cut(ln, "\t"); ok && n == name {
-			return strings.TrimSpace(p)
+	for _, si := range s.SessionList() {
+		if si.Name == name {
+			return si.Path
 		}
 	}
 	return ""
+}
+
+// SendKeys types text into the session and presses Enter, as if at the prompt.
+//
+// The target is "=name:" — the session's current pane — not the "=name" every
+// session-level command here takes: send-keys wants a pane, and tmux (3.7b,
+// measured) answers "=name" with "can't find pane", so the plain form typed
+// nothing, ever, and the reply that used it said it had. The text goes with -l
+// and after --, so it is typed as written: without them tmux looks each
+// argument up as a key name first, and a reply of "Enter", "Up" or "C-c" would
+// be pressed rather than typed, and one starting with "-" read as a flag.
+// Enter is its own call because it is the one argument that must be a key.
+func (s Server) SendKeys(name, text string) error {
+	target := "=" + name + ":"
+	if out, err := s.cmd("send-keys", "-t", target, "-l", "--", text).CombinedOutput(); err != nil {
+		return sendErr(out, err)
+	}
+	if out, err := s.cmd("send-keys", "-t", target, "Enter").CombinedOutput(); err != nil {
+		return sendErr(out, err)
+	}
+	return nil
+}
+
+// sendErr carries tmux's own words when it gave any.
+func sendErr(out []byte, err error) error {
+	if msg := strings.TrimSpace(string(out)); msg != "" {
+		return errors.New(msg)
+	}
+	return err
 }
 
 // UniqueName returns base, or base-2, base-3, … if a session already exists.
@@ -587,13 +603,18 @@ func (s Server) SessionList() []SessionInfo {
 	if err != nil {
 		return nil
 	}
+	return parseSessionList(string(out))
+}
+
+// parseSessionList reads list-sessions output of name<TAB>path.
+func parseSessionList(out string) []SessionInfo {
 	var sessions []SessionInfo
-	for _, ln := range strings.Split(string(out), "\n") {
+	for _, ln := range strings.Split(out, "\n") {
 		name, path, ok := strings.Cut(strings.TrimRight(ln, "\r"), "\t")
 		if !ok || strings.TrimSpace(name) == "" {
 			continue
 		}
-		sessions = append(sessions, SessionInfo{Name: name, Path: path})
+		sessions = append(sessions, SessionInfo{Name: name, Path: strings.TrimSpace(path)})
 	}
 	return sessions
 }

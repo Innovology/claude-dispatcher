@@ -62,8 +62,9 @@ func TestNonMutatingCallsAreSafe(t *testing.T) {
 	if got := Sessions("definitely-not-a-real-socket-xyz"); len(got) != 0 {
 		t.Errorf("Sessions(dead socket) = %v, want none", got)
 	}
-	EnsureBackKey("definitely-not-a-real-socket-xyz")
-	EnsureFocusEvents()
+	// EnsureBackKey and EnsureFocusEvents are left out on purpose: they bind a
+	// key and set an option on the default server, which on a developer's
+	// machine is their own tmux.
 }
 
 // AttachSwitches answers one question — does AttachCmd's exit mean the human is

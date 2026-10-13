@@ -105,7 +105,6 @@ type repoRef struct {
 // repoWorktree is one checkout of a repo, as the assignment editor shows it.
 type repoWorktree struct {
 	path, branch string
-	main         bool
 }
 
 type staleRepo struct {
