@@ -1,6 +1,8 @@
 package keymap
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -146,5 +148,22 @@ func TestNilMapIsTheDefaults(t *testing.T) {
 	}
 	if len(m.Bindings()) != len(Defaults) {
 		t.Error("a nil map should report the defaults")
+	}
+}
+
+// `[keys]` takes action ids, and nothing in the cockpit prints them — `?`
+// shows actions by what they do. The README lists them, and this keeps that
+// list whole: an action added here without a line there could not be rebound
+// by anyone who did not read the source.
+func TestTheReadmeListsEveryActionID(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Skipf("no README beside the module: %v", err)
+	}
+	readme := string(raw)
+	for _, b := range Defaults {
+		if !strings.Contains(readme, "`"+b.Action+"`") {
+			t.Errorf("README does not list the action id %q", b.Action)
+		}
 	}
 }

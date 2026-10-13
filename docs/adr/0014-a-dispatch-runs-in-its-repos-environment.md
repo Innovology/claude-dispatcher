@@ -168,3 +168,25 @@ where socket → repo → product is the only chain there is.
 - **Windows accepts both and ignores both.** The console backend has one session
   manager rather than a server per socket, and it starts the session process
   itself, so there is no client in between for a prefix to wrap.
+
+## Amendment (2026-10-13): the checkout's flake, where the worktree has none
+
+"A path baked into `Env` was rejected" above assumed the worktree carries the
+flake. It need not: a worktree is cut from the remote's default, or a ROOT the
+human named, and those branches need not hold the files the checkout does.
+Reported on playerpulse, whose `flake.nix` is on `dev` and not on `main`: a
+dispatch cut from `origin/main` stood `nix develop` in a worktree with no
+flake, it searched upward, found nothing, and the session never started.
+
+So `repos.EnvIn` keeps the rejected case rejected and adds the missing one. A
+worktree with its own flake still uses it — it is the code being worked on, and
+a branch may change its own toolchain. A worktree with none names the
+checkout's flake outright (`nix develop <checkout> --no-write-lock-file
+--command`), and that goes on the record, so resume and attach agree with the
+launch. An explicit `[session_env]` is passed as written.
+
+And the default needs more than a nix binary: flakes and the nix command are
+experimental features, off by default in the installer most people use on macOS
+and on Linux outside NixOS, where `nix develop` refuses before it starts. A
+flake is used only where `nix config show experimental-features` lists both, or
+the build is Determinate Nix, which ships flakes as stable.

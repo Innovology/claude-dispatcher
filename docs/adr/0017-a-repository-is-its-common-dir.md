@@ -146,3 +146,26 @@ and only one of them is taking the keys.
   user's own. Making that follow the project's layout is a separate decision:
   `x` removing a clean worktree would then be deleting inside a project
   directory.
+
+## Amendment (2026-10-13): a pin sets the root, and the checkout follows the layout
+
+Two consequences above were later decided the other way.
+
+**Pinning a checkout now writes the repo's root branch.** Reported on
+playerpulse, whose work merges into `dev`: the human pinned the `dev` checkout,
+and the next dispatch was cut from `main` — which read as the pin not working,
+because picking the folder the work lives in *is* saying where it starts. So
+`enter` in the fold writes the checkout's branch to `[root_branches]` as well as
+the checkout to `[checkouts]`. They stay two entries, because a folder is not a
+branch: switch that clone to a feature and the pin follows the folder, while
+dispatches must still start from `origin/dev`. Unpinning clears the root only if
+it is still the one the pin wrote. The order a feature branch is cut from is
+the form's ROOT, else `[root_branches]`, else the remote's default (ADR 0010).
+
+**A dispatch's checkout can be cut beside the project's own.** Config
+`worktrees = "project"` puts it at `<project>/<slug>` for a repo whose common
+dir is `<project>/.bare`, so git's worktree list and every tool reading the
+project folder agree. The state directory stays the default, and an ordinary
+clone keeps it whatever the setting says: scattering checkouts through
+whatever directory a clone sits in is inventing a convention, not joining one.
+`x` deletes only a clean worktree the record says it cut, wherever it is.

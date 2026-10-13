@@ -51,8 +51,8 @@
       pin naming a path git does not list as a worktree of that repo is ignored,
       since a pin chooses between the checkouts that exist rather than inventing
       one. A pinned checkout is **not** a root branch — it decides what the row
-      reads, while which branch a feature is cut from is `[root_branches]`,
-      else the remote's default, else the human's `Root` on the form (see the
+      reads, while which branch a feature is cut from is the human's `Root`
+      on the form, else `[root_branches]`, else the remote's default (see the
       root-branch decision below). **Pinning sets both**: it writes the
       checkout's branch to `[root_branches]` as a snapshot, because picking
       the dev folder is saying where the work lives and a dispatch then cut
@@ -106,8 +106,8 @@
       checkout. Launch refuses it; re-dispatching a *finished* feature is
       still fine and reuses the worktree left behind. "Live" is three facts
       (`liveDispatch`), and none of them is the tmux session on its own: it
-      outlives its claude by design, because `launchCommand` ends
-      `; exec ${SHELL}`, and on a real machine the claude REPL outlives the
+      outlives its claude by design, because `launchCommand` ends by exec'ing
+      a shell (`exitShell`), and on a real machine the claude REPL outlives the
       work too, sitting at its prompt for days after the merge. The record's
       status is the hooks' account of whether the dispatcher is still going;
       the live session catches a record they could not correct (a SIGKILL, a
@@ -116,7 +116,7 @@
       neither, keeping the refusal rather than guessing.
   - *Product* is the grouping lens: the cockpit list and the dispatch form's
     repo picker group by the `[products]` config, most urgent group first;
-    unmapped repos fall under "other". No separate group concept.
+    unmapped repos fall under "unassigned". No separate group concept.
 - Sessions run as interactive `claude` inside per-dispatch tmux sessions
   (`disp-<slug>`) on their repo's own tmux server; tmux is a hard dependency
   and the process supervisor. A session is addressed by the pair
@@ -237,9 +237,11 @@
   nothing configured; `[sockets]` names one for a human who already keeps
   per-project servers, since a socket name is chosen outside the repository and
   no reading of it finds one) and its **environment** (`Repo.Env`, the command
-  the client runs under — a checkout with a `flake.nix` *on a machine with nix*
+  the client runs under — a checkout with a `flake.nix` *on a machine whose nix runs flakes*
   is launched under `nix develop`, the second half no more optional than a
-  model alias we cannot vouch for). The prefix wraps the **client**, never the
+  model alias we cannot vouch for — a nix binary is not enough, since flakes
+  are off by default in the installer most macOS and non-NixOS users have,
+  and there every dispatch of that repo would die). The prefix wraps the **client**, never the
   session's command: both put the repo's binaries on PATH and only this one
   leaves the pane running the plain `<shell> -c "… claude …"` that
   `SessionIdle` reads, since a pane whose command is not a shell is taken at
@@ -316,7 +318,10 @@
   both ask first, because that directory is the human's checkout and was there
   before us. `x` **releases** rather than kills — not ours to end — clearing
   the session id so a released record stops answering hooks, and keeping its
-  place in history. `BaseSHA` is the commit at adoption, so provenance credits
+  place in history. It shipped written and unwired: `x` on an adopted row took
+  the kill path, ending the human's own session and its context, and only the
+  directory was spared. `killCmd` releases an adopted record now and the row
+  offers "release". `BaseSHA` is the commit at adoption, so provenance credits
   what happens under management and not the feature it walked in with. **And
   an adopted session is handed the convention a dispatched one is launched
   with**: a dispatch carries the working contract in its prompt, whose load-
@@ -656,7 +661,12 @@
   fingers and the match POSITIONS come back for an in-place highlight; the list
   is **lit, not filtered**, because a row's neighbours are often the point of it
   and a shrinking table makes the count at the top a different number from the
-  one you were reading. `n`/`ctrl+n` jump between hits. Full record:
+  one you were reading. `n`/`ctrl+n` jump between hits. The table first missed
+  screens: the product panel's tabs and sessions keys, settings' `e`, and the
+  list lenses never asked it, so a rebind there changed `?` and not the key —
+  and space never marked a session, because Bubble Tea sends `" "`. Every screen
+  with bindings resolves them now. `?` shows actions, not ids, so the README
+  lists the ids and a test keeps it whole. Full record:
   `docs/adr/0024-a-key-sheet-that-can-lie-is-worse-than-none.md`.
 - **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
   a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
@@ -790,17 +800,28 @@
   routinely merges mid-run, so letting one menu back onto the table and not the
   other would have frozen a questioning dispatcher at done — invisible, which
   is this same defect in the one state where marking it blocked is not enough.
-  **A menu is a menu, and the two kinds exist only to be worded apart.** Both
-  waits are `blocked`, so the status cannot tell them apart and the *reason*
-  does — `state.ReasonQuestion`, a constant because hookcmd writes it and the
-  cockpit matches it, and a drifting letter would not fail, it would file every
-  question under "approve a permission". What the human can *do* about either
-  is identical, because the answer to both is a keypress in the pane: `cqMenu`
-  is the one predicate every site asks (first rank, no `r`, no "mark shipped",
-  no quoting a mid-turn record's stale `Said`), tone needs no say in it at all
-  since it is taken from the blocked state both share, and a test pins the pair
-  to one key set and one rank while requiring the words to differ — the only
-  way to split them by accident is to edit that predicate.
+  **A menu is a menu, and the kinds exist only to be worded apart.** These
+  waits are all `blocked`, so the status cannot tell them apart and the
+  *reason* does. `state.ReasonQuestion` is a constant because hookcmd writes
+  it and the cockpit matches it, and a drifting letter would not fail, it
+  would file every question under "approve a permission". What the human can
+  *do* about any of them is identical, because the answer is a keypress in the
+  pane. `cqMenu` is the one predicate every site asks (first rank, no `r`, no
+  "mark shipped", no quoting a mid-turn record's stale `Said`). Tone needs no
+  say in it at all, since it is taken from the blocked state they share. Tests
+  pin the kinds to one key set and one rank while requiring the words to
+  differ, so the only way to split them by accident is to edit that predicate.
+  **The third menu is the one before the session starts.** A dispatch sat on
+  Claude Code's trust dialog while its row said "starting session" for good.
+  No hook fires before a session has started, so a session stopped on a
+  startup dialog (trust, login, onboarding) cannot report anything. The record
+  is evidence enough: the supervisor stamped `SessionStartedAt` and no hook
+  has given it a `SessionID` in the time a normal start takes.
+  `dispatch.LaunchStalled` (20s) makes it blocked, kind `startup` ("answer its
+  startup prompt"), and the cockpit reloads once just after the threshold so
+  the row turns when it does. A launch that could not copy the repo's trust
+  onto its worktree says so on the record (`state.ReasonUntrustedLaunch`), and
+  the lead then names the trust prompt rather than guessing.
   **And the other half of it: an ask outranks background work.** Reported an
   hour later from a live dispatcher that ended its turn on a prose question —
   "One thing needs your confirmation … OK to keep that?" — and sat at an empty
@@ -830,9 +851,8 @@
   if…" — so admitting a Stop that asks would drag most of a day's finished work
   back onto the table, which is the louder failure. A done dispatcher that
   stops with an ask keeps its row anyway, under the `finished` divider, because
-  nothing retires a held row but `x`. No ADR — one hook entry and two cases,
-  and the numbering is contested between unmerged branches. Existing installs
-  re-run `init` to get the entry.
+  nothing retires a held row but `x`. Existing installs re-run `init` to get
+  the entry.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
@@ -966,7 +986,8 @@
     window. An earlier one is a stale session and changes nothing, not even
     the reading's age.
 - Features are named at dispatch time (hybrid model): the name is the key;
-  branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
+  branch `<branch_prefix><slug>` (`feature/` unless config or the form says
+  otherwise), commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
   (PR from branch onto main).
 - "Done means live": a feature stays open until deployed, unless explicitly
@@ -1059,11 +1080,38 @@
   `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
   `root.go` is where a feature branch starts: the remote's own default, the
   human's named `Root`, and the branch list the forms offer — and the reason
-  none of it trusts `origin/HEAD`.
+  none of it trusts `origin/HEAD`. `adopt.go` wraps a record around a session
+  the human started (ADR 0026) and `brief.go` is the convention it is then
+  sent; `stall.go` is when a silent launch counts as stopped on a startup
+  prompt; `trust.go` copies a repo's trust onto its worktree.
+- `internal/supervisor` — the session backend behind one interface: tmux on
+  Unix, a console window per session on Windows. A session is addressed by
+  `Session` (socket + name), never by name alone.
+- `internal/tmux` — the tmux CLI, per `-L` server: sessions, panes, send-keys,
+  and what a pane is running (ADRs 0008, 0014, 0025).
+- `internal/config` — `config.toml`: load, and `Save`, which writes the file
+  whole with its explanatory comments, so a table the cockpit edits keeps them.
+- `internal/gh` — the GitHub CLI for PR, check and deploy signals, every call
+  best-effort and memoised; settled answers persist across launches
+  (`gh-settled.json`).
+- `internal/track` — "done means live": links dispatches to PRs and flips them
+  done when the deploy workflow succeeds.
+- `internal/initcmd` — `claude-dispatcher init`: config, state dirs, and (with
+  consent) the hooks and status line in every account's `settings.json`.
+- `internal/linear`, `internal/azure` — backlog sources, best-effort.
+- `internal/transcript` — a best-effort activity preview from a session's
+  transcript; never status truth.
+- `internal/usage` — this machine's transcript tokens and a limit learned from
+  429s: the usage lens's fallback where no session has reported Claude Code's
+  own figures (internal/account).
+- `internal/accountcmd` — `claude-dispatcher account`: list, add and log in a
+  subscription.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
   `collect_sessions.go` is the one collector that reads the machine rather than
-  the records: the sessions on it that no dispatch claims.
+  the records: the sessions on it that no dispatch claims, and `adopt.go` is
+  the key that adopts one. `search.go` is `/`; `editconfig.go` opens
+  `config.toml` in the human's editor (`e` in settings, `:config`).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is
   a real stage and every figure is what it found — the list is a description of
@@ -1087,7 +1135,7 @@
   map is one whose diff could not be read, which is NOT the same as one that
   wrote nothing: totals skip it and velocity says how many of its live features
   it could price. History rows take the figure from that map and never run a
-  diff of their own — `fleetPastRow` stays the cheapest row there is, so a
+  diff of their own — `fleetEndedRow` stays the cheapest row there is, so a
   machine with hundreds of finished dispatchers still polls in constant work.
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort

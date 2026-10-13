@@ -94,3 +94,20 @@ meant, because there is only ever one in front of you.
   already was.
 - Every on-screen key hint is read from the keymap for the same reason `?` is.
 - fzf is a new dependency; `nix/package.nix` vendorHash updated accordingly.
+
+## Amendment (2026-10-13): the screens it missed, and where the ids are
+
+The table did not reach every screen. The product panel's tabs (`O R T S H Y`)
+were literals, its sessions tab declared `sessions.mark` and `sessions.adopt`
+rebindable while nothing resolved them, and the backlog and decisions lenses
+never asked for the `list.*` bindings `?` printed — so a rebind there changed
+the sheet and not the key. Space never marked a session at all: Bubble Tea
+delivers the space bar as `" "`, and the tab matched `"space"`. The panel and
+settings have scopes of their own now, every screen with bindings resolves
+them, `Resolve` looks the space bar up by its name, and a nil keymap resolves as
+the defaults, as `KeyFor` already did. Footers and hints that named a
+rebindable key are built from the keymap too.
+
+And `[keys]` takes action ids, which nothing in the cockpit prints: `?` shows
+what an action does, not what it is called. The README lists every id, and a
+test fails when an action is added without one.

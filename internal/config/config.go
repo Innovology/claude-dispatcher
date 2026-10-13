@@ -380,8 +380,8 @@ func Save(c *Config) error {
 		b.WriteString(tomlKey(k) + " = " + tomlStrings(c.Products[k]) + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString("# Rebind any cockpit action: \"action id\" = \"key\". Press ? in the cockpit for\n")
-	b.WriteString("# every action and the key it currently answers to. A key already bound in the\n")
+	b.WriteString("# Rebind any cockpit action: \"action id\" = \"key\". The README lists every id;\n")
+	b.WriteString("# ? in the cockpit shows what each does and its key now. A key already bound in the\n")
 	b.WriteString("# same place, an id that is not an action, or ctrl+c, is refused by name at\n")
 	b.WriteString("# startup — the cockpit says so rather than ignoring the line.\n")
 	b.WriteString("# \"products.new\" = \"N\"\n")

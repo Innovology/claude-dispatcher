@@ -14,7 +14,7 @@ You can run ten Claude Code sessions. You can't watch ten terminals. The cockpit
 
 - **One screen, the whole factory** — dispatchers, PRs, deploys, backlog, usage and velocity across every repo and product.
 - **Real data, live** — dispatch records + `git` + `gh` + Linear + Azure Boards, refreshed on an fsnotify watch and a poll. Nothing is mocked.
-- **Keyboard-first** — six lenses on the number keys, one key per action, a `:` command palette, and `?` for the map. Every key is rebindable in `[keys]`, and `?` is generated from the same table, so it can never describe a binding you don't have.
+- **Keyboard-first** — six lenses on the number keys, one key per action, a `:` command palette, and `?` for the map. Every action `?` lists is rebindable in `[keys]`, and `?` is generated from the same table, so it can never describe a binding you don't have.
 - **`/` is fzf** — not fzf-like: the matcher is linked in and called in process, so a query ranks the way it does in your terminal, and matches light up where they sit instead of the list collapsing around them.
 - **Done means live** — a feature stays open until it's actually deployed, not merely merged.
 - **Tokens, not dollars** — built for a Claude subscription; usage speaks in tokens and effort.
@@ -28,7 +28,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 | `1` | **triage** | what is blocked, claims done, or waiting on me right now? |
 | `2` | **products** | how is each product (many repos) doing? `enter` opens one |
 | `3` | **backlog** | GitHub Issues · Linear · Azure Boards, in one list |
-| `4` | **usage** | 5-hour and weekly consumption vs my learned limits |
+| `4` | **usage** | how much of my 5-hour and weekly limits is gone, and when they reset |
 | `5` | **decisions** | ADRs, and the decision sections written in each repo's own markdown |
 | `6` | **velocity** | DORA + what actually reached production |
 
@@ -48,7 +48,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 
 ![The products lens](docs/products.svg)
 
-**Press `a` to say which repos make up which product.** Mark repos with `space`, `enter` moves them into the selected product, `n` names a new one, and `p` unfolds a row to show where that repo actually lives — one row is one repository, however many worktrees it has on disk. It writes straight to `[products]` in your config, so the grouping every other lens uses is one screen away rather than a file you have to remember the syntax for.
+**Press `a` to say which repos make up which product.** Mark repos with `space`, `enter` moves them into the selected product, `n` names a new one, and `p` unfolds a row to show where that repo actually lives — one row is one repository, however many worktrees it has on disk. In the fold, `enter` pins which checkout the row reads from (and makes that checkout's branch the repo's root branch), and `s` names the tmux server its sessions run on. It writes straight to `[products]` in your config, so the grouping every other lens uses is one screen away rather than a file you have to remember the syntax for.
 
 ![Assigning repos to products](docs/assign.svg)
 
@@ -64,11 +64,13 @@ It is the one figure in the cockpit that is a model rather than a measurement, s
 
 ![The backlog lens](docs/backlog.svg)
 
-## Usage limits, learned
+## Usage limits, as Claude Code reports them
 
-There is no API for a Claude subscription's limits — so the cockpit **learns** them. It measures your 5-hour rolling and weekly consumption from the session transcripts, and treats the usage at each real rate-limit (429) as that window's cap: *assume that's the limit, until we sail past it and it's fine — then raise it.* The estimate persists and sharpens over time.
+The usage lens shows how much of your **5-hour and weekly limits** is gone — the same percentages claude.ai's usage page shows, because they are Claude Code's own: it hands them to its status line, and `init` installs a status line that records them (wrapping yours, if you have one). Each window shows when it resets, how old the reading is, and its **pace** — the share used against the share of the window gone, so `0.6×` is on track and anything over `1×` will run out before the reset. With more than one subscription, each gets its own bars.
 
-![The usage lens: 5-hour and weekly windows against learned caps](docs/usage.svg)
+Every session reports the figure from its own last request, so an idle one reports an old number; within one window usage only climbs, so the highest figure is kept. Until any session has reported, the lens falls back to an **estimate** — this machine's transcript tokens against a cap learned from real rate-limit hits — and marks it `≈`.
+
+![The usage lens: Claude Code's own 5-hour and weekly figures, with their resets](docs/usage.svg)
 
 ## Several subscriptions
 
@@ -87,11 +89,11 @@ Every act the table offers is wired to the live session — the key hints show o
 
 - **`enter`** attach the tmux session at full fidelity (`Ctrl-\` to come back). Coming back **rechecks** rather than redraws: you have just spent minutes driving that session by hand, so the forge is read again instead of replayed from cache, and any session that died without getting a `SessionEnd` out stops being reported as working
 - **`y`** on a PR waiting to merge: `gh pr merge --squash --auto`, then mark live. Elsewhere it marks the record shipped, and it is hidden entirely when the dispatcher has produced no commits
-- **`x`** kill the session · **`s`** skip to the back of the table · **`ctrl+z`** undo
+- **`x`** kill the session — or, on a session you adopted, release it: the record lets go and your session keeps running · **`s`** skip to the back of the table · **`ctrl+z`** undo
 - **a dispatcher that finishes keeps its row.** It drops to a **finished** group at the bottom of the live table, marked ✓ with how it ended, and stays there until **`x`** dismisses it — which is a dismissal, not a kill, since there is nothing left to kill. Nothing takes a row off the table on your behalf: a dispatch that ends is a thing that happened, and a table that clears itself is a table that never told you
 - **`p`** park an ask you cannot answer right now — say why, and it drops to a **parked** group at the bottom of the fleet, out of the counts, with your reason on the row. `p` again brings it back, and so does answering it: the shelf clears itself the moment a prompt reaches the session. It survives reboots — a parked dispatcher whose session died resumes from its own row
 - **`d`** open the prompt · **`f`** filter the table · **`enter` on a backlog ticket** dispatches it
-- **`h`** the dispatchers you have dismissed, **newest-worked first**, and **`enter`** on one resumes its session — `claude --resume` on the same transcript, in the same worktree, so it comes back knowing what it already did. The order is when each was last *worked*, read from its own transcript, never when its record was last written: a finished record goes on being rewritten for the rest of its life by sweeps and forge reconciliation, and ordering by that puts whatever we last touched at the top
+- **`h`** the dispatchers that have ended and left the table, **newest-worked first**, and **`enter`** on one resumes its session — `claude --resume` on the same transcript, in the same worktree, so it comes back knowing what it already did. The order is when each was last *worked*, read from its own transcript, never when its record was last written: a finished record goes on being rewritten for the rest of its life by sweeps and forge reconciliation, and ordering by that puts whatever we last touched at the top
 
 ## Install
 
@@ -241,10 +243,31 @@ Press `,` in the cockpit (or `:settings`) to edit — written straight to `~/.co
 - **scan roots** — the directories scanned (3 levels deep) for git repos
 - **Linear API key** — turns on the Linear backlog source (or set `LINEAR_API_KEY`)
 - **Azure org / project** — turns on Azure Boards (needs the `az` CLI; or set `AZURE_DEVOPS_ORG` / `AZURE_DEVOPS_PROJECT`)
-- **weekly token budget** — optional; when set, the usage lens gauges against it, otherwise it shows learned caps and raw tokens
+- **branch prefix** — what every dispatch's branch starts with (`feature/` by default; blank is none). Either dispatch form can change it for one dispatch
 - **theme** — `system` (the default) follows your light/dark switch and repaints the moment it flips, even with the cockpit open; `light` or `dark` holds one. Enter cycles it. The switch is heard from the terminal where it reports one (ghostty, kitty, foot, and tmux 3.6+ relaying them), and otherwise read from the OS every couple of seconds
 
 Environment variables override file values, so a secret can stay out of the file.
+
+Everything else is in the file itself, and **`e`** on the settings screen (or `:config`) opens it in your `$VISUAL`/`$EDITOR`; the cockpit applies it when you close the editor. Each table is written with a comment saying what it is for, so the file explains itself — in brief:
+
+| key | what it does |
+|---|---|
+| `[products]` | which repos make up which product (the assignment editor writes it) |
+| `[root_branches]` | the branch a repo's new dispatches are cut from, when it is not origin's default — e.g. a repo whose work merges into `dev` |
+| `[checkouts]` | which checkout a repo's row reads from, for repos with several worktrees (`enter` in the editor's fold writes it) |
+| `[sockets]` | the tmux server a repo's sessions run on — by default the repo's own name, so each repo is its own server |
+| `[session_env]` | the command a repo's sessions start under; a repo with a `flake.nix` on a machine whose nix runs flakes gets `nix develop` without asking, and `repo = ""` turns that off |
+| `[gates]` | the one CI check that is a repo's verdict, e.g. an `All gates green` aggregator, instead of every check at once |
+| `[deploy_workflows]` | the workflow that means "deployed", when its name does not say so |
+| `[linear]` | a Linear token per product (below) |
+| `[accounts]` | extra Claude subscriptions (`claude-dispatcher account add`) |
+| `[keys]` | rebind any action `?` lists, by its id |
+| `worktrees` | `"project"` cuts dispatch checkouts beside a `<project>/.bare` layout's own instead of under the state directory |
+| `branch_prefix` | as in settings |
+| `shell` | the shell a pane drops to when claude exits (a full path); unset asks tmux |
+| `appearance_file` | a file holding `light` or `dark`, for desktops that publish their switch that way |
+
+Repos are always named the way the cockpit shows them — from the origin remote, which is not always the folder's name.
 
 ### Linear, per product
 
@@ -269,7 +292,7 @@ Adding an entry never takes anything away: `linear_api_key` keeps its own read a
 
 Unlike `linear_api_key`, these have no environment variable of their own — they live in the config file. `LINEAR_API_KEY` still overrides the unscoped one.
 
-**Products** are edited on the products lens (`2`, then `a`), which writes the table below for you. You can still group them by hand in `~/.config/claude-dispatcher/config.toml`, using each repo's directory name:
+**Products** are edited on the products lens (`2`, then `a`), which writes the table below for you. You can still group them by hand in `~/.config/claude-dispatcher/config.toml`, using each repo's name as the cockpit shows it:
 
 ```toml
 [products]
@@ -281,11 +304,14 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 
 ## How it works
 
-- Each dispatcher is an interactive `claude` session inside its own tmux session (`disp-<slug>`), started on a `feature/<slug>` branch. Sessions survive cockpit restarts; the cockpit is a stateless viewer over `~/.local/state/claude-dispatcher/`.
-- **The branch is cut from a branch that is actually there.** By default that is your repo's default branch as **origin** reports it — asked over the wire, not read from `refs/remotes/origin/HEAD`, which `git clone` writes once and no fetch ever updates: a repo that has since renamed or retired its default keeps naming the branch it left behind, and forking that either kills the launch or quietly puts a whole session's work on top of a dead branch. **ROOT** on either dispatch form overrides it — stack on another feature, or cut a fix from a release branch — and a name that is not a branch is refused by name rather than swapped for something else. The detail panel says what each dispatcher was cut from.
+- Each dispatcher is an interactive `claude` session inside its own tmux session (`disp-<slug>`), started on a `feature/<slug>` branch (the prefix is a setting) in a worktree of its own. Sessions survive cockpit restarts; the cockpit is a stateless viewer over `~/.local/state/claude-dispatcher/`.
+- **Each repo is its own tmux server** (`tmux -L <repo>`), because a tmux pane takes its environment from whoever asked for it: one server per repo keeps that repo's toolchain in front of every pane you open there. So `tmux ls` on its own no longer lists dispatch sessions — `tmux -L <repo> ls` does. A repo with a `flake.nix`, on a machine whose nix runs flakes, starts its sessions under `nix develop`.
+- **Your own sessions are on the product panel** (`Y`): tmux sessions you started yourself in these repos, found by looking where tmux keeps its servers. `enter` jumps in, and `A` adopts one: a dispatcher record is wrapped around it, nothing about the session changes, and it starts reporting from its next hook. `x` on an adopted dispatcher releases it rather than killing it.
+- **The branch is cut from a branch that is actually there.** By default that is your repo's default branch as **origin** reports it — asked over the wire, not read from `refs/remotes/origin/HEAD`, which `git clone` writes once and no fetch ever updates: a repo that has since renamed or retired its default keeps naming the branch it left behind, and forking that either kills the launch or quietly puts a whole session's work on top of a dead branch. A repo whose work goes somewhere else — merged into `dev`, say — names that branch in `[root_branches]`, and pinning a checkout in the assignment editor writes it for you. **ROOT** on either dispatch form overrides both — stack on another feature, or cut a fix from a release branch — and a name that is not a branch is refused by name rather than swapped for something else. The detail panel says what each dispatcher was cut from.
 - Status comes from **one** global Claude Code lifecycle hook (installed by `init` into `~/.claude/settings.json`). It maps events to states: working, needs you, blocked, done, exited.
 - **Fan-outs are visible.** When a session spins out subagents, the same hooks report each one starting and stopping. The dispatcher's row says `fan-out · 3 live` beside its CI signal while they run; the detail panel counts the turn (`fanned out 12 subagents` once they are home) and names the agent types. Installed with the other hooks; existing installs re-run `init` to get it.
 - **A waiting row says what it wants.** When a dispatcher stops, the row quotes the question its last message closed on — "Want me to merge it?", "Say the word and I'll…" — taken whole from the `Stop` hook, not the first line of the transcript. `r` answers it in one line without attaching; a permission prompt and a question asked through the question tool are both menus, and still take `enter`.
+- **A session stuck before it starts says so.** No hook fires until a session has started, so one sitting on a startup dialog — trusting the folder, a login — used to read *starting session* for good. A launch that has said nothing for 20 seconds goes to the top as *answer its startup prompt*, and `enter` takes you to it. A dispatch's worktree inherits its repo's trust, so this is rare; when the launch could not copy that trust, the row says it is the trust prompt.
 - **A question is a wait.** A session that asks through Claude Code's question tool has not ended its turn, is not idle at the prompt and is not asking permission, so none of the hooks above fire — a dispatcher sat on a four-option menu while the table read `0 want you · 1 running clean`, its background agent's `SubagentStop`s arriving every 32 seconds and reading as progress. The `PreToolUse` hook on `AskUserQuestion` reports it now and the row goes *blocked*, saying what it wants and sending you in to answer it. Existing installs re-run `init` to get the hook.
 - **An API error is not a stall.** A turn an API error ended used to fire nothing, so the row said *working* over a session sitting idle. The `StopFailure` hook reports it now, and a transient one (overloaded, server error) is retried with `continue` on a 1m/5m/15m backoff from the cockpit's poll — the row says `api error · overloaded · retry 1 of 3 in 40s` meanwhile. A usage limit, credential or billing error is yours, and the row says which. Existing installs re-run `init` to get the hook.
 - **Every dispatch closes with its mode's working contract** — how far to take the work, to wait on CI or a deploy with a background task or `Monitor` rather than ending the turn, to take the next step the brief implies instead of offering it, and to stop only for a decision that is yours, ending on that one question.
@@ -305,10 +331,14 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `1`–`6` | switch lens (triage · products · backlog · usage · decisions · velocity) |
 | `+` | dispatch new work — repo → feature → root → mode → model → account → fan out → prompt |
 | `j` / `k` · `g` / `G` | move · first row · last row |
-| `f` | cycle the triage filter (all · wants you · needs a look · running · history) |
-| `h` | history — every dispatcher you have dismissed, newest-worked first; `enter` resumes one |
+| `f` | cycle the triage filter (all · wants you · running · history) |
+| `h` | history — every dispatcher that has ended and left the table, newest-worked first; `enter` resumes one |
 | `enter` | attach the selected dispatcher's tmux session · open what is selected |
-| `y` · `x` · `s` | ship (squash-merge) · kill — dismiss, on a finished row · skip to the back |
+| `y` · `x` · `s` | ship (squash-merge) · kill — dismiss, on a finished row; release, on an adopted one · skip to the back |
+| `o` | open the selected dispatcher's pull request |
+| `/` · `n` · `ctrl+n` | search the list in front of you (fzf matching, lit in place) · next match · previous match |
+| `O` `R` `T` `S` `H` `Y` | in a product's panel: overview · review · team · shipped · history · your own sessions |
+| `space` · `A` | in your sessions: mark one · adopt it (or every marked one) as a dispatcher; it keeps running |
 | `r` | reply — type one line into a waiting dispatcher's session, without attaching |
 | `t` | steward on/off — it answers what each brief settles and notes the rest on your rows |
 | `p` | park an ask with a reason · on a parked row, take it back up |
@@ -316,6 +346,25 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `,` · `:` · `?` | settings · command palette · all keys |
 | `U` | upgrade to the published build — runs behind the cockpit, then comes straight back on the new build |
 | `q` | quit |
+
+To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key already taken on the same screen (or one a global key holds), an id that is not an action, or `ctrl+c` is refused at startup by name.
+
+<details>
+<summary>Action ids</summary>
+
+| screen | ids |
+|---|---|
+| anywhere | `quit` `help` `palette` `settings` `dispatch.new` `upgrade` `undo` `redraw` (`quit.now`, ctrl+c, is fixed) |
+| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` |
+| products | `products.down` `products.up` `products.open` `products.assign` `products.new` `search.open` |
+| assignment editor | `editor.down` `editor.up` `editor.close` `editor.pane` `editor.mark` `editor.move` `editor.linear` `editor.unassign` `editor.reset` `editor.where` `editor.server` |
+| an unfolded row | `fold.down` `fold.up` `fold.pick` `fold.leave` |
+| product panel | `panel.overview` `panel.review` `panel.team` `panel.shipped` `panel.history` `panel.sessions` `sessions.mark` `sessions.adopt` |
+| settings | `settings.edit` |
+| search | `search.next` `search.prev` `search.clear` |
+| backlog · decisions | `list.down` `list.up` `list.open` `list.pick` `list.dispatch` |
+
+</details>
 
 
 ## Development
@@ -352,7 +401,8 @@ Each publisher's `skip_upload` is templated on its token, so an unset token mean
 
 ## Troubleshooting
 
-- **Everything stuck on "launching"** — the hook isn't firing. Re-run `claude-dispatcher init`; confirm `~/.claude/settings.json` points at the installed binary.
+- **Every new dispatch asks you to "answer its startup prompt"** (or, on an older build, sits at *starting session*) — the hook isn't firing, so no session ever reports that it started. Re-run `claude-dispatcher init`; confirm `~/.claude/settings.json` points at the installed binary. If it is only one dispatch, attach: it is usually Claude Code asking whether to trust the folder.
+- **A repo's dispatches die at once with a `nix develop` error** — its `flake.nix` has no dev shell, or not one these sessions should use. `[session_env]` with `repo = ""` turns it off for that repo.
 - **`SessionStart:startup hook error … .claude-dispatcher-wrapped: No such file or directory`** — the hook names a `/nix/store` build that has been garbage-collected (older releases pinned it there). Re-run `claude-dispatcher init`: it repoints every dispatcher hook at the path you invoked it through and removes the duplicates earlier installs left behind, without touching anyone else's hooks.
 - **`needs you` vs `blocked` lag** — those rely on the `Notification` hook matchers (`idle_prompt` / `permission_prompt`); `Stop` covers turn completion regardless.
 - **Backlog empty** — set a Linear key / Azure org in settings, and check `gh auth status` for GitHub Issues. One product's Linear tickets missing is usually the scope of its own token: a key granted only some of that workspace's teams returns nothing for the rest, rather than an error.
