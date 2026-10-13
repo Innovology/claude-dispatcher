@@ -37,12 +37,18 @@ func TestAPaneLandsInTheServersOwnShell(t *testing.T) {
 	if err := supervisor.NewSession(sess, t.TempDir(), line, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	time.Sleep(400 * time.Millisecond)
-
 	want := filepath.Base(strings.TrimSpace(tmuxOut(t, sock, "show", "-gv", "default-shell")))
-	got := strings.TrimPrefix(strings.TrimSpace(tmuxOut(t, sock, "display", "-p", "-t", "s", "#{pane_current_command}")), "-")
 	if want == "" {
 		t.Skip("this tmux reports no default-shell")
+	}
+	// Polled rather than slept on: the pane runs `true`, then the tail, then
+	// execs the shell, and a loaded machine takes its time over all three.
+	var got string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		got = strings.TrimPrefix(strings.TrimSpace(tmuxOut(t, sock, "display", "-p", "-t", "s", "#{pane_current_command}")), "-")
+		if got == want {
+			break
+		}
 	}
 	t.Logf("this machine's tmux launches panes with %q", want)
 	if got != want {
@@ -54,8 +60,15 @@ func TestAPaneLandsInTheServersOwnShell(t *testing.T) {
 		t.Error("the session ended instead of dropping to a shell")
 	}
 	// Idle, so the name can be reclaimed and Resume can reopen it — including
-	// when that shell is one no list names.
-	if idle, known := supervisor.SessionIdle(sess); !idle || !known {
+	// when that shell is one no list names. A shell that has just started may
+	// still be running its own startup children, so idle is waited for too.
+	var idle, known bool
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if idle, known = supervisor.SessionIdle(sess); idle && known {
+			break
+		}
+	}
+	if !idle || !known {
 		t.Errorf("the finished pane reads idle=%v known=%v, want idle", idle, known)
 	}
 }

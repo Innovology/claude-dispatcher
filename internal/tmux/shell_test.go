@@ -75,9 +75,8 @@ func TestAnUnknownPaneAsksTheServerWhatItsShellIs(t *testing.T) {
 	if out, err := srv.cmd("new-session", "-d", "-s", "s", "-c", tmp, "--", fake).CombinedOutput(); err != nil {
 		t.Fatalf("new-session: %v: %s", err, out)
 	}
-	time.Sleep(300 * time.Millisecond)
-
-	idle, known := srv.SessionIdle("s")
+	var idle, known bool
+	eventually(t, func() bool { idle, known = srv.SessionIdle("s"); return idle && known })
 	if !known {
 		t.Fatal("the session could not be read at all")
 	}
@@ -103,8 +102,24 @@ func TestARunningCommandIsStillBusy(t *testing.T) {
 	if err := srv.NewSession("s", t.TempDir(), "sleep 30", ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	time.Sleep(300 * time.Millisecond)
-	if idle, known := srv.SessionIdle("s"); idle || !known {
+	// Until the shell has started sleep, the pane is a shell with nothing under
+	// it, which is idle. Busy has to arrive, and a pane that never reads busy is
+	// the yes-machine.
+	var idle, known bool
+	if !eventually(t, func() bool { idle, known = srv.SessionIdle("s"); return !idle && known }) {
 		t.Errorf("a pane running sleep read as idle=%v known=%v", idle, known)
 	}
+}
+
+// eventually polls cond until it holds or a few seconds pass, and says which.
+// A live tmux test waits for the state it is about to assert rather than for
+// a fixed time, which a loaded CI runner can outlast.
+func eventually(t *testing.T, cond func() bool) bool {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if cond() {
+			return true
+		}
+	}
+	return cond()
 }

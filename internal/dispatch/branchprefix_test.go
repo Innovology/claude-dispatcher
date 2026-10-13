@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"claude-dispatcher/internal/repos"
-	"claude-dispatcher/internal/supervisor"
 )
 
 func strptr(s string) *string { return &s }
@@ -43,11 +42,7 @@ func TestWorktreeAndBranchCanCarryTheSameName(t *testing.T) {
 	repo := initRepo(t)
 	project := t.TempDir()
 
-	prevNew, prevUniq, prevAlive := newSession, uniqueName, sessionAlive
-	newSession = func(supervisor.Session, string, string, string) error { return nil }
-	uniqueName = func(s supervisor.Session) string { return s.Name }
-	sessionAlive = func(supervisor.Session) bool { return false }
-	t.Cleanup(func() { newSession, uniqueName, sessionAlive = prevNew, prevUniq, prevAlive })
+	stubLaunch(t)
 
 	d, err := Launch(repos.Repo{
 		Name: "player-app", Path: repo,

@@ -127,9 +127,9 @@ func TestClFoldRendersPathAndCheckouts(t *testing.T) {
 	}
 }
 
-// A folded row is one line, as it always was. The fold is opt-in per repo and
-// must not cost a portfolio that never presses p.
-func TestClFoldedRowIsUnchanged(t *testing.T) {
+// Unfolding adds the fold's lines under the row and nothing else, and a repo
+// that is one directory has no checkouts line to count.
+func TestClUnfoldingAddsTheFold(t *testing.T) {
 	m := clFoldFixture(t)
 	before := len(m.clLeft(120, 40))
 	m.clExpanded = map[string]bool{"ordain": true}
@@ -137,8 +137,8 @@ func TestClFoldedRowIsUnchanged(t *testing.T) {
 	if after <= before {
 		t.Errorf("unfolding should add lines, got %d then %d", before, after)
 	}
-	// A single-checkout repo unfolds to its path and nothing else: there is no
-	// "1 checkouts" line to be said about a repo that is one directory.
+	// There is no "1 checkouts" line to be said about a repo that is one
+	// directory.
 	body := strings.Join(m.clLeft(120, 40), "\n")
 	if strings.Contains(body, "checkouts") {
 		t.Errorf("a single-checkout repo should not count its checkouts:\n%s", body)

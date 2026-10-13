@@ -9,7 +9,6 @@ import (
 
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
-	"claude-dispatcher/internal/supervisor"
 )
 
 // A repo that names a project folder gets its dispatch checkout beside the
@@ -43,11 +42,7 @@ func TestLaunchRecordsTheProjectSideWorktree(t *testing.T) {
 	// repo rather than inside it.
 	project := t.TempDir()
 
-	prevNew, prevUniq, prevAlive := newSession, uniqueName, sessionAlive
-	newSession = func(supervisor.Session, string, string, string) error { return nil }
-	uniqueName = func(s supervisor.Session) string { return s.Name }
-	sessionAlive = func(supervisor.Session) bool { return false }
-	t.Cleanup(func() { newSession, uniqueName, sessionAlive = prevNew, prevUniq, prevAlive })
+	stubLaunch(t)
 
 	d, err := Launch(repos.Repo{Name: "player-app", Path: repo, WorktreeRoot: project},
 		"dispatch test 2", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)

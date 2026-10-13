@@ -14,6 +14,7 @@ package fuzzy
 // without the binary, so its absence is not a failure.
 
 import (
+	"os"
 	"os/exec"
 	"runtime/debug"
 	"strings"
@@ -42,12 +43,19 @@ func installedFzfVersion() string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(strings.Fields(string(out))[0])
+	f := strings.Fields(string(out))
+	if len(f) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(f[0])
 }
 
 func fzfOrder(t *testing.T, query string, candidates []string) []string {
 	t.Helper()
 	cmd := exec.Command("fzf", "-f", query)
+	// Without the developer's own defaults: --exact, --tiebreak or --scheme in
+	// there change the ranking, and the comparison is of the matchers.
+	cmd.Env = withoutFzfDefaults(os.Environ())
 	cmd.Stdin = strings.NewReader(strings.Join(candidates, "\n") + "\n")
 	out, err := cmd.Output()
 	if err != nil {
@@ -118,4 +126,16 @@ func TestMatchesTheRealFzf(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withoutFzfDefaults is env minus the variables fzf reads its defaults from.
+func withoutFzfDefaults(env []string) []string {
+	var out []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "FZF_DEFAULT_OPTS=") || strings.HasPrefix(kv, "FZF_DEFAULT_OPTS_FILE=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }

@@ -75,25 +75,21 @@ func TestRebindLeavesTheOtherKeysAlone(t *testing.T) {
 // `?` is where someone goes to find out what their keys are, so it is built
 // from the keymap rather than written beside it.
 func TestHelpSheetShowsTheLiveBindings(t *testing.T) {
-	def := keymapFixture(t, nil)
-	body := strings.Join(sectionKeys(def.helpSections(), "products · lens 2"), "|")
-	if !strings.Contains(body, "p") {
-		t.Errorf("the default sheet should show p for the fold:\n%s", body)
-	}
-
-	re := keymapFixture(t, map[string]string{"editor.where": "w"})
-	rebound := def2Rows(re, "products · lens 2")
-	var found bool
-	for _, r := range rebound {
-		if r.k == "w" && strings.Contains(r.d, "unfold") {
-			found = true
+	// The fold's row, by what it says rather than by a letter that appears in
+	// half the keys on the sheet.
+	foldKey := func(m model) string {
+		for _, r := range sectionRows(m, "products · lens 2") {
+			if strings.Contains(r.d, "unfold") {
+				return r.k
+			}
 		}
-		if r.k == "p" && strings.Contains(r.d, "unfold") {
-			t.Errorf("the sheet still shows the old key: %+v", r)
-		}
+		return ""
 	}
-	if !found {
-		t.Errorf("the sheet should show the rebound key, got %+v", rebound)
+	if got := foldKey(keymapFixture(t, nil)); got != "p" {
+		t.Errorf("the default sheet shows %q for the fold, want p", got)
+	}
+	if got := foldKey(keymapFixture(t, map[string]string{"editor.where": "w"})); got != "w" {
+		t.Errorf("the sheet shows %q for the rebound fold, want w", got)
 	}
 }
 
@@ -117,20 +113,8 @@ func TestEveryDocumentedBindingIsOnTheSheet(t *testing.T) {
 	}
 }
 
-func sectionKeys(secs []helpSection, name string) []string {
-	var out []string
-	for _, s := range secs {
-		if s.section != name {
-			continue
-		}
-		for _, r := range s.keys {
-			out = append(out, r.k)
-		}
-	}
-	return out
-}
-
-func def2Rows(m model, name string) []helpRow {
+// sectionRows is one section of m's help sheet.
+func sectionRows(m model, name string) []helpRow {
 	for _, s := range m.helpSections() {
 		if s.section == name {
 			return s.keys

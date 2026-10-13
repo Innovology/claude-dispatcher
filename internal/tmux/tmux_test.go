@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -246,7 +245,9 @@ func TestALaunchDoesNotRideTheHumansDefaultShell(t *testing.T) {
 	if err := srv.NewSession("s", tmp, `X="posix only"; sleep 30; exec ${SHELL:-/bin/sh}`, ""); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	// The pane running its sleep is the session having survived its start; a
+	// line handed to the refusing shell never gets that far.
+	eventually(t, func() bool { idle, known := srv.SessionIdle("s"); return known && !idle })
 	if !srv.HasSession("s") {
 		t.Fatal("the session died: its command went through the server's default-shell")
 	}

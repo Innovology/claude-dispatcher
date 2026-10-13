@@ -71,16 +71,10 @@ func TestLaunchStampsTheSessionOnlyOnceItStarted(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 			repo := initRepo(t)
-			prevNew, prevUniq, prevAlive := newSession, uniqueName, sessionAlive
-			newSession = func(supervisor.Session, string, string, string) error {
-				if tc.fail {
-					return os.ErrPermission
-				}
-				return nil
+			stubLaunch(t)
+			if tc.fail {
+				newSession = func(supervisor.Session, string, string, string) error { return os.ErrPermission }
 			}
-			uniqueName = func(s supervisor.Session) string { return s.Name }
-			sessionAlive = func(supervisor.Session) bool { return false }
-			t.Cleanup(func() { newSession, uniqueName, sessionAlive = prevNew, prevUniq, prevAlive })
 
 			d, _ := Launch(repos.Repo{Name: "acme", Path: repo}, "stamp", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
 			if d == nil {
