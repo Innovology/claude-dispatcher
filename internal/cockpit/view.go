@@ -104,7 +104,17 @@ func (m model) headerView() string {
 		parts = append(parts, fg(cAmber, s))
 	}
 	if w := weekWindow(); w != nil {
-		parts = append(parts, fg(cFaint, "week ")+fg(usageBandColor(w.pace), itoa(w.used)+"%")+fg(cFaint, " · resets "+usageResetDay()))
+		fig := itoa(w.used) + "%"
+		if !w.measured {
+			fig = "≈" + fig
+		}
+		clause := fg(cFaint, "week ") + fg(usageBandColor(w.pace), fig)
+		// Only a reported window knows when it resets; the estimate's week is
+		// trailing and has no such day.
+		if !w.resets.IsZero() {
+			clause += fg(cFaint, " · resets "+strings.ToLower(w.resets.Local().Format("Mon")))
+		}
+		parts = append(parts, clause)
 	}
 	parts = append(parts, fg(cFaint, fitv.cols+" · "+nowHHMM()))
 
@@ -325,11 +335,6 @@ func usageBandColor(pace float64) string {
 		return cAmber
 	}
 	return cMid
-}
-
-// usageResetDay names the weekday the weekly window rolls over on.
-func usageResetDay() string {
-	return strings.ToLower(time.Now().Add(7 * 24 * time.Hour).Format("Mon"))
 }
 
 // nowHHMM is the wall clock in the header.

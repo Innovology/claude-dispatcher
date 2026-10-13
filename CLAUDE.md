@@ -913,6 +913,24 @@
   **dir**, because the transcript is there. Trust is inherited into the
   account's own `.claude.json`. Full record:
   `docs/adr/0022-a-subscription-is-a-config-directory.md`.
+  - **The usage lens shows those figures, and a reading only goes forward.**
+    The lens drew its bars from the transcript learner, while the forms already
+    had Claude Code's own numbers. Measured on one Max login, the lens said 77%
+    and 88% when claude.ai said 45% and 33%. The learner's denominator is the
+    largest window it has ever seen, and while it is "learning" that is not a
+    limit. Its header also named a reset day that was only ever today's weekday.
+    The bars are now the recorded reading for each account, with the window's
+    real reset and a pace (used share against elapsed share, unset for the
+    window's first tenth). The learner is the fallback only where no session
+    has reported, marked `≈` and given no reset day, since a trailing window
+    has none.
+    The reading itself flipped too. Every session draws its status line from
+    its own last response, so an idle one reports an older figure. One 5-hour
+    window logged 21%, 44%, 45% and 46% within five minutes, the file holding
+    whichever session redrew last. Within one `resets_at` usage only climbs, so
+    `mergeWindow` keeps the higher figure. A later `resets_at` starts the next
+    window. An earlier one is a stale session and changes nothing, not even
+    the reading's age.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main

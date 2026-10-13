@@ -92,10 +92,10 @@ func ReadLimits(stateDir, configDir string) (Limits, bool) {
 // minute; the age shown beside a figure does not need that resolution.
 const rewriteAfter = time.Minute
 
-// RecordStatusLine takes the JSON a status line command was handed and keeps
-// its rate limits as configDir's latest reading. A payload without them —
-// before the session's first response, or an API-key login that has none — is
-// not a reading and leaves the last one in place.
+// RecordStatusLine takes the JSON a status line command was handed and folds
+// its rate limits into configDir's reading (mergeWindow says how). A payload
+// without them — before the session's first response, or an API-key login that
+// has none — is not a reading and leaves the last one in place.
 func RecordStatusLine(stateDir, configDir string, payload []byte, now time.Time) error {
 	var in struct {
 		RateLimits struct {
@@ -111,10 +111,18 @@ func RecordStatusLine(stateDir, configDir string, payload []byte, now time.Time)
 	}
 	next := Limits{ConfigDir: filepath.Clean(configDir), FiveHour: in.RateLimits.FiveHour,
 		SevenDay: in.RateLimits.SevenDay, At: now}
-	if prev, ok := ReadLimits(stateDir, configDir); ok &&
-		sameWindow(prev.FiveHour, next.FiveHour) && sameWindow(prev.SevenDay, next.SevenDay) &&
-		now.Sub(prev.At) < rewriteAfter {
-		return nil
+	if prev, ok := ReadLimits(stateDir, configDir); ok {
+		five, fiveCurrent := mergeWindow(prev.FiveHour, next.FiveHour)
+		seven, sevenCurrent := mergeWindow(prev.SevenDay, next.SevenDay)
+		next.FiveHour, next.SevenDay = five, seven
+		if sameWindow(prev.FiveHour, five) && sameWindow(prev.SevenDay, seven) {
+			// Nothing new. A payload that confirms the kept figure moves its
+			// age, now and then; a stale one says nothing about the present
+			// and leaves the age where the last real reading put it.
+			if !fiveCurrent || !sevenCurrent || now.Sub(prev.At) < rewriteAfter {
+				return nil
+			}
+		}
 	}
 	out, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
@@ -146,6 +154,29 @@ func sameWindow(a, b *Window) bool {
 		return a == b
 	}
 	return *a == *b
+}
+
+// mergeWindow is what one session's figure for a window adds to the one kept,
+// and whether that figure is current — the newest thing known about the window.
+//
+// Every session of an account draws its status line with the figures from its
+// OWN last API response, so a session idle since the morning goes on reporting
+// the morning beside a busy one reporting this minute. Kept last-writer-wins,
+// the reading flipped with whichever redrew last: measured, 21% and 45% of one
+// 5-hour window a second apart, with claude.ai saying 45. Within a window usage
+// only climbs, so of two figures for the same window (one resets_at) the higher
+// is the later; a later resets_at is the next window and replaces it; an
+// earlier one is a session still reporting a window that has rolled over.
+func mergeWindow(prev, next *Window) (*Window, bool) {
+	switch {
+	case next == nil:
+		return prev, true // the payload says nothing about this window
+	case prev == nil, next.ResetsAt > prev.ResetsAt:
+		return next, true
+	case next.ResetsAt == prev.ResetsAt && next.UsedPct >= prev.UsedPct:
+		return next, true
+	}
+	return prev, false
 }
 
 // Brief is a reading as one short phrase — "5h 77% · wk 59% left" — or ""

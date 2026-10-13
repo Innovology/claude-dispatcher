@@ -1,6 +1,7 @@
 package account
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,6 +55,53 @@ func TestAPayloadWithoutLimitsKeepsTheLastReading(t *testing.T) {
 	}
 	if l, ok := ReadLimits(st, cd); !ok || !l.At.Equal(now) {
 		t.Fatalf("reading = %+v %v, want the first one kept", l, ok)
+	}
+}
+
+// Every session of an account draws its status line from its own last
+// response, so an idle one reports an old figure beside a busy one reporting
+// the present. Measured on one machine: 21% and 45% of the same window a second
+// apart, the file holding whichever redrew last. Within a window usage only
+// climbs, so the higher figure is kept, and a stale one moves nothing — not
+// even the reading's age.
+func TestAnIdleSessionCannotLowerTheReading(t *testing.T) {
+	st, cd := t.TempDir(), "/x"
+	now := time.Unix(1791890000, 0)
+	payload := func(five, seven int, fiveResets int64) []byte {
+		return []byte(fmt.Sprintf(`{"rate_limits":{"five_hour":{"used_percentage":%d,"resets_at":%d},`+
+			`"seven_day":{"used_percentage":%d,"resets_at":1792051200}}}`, five, fiveResets, seven))
+	}
+	read := func() Limits {
+		t.Helper()
+		l, ok := ReadLimits(st, cd)
+		if !ok {
+			t.Fatal("no reading")
+		}
+		return l
+	}
+
+	_ = RecordStatusLine(st, cd, payload(45, 33, 1791900600), now)
+	_ = RecordStatusLine(st, cd, payload(21, 26, 1791900600), now.Add(2*time.Minute))
+	if l := read(); l.FiveHour.UsedPct != 45 || l.SevenDay.UsedPct != 33 || !l.At.Equal(now) {
+		t.Fatalf("after a stale redraw: %+v %+v at %v, want 45/33 kept at its own age", *l.FiveHour, *l.SevenDay, l.At)
+	}
+
+	// The busy session confirms its figure: the age moves.
+	later := now.Add(3 * time.Minute)
+	_ = RecordStatusLine(st, cd, payload(45, 33, 1791900600), later)
+	if l := read(); !l.At.Equal(later) {
+		t.Errorf("a confirming reading left the age at %v", l.At)
+	}
+
+	// The next 5-hour window replaces the old one, starting from its own figure.
+	_ = RecordStatusLine(st, cd, payload(2, 34, 1791918600), later.Add(time.Hour))
+	if l := read(); l.FiveHour.UsedPct != 2 || l.FiveHour.ResetsAt != 1791918600 || l.SevenDay.UsedPct != 34 {
+		t.Errorf("a new window = %+v %+v", *l.FiveHour, *l.SevenDay)
+	}
+	// And a session still reporting the window that rolled over changes nothing.
+	_ = RecordStatusLine(st, cd, payload(45, 33, 1791900600), later.Add(2*time.Hour))
+	if l := read(); l.FiveHour.UsedPct != 2 || l.SevenDay.UsedPct != 34 {
+		t.Errorf("a finished window came back: %+v %+v", *l.FiveHour, *l.SevenDay)
 	}
 }
 
