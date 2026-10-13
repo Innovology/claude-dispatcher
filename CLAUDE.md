@@ -289,6 +289,25 @@
   `supervisor.AttachSwitches`), the recheck waits for the terminal focus
   event instead. Focus alone never triggers it: a full forge re-read on every
   alt-tab is how the gh quota gets burned.
+- **A load costs its slowest chain, not the sum of its calls.** Nearly all of
+  a load is waiting — on GitHub, 0.3s a round trip and over a second a
+  search, and on the week's transcripts — and measured on a 27-repo
+  portfolio the opening screen took about 28s cold, 19 of them on PRODUCTS
+  asking each repo for its deploy workflow one after another; every record
+  change paid a load again before the screen moved. So: the **collectors run
+  at once** (each writes only its own fields of the snapshot, and velocity,
+  the one reader across them, waits on the products and the effort figures);
+  inside a stage, **independent forge reads go together**
+  (`warmProductForge`, a PR's checks beside its review); **usage reads each
+  transcript once**, then only what was appended (transcripts are
+  append-only, and a line holding neither `"usage"` nor
+  `"isApiErrorMessage"` is skipped before decoding — escaped inside strings,
+  those appear literally only as keys); and **what SettledTTL holds survives
+  a restart** (`gh-settled.json` in the state dir, never longer than the TTL,
+  gone with `InvalidateCache`). Measured: 3.7s for a first launch, 0.22s for
+  every refresh after it. The floor is GitHub's own search time, about 1.2s;
+  going under it would mean painting the last launch's answers, which this
+  does not do.
 - **The forge bill counts repositories, not pull requests — and stops when
   GitHub says stop.** Measured, one idle cockpit spent 5,409 GraphQL requests
   an hour against a limit of 5,000: it exhausted the quota by itself and took
