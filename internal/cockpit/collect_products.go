@@ -451,13 +451,9 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 	}
 }
 
-// ---- helpers (prod-prefixed to avoid collisions) ---------------------------
-
-// prodLiveAt returns when a record went live: its deploy time, else the PR
-// merge time.
 // warmProductForge asks the forge everything collectProducts will ask, at once,
 // and returns the two searches it needs by value; the per-repo answers land in
-// gh's cache, where the loops below find them.
+// gh's cache, where collectProducts' loops find them.
 //
 // The stage was 19 seconds on the opening screen of a 27-repo portfolio, and
 // measured it was nearly all waiting on gh one call at a time: a deploy lookup
@@ -509,6 +505,10 @@ func warmProductForge(ctx *collectCtx, discByName map[string]repos.Repo, ghUp bo
 	return openPRs, merged
 }
 
+// ---- helpers (prod-prefixed to avoid collisions) ---------------------------
+
+// prodLiveAt returns when a record went live: its deploy time, else the PR
+// merge time.
 func prodLiveAt(rec *state.Dispatch) (time.Time, bool) {
 	if rec.DeployedAt != nil {
 		return *rec.DeployedAt, true

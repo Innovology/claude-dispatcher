@@ -154,3 +154,19 @@ func TestScanReadsOnlyWhatWasAppended(t *testing.T) {
 		t.Errorf("a file that shrank = %d, want 7, read from the start", w.wkTotal)
 	}
 }
+
+// The figure a window is measured against: the learned cap once there is one,
+// the high-water mark while learning, and a percentage only against a cap.
+func TestStatMeasuresAgainstItsCap(t *testing.T) {
+	learning := Stat{Total: 30, HighWater: 60}
+	if learning.Denom() != 60 || learning.Pct() != -1 {
+		t.Errorf("while learning: denom %d pct %d, want 60 and -1", learning.Denom(), learning.Pct())
+	}
+	capped := Stat{Total: 30, Cap: 120, HighWater: 60}
+	if capped.Denom() != 120 || capped.Pct() != 25 {
+		t.Errorf("with a cap: denom %d pct %d, want 120 and 25", capped.Denom(), capped.Pct())
+	}
+	if over := (Stat{Total: 300, Cap: 120}); over.Pct() != 100 {
+		t.Errorf("past the cap reads %d%%, want 100", over.Pct())
+	}
+}

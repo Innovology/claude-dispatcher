@@ -233,10 +233,3 @@ func parseUse(line []byte) (use, bool) {
 	}
 	return use{at: ts, model: bucket(l.Message.Model), tok: tok, session: l.SessionID}, true
 }
-
-// forgetScans drops every remembered reading, as a fresh process starts.
-func forgetScans() {
-	scanMu.Lock()
-	scans = map[string]*fileScan{}
-	scanMu.Unlock()
-}
