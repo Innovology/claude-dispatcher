@@ -16,8 +16,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/repos"
@@ -48,25 +46,6 @@ func seedGitRepo(t *testing.T, name string, branches ...string) (root, repoPath 
 	return root, repoPath
 }
 
-// captureLaunch replaces the seam both forms hand off through and returns a
-// pointer to what the next dispatch is asked to cut from.
-func captureLaunch(t *testing.T) *dispatchpkg.Root {
-	t.Helper()
-	var got dispatchpkg.Root
-	prev := launchDispatch
-	launchDispatch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, root dispatchpkg.Root, _ *string, _ bool, _ string) tea.Cmd {
-		got = root
-		// A real cmd, because "did it dispatch" is read off the returned
-		// command: a stub returning nil would make every rejected submit look
-		// like every accepted one.
-		return func() tea.Msg { return nil }
-	}
-	dxPrev := dxLaunch
-	dxLaunch = launchDispatch
-	t.Cleanup(func() { launchDispatch, dxLaunch = prev, dxPrev })
-	return &got
-}
-
 // The `+` overlay's ROOT step offers the repo's branches, and the branch picked
 // there is the one the launch is asked for.
 func TestDispatchFormRootReachesTheLaunch(t *testing.T) {
@@ -76,7 +55,7 @@ func TestDispatchFormRootReachesTheLaunch(t *testing.T) {
 	m.cfg = &config.Config{Roots: []string{root}}
 	m.lens = "products" // '+' is swallowed by the triage lens
 
-	got := captureLaunch(t)
+	got := captureLaunches(t)
 
 	m = press(m, "+")
 	m = press(m, "enter") // the only repo
@@ -107,8 +86,8 @@ func TestDispatchFormRootReachesTheLaunch(t *testing.T) {
 	next, _ := m.handleKey("enter")
 	m = next.(model)
 
-	if *got != dispatchpkg.Root("release/24") {
-		t.Errorf("the launch was asked to cut from %q, want release/24", *got)
+	if got.root != dispatchpkg.Root("release/24") {
+		t.Errorf("the launch was asked to cut from %q, want release/24", got.root)
 	}
 	if !strings.Contains(m.notice, "release/24") {
 		t.Errorf("notice = %q — it does not say what the dispatch was cut from", m.notice)
@@ -126,7 +105,7 @@ func TestDispatchFormDefaultRootNamesNoBranch(t *testing.T) {
 	m.cfg = &config.Config{Roots: []string{root}}
 	m.lens = "products"
 
-	got := captureLaunch(t)
+	got := captureLaunches(t)
 
 	m = press(m, "+")
 	m = press(m, "enter")
@@ -142,8 +121,8 @@ func TestDispatchFormDefaultRootNamesNoBranch(t *testing.T) {
 	next, _ := m.handleKey("enter")
 	m = next.(model)
 
-	if !got.IsDefault() {
-		t.Errorf("the launch was asked to cut from %q, want the default", *got)
+	if !got.root.IsDefault() {
+		t.Errorf("the launch was asked to cut from %q, want the default", got.root)
 	}
 	if strings.Contains(m.notice, "from ") {
 		t.Errorf("notice = %q — the default names no branch until the launch asks origin", m.notice)
@@ -200,19 +179,19 @@ func TestDispatchFormRootResetsWithTheRepo(t *testing.T) {
 
 // The dx form's ROOT is typed, and what is typed reaches the launch.
 func TestDXSubmitPassesTheRoot(t *testing.T) {
-	got := captureLaunch(t)
+	got := captureLaunches(t)
 
 	m := dxFormModel(t)
 	m.dxTitle, m.dxWhat, m.dxRoot = "payment retries", "retry declined cards", "release/24"
-	if _, _ = m.dxSubmit(); *got != dispatchpkg.Root("release/24") {
-		t.Errorf("the launch got root %q, want release/24", *got)
+	if _, _ = m.dxSubmit(); got.root != dispatchpkg.Root("release/24") {
+		t.Errorf("the launch got root %q, want release/24", got.root)
 	}
 
 	// And a blank field is the default, not an empty branch name.
 	m = dxFormModel(t)
 	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
-	if _, _ = m.dxSubmit(); !got.IsDefault() {
-		t.Errorf("an untouched ROOT launched as %q, want the default", *got)
+	if _, _ = m.dxSubmit(); !got.root.IsDefault() {
+		t.Errorf("an untouched ROOT launched as %q, want the default", got.root)
 	}
 }
 
@@ -224,7 +203,7 @@ func TestDXRefusesARootThatIsNotABranch(t *testing.T) {
 	lastDiscovered = []repos.Repo{{Name: "shop-api", Path: repoPath}}
 	t.Cleanup(func() { lastDiscovered = prev })
 
-	launched := captureLaunch(t)
+	launched := captureLaunches(t)
 
 	m := newModel()
 	m.width, m.height = 130, 40
@@ -234,7 +213,7 @@ func TestDXRefusesARootThatIsNotABranch(t *testing.T) {
 
 	next, cmd := m.dxSubmit()
 	m = next
-	if cmd != nil || *launched != "" {
+	if cmd != nil || launched.n > 0 {
 		t.Fatal("a root that is not a branch was dispatched anyway")
 	}
 	if !m.cqDispatch {
@@ -255,8 +234,8 @@ func TestDXRefusesARootThatIsNotABranch(t *testing.T) {
 	if _, cmd := m.dxSubmit(); cmd == nil {
 		t.Error("a real branch was refused")
 	}
-	if *launched != dispatchpkg.Root("release/24") {
-		t.Errorf("the launch got root %q, want release/24", *launched)
+	if launched.root != dispatchpkg.Root("release/24") {
+		t.Errorf("the launch got root %q, want release/24", launched.root)
 	}
 }
 
@@ -268,7 +247,7 @@ func TestDXDoesNotRefuseWhatItCannotCheck(t *testing.T) {
 	lastDiscovered = nil
 	t.Cleanup(func() { lastDiscovered = prev })
 
-	captureLaunch(t)
+	captureLaunches(t)
 	m := dxFormModel(t)
 	m.dxTitle, m.dxWhat, m.dxRoot = "payment retries", "retry declined cards", "release/24"
 	if _, cmd := m.dxSubmit(); cmd == nil {
@@ -295,5 +274,28 @@ func TestFleetMetaNamesTheRoot(t *testing.T) {
 	}
 	if got := fleetMeta(fleetRow{}); strings.Contains(got, "from ") {
 		t.Errorf("fleetMeta = %q, want no root clause", got)
+	}
+}
+
+// A blank ROOT on a repo with a root branch of its own says that branch, on
+// both forms — "as origin sees it" would be describing a launch that will not
+// happen.
+func TestFormsNameTheRepoRootBranch(t *testing.T) {
+	m := dxFormModel(t)
+	m.cfg.RootBranches = map[string]string{"shop-api": "dev"}
+	if h := m.dxRootHint(); !strings.Contains(h, "dev") || strings.Contains(h, "as origin sees it") {
+		t.Errorf("dx ROOT hint = %q", h)
+	}
+	m.dxTitle = "payment retries"
+	if s := m.dxSummary(); !strings.Contains(s, "from dev") {
+		t.Errorf("dx summary = %q", s)
+	}
+	df := &dispatchForm{}
+	df.repo.RootBranch = "dev"
+	if o := df.rootOptions()[0]; !strings.Contains(o.hint, "dev") {
+		t.Errorf("+ overlay default row = %+v", o)
+	}
+	if df.rootLabel() != "default · dev" {
+		t.Errorf("+ overlay breadcrumb = %q", df.rootLabel())
 	}
 }

@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
@@ -433,13 +431,7 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 	const title = "dispatching immediate look up when"
 	const what = "dispatching immediate look up when the branch already has a dispatcher"
 
-	var gotFeature, gotPrompt string
-	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ *string, _ bool, _ string) tea.Cmd {
-		gotFeature, gotPrompt = feature, prompt
-		return nil
-	}
-	t.Cleanup(func() { dxLaunch = prev })
+	got := captureLaunches(t)
 
 	m := cqModel(t)
 	m.cfg = &config.Config{Roots: []string{seedRepoRoot(t, "alpha-api")}}
@@ -449,18 +441,18 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 
 	// The name is the title, which is what keeps the record, the branch, the
 	// worktree and the session saying one thing.
-	if gotFeature != title {
-		t.Errorf("feature = %q, want %q", gotFeature, title)
+	if got.feature != title {
+		t.Errorf("feature = %q, want %q", got.feature, title)
 	}
 	// The brief is not the name: the title leads, and WHAT follows it whole.
-	if first := strings.SplitN(gotPrompt, "\n", 2)[0]; first != title {
+	if first := strings.SplitN(got.prompt, "\n", 2)[0]; first != title {
 		t.Errorf("prompt line 1 = %q\nwant %q", first, title)
 	}
-	if !strings.Contains(gotPrompt, what) {
-		t.Errorf("prompt lost the brief:\n%s", gotPrompt)
+	if !strings.Contains(got.prompt, what) {
+		t.Errorf("prompt lost the brief:\n%s", got.prompt)
 	}
-	if !strings.Contains(gotPrompt, "done when: the pr is merged") {
-		t.Errorf("prompt lost DONE WHEN:\n%s", gotPrompt)
+	if !strings.Contains(got.prompt, "done when: the pr is merged") {
+		t.Errorf("prompt lost DONE WHEN:\n%s", got.prompt)
 	}
 }
 

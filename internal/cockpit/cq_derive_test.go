@@ -447,3 +447,17 @@ func TestAStalledLaunchWantsYou(t *testing.T) {
 		t.Errorf("a launch inside the threshold reads %q, want working", st)
 	}
 }
+
+// A row whose launch never ran offers to start it again, not a resume that can
+// only refuse — "never recorded a session id — there is nothing to resume" was
+// the whole of what ⏎ did there.
+func TestANeverStartedRowOffersToStartAgain(t *testing.T) {
+	never := &state.Dispatch{Feature: "explore-code", Status: state.StatusExited, StatusReason: "did not start: …"}
+	if acts := cqActs(never, "done"); len(acts) == 0 || acts[0].k != "⏎" || acts[0].d != "start again" {
+		t.Errorf("acts = %+v", acts)
+	}
+	ran := &state.Dispatch{Feature: "robustness", Status: state.StatusExited, SessionID: "sess-1"}
+	if acts := cqActs(ran, "done"); acts[0].d != "resume" {
+		t.Errorf("a dispatcher with a conversation should resume it: %+v", acts[0])
+	}
+}
