@@ -71,8 +71,11 @@ func TestAnUnknownPaneAsksTheServerWhatItsShellIs(t *testing.T) {
 		t.Fatalf("start-server: %v: %s", err, out)
 	}
 	// The pane sits at that shell, which is what a dispatch pane looks like
-	// once claude has exited.
-	if out, err := srv.cmd("new-session", "-d", "-s", "s", "-c", tmp, "--", fake).CombinedOutput(); err != nil {
+	// once claude has exited. Two arguments, so tmux execs it directly: one
+	// would be run as `<default-shell> -c fake`, and a sh that does not exec
+	// its last command (Ubuntu's dash, on CI) leaves that wrapper as the pane
+	// with the shell under it — a child, so busy, for as long as you wait.
+	if out, err := srv.cmd("new-session", "-d", "-s", "s", "-c", tmp, "--", fake, "-i").CombinedOutput(); err != nil {
 		t.Fatalf("new-session: %v: %s", err, out)
 	}
 	var idle, known bool
