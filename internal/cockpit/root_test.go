@@ -54,7 +54,7 @@ func captureLaunch(t *testing.T) *dispatchpkg.Root {
 	t.Helper()
 	var got dispatchpkg.Root
 	prev := launchDispatch
-	launchDispatch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, root dispatchpkg.Root, _ bool, _ string) tea.Cmd {
+	launchDispatch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, root dispatchpkg.Root, _ *string, _ bool, _ string) tea.Cmd {
 		got = root
 		// A real cmd, because "did it dispatch" is read off the returned
 		// command: a stub returning nil would make every rejected submit look

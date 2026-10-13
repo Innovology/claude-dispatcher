@@ -64,7 +64,7 @@ func TestDXAccountShowsWhatEachHasLeft(t *testing.T) {
 func TestDXAccountReachesTheLaunch(t *testing.T) {
 	var got string
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, acct string) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ *string, _ bool, acct string) tea.Cmd {
 		got = acct
 		return nil
 	}
@@ -110,7 +110,7 @@ func TestDXAccountFallsBackWhenRemoved(t *testing.T) {
 func TestDispatchFormAccountStep(t *testing.T) {
 	var got string
 	prev := launchDispatch
-	launchDispatch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, acct string) tea.Cmd {
+	launchDispatch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ *string, _ bool, acct string) tea.Cmd {
 		got = acct
 		return nil
 	}
@@ -154,7 +154,7 @@ func TestDispatchFormAccountStep(t *testing.T) {
 // with the reason, rather than running on some other login.
 func TestLaunchRefusesAnUnknownAccount(t *testing.T) {
 	msg := launchCmd(&config.Config{}, "repo", "feature", "prompt", dispatchpkg.ModeAuto,
-		dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, "nope")()
+		dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, "nope")()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || !strings.Contains(lm.reason, "no account named nope") {
 		t.Fatalf("msg = %#v", msg)

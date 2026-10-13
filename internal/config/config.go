@@ -157,6 +157,17 @@ type Config struct {
 // ship from main.
 const DefaultBranchPrefix = "feature/"
 
+// EffectiveBranchPrefix is the prefix a dispatch is cut with when nobody
+// changes it on the form: branch_prefix as written, or DefaultBranchPrefix
+// where it is not written at all. It is what both forms open on, so the branch
+// they preview is the branch the launch cuts.
+func (c *Config) EffectiveBranchPrefix() string {
+	if c == nil || c.BranchPrefix == nil {
+		return DefaultBranchPrefix
+	}
+	return strings.TrimSpace(*c.BranchPrefix)
+}
+
 // WorktreesBesideProject reports whether a dispatch's checkout is cut beside
 // the repository's other ones rather than under the state directory.
 func (c *Config) WorktreesBesideProject() bool {

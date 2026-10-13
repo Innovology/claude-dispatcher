@@ -65,9 +65,15 @@ type dispatchForm struct {
 	cursor int
 	repo   repos.Repo
 
-	filter     textinput.Model // step 1: filter repos by name/product
-	feature    textinput.Model // step 2: feature name
-	rootFilter textinput.Model // step 3: filter the picked repo's branches
+	filter  textinput.Model // step 1: filter repos by name/product
+	feature textinput.Model // step 2: feature name
+	// prefix is step 2's second input: the branch prefix, opened on settings'
+	// default and changed here for this dispatch alone. It shares the feature's
+	// step rather than taking one of its own, because a step is a keypress on
+	// every dispatch and the prefix is changed on few; tab reaches it.
+	prefix      textinput.Model
+	prefixFocus bool
+	rootFilter  textinput.Model // step 3: filter the picked repo's branches
 	// roots are the picked repo's branches, read once when the repo is chosen
 	// rather than per keystroke: this is a git call, and the list cannot change
 	// under a human who is looking at it.
@@ -178,6 +184,11 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 	feature.Placeholder = "payment retry flow"
 	feature.CharLimit = 80
 
+	prefix := textinput.New()
+	prefix.Placeholder = "none"
+	prefix.CharLimit = 60
+	prefix.SetValue(cfg.EffectiveBranchPrefix())
+
 	rootFilter := textinput.New()
 	rootFilter.Placeholder = "filter branches…"
 	rootFilter.CharLimit = 120 // a branch name, not a sentence
@@ -207,7 +218,15 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 		}
 	}
 	return &dispatchForm{step: dispatchRepo, repos: rs, modeSel: sel, modelSel: mdlSel,
-		filter: filter, feature: feature, rootFilter: rootFilter, prompt: prompt}
+		filter: filter, feature: feature, prefix: prefix, rootFilter: rootFilter, prompt: prompt}
+}
+
+// branchPrefix is the prefix as the launch will take it.
+func (df *dispatchForm) branchPrefix() string { return strings.TrimSpace(df.prefix.Value()) }
+
+// branchPreview is the branch this form will cut, as both its lines show it.
+func (df *dispatchForm) branchPreview() string {
+	return df.branchPrefix() + slugPreview(df.feature.Value())
 }
 
 // filtered returns the repos matching the current filter (by name or product).
@@ -289,17 +308,37 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 		case "esc":
 			df.step = dispatchRepo
 			df.feature.Blur()
+			df.prefix.Blur()
+			df.prefixFocus = false
 			return m, df.filter.Focus()
+		case "tab", "shift+tab":
+			df.prefixFocus = !df.prefixFocus
+			if df.prefixFocus {
+				df.feature.Blur()
+				return m, df.prefix.Focus()
+			}
+			df.prefix.Blur()
+			return m, df.feature.Focus()
 		case "enter":
 			if strings.TrimSpace(df.feature.Value()) == "" {
 				df.errMsg = "feature name is required — history is navigated by feature"
 				return m, nil
 			}
+			if bad := dispatchpkg.PrefixProblem(df.branchPrefix()); bad != "" {
+				df.errMsg = "prefix: " + bad
+				return m, nil
+			}
 			df.step = dispatchRoot
 			df.feature.Blur()
+			df.prefix.Blur()
+			df.prefixFocus = false
 			return m, df.rootFilter.Focus()
 		default:
 			var cmd tea.Cmd
+			if df.prefixFocus {
+				df.prefix, cmd = df.prefix.Update(m.inputMsg(k))
+				return m, cmd
+			}
 			df.feature, cmd = df.feature.Update(m.inputMsg(k))
 			return m, cmd
 		}
@@ -446,6 +485,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			root := df.root()
 			fanOut := df.fanOut()
 			acct := m.dfAccount()
+			prefix := df.branchPrefix()
 			m.dispatchForm = nil
 			notice := "dispatching \"" + feature + "\" · " + string(mode)
 			if mdl != dispatchpkg.DefaultModel {
@@ -469,7 +509,7 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			// dispatch has to be on the triage table by the time the human gets
 			// there — see pending.go.
 			m = m.markPending(m.pendingFor(repo, feature, prompt)).fleetSync()
-			return m, launchDispatch(m.cfg, repo, feature, prompt, mode, mdl, root, fanOut, acct)
+			return m, launchDispatch(m.cfg, repo, feature, prompt, mode, mdl, root, &prefix, fanOut, acct)
 		default:
 			var cmd tea.Cmd
 			df.prompt, cmd = df.prompt.Update(m.inputMsg(k))
@@ -479,8 +519,8 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 	return m, nil
 }
 
-// slugPreview shows the branch the feature name will produce, mirroring the
-// real slug so the user sees feature/<slug> before dispatching.
+// slugPreview shows the slug the feature name will produce, mirroring the real
+// one so the user sees the branch before dispatching.
 func slugPreview(feature string) string {
 	s := dispatchpkg.Slugify(feature)
 	if s == "" {
@@ -522,7 +562,7 @@ func (m model) viewDispatchForm(w, h int) string {
 		inW = 10
 	}
 	df.filter.Width, df.feature.Width, df.prompt.Width = inW, inW, inW
-	df.rootFilter.Width = inW
+	df.rootFilter.Width, df.prefix.Width = inW, inW
 
 	var lines []string
 	lines = append(lines, fg(cWhite, "new dispatch"))
@@ -539,7 +579,7 @@ func (m model) viewDispatchForm(w, h int) string {
 		lines = append(lines, row(iw, "", c("repo", 10, cFaint), flexc(df.repo.Name+"  ·  "+prod, cMid)))
 	}
 	if df.step > dispatchFeature {
-		lines = append(lines, row(iw, "", c("feature", 10, cFaint), flexc("feature/"+slugPreview(df.feature.Value()), cMid)))
+		lines = append(lines, row(iw, "", c("feature", 10, cFaint), flexc(df.branchPreview(), cMid)))
 	}
 	if df.step > dispatchRoot {
 		lines = append(lines, row(iw, "", c("root", 10, cFaint), flexc(string(df.root()), cMid)))
@@ -593,10 +633,23 @@ func (m model) viewDispatchForm(w, h int) string {
 		}
 
 	case dispatchFeature:
-		lines = append(lines, row(iw, "", c("feature", 10, cMid), flexc(df.feature.View(), cWhite)))
+		nameC, prefixC, tabTo := cMid, cFaint, "prefix"
+		if df.prefixFocus {
+			nameC, prefixC, tabTo = cFaint, cMid, "feature"
+		}
+		lines = append(lines, row(iw, "", c("feature", 10, nameC), flexc(df.feature.View(), cWhite)))
+		lines = append(lines, row(iw, "", c("prefix", 10, prefixC), flexc(df.prefix.View(), cWhite)))
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "the branch will be ")+fg(cMid, "feature/"+slugPreview(df.feature.Value())))
-		lines = append(lines, blank(2)+fg(cFaint, "enter → root · esc → repo"))
+		lines = append(lines, blank(2)+fg(cFaint, "the branch will be ")+fg(cMid, df.branchPreview()))
+		if bad := dispatchpkg.PrefixProblem(df.branchPrefix()); bad != "" {
+			lines = append(lines, blank(2)+fg(cAmber, "prefix: "+bad))
+		} else if def := m.cfg.EffectiveBranchPrefix(); df.branchPrefix() != def {
+			if def == "" {
+				def = "none"
+			}
+			lines = append(lines, blank(2)+fg(cFaint, "prefix for this dispatch only · the default is "+def))
+		}
+		lines = append(lines, blank(2)+fg(cFaint, "enter → root · tab → "+tabTo+" · esc → repo"))
 
 	case dispatchRoot:
 		lines = append(lines, fg(cMid, "root")+fg(cFaint, "  the branch this work is cut from"))

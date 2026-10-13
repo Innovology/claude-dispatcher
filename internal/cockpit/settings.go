@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 )
 
 type settingsKind int
@@ -55,6 +56,7 @@ var settingsFields = []settingsField{
 	{key: "azure_project", label: "Azure project", hint: "Azure Boards project name", kind: setString},
 	{key: "weekly_token_limit", label: "weekly token budget", hint: "0 = unknown → usage shows raw tokens", kind: setInt},
 	{key: "theme", label: "theme", hint: "enter cycles · system follows your light/dark switch while open", kind: setChoice},
+	{key: "branch_prefix", label: "branch prefix", hint: "every dispatch's branch starts with it · blank is none · a dispatch form can change it for one", kind: setString},
 }
 
 func newSettings(cfg *config.Config) *settingsState {
@@ -85,6 +87,19 @@ func settingsValue(cfg *config.Config, f settingsField) string {
 	case "theme":
 		mode, _ := themeModeOf(cfg.Theme)
 		return mode
+	case "branch_prefix":
+		return cfg.EffectiveBranchPrefix()
+	}
+	return ""
+}
+
+// settingsProblem is why val cannot be saved for f, or "". The editor stays
+// open on a refusal, so what was typed is still there to fix.
+func settingsProblem(f settingsField, val string) string {
+	if f.key == "branch_prefix" {
+		if bad := dispatchpkg.PrefixProblem(strings.TrimSpace(val)); bad != "" {
+			return "branch prefix: " + bad
+		}
 	}
 	return ""
 }
@@ -110,6 +125,10 @@ func settingsCommit(cfg *config.Config, f settingsField, val string) {
 	case "weekly_token_limit":
 		n, _ := strconv.Atoi(val)
 		cfg.WeeklyTokenLimit = n
+	case "branch_prefix":
+		// Always written, blank included: blank is "no prefix", which config
+		// can only say with the key present (see config.BranchPrefix).
+		cfg.BranchPrefix = &val
 	}
 }
 
@@ -126,6 +145,10 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 			st.input.Blur()
 			return m, nil
 		case "enter":
+			if bad := settingsProblem(st.fields[st.cursor], st.input.Value()); bad != "" {
+				m.notice = bad
+				return m, nil
+			}
 			if m.cfg != nil {
 				settingsCommit(m.cfg, st.fields[st.cursor], st.input.Value())
 				if err := config.Save(m.cfg); err != nil {

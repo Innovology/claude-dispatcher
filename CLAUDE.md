@@ -79,7 +79,12 @@
       record, so a dispatch made before the setting changed resumes where it
       was cut. A branch keeps its `feature/` prefix unless config's
       `branch_prefix` says otherwise, so on a layout whose folders are named
-      after their branches the two can be made to read the same.
+      after their branches the two can be made to read the same. That is the
+      **default**, kept in settings; **PREFIX** on both forms opens on it and
+      changes it for one dispatch (dx: a field under ROOT; `+`: tab on the
+      feature step), and both previews read it — they printed `feature/`
+      whatever the config said. A prefix git would refuse
+      (`dispatch.PrefixProblem`) is refused where it is typed.
     - The feature branch is cut from the repo's **default branch as the
       remote sees it**, after a best-effort fetch — never from the repo's
       HEAD. Git's default would inherit whatever branch the human left

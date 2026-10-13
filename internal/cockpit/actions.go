@@ -276,7 +276,12 @@ func resumedAt(rec *state.Dispatch, name string) supervisor.Session {
 // rather than carried as a struct from the form, so an account removed between
 // the form and the launch is a launch that says so instead of one that runs on
 // a directory nobody configured any more.
-func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, fanOut bool, acctName string) tea.Cmd {
+//
+// prefix is the branch prefix for this one dispatch, as the form showed it —
+// settings' default unless the human changed it there. nil is the paths that
+// ask nothing (the backlog's enter, the product panel's re-dispatch): they cut
+// with the repo's configured prefix, as they always have.
+func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, prefix *string, fanOut bool, acctName string) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
 			return launchFailed(feature, "no config — cannot dispatch")
@@ -295,6 +300,10 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 		}
 		if found == nil {
 			return launchFailed(feature, "repo not found: "+repoName)
+		}
+		if prefix != nil {
+			p := strings.TrimSpace(*prefix)
+			found.BranchPrefix = &p
 		}
 		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, root, fanOut, acct)
 		if err != nil {

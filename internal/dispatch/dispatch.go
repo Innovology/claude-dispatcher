@@ -242,6 +242,53 @@ func branchFor(r repos.Repo, slug string) string {
 	return *r.BranchPrefix + slug
 }
 
+// PrefixProblem is why prefix cannot start a branch name, or "" when it can.
+//
+// These are git's rules for a ref (git check-ref-format --branch) applied to
+// the prefix with a slug after it: a slug is [a-z0-9-] and never empty, so
+// anything a slug can follow is a prefix git will take. It is asked where the
+// human is still looking — both forms and the settings screen — because a
+// prefix git refuses is otherwise a launch that fails after the form is gone;
+// one that gets past them anyway (a hand-edited config) is refused by git at
+// the launch, on the failed row (ADR 0009).
+func PrefixProblem(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+	ref := prefix + "x"
+	switch {
+	case strings.HasPrefix(ref, "-"):
+		return "a branch cannot start with -"
+	case strings.HasPrefix(ref, "/"):
+		return "a branch cannot start with /"
+	case strings.Contains(ref, "//"):
+		return "a branch cannot hold //"
+	case strings.Contains(ref, ".."):
+		return "a branch cannot hold .."
+	case strings.Contains(ref, "@{"):
+		return "a branch cannot hold @{"
+	}
+	for _, r := range ref {
+		switch {
+		case r == ' ':
+			return "a branch cannot hold a space"
+		case r < 0x20 || r == 0x7f:
+			return "a branch cannot hold a control character"
+		case strings.ContainsRune(`~^:?*[\`, r):
+			return "a branch cannot hold " + string(r)
+		}
+	}
+	for _, part := range strings.Split(ref, "/") {
+		if strings.HasPrefix(part, ".") {
+			return "no part of a branch can start with ."
+		}
+		if strings.HasSuffix(part, ".lock") {
+			return "no part of a branch can end with .lock"
+		}
+	}
+	return ""
+}
+
 // worktreePath is where this dispatch's own checkout is cut.
 //
 // The default is the state directory, keyed by repo and feature, which keeps

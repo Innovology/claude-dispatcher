@@ -419,3 +419,18 @@ func TestLiveDispatchReadsTheRecordAsWellAsTheSession(t *testing.T) {
 		}
 	}
 }
+
+// A prefix is refused for exactly what git refuses in a branch name, checked
+// with a slug after it, since a slug always follows.
+func TestPrefixProblem(t *testing.T) {
+	for _, ok := range []string{"", "feature/", "fix/", "vk-", "team/vk/", "release-2.1/"} {
+		if bad := PrefixProblem(ok); bad != "" {
+			t.Errorf("PrefixProblem(%q) = %q, want none", ok, bad)
+		}
+	}
+	for _, bad := range []string{"-x/", "/x", "a//", "a..b/", "a@{/", "my fix/", "a~/", "a^/", "a:/", "a?/", "a*/", "a[/", `a\/`, ".hidden/", "x/.y/", "a.lock/", "tab\t/"} {
+		if PrefixProblem(bad) == "" {
+			t.Errorf("PrefixProblem(%q) accepted a prefix git refuses", bad)
+		}
+	}
+}

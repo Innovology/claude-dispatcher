@@ -332,7 +332,7 @@ func TestCQFormFallThrough(t *testing.T) {
 func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxRootF, dxModeF} {
+	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxRootF, dxPrefixF, dxModeF} {
 		m = press(m, "enter")
 		if m.dxField != want {
 			t.Fatalf("enter should advance to field %d, got %d", want, m.dxField)
@@ -402,7 +402,7 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 
 	var gotFeature, gotPrompt string
 	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, _ string) tea.Cmd {
+	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ *string, _ bool, _ string) tea.Cmd {
 		gotFeature, gotPrompt = feature, prompt
 		return nil
 	}
