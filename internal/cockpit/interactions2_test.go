@@ -547,11 +547,6 @@ func TestSettingsEditEveryField(t *testing.T) {
 			t.Fatalf("field %s: enter should start editing", f.key)
 		}
 		switch f.kind {
-		case setInt:
-			for _, ch := range "42" {
-				mm, _ = m.handleKey(string(ch))
-				m = mm.(model)
-			}
 		case setRoots:
 			for _, ch := range "/tmp/a, /tmp/b" {
 				mm, _ = m.handleKey(string(ch))
@@ -573,8 +568,8 @@ func TestSettingsEditEveryField(t *testing.T) {
 		}
 	}
 
-	if m.cfg.WeeklyTokenLimit != 42 {
-		t.Errorf("weekly_token_limit = %d, want 42", m.cfg.WeeklyTokenLimit)
+	if m.cfg.AzureProject != "value" {
+		t.Errorf("azure_project = %q, want value", m.cfg.AzureProject)
 	}
 	if len(m.cfg.Roots) != 2 {
 		t.Errorf("roots = %v, want 2 entries", m.cfg.Roots)

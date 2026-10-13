@@ -49,7 +49,7 @@ func TestShellSurvivesSaveAndLoad(t *testing.T) {
 	}
 }
 
-// The appearance file is the other top-level key added for this machine, and
+// The appearance file is the other top-level key written as a scalar, and
 // it has the same "written before the first table" hazard. ~ is expanded on
 // the way out, because the human types the path their desktop writes to and
 // `os.ReadFile` has never heard of a home directory.

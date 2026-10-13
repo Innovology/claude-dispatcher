@@ -9,8 +9,6 @@
 //
 // The surface, implemented by each build-tagged file:
 //
-// The surface, implemented by each build-tagged file:
-//
 //	Available() bool                          — is the backend usable on this host
 //	Backend() string                          — its name, for messages ("tmux")
 //	NewSession(s, dir, shellCommand, env)     — start a detached session
@@ -26,6 +24,9 @@
 //	AttachSwitches(s) bool                    — does AttachCmd exit on the way out
 //	Servers() []string                        — every server found by looking
 //	SessionList(socket) []SessionInfo         — its sessions, with their directories
+//	SessionIdle(s) (idle, known bool)         — has claude ended, leaving the shell
+//	SessionPIDs(s) []int                      — the processes running in it
+//	KnowShell(shell)                          — a shell name to count as idle
 package supervisor
 
 // Session is where a dispatcher's session can be reached: its name, and the

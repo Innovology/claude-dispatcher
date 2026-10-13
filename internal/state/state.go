@@ -137,8 +137,9 @@ type Dispatch struct {
 	// complete confidence. Together with TmuxSession it is the whole address.
 	TmuxSocket string `json:"tmux_socket,omitempty"`
 	// EnvCommand is the command prefix the tmux client was run under, so that
-	// the session sees the repo's own binaries — "nix develop --command" for a
-	// flake repo, empty for everywhere else.
+	// the session sees the repo's own binaries — repos.NixDevelop for a flake
+	// repo, the same naming the checkout's flake where the worktree has none
+	// (repos.EnvIn), a [session_env] entry as written, empty everywhere else.
 	//
 	// Recorded for the same reason: a dispatch launched before nix was on the
 	// machine, resumed after it arrived, would otherwise come back in a

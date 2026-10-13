@@ -190,7 +190,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		return d, failLaunch(d, fmt.Errorf("could not write the prompt file: %w", err))
 	}
 
-	// launchCommand is OS-specific (bash on Unix, cmd.exe on Windows); it keeps
+	// launchCommand is OS-specific (/bin/sh on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
 	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir)
@@ -410,8 +410,8 @@ var audit = state.AppendEvent
 // still going: a done or exited one has finished, and re-dispatching its name
 // is the case per-dispatch worktrees explicitly allow. Reading the session
 // alone refused every feature that had ever completed, because launchCommand
-// ends `; exec ${SHELL}` on purpose and the session outlives its claude by
-// design — and on a real machine the claude itself often outlives the work too,
+// ends by exec'ing a shell on purpose (exitShell) and the session outlives its
+// claude by design — and on a real machine the claude itself often outlives the work too,
 // sitting at its prompt for days after the PR merged.
 //
 // The live session is what catches a record the hooks could not correct: a
@@ -458,6 +458,20 @@ var (
 	supervisorReady = supervisor.Available
 )
 
+// socketsOf is every server the given records live on, each once.
+func socketsOf(ds []*state.Dispatch) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range ds {
+		if d.TmuxSession == "" || seen[d.TmuxSocket] {
+			continue
+		}
+		seen[d.TmuxSocket] = true
+		out = append(out, d.TmuxSocket)
+	}
+	return out
+}
+
 // ReconcileSessions re-derives status from the one fact the lifecycle hook
 // cannot report — whether the session behind a record still exists — and marks
 // every stray record exited. It returns how many it retired, and how many
@@ -474,7 +488,7 @@ var (
 // ground truth — the same call liveDispatch makes.
 //
 // Note what does NOT strand a record: claude merely exiting. launchCommand
-// drops to a login shell so the session survives for inspection, and SessionEnd
+// drops to a shell so the session survives for inspection, and SessionEnd
 // fires on the way out. A missing session means something took it away.
 //
 // The three statuses swept are a boundary, not caution. Each is reachable only
@@ -489,7 +503,7 @@ var (
 // even reach is not evidence that every session is gone, which is why an
 // unavailable backend sweeps nothing rather than retiring the whole fleet.
 //
-// It reads the whole fleet's liveness from ONE listing, because the cockpit now
+// It reads the whole fleet's liveness from one listing per server, because the cockpit now
 // runs it on every load rather than once per jump-in: a probe per record would
 // be a subprocess per record on every poll and every state-file change. The
 // listing screens; it never convicts on its own. A record it says is missing is
@@ -498,20 +512,6 @@ var (
 // "the whole fleet died" — the same reason an unreachable supervisor sweeps
 // nothing. The extra probe costs one subprocess per record about to be retired,
 // and a retired record is skipped on every pass after this one.
-// socketsOf is every server the given records live on, each once.
-func socketsOf(ds []*state.Dispatch) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, d := range ds {
-		if d.TmuxSession == "" || seen[d.TmuxSocket] {
-			continue
-		}
-		seen[d.TmuxSocket] = true
-		out = append(out, d.TmuxSocket)
-	}
-	return out
-}
-
 func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 	if !supervisorReady() {
 		return 0, 0

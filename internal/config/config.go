@@ -17,11 +17,12 @@ import (
 type Config struct {
 	// Roots are directories scanned (a few levels deep) for git repositories.
 	Roots []string `toml:"roots"`
-	// Products maps a product name to the repo directory names that belong to
-	// it, powering the portfolio roll-up lens.
+	// Products maps a product name to the repos that belong to it, powering the
+	// portfolio roll-up lens. A repo is named as the cockpit shows it — from its
+	// origin remote, which is not always the name of its folder.
 	Products map[string][]string `toml:"products"`
-	// DeployWorkflows overrides deploy-workflow auto-detection per repo
-	// directory name. Unlisted repos use the first workflow whose name looks
+	// DeployWorkflows overrides deploy-workflow auto-detection per repo, keyed
+	// by repo name. Unlisted repos use the first workflow whose name looks
 	// deploy-ish (deploy/release/publish/ship/prod).
 	DeployWorkflows map[string]string `toml:"deploy_workflows"`
 	// Checkouts pins which working tree a repo's row acts in, keyed by repo
@@ -102,11 +103,6 @@ type Config struct {
 	// account add`, which also logs the directory in and installs the hooks
 	// and status line it needs.
 	Accounts map[string]string `toml:"accounts,omitempty"`
-	// WeeklyTokenLimit is the subscription's weekly token budget. There is no
-	// API to read it (Claude Code exposes usage only interactively), so it is a
-	// user setting; 0 means unknown and the usage lens shows raw tokens instead
-	// of a percentage.
-	WeeklyTokenLimit int `toml:"weekly_token_limit,omitempty"`
 	// Theme is the cockpit's colours: "system" (and empty) follows the light/
 	// dark switch, live while the cockpit is open; a theme's name — "light",
 	// "dark" — holds that theme whatever the switch says. Edited in settings.
@@ -121,13 +117,14 @@ type Config struct {
 	// Empty is not "bash": it means ask tmux for the `default-shell` the pane
 	// is sitting in, and fall back to $SHELL. The key exists because that
 	// answer is only available from a running server — a tmux.conf may compute
-	// its default-shell in a `run-shell` job, as this machine's does, so there
-	// is nothing in the file to read — and because a shell we were told about
-	// is one the idle check can recognise by name.
+	// its default-shell in a `run-shell` job, so there is nothing in the file
+	// to read — and because a shell we were told about is one the idle check
+	// can recognise by name. It is a path, not a name: the pane checks it is
+	// executable, and a bare "fish" falls through to $SHELL.
 	Shell string `toml:"shell,omitempty"`
 	// AppearanceFile is a file whose contents are the word "light" or "dark":
-	// the light/dark switch as this machine's own desktop publishes it, read
-	// before the portal is asked.
+	// the light/dark switch as a desktop that writes it to a file publishes it,
+	// read before the portal is asked.
 	//
 	// The portal is not universal. On a NixOS/niri desktop running
 	// dankMaterialShell it answers "no preference" while the desktop is in
@@ -246,7 +243,7 @@ func (c *Config) ExpandedRoots() []string {
 	return out
 }
 
-// ProductFor returns the product a repo directory name belongs to, or "".
+// ProductFor returns the product a repo (by name) belongs to, or "".
 func (c *Config) ProductFor(repoName string) string {
 	for product, names := range c.Products {
 		for _, n := range names {
@@ -289,19 +286,16 @@ func Save(c *Config) error {
 	var b strings.Builder
 	b.WriteString("# Claude Dispatcher configuration.\n\n")
 	b.WriteString("# Directories scanned (up to 3 levels deep) for git repositories.\n")
-	b.WriteString("# Editable from the cockpit: press s.\n")
+	b.WriteString("# Editable from the cockpit: press `,`.\n")
 	b.WriteString("roots = " + tomlStrings(c.Roots) + "\n\n")
 	// Top-level integration keys must precede the first [table] in TOML.
-	b.WriteString("# Integrations (optional; edit in-app with `s`). Matching env vars override.\n")
+	b.WriteString("# Integrations (optional; edit in-app with `,`). Matching env vars override.\n")
 	b.WriteString("# linear_api_key is the unscoped Linear key: the whole backlog when no\n")
 	b.WriteString("# product names one below, and what a product with no entry is read with.\n")
 	fmt.Fprintf(&b, "linear_api_key = %q\n", c.LinearAPIKey)
 	b.WriteString("# Azure Boards backlog (needs the az CLI logged in): the org URL and project.\n")
 	fmt.Fprintf(&b, "azure_org = %q\n", c.AzureOrg)
 	fmt.Fprintf(&b, "azure_project = %q\n", c.AzureProject)
-	b.WriteString("# Your subscription's weekly token budget (no API exposes it, so set it here).\n")
-	b.WriteString("# 0 = unknown → the usage lens shows raw tokens instead of a percentage.\n")
-	fmt.Fprintf(&b, "weekly_token_limit = %d\n", c.WeeklyTokenLimit)
 	b.WriteString("# The cockpit's colours: \"system\" follows your light/dark switch, live while\n")
 	b.WriteString("# the cockpit is open; \"light\" or \"dark\" holds one. Edit in-app with `,`.\n")
 	if c.Theme == "" {
@@ -312,7 +306,8 @@ func Save(c *Config) error {
 	b.WriteString("# The shell a dispatch pane drops to when claude exits. Unset asks tmux for\n")
 	b.WriteString("# the default-shell of the server the pane runs on, then falls back to\n")
 	b.WriteString("# $SHELL. Name one here to be sure — a tmux.conf that sets default-shell\n")
-	b.WriteString("# from a run-shell job has nothing in the file for us to read.\n")
+	b.WriteString("# from a run-shell job has nothing in the file for us to read. A full path:\n")
+	b.WriteString("# a bare name is not looked up, and falls through to $SHELL.\n")
 	if c.Shell == "" {
 		b.WriteString("# shell = \"/usr/bin/fish\"\n")
 	} else {
@@ -323,7 +318,7 @@ func Save(c *Config) error {
 	b.WriteString("# when the portal reports \"no preference\" but your theme still changes,\n")
 	b.WriteString("# which is every setup whose switch is a script rather than a desktop.\n")
 	if c.AppearanceFile == "" {
-		b.WriteString("# appearance_file = \"~/.config/tmux/mode\"\n")
+		b.WriteString("# appearance_file = \"~/path/to/your/mode-file\"\n")
 	} else {
 		fmt.Fprintf(&b, "appearance_file = %q\n", c.AppearanceFile)
 	}
@@ -377,7 +372,8 @@ func Save(c *Config) error {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Accounts[k])
 	}
 	b.WriteString("\n")
-	b.WriteString("# Map product names to repo directory names for the portfolio roll-up.\n")
+	b.WriteString("# Map product names to repos for the portfolio roll-up. A repo is named as the\n")
+	b.WriteString("# cockpit shows it — from its origin remote, not always its folder's name.\n")
 	b.WriteString("# acme-shop = [\"shop-api\", \"shop-web\"]\n")
 	b.WriteString("[products]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Products)) {
@@ -423,7 +419,8 @@ func Save(c *Config) error {
 	b.WriteString("# repos use their own name, so each is its own server and its own PATH: a\n")
 	b.WriteString("# session inherits the environment of whatever asked for it, so one server per\n")
 	b.WriteString("# repo is what keeps a repo's toolchain in front of every pane you open in it.\n")
-	b.WriteString("# Name one here only to match servers you already start yourself.\n")
+	b.WriteString("# Name one here only to match servers you already start yourself, or press\n")
+	b.WriteString("# s on the repo in the assignment editor (2, then a), which writes it here.\n")
 	b.WriteString("# shop-api = \"shop\"\n")
 	b.WriteString("[sockets]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Sockets)) {

@@ -8,8 +8,8 @@ import (
 )
 
 // launchCommand builds the shell command that runs claude for a dispatch on
-// Unix. When claude exits we drop to a login shell so the tmux session stays
-// open for inspection instead of vanishing. CLAUDE_DISPATCHER_ID is the join
+// Unix. When claude exits the pane becomes a shell (exitShell) so the tmux
+// session stays open for inspection instead of vanishing. CLAUDE_DISPATCHER_ID is the join
 // key the lifecycle hook reads to attribute events back to the record, mode is
 // the permission mode the session opens in (see mode.go), and model is the
 // model it runs (see model.go).
@@ -21,8 +21,8 @@ import (
 // (MAX_IMSGSIZE); measured against tmux 3.7b, a new-session command of 16313
 // bytes went through and 16314 came back "command too long". So a prompt of any
 // size a human might paste took the launch down, and every trace of it with it.
-// Reading the file inside the session leaves this command a fixed ~120 bytes
-// whatever the prompt is; the only ceiling left is the kernel's on one argv
+// Reading the file inside the session leaves this command a fixed few hundred
+// bytes whatever the prompt is; the only ceiling left is the kernel's on one argv
 // (see MaxPromptBytes).
 //
 // configDir is the account's CLAUDE_CONFIG_DIR, carried inline for the same
@@ -66,8 +66,8 @@ func StewardCommand(stateDir, opening string) string {
 // tmux server for `default-shell`, which is the setting their every other pane
 // already obeys — asked here, inside the pane, rather than resolved when the
 // line was built, because at that point the server did not exist yet and
-// because a tmux.conf may compute the value in a `run-shell` job (this
-// machine's does), leaving nothing in the file to parse. Then $SHELL, then
+// because a tmux.conf may compute the value in a `run-shell` job, leaving
+// nothing in the file to parse. Then $SHELL, then
 // /bin/sh, which is the one shell a POSIX machine is required to have.
 //
 // `-x` rather than `-n` on the last check, so a shell named in config that is

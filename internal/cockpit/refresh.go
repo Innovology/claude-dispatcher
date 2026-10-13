@@ -174,7 +174,7 @@ func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 		dispatchpkg.RetryFailed(state.LoadAll(), time.Now())
 		// And where an adopted session is handed the convention a dispatched
 		// one is launched with. It waits for the session to be at its prompt,
-		// which is a moment only the poll is watching for (dispatch.Brief).
+		// which is a moment only the poll is watching for (dispatch.DeliverBriefs).
 		dispatchpkg.DeliverBriefs(state.LoadAll(), time.Now())
 		// A switched-on steward whose session was taken away — a reboot, claude
 		// exiting in it — comes back here, at startup and on every poll, so

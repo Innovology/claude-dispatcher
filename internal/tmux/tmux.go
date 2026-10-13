@@ -211,11 +211,10 @@ func (s Server) KillSession(name string) error {
 }
 
 // shellCommands are the pane commands that mean "nothing is running here": the
-// login shell a dispatch session drops to once claude exits (see
-// launchCommand). A login shell reports as "-bash", hence the leading dash trim
-// in paneIdle. $SHELL is whatever the human logs in with, so the shells that
-// are not POSIX count too: a pane parked at nu after claude exits is as idle
-// as one parked at bash.
+// shell a dispatch session drops to once claude exits (see launchCommand). A
+// login shell reports as "-bash", hence the leading dash trim in paneIdle. That
+// shell is whatever the human uses, so the shells that are not POSIX count
+// too: a pane parked at nu after claude exits is as idle as one parked at bash.
 var shellCommands = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "fish": true,
 	"dash": true, "ksh": true, "csh": true, "tcsh": true, "login": true,
@@ -303,7 +302,7 @@ func (s Server) learnDefaultShell() {
 //
 // `#{pane_current_command}` alone cannot answer this, and reading it as if it
 // could is why every session we start looked idle while claude was running in
-// it. A session is launched as `/bin/sh -c "… claude …; exec $SHELL"`, and a
+// it. A session is launched as `/bin/sh -c "… claude …; exec <shell>"`, and a
 // non-interactive shell has no job control, so claude never gets a process
 // group of its own: the pane's foreground group leader stays the shell, and
 // tmux dutifully reports "zsh". Measured on a live dispatcher — pane_pid 51122

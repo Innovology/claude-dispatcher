@@ -187,7 +187,7 @@ var commands = []command{
 	{name: "kill", hint: "end the tmux session and mark exited"},
 	{name: "tidy", hint: "remove the worktrees and node_modules finished dispatchers left on disk"},
 	{name: "roots", hint: "edit the directories scanned for repos"},
-	{name: "settings", hint: "scan roots · Linear key · Azure org · weekly token budget"},
+	{name: "settings", hint: "scan roots · Linear key · Azure board · theme · branch prefix"},
 	{name: "config", hint: "open config.toml in your editor — everything settings does not show"},
 }
 

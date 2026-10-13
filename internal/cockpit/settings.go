@@ -9,7 +9,6 @@ package cockpit
 
 import (
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -25,7 +24,6 @@ type settingsKind int
 const (
 	setString settingsKind = iota
 	setSecret
-	setInt
 	setRoots
 	// setChoice is a field with a fixed set of answers: enter steps to the next
 	// one and saves it, because a typed "lihgt" is a mistake the editor should
@@ -55,7 +53,6 @@ var settingsFields = []settingsField{
 	{key: "linear_api_key", label: "Linear API key", hint: "the unscoped Linear read · a token per product on 2, a, l", kind: setSecret},
 	{key: "azure_org", label: "Azure DevOps org", hint: "org URL, e.g. https://dev.azure.com/acme", kind: setString},
 	{key: "azure_project", label: "Azure project", hint: "Azure Boards project name", kind: setString},
-	{key: "weekly_token_limit", label: "weekly token budget", hint: "0 = unknown → usage shows raw tokens", kind: setInt},
 	{key: "theme", label: "theme", hint: "enter cycles · system follows your light/dark switch while open", kind: setChoice},
 	{key: "branch_prefix", label: "branch prefix", hint: "every dispatch's branch starts with it · blank is none · a dispatch form can change it for one", kind: setString},
 }
@@ -80,11 +77,6 @@ func settingsValue(cfg *config.Config, f settingsField) string {
 		return cfg.AzureOrg
 	case "azure_project":
 		return cfg.AzureProject
-	case "weekly_token_limit":
-		if cfg.WeeklyTokenLimit == 0 {
-			return ""
-		}
-		return strconv.Itoa(cfg.WeeklyTokenLimit)
 	case "theme":
 		mode, _ := themeModeOf(cfg.Theme)
 		return mode
@@ -123,9 +115,6 @@ func settingsCommit(cfg *config.Config, f settingsField, val string) {
 		cfg.AzureOrg = val
 	case "azure_project":
 		cfg.AzureProject = val
-	case "weekly_token_limit":
-		n, _ := strconv.Atoi(val)
-		cfg.WeeklyTokenLimit = n
 	case "branch_prefix":
 		// Always written, blank included: blank is "no prefix", which config
 		// can only say with the key present (see config.BranchPrefix).

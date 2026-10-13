@@ -22,7 +22,7 @@ import (
 // report it. So the convention is sent as a message, the way the human would
 // send it.
 
-// AdoptBrief is what an adopted session is told. Two sentences, because it is
+// AdoptBrief is what an adopted session is told. Three sentences, because it is
 // arriving in the middle of somebody's work and every extra line is context
 // taken from the thing they were doing.
 //

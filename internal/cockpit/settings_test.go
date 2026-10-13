@@ -26,29 +26,29 @@ func TestSettingsEditPersists(t *testing.T) {
 		t.Fatal("settings render empty")
 	}
 
-	// Move to the weekly token budget field (index 4) and edit it.
-	for i := 0; i < 4; i++ {
+	// Move to the Azure project field (index 3) and edit it.
+	for i := 0; i < 3; i++ {
 		m = press(m, "j")
 	}
 	m = press(m, "enter") // begin editing
 	if !m.settings.editing {
 		t.Fatal("enter did not begin editing")
 	}
-	for _, ch := range strings.Split("2500000", "") {
+	for _, ch := range strings.Split("boards", "") {
 		m = press(m, ch)
 	}
 	m = press(m, "enter") // commit
 
-	if m.cfg.WeeklyTokenLimit != 2500000 {
-		t.Fatalf("weekly limit not committed: got %d", m.cfg.WeeklyTokenLimit)
+	if m.cfg.AzureProject != "boards" {
+		t.Fatalf("azure project not committed: got %q", m.cfg.AzureProject)
 	}
 	// It should have been saved to config.toml under the sandboxed HOME.
 	got, err := config.Load()
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if got.WeeklyTokenLimit != 2500000 {
-		t.Errorf("saved config weekly limit = %d, want 2500000", got.WeeklyTokenLimit)
+	if got.AzureProject != "boards" {
+		t.Errorf("saved config azure project = %q, want boards", got.AzureProject)
 	}
 
 	// esc closes the editor.
