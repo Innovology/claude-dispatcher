@@ -547,9 +547,8 @@
   if…" — so admitting a Stop that asks would drag most of a day's finished work
   back onto the table, which is the louder failure. A done dispatcher that
   stops with an ask keeps its row anyway, under the `finished` divider, because
-  nothing retires a held row but `x`. No ADR — one hook entry and two cases,
-  and the numbering is contested between unmerged branches. Existing installs
-  re-run `init` to get the entry.
+  nothing retires a held row but `x`. No ADR — one hook entry and two cases.
+  Existing installs re-run `init` to get the entry.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
