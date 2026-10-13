@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,9 @@ import (
 // withPane stands in for the process table under a session's panes.
 func withPane(t *testing.T, pids ...int) {
 	t.Helper()
+	// The registry is read from ~/.claude when a process names no config dir
+	// of its own, and this machine's real one has real pids in it.
+	t.Setenv("HOME", t.TempDir())
 	prev := paneChildren
 	paneChildren = func(supervisor.Session) []int { return pids }
 	t.Cleanup(func() { paneChildren = prev })
@@ -60,6 +64,90 @@ func TestBindSessionReadsTheConversationOffTheProcess(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("bound %q, want %q", got, want)
+	}
+}
+
+// writeRegistry puts Claude Code's own file for pid under dir/sessions.
+func writeRegistry(t *testing.T, dir string, pid int, sessionID, procStart string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"pid":` + strconv.Itoa(pid) + `,"sessionId":"` + sessionID + `","procStart":"` + procStart +
+		`","cwd":"/home/u/src/app","kind":"interactive","status":"idle"}`
+	if err := os.WriteFile(filepath.Join(dir, "sessions", strconv.Itoa(pid)+".json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeProcFile puts one file into the fake /proc entry for pid.
+func writeProcFile(t *testing.T, pid int, name, body string) {
+	t.Helper()
+	dir := filepath.Join(procRoot, strconv.Itoa(pid))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// statLine is a /proc/<pid>/stat whose start time (field 22) is started, with
+// a command name holding a space and a ')' so the parse cannot count fields
+// from the front.
+func statLine(pid int, started string) string {
+	f := []string{strconv.Itoa(pid), "(claude (x) y)", "S"}
+	for i := 4; i <= 21; i++ {
+		f = append(f, "0")
+	}
+	return strings.Join(append(f, started, "0", "0"), " ")
+}
+
+// An idle claude holds no transcript open, which is the state an orchestrator
+// waiting on its human spends most of its life in. Claude Code's own registry
+// names the conversation anyway, and it is asked first.
+func TestBindSessionReadsClaudeCodesOwnRegistry(t *testing.T) {
+	const want = "51423193-d9d5-49ac-96ea-335dd6d7b9ab"
+	withPane(t, 133069, 133072) // the pane's shell, then claude
+	fakeProc(t, map[int][]string{133072: {"/dev/pts/3"}})
+	writeProcFile(t, 133072, "stat", statLine(133072, "121031"))
+	writeRegistry(t, filepath.Join(os.Getenv("HOME"), ".claude"), 133072, want, "121031")
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+
+	got, err := BindSession(supervisor.Session{Name: "player-app__main", Socket: "player-app"}, t.TempDir())
+	if err != nil || got != want {
+		t.Fatalf("BindSession = %q, %v — want the conversation the registry names", got, err)
+	}
+}
+
+// A registry file is left behind by a claude that died without cleaning up,
+// and its pid is handed to something else. The start time is what tells the
+// two processes apart.
+func TestBindSessionRefusesARegistryFileFromAnEarlierProcess(t *testing.T) {
+	withPane(t, 9)
+	fakeProc(t, map[int][]string{9: nil})
+	writeProcFile(t, 9, "stat", statLine(9, "500"))
+	writeRegistry(t, filepath.Join(os.Getenv("HOME"), ".claude"), 9, "stale-conversation", "400")
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+
+	if got, err := BindSession(supervisor.Session{Name: "s"}, t.TempDir()); err == nil {
+		t.Fatalf("bound %q from a registry file whose process is gone", got)
+	}
+}
+
+// A claude run under an account keeps its registry in that account's config
+// dir, which its own environment names.
+func TestBindSessionReadsTheRegistryOfTheProcesssAccount(t *testing.T) {
+	const want = "acc0un75-0000-4000-8000-000000000001"
+	withPane(t, 31)
+	fakeProc(t, map[int][]string{31: nil})
+	account := t.TempDir()
+	writeProcFile(t, 31, "environ", "PATH=/bin\x00CLAUDE_CONFIG_DIR="+account+"\x00")
+	writeRegistry(t, account, 31, want, "")
+
+	got, err := BindSession(supervisor.Session{Name: "s"}, t.TempDir())
+	if err != nil || got != want {
+		t.Fatalf("BindSession = %q, %v — want the account's registry read", got, err)
 	}
 }
 

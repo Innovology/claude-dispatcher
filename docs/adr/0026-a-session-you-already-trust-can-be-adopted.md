@@ -45,13 +45,25 @@ one folder per branch is what the human already calls that work.
 
 **The conversation is identified from the process, not the log.** The hooks
 identify themselves by Claude Code session id, so adoption must know which
-conversation a tmux session is running. claude holds its transcript open,
-named for the session id, so the open descriptors of the claude under that
-pane name it exactly. The event log can only say which conversation last
-reported from a *directory*, and the human this feature is for runs two
-orchestrators in one checkout. The log is the fallback for a machine with no
-`/proc`, and it refuses rather than guesses when more than one conversation
-has reported from the directory.
+conversation a tmux session is running. Claude Code keeps a file per live
+claude, `<config dir>/sessions/<pid>.json`, naming its session id, so the pids
+under that pane name it exactly; the file must agree with the kernel on the
+pid's start time (`procStart`, field 22 of `/proc/<pid>/stat`), because it
+outlives a claude that dies uncleanly and pids are reused. This shipped reading
+the claude's open descriptors for its transcript instead, on the belief that
+claude holds it open — and an idle one does not: measured on 2.1.296, the
+orchestrator this feature was reported for sat at its prompt with no `.jsonl`
+open, so `A` would have refused exactly the session it exists for. The
+descriptors are still read, second. The event log can only say which
+conversation last reported from a *directory*, and the human this feature is
+for runs two orchestrators in one checkout — that checkout had ninety
+conversations in the log. The log is the last fallback, and it refuses rather
+than guesses when more than one conversation has reported from the directory.
+
+`A` opens a naming input drawn as an overlay, the way park's is. It first
+shipped as a bar no view drew, so the press looked like nothing and the keys
+typed after it went into a name nobody could see. The sessions row names the
+adopt and mark keys, since nothing else on that screen did.
 
 **The record admits it does not own the directory.** `AdoptedAt` is set, and
 `OwnsWorktree()` is false for the life of the record. Both places that delete

@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -164,18 +165,26 @@ func headSHA(dir string) string {
 // identify themselves by session id, and a record carrying the wrong one
 // would quietly take another session's status.
 //
-// It asks the process, not the log. claude keeps its transcript open, named
-// for the session id (`~/.claude/projects/<slug>/<id>.jsonl`), so the open
-// file descriptors of the claude running under this pane name the session
-// exactly. The event log can only say which conversation last reported from
-// this DIRECTORY, and a human with two orchestrators in one checkout — the
-// case this feature is for — has two answers there and no way to choose.
+// It asks the process, not the log. Claude Code keeps a file per live claude
+// under its config dir — `sessions/<pid>.json`, naming the session id — so the
+// pids running under this pane name the conversation exactly. The transcript
+// the process has open says the same thing when there is one, but an idle
+// claude holds none: measured on 2.1.296, the orchestrator adoption exists for
+// sat at its prompt with no .jsonl among its descriptors, and the log behind
+// it had ninety conversations from that checkout to choose between. The event
+// log can only say which conversation last reported from this DIRECTORY, and a
+// human with two orchestrators in one checkout — the case this feature is for
+// — has two answers there and no way to choose.
 //
-// The log is still the fallback, for a platform with no /proc and for a
-// claude whose descriptor we cannot read, and it refuses rather than guesses
-// when more than one conversation has been reporting from the directory.
+// The log is still the fallback, for a claude neither of those can read, and
+// it refuses rather than guesses when more than one conversation has been
+// reporting from the directory.
 func BindSession(sess supervisor.Session, dir string) (string, error) {
-	if id := sessionIDFromProc(paneChildren(sess)); id != "" {
+	pids := paneChildren(sess)
+	if id := sessionIDFromRegistry(pids); id != "" {
+		return id, nil
+	}
+	if id := sessionIDFromProc(pids); id != "" {
 		return id, nil
 	}
 	ids := recentSessionIDs(dir)
@@ -195,6 +204,72 @@ func BindSession(sess supervisor.Session, dir string) (string, error) {
 // pane's own command is a shell, and what matters is what it is running.
 var paneChildren = func(sess supervisor.Session) []int {
 	return supervisor.SessionPIDs(sess)
+}
+
+// sessionIDFromRegistry reads Claude Code's own record of each pid —
+// `<config dir>/sessions/<pid>.json`, which is how claude lists its live
+// sessions — and returns the first session id one names.
+//
+// The file outlives a claude that dies without cleaning up, and pids are
+// reused, so where the kernel can be asked the file must agree with it: its
+// procStart is field 22 of /proc/<pid>/stat, the pid's start time, and a file
+// written for an earlier process of the same pid carries another one.
+func sessionIDFromRegistry(pids []int) string {
+	for _, pid := range pids {
+		raw, err := os.ReadFile(filepath.Join(claudeConfigDir(pid), "sessions", itoa(pid)+".json"))
+		if err != nil {
+			continue
+		}
+		var reg struct {
+			PID       int    `json:"pid"`
+			SessionID string `json:"sessionId"`
+			ProcStart string `json:"procStart"`
+		}
+		if json.Unmarshal(raw, &reg) != nil || reg.PID != pid || reg.SessionID == "" {
+			continue
+		}
+		if started := procStartTime(pid); started != "" && reg.ProcStart != started {
+			continue
+		}
+		return reg.SessionID
+	}
+	return ""
+}
+
+// claudeConfigDir is the config dir a process's claude keeps its state under:
+// its own CLAUDE_CONFIG_DIR — an account (ADR 0022) — where its environment can
+// be read, ~/.claude otherwise.
+func claudeConfigDir(pid int) string {
+	if env, err := os.ReadFile(filepath.Join(procRoot, itoa(pid), "environ")); err == nil {
+		for _, kv := range strings.Split(string(env), "\x00") {
+			if d, ok := strings.CutPrefix(kv, "CLAUDE_CONFIG_DIR="); ok && d != "" {
+				return d
+			}
+		}
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude")
+}
+
+// procStartTime is field 22 of /proc/<pid>/stat, or "" where it cannot be read.
+// The command name (field 2) is parenthesised and may hold spaces, so fields
+// are counted from the last ')'.
+func procStartTime(pid int) string {
+	raw, err := os.ReadFile(filepath.Join(procRoot, itoa(pid), "stat"))
+	if err != nil {
+		return ""
+	}
+	s := string(raw)
+	i := strings.LastIndexByte(s, ')')
+	if i < 0 {
+		return ""
+	}
+	// After ')' come fields 3 onward, so field 22 is the twentieth.
+	f := strings.Fields(s[i+1:])
+	if len(f) < 20 {
+		return ""
+	}
+	return f[19]
 }
 
 // sessionIDFromProc reads each process's open files and returns the session id

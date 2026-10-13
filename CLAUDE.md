@@ -287,8 +287,10 @@
   started, every one dropped for matching no record. `space` marks in the
   sessions tab and `A` adopts: a record is wrapped around the session and
   **nothing else changes** — no branch, no worktree, no claude, no prompt.
-  The conversation is identified from the **process** (claude holds its
-  transcript open, named for the session id) rather than from the log, which
+  The conversation is identified from the **process** — Claude Code's own
+  `sessions/<pid>.json` for the claude under the pane, checked against the
+  pid's start time; its open transcript second, since an idle claude holds
+  none — rather than from the log, which
   only knows which conversation last reported from a *directory* and cannot
   choose between two orchestrators in one checkout; the log is the fallback
   and refuses rather than guesses. The record **does not own its directory**

@@ -971,9 +971,12 @@ func (m model) productSessionsBody(cw, ch int) []string {
 		detail = append(detail, fg(cFaint, "launched under "+cur.env))
 	}
 	// No kill key, and no status. This cockpit did not start these and does not
-	// account for them; handing over the terminal is the whole of what it can
-	// honestly offer.
-	detail = append(detail, fg(cDim, "enter jumps in · yours, not a dispatcher"))
+	// account for them: it can hand over the terminal, or — when asked — adopt
+	// one, and the row says both, since nothing else on this screen names the
+	// adopt key.
+	detail = append(detail, fg(cDim, "enter jumps in · "+
+		prettyKey(m.keys.KeyFor("sessions.adopt"))+" adopts it as a dispatcher · "+
+		prettyKey(m.keys.KeyFor("sessions.mark"))+" marks several · yours until then"))
 
 	var rows []string
 	for i, it := range items {

@@ -145,6 +145,9 @@ func (m model) footerHelp() string {
 	if m.lens == "floor" {
 		return m.cqFooterHelp()
 	}
+	if m.adoptOpenInput {
+		return "type the name · enter adopts it · esc cancels"
+	}
 	if m.lens == "products" && m.clOpen {
 		if m.clNaming {
 			return "type the name · enter creates it · esc cancels"
@@ -215,6 +218,8 @@ func (m model) overlayView(w, h int) (string, bool) {
 		return m.viewPark(w, h), true
 	case m.replyOpen:
 		return m.viewReply(w, h), true
+	case m.adoptOpenInput && m.adoptAt != nil:
+		return m.viewAdopt(w, h), true
 	case m.paletteOpen:
 		return m.viewPalette(w, h), true
 	}

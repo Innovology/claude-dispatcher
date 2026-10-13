@@ -318,6 +318,7 @@ func (m model) inputPending() bool {
 		m.confirm != nil ||
 		m.parkOpen ||
 		m.replyOpen ||
+		m.adoptOpenInput ||
 		m.paletteOpen ||
 		m.clNaming || m.clKeying || m.clSockOpen ||
 		(m.cqFormOn() && m.dxTouched())

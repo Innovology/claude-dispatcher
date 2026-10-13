@@ -11,7 +11,7 @@ package cockpit
 // see: the hooks already fire, and from the moment there is a record to match
 // them to, the row waits, quotes and answers like any other.
 //
-// `space` marks sessions in the tab, `a` adopts. One session asks for a name,
+// `space` marks sessions in the tab, `A` adopts. One session asks for a name,
 // pre-filled with the branch it is on; a marked set is adopted on those
 // defaults, because naming six sessions one at a time is not a migration.
 
@@ -59,7 +59,7 @@ func (m model) adoptOpen(items []ownSession) (model, tea.Cmd) {
 	}
 }
 
-// adoptPicked is what `a` acts on: every marked session in this product, or
+// adoptPicked is what `A` acts on: every marked session in this product, or
 // the row under the cursor when nothing is marked.
 func (m model) adoptPicked(items []ownSession) []ownSession {
 	var out []ownSession
@@ -136,18 +136,34 @@ func adoptCmd(sessions []ownSession, name string) tea.Cmd {
 	}
 }
 
-// adoptBar is the naming input, drawn where park's is.
-func (m model) adoptBar(w int) []string {
-	if !m.adoptOpenInput || m.adoptAt == nil {
-		return nil
+// viewAdopt is the naming input, an overlay the way park's is. It shipped as a
+// bar nothing drew: `A` opened an input that took every key that followed and
+// showed none of them, so the press read as doing nothing — and the next
+// letters typed went into a name nobody could see.
+func (m model) viewAdopt(w, h int) string {
+	t := m.adoptAt
+	if t == nil {
+		return ""
 	}
-	lead := "adopt " + m.adoptAt.sess.Name
-	if m.adoptAt.repo != "" {
-		lead += " in " + m.adoptAt.repo
+	cw := w - 2*pad
+	if cw < 10 {
+		cw = w
 	}
-	return []string{
-		fg(cFaint, truncate(lead, w)),
-		fg(cAmber, "name ") + fg(cWhite, m.adoptText+"▏"),
-		fg(cFaint, truncate("⏎ adopt · esc cancel · the session keeps running either way", w)),
+	lead := t.sess.Name
+	if t.repo != "" {
+		lead += " in " + t.repo
 	}
+	var out []string
+	out = append(out, fg(cDim, "adopt this session"))
+	out = append(out, line(lead, cw, cWhite, ""))
+	out = append(out, fg(cFaint, truncate(t.dir, cw)))
+	explain := "it joins the fleet as a dispatcher and reports from its next hook · " +
+		"nothing else changes: no branch, no worktree, and the session keeps running either way"
+	for _, ln := range productWrap(explain, cw) {
+		out = append(out, fg(cFaint, ln))
+	}
+	out = append(out, fg(cRule, strings.Repeat("─", cw)))
+	out = append(out, fg(cAmber, "name ")+fg(cWhite, m.adoptText+"▏"))
+	out = append(out, fg(cFaint, "enter adopts it · esc cancels"))
+	return clampLines(gutter(strings.Join(out, "\n"), pad), h)
 }
