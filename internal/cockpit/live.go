@@ -159,7 +159,7 @@ type collectCtx struct {
 // nothing loaded, what the dispatch was launched under is the only thing known.
 //
 // It reads the config rather than the package's productOrder/reposByProduct
-// vars on purpose. Collectors run in order and applySnapshot only publishes
+// vars on purpose. Collectors run at once and applySnapshot only publishes
 // their results at the end, so on the first load those vars are still empty:
 // every dispatch resolved to "—", matched no product group, and the floor came
 // up empty while work was in flight. A collector must derive from its ctx, not
