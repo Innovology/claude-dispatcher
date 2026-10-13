@@ -2,12 +2,14 @@ package cockpit
 
 import (
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fsnotify/fsnotify"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/keymap"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
@@ -55,6 +57,9 @@ func Run() error {
 			m.keys = km
 		}
 		_ = state.EnsureDirs()
+		// Answers that cannot change any more are kept across launches, so a
+		// cockpit opened again within the half hour does not ask for them again.
+		gh.KeepSettled(filepath.Join(state.Dir(), "gh-settled.json"))
 		ch := make(chan struct{}, 1)
 		if watcher, err := fsnotify.NewWatcher(); err == nil {
 			if watcher.Add(state.DispatchesDir()) == nil {

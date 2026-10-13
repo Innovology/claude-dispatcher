@@ -98,8 +98,16 @@ func buildFloorRow(ctx *collectCtx, rec *state.Dispatch) floorRow {
 	var checks gh.Checks
 	var review gh.Review
 	if forge == "gh" && rec.PRNumber > 0 {
+		// Side by side: for a PR the repo's open list does not hold — merged or
+		// closed — each is a request of its own, and in series they were a
+		// second and a half on the opening screen's critical path.
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			review = gh.PRReviewFor(rec.RepoPath, rec.PRNumber)
+		}()
 		checks = gh.PRChecksFor(rec.RepoPath, rec.PRNumber)
-		review = gh.PRReviewFor(rec.RepoPath, rec.PRNumber)
+		<-done
 	}
 
 	// Transcript preview: one read reused for said/tail/activity.
