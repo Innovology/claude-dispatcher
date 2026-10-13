@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
 )
@@ -398,5 +399,51 @@ func TestFleetRepoStemsOnlyTheProductPrefix(t *testing.T) {
 		if got := fleetRepo(c.repo, c.product); got != c.want {
 			t.Errorf("fleetRepo(%q,%q) = %q, want %q", c.repo, c.product, got, c.want)
 		}
+	}
+}
+
+// A session that started and has said nothing since is sitting on a startup
+// prompt no hook reports — reported as a row reading "starting session" while
+// the pane asked whether to trust the folder. It is a menu like the other two:
+// first in the table, amber, enter to attach; only its words are its own.
+func TestAStalledLaunchWantsYou(t *testing.T) {
+	started := time.Now().Add(-dispatchpkg.LaunchStallAfter - 10*time.Second)
+	rec := &state.Dispatch{ID: "s1", Feature: "find-mannequin", Status: state.StatusLaunching, SessionStartedAt: &started}
+	if st := floorState(rec); st != "blocked" {
+		t.Fatalf("floorState = %q, want blocked", st)
+	}
+	kind := cqKind(rec, "blocked")
+	if kind != "startup" || !cqMenu(kind) {
+		t.Fatalf("kind = %q (menu %v), want a startup menu", kind, cqMenu(kind))
+	}
+	if cqUrgency(fleetRow{ask: kind}) != cqUrgency(fleetRow{ask: "permission"}) {
+		t.Error("a stalled launch must rank with the other menus")
+	}
+	keys := func(kind string) string {
+		var ks []string
+		for _, a := range cqActs(rec, kind) {
+			ks = append(ks, a.k+":"+a.d)
+		}
+		return strings.Join(ks, " ")
+	}
+	if keys("startup") != keys("permission") {
+		t.Errorf("acts differ: startup %q, permission %q", keys("startup"), keys("permission"))
+	}
+	if cqWant(kind) == cqWant("permission") {
+		t.Error("a startup prompt is worded as a permission")
+	}
+	s := &snapshot{}
+	if lead := cqLeadOf(s, rec, kind); !strings.Contains(lead, "startup prompt") {
+		t.Errorf("lead with nothing recorded = %q", lead)
+	}
+	rec.StatusReason = state.ReasonUntrustedLaunch
+	if lead := cqLeadOf(s, rec, kind); !strings.Contains(lead, "trust this worktree") {
+		t.Errorf("lead for an untrusted launch = %q", lead)
+	}
+
+	fresh := time.Now().Add(-5 * time.Second)
+	rec.SessionStartedAt = &fresh
+	if st := floorState(rec); st != "working" {
+		t.Errorf("a launch inside the threshold reads %q, want working", st)
 	}
 }

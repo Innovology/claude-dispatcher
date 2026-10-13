@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // claudeConfigPath is Claude Code's own config, where project trust lives.
@@ -186,13 +187,23 @@ func readClaudeProjects(path string) (map[string]json.RawMessage, map[string]map
 	if path == "" {
 		return nil, nil, false
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, false
-	}
+	// Claude Code rewrites this file from every running session, and a read
+	// that lands mid-write does not parse. That failure is silent — trust is
+	// simply not inherited, and the session stops on its trust prompt — so a
+	// file that will not parse is read again before it is given up on.
 	var cfg map[string]json.RawMessage
-	if json.Unmarshal(raw, &cfg) != nil {
-		return nil, nil, false
+	for attempt := 0; ; attempt++ {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, false
+		}
+		if json.Unmarshal(raw, &cfg) == nil {
+			break
+		}
+		if attempt == 2 {
+			return nil, nil, false
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	var projects map[string]map[string]any
 	if p, ok := cfg["projects"]; ok {

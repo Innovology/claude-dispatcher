@@ -136,7 +136,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	// A fresh worktree is a folder Claude Code has never seen, and it blocks on
 	// its trust prompt before reading the prompt we launched it with. Inherit
 	// the repo's own trust decision so an unattended session can actually start.
-	InheritTrustFor(acct.Env(), r.Path, worktree)
+	trusted := InheritTrustFor(acct.Env(), r.Path, worktree)
 
 	baseSHA := ""
 	if out, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output(); err == nil {
@@ -175,6 +175,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		ConfigDir:    acct.Env(),
 		TmuxSession:  uniqueName(supervisor.Session{Name: "disp-" + slug, Socket: r.Socket}),
 		Status:       state.StatusLaunching,
+		StatusReason: launchReason(trusted),
 		CreatedAt:    time.Now(),
 	}
 	if err := state.Save(d); err != nil {
@@ -664,4 +665,15 @@ func CleanupWorktree(repoPath, worktreePath string) bool {
 	_ = exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
 	_, err := os.Stat(worktreePath)
 	return os.IsNotExist(err)
+}
+
+// launchReason is a new record's reason. A worktree that could not be marked
+// trusted is a session that will stop on claude's trust prompt before it reads
+// the prompt it was sent, and saying so at the launch is what lets the row name
+// that prompt when the session goes quiet (LaunchStalled) instead of guessing.
+func launchReason(trusted bool) string {
+	if trusted {
+		return ""
+	}
+	return state.ReasonUntrustedLaunch
 }

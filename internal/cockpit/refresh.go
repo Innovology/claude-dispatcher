@@ -46,6 +46,9 @@ type (
 	snapshotMsg snapshot
 	// stateChangedMsg fires when the dispatch state dir changes on disk.
 	stateChangedMsg struct{}
+	// launchStallCheckMsg is the reload a launch schedules for just after a
+	// silent session would count as stalled (dispatch.LaunchStallAfter).
+	launchStallCheckMsg struct{}
 	// refreshTickMsg is the periodic poll.
 	refreshTickMsg struct{}
 	// ageTickMsg is the clock tick: a redraw and nothing else.

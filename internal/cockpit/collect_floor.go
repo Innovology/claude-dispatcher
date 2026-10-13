@@ -207,7 +207,15 @@ func floorState(rec *state.Dispatch) string {
 			return "review"
 		}
 		return "needs"
-	case state.StatusWorking, state.StatusLaunching:
+	case state.StatusLaunching:
+		// A session that started and has said nothing since is waiting on a
+		// startup prompt no hook reports — its trust dialog, most often — and
+		// it is the human's to answer (dispatch.LaunchStalled).
+		if dispatchpkg.LaunchStalled(rec, time.Now()) {
+			return "blocked"
+		}
+		return "working"
+	case state.StatusWorking:
 		return "working"
 	case state.StatusDone:
 		return "live"

@@ -49,6 +49,12 @@ const ReasonQuestion = "asked you a question — ⏎ to answer it in the session
 // this prefix to classify the ask, which is the other half of why it is named.
 const ReasonTurnComplete = "turn complete — waiting on you"
 
+// ReasonUntrustedLaunch is a launching record's reason when its worktree could
+// not be marked trusted, so claude will stop on its trust prompt before it
+// reads the prompt. Named for the same reason as ReasonQuestion: dispatch
+// writes it and the cockpit's lead for a stalled launch matches it.
+const ReasonUntrustedLaunch = "starting session · not marked trusted, so claude will ask first"
+
 // Priority orders statuses by how urgently they need the human's attention.
 func (s Status) Priority() int {
 	switch s {

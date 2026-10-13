@@ -135,9 +135,12 @@ func cqAllDigits(s string) bool {
 // the honest "it stopped".
 func cqKind(rec *state.Dispatch, st string) string {
 	if st == "blocked" {
-		// Both waits are blocked, so the reason is the only thing that tells
-		// them apart — and they are told apart only to be worded differently:
-		// see cqMenu for everything they share.
+		// All three waits are blocked, so the reason is the only thing that
+		// tells them apart — and they are told apart only to be worded
+		// differently: see cqMenu for everything they share.
+		if dispatchpkg.LaunchStalled(rec, time.Now()) {
+			return "startup"
+		}
 		if rec.StatusReason == state.ReasonQuestion {
 			return "question"
 		}
@@ -169,11 +172,13 @@ func cqKind(rec *state.Dispatch, st string) string {
 // this instead, so the one way to split them by accident is to edit this
 // function, which is the point of it.
 func cqMenu(kind string) bool {
-	return kind == "permission" || kind == "question"
+	return kind == "permission" || kind == "question" || kind == "startup"
 }
 
 func cqWant(kind string) string {
 	switch kind {
+	case "startup":
+		return "answer its startup prompt"
 	case "permission":
 		return "approve a permission"
 	case "question":
@@ -230,6 +235,15 @@ func cqToneOf(st string, checks gh.Checks, review gh.Review, clash *cqClash) str
 func cqLeadOf(s *snapshot, rec *state.Dispatch, kind string) string {
 	if kind == "api-error" {
 		return cqFailLead(rec)
+	}
+	if kind == "startup" {
+		// Named only when the launch recorded why: a worktree it could not
+		// mark trusted is a session on its trust prompt. Otherwise the silence
+		// is the whole of the evidence, and the lead says only that.
+		if rec.StatusReason == state.ReasonUntrustedLaunch {
+			return "Claude Code is asking whether to trust this worktree. Attach and answer it."
+		}
+		return "Claude has said nothing since its session started — it is most likely on a startup prompt, such as trusting the folder. Attach to answer it."
 	}
 	// A menu's wait is mid-turn, so rec.Said is the last thing it said on some
 	// earlier turn: stale, and never the menu that is on the screen now.

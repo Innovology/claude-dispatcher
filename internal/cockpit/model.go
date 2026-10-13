@@ -579,6 +579,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.settlePending(msg.feature)
 		}
 		mm, load := m.fleetSync().requestLoad(loadPlain)
+		if msg.failed {
+			return mm, load
+		}
+		// A session that never reports in writes nothing, so nothing would
+		// reload to show it stalled before the next poll, a minute away. One
+		// load just past the threshold is what turns its row (LaunchStalled).
+		stall := tea.Tick(dispatchpkg.LaunchStallAfter+2*time.Second, func(time.Time) tea.Msg { return launchStallCheckMsg{} })
+		return mm, tea.Batch(load, stall)
+
+	case launchStallCheckMsg:
+		mm, load := m.requestLoad(loadPlain)
 		return mm, load
 
 	case resumedMsg:
