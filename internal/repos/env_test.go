@@ -3,6 +3,7 @@ package repos
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"claude-dispatcher/internal/config"
@@ -92,4 +93,43 @@ func withNix(t *testing.T, present bool) {
 	prev := nixAvailable
 	nixAvailable = func() bool { return present }
 	t.Cleanup(func() { nixAvailable = prev })
+}
+
+// The flake that decides a repo's environment is the checkout's, and a session
+// runs in a worktree cut from somewhere else. Reported on playerpulse: the
+// flake is on `dev`, the dispatch was cut from main, and `nix develop` stood in
+// a worktree with no flake.nix and found nothing. Where the session's own
+// directory has a flake it is still the one used; where it has none, the
+// checkout's is named outright.
+func TestEnvInNamesTheCheckoutsFlakeWhereTheWorktreeHasNone(t *testing.T) {
+	flake := func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, "flake.nix"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkout, worktree := t.TempDir(), t.TempDir()
+	flake(checkout)
+
+	if got, want := EnvIn(NixDevelop, checkout, worktree), "nix develop "+checkout+" --no-write-lock-file --command"; got != want {
+		t.Errorf("EnvIn(no flake in the worktree) = %q, want %q", got, want)
+	}
+	flake(worktree)
+	if got := EnvIn(NixDevelop, checkout, worktree); got != NixDevelop {
+		t.Errorf("EnvIn(the worktree's own flake) = %q, want it searched for where it stands", got)
+	}
+	if got := EnvIn("devbox run --", checkout, t.TempDir()); got != "devbox run --" {
+		t.Errorf("an explicit [session_env] was rewritten: %q", got)
+	}
+
+	// The env string is split on whitespace, so a path holding a space goes as
+	// a URL with the space escaped.
+	spaced := filepath.Join(t.TempDir(), "my repo")
+	if err := os.MkdirAll(spaced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	flake(spaced)
+	got := EnvIn(NixDevelop, spaced, t.TempDir())
+	if len(strings.Fields(got)) != 5 || !strings.Contains(got, "git+file://") || !strings.Contains(got, "my%20repo") {
+		t.Errorf("EnvIn(spaced checkout) = %q", got)
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 )
 
@@ -235,10 +236,12 @@ func TestResumeRefusesWhatItCannotResume(t *testing.T) {
 	stubSessions(t, sup)
 
 	// A repo each: one branch cannot be checked out in two worktrees at once.
+	// No conversation is started again (below) — unless there is not even a
+	// prompt to start it with.
 	noSession := finished(t, initRepo(t))
-	noSession.SessionID, noSession.TranscriptPath = "", ""
-	if _, _, err := Resume(noSession, ""); err == nil || !strings.Contains(err.Error(), "nothing to resume") {
-		t.Errorf("no session id: err = %v", err)
+	noSession.SessionID, noSession.TranscriptPath, noSession.Prompt = "", "", ""
+	if _, _, err := Resume(noSession, ""); err == nil || !strings.Contains(err.Error(), "never started") {
+		t.Errorf("no session id and no prompt: err = %v", err)
 	}
 
 	gone := finished(t, initRepo(t))
@@ -270,5 +273,53 @@ func TestSessionIDOfFallsBackToTheTranscript(t *testing.T) {
 		if got := SessionIDOf(c.d); got != c.want {
 			t.Errorf("SessionIDOf(%#v) = %q, want %q", c.d, got, c.want)
 		}
+	}
+}
+
+// A launch that died before claude ran keeps its row (ADR 0009), and ⏎ on it
+// used to refuse — "nothing to resume" — leaving the human to type the whole
+// dispatch again. It launches it again instead: same worktree, the prompt it
+// was sent with, and an environment that works where it now stands. The
+// reported case was a flake on the checkout's branch and not on main, so the
+// record carried a bare `nix develop` that found nothing in the worktree.
+func TestResumeStartsANeverStartedLaunchAgain(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	sup := &stubSupervisor{alive: map[string]bool{}}
+	stubSessions(t, sup)
+
+	repo := initRepo(t)
+	d := finished(t, repo)
+	d.SessionID, d.TranscriptPath = "", ""
+	d.EnvCommand = repos.NixDevelop
+	d.Status, d.StatusReason = state.StatusExited, "did not start: tmux new-session: path … does not contain a 'flake.nix'"
+	// The checkout's branch has a flake; the worktree, cut from elsewhere, not.
+	if err := os.WriteFile(filepath.Join(repo, "flake.nix"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !NeverStarted(d) {
+		t.Fatal("a record with no session id and no transcript never started")
+	}
+
+	mode, session, err := Resume(d, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != ResumeRelaunched || session == "" {
+		t.Fatalf("mode = %q session = %q, want a relaunch", mode, session)
+	}
+	if sup.started.dir != d.WorktreePath {
+		t.Errorf("started in %q, want its own worktree %q", sup.started.dir, d.WorktreePath)
+	}
+	if strings.Contains(sup.started.cmd, "--resume") || !strings.Contains(sup.started.cmd, state.PromptPath(d.ID)) {
+		t.Errorf("command %q is not the original launch", sup.started.cmd)
+	}
+	if b, err := os.ReadFile(state.PromptPath(d.ID)); err != nil || string(b) != "retry the payments" {
+		t.Errorf("prompt file = %q, %v; want what it was dispatched with", b, err)
+	}
+	if want := "nix develop " + repo + " --no-write-lock-file --command"; sup.started.env != want || d.EnvCommand != want {
+		t.Errorf("env = %q (record %q), want the checkout's flake named: %q", sup.started.env, d.EnvCommand, want)
+	}
+	if d.Status != state.StatusLaunching || d.StatusReason != "starting again" {
+		t.Errorf("record left at %q / %q", d.Status, d.StatusReason)
 	}
 }

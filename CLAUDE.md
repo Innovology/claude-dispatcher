@@ -240,7 +240,13 @@
   client runs **from the session's directory** (the worktree at launch, tmux's
   `session_path` at attach), because `nix develop` finds its flake where it
   stands: run from the cockpit's cwd it failed from `~` and, worse, lent a
-  dispatch whichever flake repo the cockpit was opened in. It is applied to
+  dispatch whichever flake repo the cockpit was opened in. **Where it stands
+  need not have one**: the flake was found in the *checkout*, and a worktree
+  cut from the remote's default carries that branch's files — playerpulse's
+  flake is on `dev`, not `main`, and a dispatch from `origin/main` died with
+  "does not contain a 'flake.nix'". So `repos.EnvIn` keeps the worktree's own
+  flake where it has one and otherwise names the checkout's outright (`nix
+  develop <checkout> …`), on the record, so resume and attach agree. It is applied to
   the two calls that spawn a pane and nowhere else, because on the Server it
   would put a nix evaluation behind every poll. The name alone stops being an
   address: `supervisor.Session` carries `(socket, name)` and both go on the
@@ -375,7 +381,9 @@
   verbatim — not lifecycle events, nothing derives status from them and
   `velDwellState` leaves them unbilled); **a failed launch keeps its row**,
   SIGNAL "did not start", the launch's own words in the detail lead, `x` to
-  dismiss, and no snapshot retires it because what it reports is that there is
+  dismiss, `⏎` to **start it again** (`dispatch.Resume` on a record with no
+  conversation reruns the launch in its worktree with its prompt — a resume
+  would only refuse), and no snapshot retires it because what it reports is that there is
   nothing for a snapshot to find; and **a session that would not start keeps
   its record**, carrying the supervisor's words instead of the "tmux launch
   failed" that stood for every cause there is. The long-prompt cause was the

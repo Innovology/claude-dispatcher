@@ -169,7 +169,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		Model:        string(model),
 		FanOut:       fanOut,
 		TmuxSocket:   r.Socket,
-		EnvCommand:   r.Env,
+		EnvCommand:   repos.EnvIn(r.Env, r.Path, worktree),
 		PaneShell:    r.Shell,
 		Account:      accountName(acct),
 		ConfigDir:    acct.Env(),

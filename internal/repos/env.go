@@ -10,6 +10,7 @@ package repos
 // and each has to bring its own. See docs/adr/0014.
 
 import (
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,6 +68,35 @@ func envFor(cfg *config.Config, name, checkout string) string {
 		return ""
 	}
 	return NixDevelop
+}
+
+// EnvIn is env made to work from dir, the directory a session actually runs
+// in, given that it was resolved for checkout.
+//
+// The flake that decided env was the CHECKOUT's — the one the repo's row reads
+// — and a session runs somewhere else: a worktree cut from the remote's
+// default, or from a ROOT the human named. Those need not carry the same
+// files. Reported on playerpulse, whose flake is on `dev` and not on `main`:
+// the dispatch was cut from origin/main, `nix develop` stood in a worktree
+// with no flake.nix, searched up, found nothing, and the session never
+// started. A flake in dir is still the one used — it is the code being worked
+// on, and a branch may change its own toolchain — but where dir has none, the
+// checkout's is named outright rather than searched for, so the dispatch gets
+// the repo's environment as the human runs it.
+//
+// Only the bare NixDevelop is rewritten: an explicit [session_env] says what
+// it means and is passed as written. The reference is a plain path unless it
+// holds whitespace, which the env string is split on (tmux.cmdIn), and then a
+// git+file URL with the path escaped.
+func EnvIn(env, checkout, dir string) string {
+	if env != NixDevelop || dir == "" || checkout == "" || hasFlake(dir) || !hasFlake(checkout) {
+		return env
+	}
+	ref := checkout
+	if strings.ContainsAny(ref, " \t\n") {
+		ref = (&url.URL{Scheme: "git+file", Path: checkout}).String()
+	}
+	return "nix develop " + ref + " --no-write-lock-file --command"
 }
 
 // shellFor is the interactive shell a dispatch pane drops to once claude

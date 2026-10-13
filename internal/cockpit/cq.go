@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
 )
@@ -322,6 +323,12 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 	if kind == "past" || kind == "done" {
 		acts := []cqAct{
 			{k: "⏎", d: "resume", ok: "resuming \"" + rec.Feature + "\"…", keep: true},
+		}
+		// A launch that died before claude ran has no conversation, so ⏎
+		// launches it again (dispatch.Resume) — and says that, rather than
+		// offering a resume it cannot perform.
+		if dispatchpkg.NeverStarted(rec) {
+			acts[0] = cqAct{k: "⏎", d: "start again", ok: "starting \"" + rec.Feature + "\" again…", keep: true}
 		}
 		if rec.PRNumber > 0 {
 			// No forge is threaded in here, so the flash names the feature rather

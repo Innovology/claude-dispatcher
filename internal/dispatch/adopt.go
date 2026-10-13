@@ -105,7 +105,7 @@ func Adopt(a Adoption, now time.Time) (*state.Dispatch, error) {
 		// know what it was given.
 		TmuxSession:      a.Session.Name,
 		TmuxSocket:       a.Session.Socket,
-		EnvCommand:       a.Repo.Env,
+		EnvCommand:       repos.EnvIn(a.Repo.Env, a.Repo.Path, a.Dir),
 		PaneShell:        a.Repo.Shell,
 		SessionID:        sid,
 		Status:           state.StatusWorking,
