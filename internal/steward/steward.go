@@ -48,6 +48,7 @@ func Dir() string { return filepath.Join(state.Dir(), "steward") }
 
 // The supervisor calls, as seams for tests.
 var (
+	available   = supervisor.Available
 	sessionIdle = supervisor.SessionIdle
 	hasSession  = supervisor.HasSession
 	newSession  = supervisor.NewSession
@@ -94,7 +95,7 @@ func setEnabled(on bool) error {
 // answer leaves it alone, since replacing a steward that is working would be
 // worse than a steward that is late. It reports whether it started one.
 func Ensure() (bool, error) {
-	if !Enabled() || !supervisor.Available() {
+	if !Enabled() || !available() {
 		return false, nil
 	}
 	if Running() {
@@ -121,7 +122,7 @@ var ErrRunning = errors.New("the steward is already running")
 // binary, so an upgrade changes how it works on its next start — trusts it,
 // and starts the session. One already up is left alone (ErrRunning).
 func Start() error {
-	if !supervisor.Available() {
+	if !available() {
 		return errors.New(supervisor.Backend() + " is not available")
 	}
 	if Running() {

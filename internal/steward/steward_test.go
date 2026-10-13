@@ -23,10 +23,13 @@ type fakeSup struct {
 func withFakes(t *testing.T, f *fakeSup, exe string) {
 	t.Helper()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	ph, pn, pk, pt, pe, pi := hasSession, newSession, killSession, trustDir, executable, sessionIdle
+	pa, ph, pn, pk, pt, pe, pi := available, hasSession, newSession, killSession, trustDir, executable, sessionIdle
 	t.Cleanup(func() {
-		hasSession, newSession, killSession, trustDir, executable, sessionIdle = ph, pn, pk, pt, pe, pi
+		available, hasSession, newSession, killSession, trustDir, executable, sessionIdle = pa, ph, pn, pk, pt, pe, pi
 	})
+	// The fakes are the supervisor, so it is there whether or not this machine
+	// has tmux: the nix build runs the suite in a sandbox without it.
+	available = func() bool { return true }
 	sessionIdle = func(supervisor.Session) (bool, bool) { return f.idle, f.known }
 	hasSession = func(supervisor.Session) bool { return f.running }
 	newSession = func(s supervisor.Session, dir, cmd, env string) error {
