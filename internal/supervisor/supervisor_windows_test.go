@@ -19,7 +19,7 @@ func TestBackend(t *testing.T) {
 func TestUniqueNameFree(t *testing.T) {
 	// Isolate the registry so no session is ever "taken".
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	if got := UniqueName("disp-fresh"); got != "disp-fresh" {
+	if got := UniqueName(Session{Name: "disp-fresh"}); got != "disp-fresh" {
 		t.Errorf("UniqueName of a free name = %q, want disp-fresh", got)
 	}
 }

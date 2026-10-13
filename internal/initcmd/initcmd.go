@@ -117,7 +117,7 @@ func hookExe(exe, argv0 string, lookPath, eval func(string) (string, error)) str
 	if err != nil {
 		return exe
 	}
-	if resolved, err := eval(cand); err != nil || !(resolved == exe || wraps(resolved, exe)) {
+	if resolved, err := eval(cand); err != nil || (resolved != exe && !wraps(resolved, exe)) {
 		return exe
 	}
 	return cand
