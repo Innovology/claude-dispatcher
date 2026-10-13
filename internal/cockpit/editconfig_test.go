@@ -37,13 +37,16 @@ func TestConfigEditedReloadsAndKeepsTheOldOnABadFile(t *testing.T) {
 	m := newModel()
 	m.cfg = &config.Config{Roots: []string{"/old"}}
 
-	write("roots = [\"/new\"]\n[keys]\n\"settings\" = \"S\"\n")
+	write("roots = [\"/new\"]\nappearance_file = \"/tmp/cd-test-mode\"\n[keys]\n\"settings\" = \"ctrl+o\"\n")
 	m, _ = m.onConfigEdited(configEditedMsg{})
 	if len(m.cfg.Roots) != 1 || m.cfg.Roots[0] != "/new" {
 		t.Errorf("roots after the edit = %v", m.cfg.Roots)
 	}
-	if m.keys.KeyFor("settings") != "S" {
+	if m.keys.KeyFor("settings") != "ctrl+o" {
 		t.Errorf("the [keys] rebinding was not applied: settings is %q", m.keys.KeyFor("settings"))
+	}
+	if m.themeFile != "/tmp/cd-test-mode" {
+		t.Errorf("appearance_file after the edit = %q, want it read from then on", m.themeFile)
 	}
 	if !strings.Contains(m.notice, "reloaded") {
 		t.Errorf("notice = %q", m.notice)

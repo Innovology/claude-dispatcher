@@ -451,8 +451,8 @@ func (m model) productsOnboarding(cw int) []string {
 	out = append(out, fg(cDim, itoa(len(rows))+" "+plural(len(rows), "repo", "repos")+" found, none grouped"))
 	out = append(out, "")
 	out = append(out, row(cw, "",
-		c("n", 2, cFg), flexc("name a product, then move repos in", cDim),
-		c("a", 2, cFg), flexc("open the repo list and assign", cDim),
+		c(m.keys.KeyFor("products.new"), 2, cFg), flexc("name a product, then move repos in", cDim),
+		c(m.keys.KeyFor("products.assign"), 2, cFg), flexc("open the repo list and assign", cDim),
 	))
 	if s := productsSuggestion(rows); s != "" {
 		out = append(out, "", fg(cFaint, s))

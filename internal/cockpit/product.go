@@ -13,13 +13,14 @@ package cockpit
 // columns of cards, and "in flight" says the same thing in a list.
 
 import (
-	"claude-dispatcher/internal/supervisor"
 	"strings"
 
 	"claude-dispatcher/internal/account"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
+	"claude-dispatcher/internal/keymap"
 	"claude-dispatcher/internal/repos"
+	"claude-dispatcher/internal/supervisor"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -738,6 +739,12 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 
+	// After the inputs above, which take every key as text: the tabs and the
+	// sessions keys are the keymap's, so a rebind moves them.
+	if k = m.keys.Resolve(keymap.Panel, k); k == "" {
+		return m, nil
+	}
+
 	// esc closes the panel and hands the portfolio back. It is not a lens change
 	// in the human's terms — the products lens was never left. q stays quit
 	// everywhere, so the panel does not claim it and the footer does not offer it.
@@ -984,8 +991,14 @@ func (m model) productSessionsBody(cw, ch int) []string {
 		if i == sel {
 			bg, marker, nameColor = cSel, "▸", cWhite
 		}
+		// A mark is what A acts on instead of the cursor, so it has to show.
+		mark := " "
+		if m.sessionMarked[it.socket+"/"+it.name] {
+			mark = "◆"
+		}
 		rows = append(rows, row(cw, bg,
 			c(marker, 2, cFaint),
+			c(mark, 2, cAmber),
 			flexc(it.name, nameColor),
 			c(it.repo, 20, cDim),
 			cr(serverLabel(it.socket), 16, cFaint)))

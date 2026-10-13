@@ -17,6 +17,7 @@ import (
 
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/keymap"
 )
 
 type settingsKind int
@@ -167,6 +168,9 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 			st.input, cmd = st.input.Update(m.inputMsg(k))
 			return m, cmd
 		}
+	}
+	if k = m.keys.Resolve(keymap.Settings, k); k == "" {
+		return m, nil
 	}
 	switch k {
 	case "esc", "q", ",":

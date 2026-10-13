@@ -170,7 +170,7 @@ type model struct {
 	sessionMarked  map[string]bool
 	adoptOpenInput bool
 	adoptText      string
-	adoptAt        *adoptTarget
+	adoptAt        *ownSession
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.

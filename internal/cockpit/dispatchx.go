@@ -155,8 +155,8 @@ func (m model) dxTouched() bool {
 }
 
 // dxAtRest reports whether the form is exactly as it opened: focus on WHERE,
-// the repo cursor on the first row, nothing typed. Only then do 1–6, ':', 'd'
-// and 'h' leave it.
+// the repo cursor on the first row, nothing typed. Only then do 1–6 and ':'
+// leave it — and 'd' and 'h', on the form that stands in for an empty table.
 //
 // dxTouched alone was the test, and it cannot see a choice made without typing.
 // Arrow down to a repo and press enter, and every text field is still empty,

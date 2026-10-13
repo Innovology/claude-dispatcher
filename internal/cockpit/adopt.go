@@ -26,15 +26,6 @@ import (
 	"claude-dispatcher/internal/supervisor"
 )
 
-// adoptTarget is one session about to be adopted, captured when the input
-// opens: the list behind it is rebuilt on every load, and a name typed over
-// five seconds must not land on whatever row has taken that index since.
-type adoptTarget struct {
-	sess supervisor.Session
-	dir  string
-	repo string
-}
-
 // adoptOpen starts an adoption: the marked sessions, or the one under the
 // cursor. A single one gets the naming input; several are taken on their
 // default names.
@@ -45,16 +36,19 @@ func (m model) adoptOpen(items []ownSession) (model, tea.Cmd) {
 		m.notice = "no session to adopt"
 		return m, nil
 	case 1:
-		m.adoptOpenInput, m.adoptAt = true, &adoptTarget{
-			sess: supervisor.Session{Name: picked[0].name, Socket: picked[0].socket},
-			dir:  picked[0].path,
-			repo: picked[0].repo,
-		}
+		// The session is copied when the input opens: the list behind it is
+		// rebuilt on every load, and a name typed over five seconds must not
+		// land on whatever row has taken that index since.
+		t := picked[0]
+		m.adoptOpenInput, m.adoptAt = true, &t
 		// Pre-filled with the name the work already has, so the common case is
 		// one keypress and the human is still the one who named it.
 		m.adoptText = dispatchpkg.AdoptName(picked[0].path)
 		return m, nil
 	default:
+		// The marks have been acted on. Kept, they would outlive the sessions
+		// they named and pick the next A's targets instead of the cursor.
+		m.sessionMarked = map[string]bool{}
 		return m, adoptCmd(picked, "")
 	}
 }
@@ -92,7 +86,8 @@ func (m model) adoptKey(k string) (model, tea.Cmd) {
 		if t == nil {
 			return m, nil
 		}
-		return m, adoptCmd([]ownSession{{name: t.sess.Name, socket: t.sess.Socket, path: t.dir, repo: t.repo}}, name)
+		m.sessionMarked = map[string]bool{}
+		return m, adoptCmd([]ownSession{*t}, name)
 	}
 	m.adoptText = next
 	return m, nil
@@ -149,14 +144,14 @@ func (m model) viewAdopt(w, h int) string {
 	if cw < 10 {
 		cw = w
 	}
-	lead := t.sess.Name
+	lead := t.name
 	if t.repo != "" {
 		lead += " in " + t.repo
 	}
 	var out []string
 	out = append(out, fg(cDim, "adopt this session"))
 	out = append(out, line(lead, cw, cWhite, ""))
-	out = append(out, fg(cFaint, truncate(t.dir, cw)))
+	out = append(out, fg(cFaint, truncate(t.path, cw)))
 	explain := "it joins the fleet as a dispatcher and reports from its next hook · " +
 		"nothing else changes: no branch, no worktree, and the session keeps running either way"
 	for _, ln := range productWrap(explain, cw) {

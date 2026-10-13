@@ -67,7 +67,8 @@ func (m model) clRepos() []clRepoRow {
 			out = append(out, clRepoRow{
 				name: r.name, forge: r.forge, product: p, out: r.out, last: last,
 				path: r.path, pinned: r.pinned, worktrees: r.worktrees,
-				root: m.cfg.RootBranchFor(r.name),
+				root:   m.cfg.RootBranchFor(r.name),
+				socket: r.socket, env: r.env,
 			})
 		}
 	}

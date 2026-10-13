@@ -9,12 +9,9 @@ import (
 
 const pad = 2 // left/right page gutter, in columns (the design's 24px)
 
+// footerByLens is the footer of a lens whose keys the keymap does not own. The
+// ones it does are built from it (footerFromKeys).
 var footerByLens = map[string]string{
-	"products": "j/k move · enter opens the product panel · a assign · n new product · : palette",
-	// The design also offers J/K scroll and q close. Neither is wired — the
-	// panel does not scroll, and q is quit everywhere — so neither is offered.
-	"product":   "O overview · R review · T team · S shipped · H history · esc close · 1 triage",
-	"backlog":   "j/k move · space pick · enter dispatch · ctrl+d dispatch picked · s source · 1 triage",
 	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
 	"decisions": "j/k records · J/K repo · → body · a status · s supersede · e sources · o where it lives",
 	// v4 moved the product view off the digits, so the clause that named one is
@@ -162,12 +159,57 @@ func (m model) footerHelp() string {
 		if m.clNaming {
 			return "type the name · enter creates it · esc cancels"
 		}
-		return "j/k move · tab pane · space mark · enter assign · u unassign · ctrl+u start over · n new · a done"
+		return strings.Join([]string{
+			m.pairHint("editor.down", "editor.up", "move"), m.keyHint("editor.pane", "pane"),
+			m.keyHint("editor.mark", "mark"), m.keyHint("editor.move", "assign"),
+			m.keyHint("editor.unassign", "unassign"), m.keyHint("editor.reset", "start over"),
+			m.keyHint("products.new", "new"), m.keyHint("editor.close", "done"),
+		}, " · ")
+	}
+	if h, ok := m.footerFromKeys(m.lens); ok {
+		return h
 	}
 	if h, ok := footerByLens[m.lens]; ok {
 		return h
 	}
 	return "1 triage"
+}
+
+// footerFromKeys is the footer of a lens whose keys the keymap owns, built from
+// it rather than written beside it: a footer naming a key that has been
+// rebound is the same lie a hand-written help sheet would be.
+func (m model) footerFromKeys(lens string) (string, bool) {
+	var parts []string
+	switch lens {
+	case "products":
+		parts = []string{m.pairHint("products.down", "products.up", "move"),
+			m.keyHint("products.open", "opens the product panel"), m.keyHint("products.assign", "assign"),
+			m.keyHint("products.new", "new product"), m.keyHint("palette", "palette")}
+	case "product":
+		// The design also offers J/K scroll and q close. Neither is wired — the
+		// panel does not scroll, and q is quit everywhere — so neither is offered.
+		parts = []string{m.keyHint("panel.overview", "overview"), m.keyHint("panel.review", "review"),
+			m.keyHint("panel.team", "team"), m.keyHint("panel.shipped", "shipped"),
+			m.keyHint("panel.history", "history"), m.keyHint("panel.sessions", "your sessions"),
+			"esc close", "1 triage"}
+	case "backlog":
+		parts = []string{m.pairHint("list.down", "list.up", "move"), m.keyHint("list.pick", "pick"),
+			m.keyHint("list.open", "dispatch"), m.keyHint("list.dispatch", "dispatch picked"),
+			"s source", "1 triage"}
+	default:
+		return "", false
+	}
+	return strings.Join(parts, " · "), true
+}
+
+// keyHint is "<key> <what>" for an action, with the key it answers to now.
+func (m model) keyHint(action, what string) string {
+	return prettyKey(m.keys.KeyFor(action)) + " " + what
+}
+
+// pairHint is keyHint for a list's down/up pair: "j/k move".
+func (m model) pairHint(down, up, what string) string {
+	return prettyKey(m.keys.KeyFor(down)) + "/" + prettyKey(m.keys.KeyFor(up)) + " " + what
 }
 
 // barsView renders the bars that sit above the footer: the upgrade running

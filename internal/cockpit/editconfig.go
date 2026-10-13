@@ -61,9 +61,26 @@ func (m model) editConfig() (model, tea.Cmd) {
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return configEditedMsg{err: err} })
 }
 
+// applyConfig puts cfg in force: the environment it sets, the shell a session
+// may drop to, the key bindings, and the file the theme reads its switch from.
+// Run applies it at startup and onConfigEdited after the editor, so the two
+// cannot drift apart. A bad `[keys]` keeps the bindings already held and comes
+// back as the error, for each caller to word.
+func (m model) applyConfig(cfg *config.Config) (model, error) {
+	m.cfg = cfg
+	applyConfigEnv(cfg)
+	supervisor.KnowShell(cfg.Shell)
+	m.themeFile = cfg.AppearancePath()
+	km, err := keymap.New(cfg.Keys)
+	if err == nil {
+		m.keys = km
+	}
+	return m, err
+}
+
 // onConfigEdited reads the file back and applies it: everything Run applied
-// from it at startup, then a reload, because roots, products, checkouts and
-// sockets are what a load is built from.
+// from it at startup (applyConfig), then a reload, because roots, products,
+// checkouts and sockets are what a load is built from.
 //
 // A file that no longer parses keeps the config already running. The cockpit
 // saving its own settings rewrites the whole file from the config it holds,
@@ -80,17 +97,19 @@ func (m model) onConfigEdited(msg configEditedMsg) (model, tea.Cmd) {
 		m.notice = "config.toml did not load — still running on the config from before: " + err.Error()
 		return m, follow
 	}
-	m.cfg = cfg
-	applyConfigEnv(cfg)
-	supervisor.KnowShell(cfg.Shell)
+	fileBefore := m.themeFile
 	notice := "config.toml reloaded"
-	if km, err := keymap.New(cfg.Keys); err != nil {
+	if m, err = m.applyConfig(cfg); err != nil {
 		notice += fmt.Sprintf(" · keys: %v — keeping the bindings in use", err)
-	} else {
-		m.keys = km
 	}
 	var cmds []tea.Cmd
-	if mode, _ := themeModeOf(cfg.Theme); mode != m.themeMode {
+	mode, _ := themeModeOf(cfg.Theme)
+	fileChanged := m.themeFile != fileBefore
+	if fileChanged {
+		// A file named where there was nothing to ask is something to ask.
+		m.themeNoOS = false
+	}
+	if mode != m.themeMode || fileChanged {
 		m.themeMode = mode
 		m.applyTheme()
 		if mode == themeSystem {

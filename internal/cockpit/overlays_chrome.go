@@ -33,7 +33,6 @@ var helpLegend = []helpSection{
 	{section: "move", keys: []helpRow{
 		{"1…6", "triage · products · backlog · usage · decisions · velocity"},
 		{"esc", "leave the dispatch form"},
-		{"O R T S H", "in the product panel: overview · review · team · shipped · history"},
 		{"→ / ←", "into an ADR's body and back (decisions)"},
 	}},
 }
@@ -41,19 +40,25 @@ var helpLegend = []helpSection{
 // helpNotes are lines that belong to a generated section but are not bindings:
 // a key whose meaning depends on the row it is pressed on, and the sentence
 // that says what happens after. They are appended to their section, so nothing
-// the hand-written sheet used to say was lost when it started being built.
-var helpNotes = map[string][]helpRow{
-	"work the fleet": {
-		{"x", "on a ✓ row: dismiss it · nothing to kill, it goes to history"},
-	},
-	"what has finished": {
-		{"", "a dispatcher that ends keeps its row until you dismiss it"},
-		{"⏎", "resume it · its own transcript, in its own worktree"},
-		{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
-	},
-	"products · lens 2": {
-		{"esc", "close the panel · again closes the assignment editor"},
-	},
+// the hand-written sheet used to say was lost when it started being built. A
+// key they name is still read from the keymap.
+func (m model) helpNotes() map[string][]helpRow {
+	kill := prettyKey(m.keys.KeyFor("fleet.kill"))
+	return map[string][]helpRow{
+		"work the fleet": {
+			{kill, "on a ✓ row: dismiss it · nothing to kill, it goes to history"},
+			{kill, "on an adopted row: release it · the session keeps running, yours again"},
+		},
+		"what has finished": {
+			{"", "a dispatcher that ends keeps its row until you dismiss it"},
+			{"", "one you killed or merged yourself goes straight there — you read it"},
+			{prettyKey(m.keys.KeyFor("fleet.attach")), "resume it · its own transcript, in its own worktree"},
+			{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
+		},
+		"products · lens 2": {
+			{"esc", "close the panel · again closes the assignment editor"},
+		},
+	}
 }
 
 // helpOrder is the order the generated sections are printed in. A section a
@@ -86,6 +91,7 @@ func (m model) helpSections() []helpSection {
 	}
 
 	out := append([]helpSection{}, helpLegend...)
+	helpNotes := m.helpNotes()
 	printed := map[string]bool{}
 	add := func(name string) {
 		if printed[name] || len(rows[name]) == 0 {
@@ -108,6 +114,14 @@ func (m model) helpSections() []helpSection {
 // found by id — an action ending ".down" is printed with its ".up".
 func helpKeyLabel(m model, b keymap.Binding) string {
 	label := prettyKey(b.Key)
+	// The product panel's tabs are one idea, printed as one row.
+	if b.Action == "panel.overview" {
+		tabs := []string{label}
+		for _, a := range []string{"panel.review", "panel.team", "panel.shipped", "panel.history", "panel.sessions"} {
+			tabs = append(tabs, prettyKey(m.keys.KeyFor(a)))
+		}
+		return strings.Join(tabs, " ")
+	}
 	if mate, ok := strings.CutSuffix(b.Action, ".down"); ok {
 		if up := m.keys.KeyFor(mate + ".up"); up != "" {
 			return label + " / " + prettyKey(up)
@@ -129,9 +143,9 @@ func prettyKey(k string) string {
 }
 
 const (
-	// helpKeyCol is the width of the sheet's key column. The widest chord it
-	// has to hold is "u / ctrl+u".
-	helpKeyCol = 10
+	// helpKeyCol is the width of the sheet's key column. The widest label it
+	// has to hold is the product panel's tabs, "O R T S H Y".
+	helpKeyCol = 11
 	// helpMaxWidth caps the sheet so its prose stays readable — a sentence run
 	// across a 200-column terminal is one the eye loses its place in.
 	//

@@ -8,8 +8,9 @@
 //     the cockpit does not have. A hand-written key sheet beside a remappable
 //     keymap is a lie waiting for its first rebind.
 //   - A key bound to two actions in one scope is refused at load, with both
-//     actions named. Silently letting the last one win would make a typo in a
-//     config file present as a key that stopped working.
+//     actions named, and so is a screen's key that a global one already holds.
+//     Silently letting the last one win would make a typo in a config file
+//     present as a key that stopped working.
 //
 // Scope is what lets `n` be "new product" on the products lens and "next match"
 // while a search is up: keys are resolved against the screen that has the
@@ -23,6 +24,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Scope is the screen a binding belongs to. A key means whatever the scope with
@@ -40,6 +42,11 @@ const (
 	Editor Scope = "editor"
 	// Fold is an unfolded repo row inside the editor, while it has the keyboard.
 	Fold Scope = "fold"
+	// Panel is the product panel, enter on a product: its tabs, and what the
+	// rows of the sessions tab do.
+	Panel Scope = "panel"
+	// Settings is the settings screen, `,`.
+	Settings Scope = "settings"
 	// Search is live only while a query is up. It is resolved before the lens
 	// beneath it, which is how `n` can step to the next match on a screen where
 	// `n` otherwise makes a product — two meanings that never apply at once.
@@ -94,7 +101,7 @@ var Defaults = []Binding{
 	{Action: "fleet.park", Scope: Fleet, Key: "p", Help: "park it · say why, it waits below the fleet · again unparks", Section: "work the fleet"},
 	{Action: "fleet.dispatch", Scope: Fleet, Key: "d", Help: "dispatch · pick a repo, say what it does", Section: "work the fleet"},
 	{Action: "fleet.steward", Scope: Fleet, Key: "t", Help: "steward on/off · it answers what the brief settles, notes the rest on your rows", Section: "work the fleet"},
-	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher you have dismissed, newest worked first", Section: "what has finished"},
+	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher that has ended and left the table, newest worked first", Section: "what has finished"},
 	{Action: "fleet.openpr", Scope: Fleet, Key: "o", Help: "open its pull request", Section: "what has finished"},
 
 	// ---- products lens ------------------------------------------------------
@@ -128,9 +135,21 @@ var Defaults = []Binding{
 	{Action: "fold.pick", Scope: Fold, Key: "enter", Help: "in the fold: set it · again on the pinned one clears it", Section: "products · lens 2"},
 	{Action: "fold.leave", Scope: Fold, Key: "esc"},
 
+	// ---- the product panel --------------------------------------------------
+	// The sheet prints the tabs as one row, from panel.overview (helpKeyLabel).
+	{Action: "panel.overview", Scope: Panel, Key: "O", Help: "in the product panel: overview · review · team · shipped · history · your sessions", Section: "products · lens 2"},
+	{Action: "panel.review", Scope: Panel, Key: "R"},
+	{Action: "panel.team", Scope: Panel, Key: "T"},
+	{Action: "panel.shipped", Scope: Panel, Key: "S"},
+	{Action: "panel.history", Scope: Panel, Key: "H"},
+	{Action: "panel.sessions", Scope: Panel, Key: "Y"},
+	{Action: "sessions.mark", Scope: Panel, Key: "space", Help: "in your sessions: mark one · A adopts every marked one", Section: "products · lens 2"},
+	{Action: "sessions.adopt", Scope: Panel, Key: "A", Help: "in your sessions: adopt it · the session keeps running and starts reporting", Section: "products · lens 2"},
+
+	// ---- settings -----------------------------------------------------------
+	{Action: "settings.edit", Scope: Settings, Key: "e", Help: "in settings: open config.toml in your editor, for everything settings does not show", Section: "anywhere"},
+
 	// ---- search -------------------------------------------------------------
-	{Action: "sessions.mark", Scope: Products, Key: "space", Help: "in your sessions: mark one · A adopts every marked one", Section: "products · lens 2"},
-	{Action: "sessions.adopt", Scope: Products, Key: "A", Help: "in your sessions: adopt it · the session keeps running and starts reporting", Section: "products · lens 2"},
 	{Action: "search.open", Scope: Products, Key: "/", Help: "search · fzf matching, live, in place", Section: "search"},
 	{Action: "search.open", Scope: Editor, Key: "/"},
 	{Action: "search.next", Scope: Search, Key: "n", Help: "jump to the next match", Section: "search"},
@@ -241,6 +260,15 @@ func New(overrides map[string]string) (*Map, error) {
 	return m, nil
 }
 
+// defaultMap is the keymap with no overrides, built once, for a nil *Map.
+var defaultMap = sync.OnceValue(func() *Map {
+	m, err := New(nil)
+	if err != nil {
+		panic("keymap: the defaults do not resolve: " + err.Error())
+	}
+	return m
+})
+
 func defaultKeyOf(action string) string {
 	for _, d := range Defaults {
 		if d.Action == action {
@@ -264,12 +292,20 @@ func defaultKeyOf(action string) string {
 //     alongside the new one, which is not what rebinding means.
 func (m *Map) Resolve(scope Scope, pressed string) string {
 	if m == nil {
-		return pressed
+		// No map is the defaults, as it is for KeyFor and Bindings.
+		m = defaultMap()
 	}
-	if canon, ok := m.byKey[scope][pressed]; ok {
+	// The table spells the space bar "space", and Bubble Tea delivers it as
+	// " ". Looked up under its name, so a binding to space is reached by the
+	// key itself; unbound, it passes through as it came, for text entry.
+	name := pressed
+	if pressed == " " {
+		name = "space"
+	}
+	if canon, ok := m.byKey[scope][name]; ok {
 		return canon
 	}
-	if m.canonical[scope][pressed] {
+	if m.canonical[scope][name] {
 		return ""
 	}
 	return pressed

@@ -49,12 +49,12 @@ func (m model) clLeft(cw, h int) []string {
 		if marked != 1 {
 			word = "repos"
 		}
-		markedLine = itoa(marked) + " " + word + " marked · enter moves them"
+		markedLine = itoa(marked) + " " + word + " marked · " + m.keyHint("editor.move", "moves them")
 	}
 	// While a fold has the keyboard the hint is about the fold, because every
 	// key it names now means something else.
 	if m.clFoldRow != "" {
-		markedLine = "checkouts of " + m.clFoldRow + " · enter picks one · esc leaves"
+		markedLine = "checkouts of " + m.clFoldRow + " · " + m.keyHint("fold.pick", "picks one") + " · " + m.keyHint("fold.leave", "leaves")
 	}
 	// And a live search outranks both: it is the thing the keys currently mean.
 	if s := m.searchLine(); s != "" {
@@ -118,7 +118,7 @@ func (m model) clLeft(cw, h int) []string {
 				focus = clampCursor(m.clFoldIdx, len(r.worktrees))
 				hi = m.clFoldHighlights(r)
 			}
-			lines = append(lines, clFold(r, cw, focus, hi)...)
+			lines = append(lines, m.clFold(r, cw, focus, hi)...)
 		}
 	}
 	// Leave a line for the "showing x of y" footer so it cannot itself be the
@@ -140,16 +140,12 @@ func (m model) clLeft(cw, h int) []string {
 // changes it. An empty socket is named rather than left blank — "the default
 // server" is an answer, and a gap where a name goes reads as a failure to find
 // one.
-func clServerLine(r clRepoRow) string {
-	server := r.socket
-	if server == "" {
-		server = "default server"
-	}
-	line := "server " + server
+func (m model) clServerLine(r clRepoRow) string {
+	line := "server " + serverLabel(r.socket)
 	if r.env != "" {
 		line += " · " + r.env
 	}
-	return line + " · s to change"
+	return line + " · " + m.keyHint("editor.server", "to change")
 }
 
 // clFoldMax is how many other checkouts an unfolded row lists before it counts
@@ -174,7 +170,7 @@ const clFoldMax = 8
 // repos.
 // hi carries the search highlight for each checkout, indexed as r.worktrees is,
 // and is nil when no query is up.
-func clFold(r clRepoRow, cw, focus int, hi []map[int]bool) []string {
+func (m model) clFold(r clRepoRow, cw, focus int, hi []map[int]bool) []string {
 	lead := c("", 3, "")
 	inner := maxi(cw-3, 1)
 
@@ -195,7 +191,7 @@ func clFold(r clRepoRow, cw, focus int, hi []map[int]bool) []string {
 	// fact about this repo as the first, and it is the one nothing else on any
 	// screen says: a dispatch starts on this server, under this command, and
 	// every pane opened in it afterwards sees what that command put on PATH.
-	out = append(out, row(cw, "", lead, flexc(clElide(clServerLine(r), inner), cFaint)))
+	out = append(out, row(cw, "", lead, flexc(clElide(m.clServerLine(r), inner), cFaint)))
 	// And where its new work starts, which is not the folder above: a checkout
 	// holds whatever is out there today, and a dispatch is cut from origin.
 	rootLine := "new dispatches are cut from origin's default branch"
@@ -213,11 +209,11 @@ func clFold(r clRepoRow, cw, focus int, hi []map[int]bool) []string {
 	meta := itoa(len(r.worktrees)) + " checkouts"
 	switch {
 	case focus >= 0:
-		meta += " · enter picks where this row works · esc leaves"
+		meta += " · " + m.keyHint("fold.pick", "picks where this row works") + " · " + m.keyHint("fold.leave", "leaves")
 	case r.pinned:
-		meta += " · pinned · p to change"
+		meta += " · pinned · " + m.keyHint("editor.where", "to change")
 	default:
-		meta += " · chosen · p to change"
+		meta += " · chosen · " + m.keyHint("editor.where", "to change")
 	}
 	out = append(out, row(cw, "", lead, flexc(meta, cFaint)))
 

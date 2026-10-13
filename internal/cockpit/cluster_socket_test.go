@@ -102,12 +102,39 @@ func TestTheFoldNamesTheServerAndWhatLaunchesThere(t *testing.T) {
 		{"the default server is named", clRepoRow{}, []string{"default server"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := clServerLine(tc.row)
+			got := newModel().clServerLine(tc.row)
 			for _, want := range tc.want {
 				if !strings.Contains(got, want) {
 					t.Errorf("clServerLine = %q, want it to contain %q", got, want)
 				}
 			}
 		})
+	}
+}
+
+// The rows the editor draws come from clRepos, which built them without the
+// repo's server and environment: every fold said "default server", and `s`
+// opened on an empty field, so enter saved `[sockets] repo = ""` and moved the
+// repo onto the default server without a word. Read through clRepos, not a
+// hand-built row.
+func TestTheEditorRowsCarryTheServer(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	reposByProduct = map[string][]repoRef{
+		"acme": {{name: "acme-api", socket: "pp", env: "nix develop --command"}},
+	}
+	m := newModel()
+	m.cfg = &config.Config{}
+
+	rows := m.clRepos()
+	if len(rows) != 1 || rows[0].socket != "pp" || rows[0].env != "nix develop --command" {
+		t.Fatalf("rows = %+v, want the repo's server and environment", rows)
+	}
+	if line := m.clServerLine(rows[0]); !strings.Contains(line, "server pp") {
+		t.Errorf("fold says %q", line)
+	}
+	mm, _, _ := m.updateCluster("s")
+	if mm.clSockText != "pp" {
+		t.Errorf("s opens on %q, want the repo's own server", mm.clSockText)
 	}
 }

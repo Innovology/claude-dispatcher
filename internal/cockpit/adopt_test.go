@@ -49,3 +49,47 @@ func TestAdoptInputIsDrawnWhereTheKeyOpensIt(t *testing.T) {
 		t.Error("esc did not close the naming input")
 	}
 }
+
+// space marks a session for A, and A then acts on the marks rather than the
+// cursor — so a mark has to be on screen, and has to go once it is spent. It
+// was neither: nothing drew it, and a session released and listed again kept
+// its mark, so the next A adopted it instead of the row under the cursor.
+func TestASessionMarkShowsAndIsSpentByTheAdoption(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	prevOwn := ownSessions
+	t.Cleanup(func() { ownSessions = prevOwn })
+
+	products = []product{{name: "pp"}}
+	ownSessions = map[string][]ownSession{"pp": {
+		{name: "one", socket: "s", repo: "r", path: t.TempDir()},
+		{name: "two", socket: "s", repo: "r", path: t.TempDir()},
+	}}
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.lens = "product"
+	m.rightTab = "sessions"
+
+	marks := func(m model) int { return strings.Count(m.View(), "◆") }
+	if marks(m) != 0 {
+		t.Fatal("a mark is drawn before anything was marked")
+	}
+	next, _ := m.handleKey(" ")
+	m = next.(model)
+	next, _ = m.handleKey("j")
+	m = next.(model)
+	next, _ = m.handleKey(" ")
+	m = next.(model)
+	if marks(m) != 2 {
+		t.Fatalf("two marked sessions draw %d marks", marks(m))
+	}
+
+	next, cmd := m.handleKey("A")
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("A with two marks should adopt both")
+	}
+	if len(m.sessionMarked) != 0 || marks(m) != 0 {
+		t.Errorf("the marks outlived the adoption: %v", m.sessionMarked)
+	}
+}

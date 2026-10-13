@@ -321,7 +321,7 @@ func (m model) inputPending() bool {
 		m.adoptOpenInput ||
 		m.paletteOpen ||
 		m.clNaming || m.clKeying || m.clSockOpen ||
-		(m.cqFormOn() && m.dxTouched())
+		(m.cqFormOn() && !m.dxAtRest())
 }
 
 // upgradeBar is the whole of the upgrade on screen: one line above the footer.

@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"claude-dispatcher/internal/keymap"
 )
 
 // decision is one architecture decision record. Fields track the mock's
@@ -360,6 +362,9 @@ func (m model) decBodyBlock(cw int, _ string, list []decision, ci int, decPlugin
 // branch: j/k move within a repo's records, J/K change repo, a/s/o/e set a
 // notice, and →/← toggle the detail pane.
 func (m model) updateDecisions(k string) (model, tea.Cmd) {
+	if k = m.keys.Resolve(keymap.List, k); k == "" {
+		return m, nil
+	}
 	repos := decisionRepoOrder
 	if len(repos) == 0 {
 		return m, nil // no repo has an ADR directory — there is nothing to move through
