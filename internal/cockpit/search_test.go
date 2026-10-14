@@ -278,3 +278,32 @@ func TestSearchFromTheProductsLensTakesTheHeader(t *testing.T) {
 		t.Error("a long query should push the subtitle out and keep the title")
 	}
 }
+
+// A query is text all the way through, including the letters that are global
+// keys everywhere else. They used to resolve first: `q` quit the cockpit
+// mid-query, a digit switched lens, `?`, `:` and `,` opened help, the palette
+// and settings, and `U` started an upgrade — each throwing away what had been
+// typed, the way a product's name was lost before the naming prompt was
+// guarded the same way.
+func TestAQueryTakesTheGlobalKeysAsText(t *testing.T) {
+	m := searchFixture(t)
+	m.lens = "products"
+	m.width, m.height = 130, 40
+	m = press(m, "/")
+
+	const typed = "q2?:,U"
+	for _, r := range typed {
+		next, cmd := m.handleKey(string(r))
+		m = next.(model)
+		if cmd != nil {
+			t.Fatalf("%q fired a command mid-query instead of being typed", string(r))
+		}
+	}
+	if m.searchText != typed {
+		t.Errorf("query = %q, want %q", m.searchText, typed)
+	}
+	if m.lens != "products" || m.helpOpen || m.settings != nil || m.paletteOpen {
+		t.Errorf("a typed letter acted on the cockpit (lens=%s help=%v settings=%v palette=%v)",
+			m.lens, m.helpOpen, m.settings != nil, m.paletteOpen)
+	}
+}

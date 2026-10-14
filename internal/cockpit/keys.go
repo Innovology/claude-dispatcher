@@ -265,7 +265,8 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	// the cockpit mid-name and a digit switched lens, both discarding what had
 	// been typed, and the footer promised only "esc cancels". A token makes that
 	// worse, not better: `lin_api_1…` would switch lens on its first digit.
-	if m.clNaming || m.clKeying || m.clSockOpen {
+	// A `/` query is the same: it was left out, so `q` quit mid-query.
+	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
 		mm, cmd := m.updateProducts(k)
 		return mm, cmd
 	}
