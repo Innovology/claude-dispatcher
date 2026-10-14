@@ -376,6 +376,13 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 			if a.ok == "" || !cqActKeyMatches(a.k, k) {
 				continue
 			}
+			// An act that asks first holds the row and the act as they were
+			// when the key landed: the table is rebuilt under the bar while it
+			// waits, and the answer is about the row the question named.
+			if a.confirm != "" {
+				m.confirm = &confirmState{kind: "act", label: a.confirm, row: r, act: a}
+				return m, nil, true
+			}
 			mm, cmd := m.cqStartFlash(r, a)
 			return mm, cmd, true
 		}
