@@ -366,25 +366,15 @@ func TestDecisionsEmptyRepoBranch(t *testing.T) {
 	defer restoreVars(saved)
 	decisions = map[string][]decision{"empty-repo": {}}
 	decisionRepoOrder = []string{"empty-repo"}
-	// pluginForRepo falls back to the plugin whose id is "builtin", so the
-	// slice must carry one even in this synthetic scenario.
-	plugins = []plugin{
-		{id: "p0", name: "p0"}, {id: "p1", name: "p1"}, {id: "p2", name: "p2"},
-		{id: "builtin", name: "cockpit records"},
-	}
 
 	m := newModel()
 	m.width, m.height = 190, 44
 	m = press(m, "5")
-	m = press(m, "a")
-	if m.notice != "" {
-		t.Errorf("accept on an empty record list should leave no notice, got %q", m.notice)
+	next, cmd := m.handleKey("o")
+	m = next.(model)
+	if cmd != nil || m.notice != "" {
+		t.Errorf("o with nothing selected should do nothing, got notice %q", m.notice)
 	}
-	m = press(m, "s")
-	if m.notice != "" {
-		t.Errorf("supersede on an empty record list should leave no notice, got %q", m.notice)
-	}
-	m = press(m, "o")
 	renderClean(t, m, "decisions open on empty repo")
 }
 

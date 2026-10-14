@@ -13,7 +13,7 @@ const pad = 2 // left/right page gutter, in columns (the design's 24px)
 // ones it does are built from it (footerFromKeys).
 var footerByLens = map[string]string{
 	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
-	"decisions": "j/k records · J/K repo · → body · a status · s supersede · e sources · o where it lives",
+	"decisions": "j/k decisions · [ ] group · J/K repo · → body · o open in editor",
 	// v4 moved the product view off the digits, so the clause that named one is
 	// gone rather than renumbered: 3 is the backlog now.
 	"velocity": "velocity is what reached production, not what you set in motion · 1 triage",

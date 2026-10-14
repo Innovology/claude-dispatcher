@@ -102,7 +102,8 @@ var backlogTickets []ticket
 var (
 	decisions         = map[string][]decision{}
 	decisionRepoOrder []string
-	plugins           []plugin
+	decisionProduct   = map[string]string{}
+	decisionNone      int
 )
 
 // ---- usage ------------------------------------------------------------------

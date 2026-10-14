@@ -29,7 +29,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 | `2` | **products** | how is each product (many repos) doing? `enter` opens one |
 | `3` | **backlog** | GitHub Issues · Linear · Azure Boards, in one list |
 | `4` | **usage** | how much of my 5-hour and weekly limits is gone, and when they reset |
-| `5` | **decisions** | ADRs, and the decision sections written in each repo's own markdown |
+| `5` | **decisions** | every decision your repos have written down, wherever it is — ADRs, registers, decided and open sections, rulings — grouped by the file it came from; `[` `]` step a group, `o` opens it in your editor |
 | `6` | **velocity** | DORA + what actually reached production |
 
 **Triage is the whole fleet, ranked.** One table of everything in flight — the dispatchers that want you above the ones getting on with it — and a detail panel for the row under the cursor: what it wants, where it stands, and the keys that answer it. The cursor holds its row across refreshes, so nothing moves under your hands.

@@ -25,7 +25,8 @@ func restoreVars(s snapshot) {
 	productStats, backlogTickets = s.productStats, s.backlogTickets
 	reviews, team, teamVerdict, shipped = s.reviews, s.team, s.teamVerdict, s.shipped
 	productVelocity, decisions = s.productVelocity, s.decisions
-	decisionRepoOrder, plugins = s.decisionRepoOrder, s.plugins
+	decisionRepoOrder, decisionProduct = s.decisionRepoOrder, s.decisionProduct
+	decisionNone = s.decisionNone
 	usageWindows, usageModels = s.usageWindows, s.usageModels
 	usageProjection, usageAdvice = s.usageProjection, s.usageAdvice
 	doraOrg, doraFactory, doraSplit, doraWeeks = s.doraOrg, s.doraFactory, s.doraSplit, s.doraWeeks
@@ -48,7 +49,8 @@ func captureVars() snapshot {
 		productStats: productStats, backlogTickets: backlogTickets,
 		reviews: reviews, team: team, teamVerdict: teamVerdict, shipped: shipped,
 		productVelocity: productVelocity, decisions: decisions,
-		decisionRepoOrder: decisionRepoOrder, plugins: plugins,
+		decisionRepoOrder: decisionRepoOrder, decisionProduct: decisionProduct,
+		decisionNone: decisionNone,
 		usageWindows: usageWindows, usageModels: usageModels,
 		usageProjection: usageProjection, usageAdvice: usageAdvice,
 		doraOrg: doraOrg, doraFactory: doraFactory, doraSplit: doraSplit,

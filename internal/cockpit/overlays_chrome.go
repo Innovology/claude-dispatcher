@@ -33,7 +33,8 @@ var helpLegend = []helpSection{
 	{section: "move", keys: []helpRow{
 		{"1…6", "triage · products · backlog · usage · decisions · velocity"},
 		{"esc", "leave the dispatch form"},
-		{"→ / ←", "into an ADR's body and back (decisions)"},
+		{"→ / ←", "into a decision's body and back (decisions)"},
+		{"[ / ]", "the previous or next group of decisions · o opens one in your editor"},
 	}},
 }
 
