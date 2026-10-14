@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/repos"
 )
 
 func parsed(t *testing.T, rel string, lines ...string) []decision {
@@ -402,5 +405,261 @@ func TestAStatusIsTheDecisionsOwnNotWhatItDescribes(t *testing.T) {
 	got := parsed(t, "stack-decisions.md", body...)
 	if len(got) != 2 || got[0].status != "decided" {
 		t.Errorf("D46 = %+v, want decided: a status line deep in its body is not its own", got)
+	}
+}
+
+// The other ADR form — MADR's "Context and Problem Statement" and "Decision
+// Outcome" — is an ADR too, its status read from a status line where it has
+// no section for one.
+func TestAnADRInTheOtherCommonFormIsReadToo(t *testing.T) {
+	got := parsed(t, "docs/decisions/use-go.md",
+		"# Use Go for the CLI",
+		"",
+		"Status: superseded by 0007",
+		"",
+		"## Context and Problem Statement",
+		"We need one binary.",
+		"",
+		"## Decision Outcome",
+		"Go.",
+	)
+	if len(got) != 1 || got[0].status != "superseded" || got[0].context != "We need one binary." || got[0].decision != "Go." {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// A heading that says only "Open", or "Open questions", is what a document has
+// left to decide — in a register as much as anywhere ("## 8. Open" closes the
+// payments record).
+func TestAnOpenHeadingByAnyName(t *testing.T) {
+	got := parsed(t, "_docs/spec/payments.md",
+		"# Payments — decision record",
+		"",
+		"## 1. Product rules",
+		"Seats are per team.",
+		"",
+		"## 8. Open",
+		"",
+		"- **The Observer branch.** To confirm when PR B is designed.",
+	)
+	if s := summary(got); s != "decided 1 Product rules\nopen 1 The Observer branch" {
+		t.Errorf("got\n%s", s)
+	}
+	for _, h := range []string{"Open questions", "Open", "Pending items"} {
+		if dcnSectionKind(h) != "open" {
+			t.Errorf("%q is not read as open", h)
+		}
+	}
+	if dcnSectionKind("Open source licences") != "" {
+		t.Error(`"Open source licences" is not a set of decisions`)
+	}
+}
+
+// A register whose entries carry no ids numbers them in order; a file named
+// for one decision with no status line takes its title's marker.
+func TestARegisterWithoutIDsAndADecisionWithoutAStatusLine(t *testing.T) {
+	got := parsed(t, "DECISION-LOG.md", "# Decision log", "", "## Use Go", "", "## Ship on Fridays", "")
+	if s := summary(got); s != "decided 1 Use Go\ndecided 2 Ship on Fridays" {
+		t.Errorf("got\n%s", s)
+	}
+	one := parsed(t, "cache-decision.md", "# Cache in Redis — WITHDRAWN 2026-08-01", "", "Not needed.")
+	if len(one) != 1 || one[0].status != "superseded" || one[0].title != "Cache in Redis" {
+		t.Errorf("got %+v", one)
+	}
+	plain := parsed(t, "cache-decision.md", "No heading at all, just prose.")
+	if len(plain) != 1 || plain[0].status != "decided" || plain[0].title != "cache decision" {
+		t.Errorf("a heading-less decision file = %+v", plain)
+	}
+}
+
+// A decision's body is its prose: code, tables and rules left out, quotes and
+// headings flattened, lists kept as points, and a long one cut.
+func TestABodyIsTheProseWithoutTheMachinery(t *testing.T) {
+	got := dcnBody([]string{
+		"> Quoted context.",
+		"```go",
+		"x := 1",
+		"```",
+		"| a | b |",
+		"---",
+		"### A sub-point",
+		"- first",
+		"- second",
+	})
+	if got != "Quoted context. A sub-point · first · second" {
+		t.Errorf("body = %q", got)
+	}
+	long := dcnBody([]string{strings.Repeat("word ", dcnBodyMax)})
+	if len([]rune(long)) > dcnBodyMax+1 || !strings.HasSuffix(long, "…") {
+		t.Errorf("a long body is %d runes, want it cut at %d", len([]rune(long)), dcnBodyMax)
+	}
+}
+
+// A table is titled by the column that names the decision, else the first that
+// is not an id; a row whose title cell is only a marker is titled by the next
+// cell that says something. Under an open heading a withdrawn row is
+// superseded and a settled one decided; a nested bullet with nothing above it
+// and an empty bullet are nothing.
+func TestTablesAndItemsUnderAnOpenHeading(t *testing.T) {
+	if dcnTitleColumn([]string{"#", "What", "Owner"}) != 1 || dcnTitleColumn([]string{"id", "Area", "Note"}) != 1 ||
+		dcnTitleColumn([]string{"#", ""}) != 0 {
+		t.Error("title column chosen wrongly")
+	}
+	if title, marks := dcnRowTitle([]string{"`[OPEN]`", "", "The general-fitness path"}, 0); title != "The general-fitness path" || marks != "`[OPEN]`" {
+		t.Errorf("row title %q marks %q", title, marks)
+	}
+	if title, _ := dcnRowTitle([]string{"**OPEN**"}, 0); title != "**OPEN**" {
+		t.Errorf("an all-marker row = %q, want its cell", title)
+	}
+	if title, _ := dcnRowTitle([]string{"a"}, 3); title != "" {
+		t.Errorf("a row narrower than its column = %q", title)
+	}
+	got := parsed(t, "plan.md",
+		"# Plan",
+		"",
+		"## Pending decisions",
+		"  - a nested bullet with nothing above it",
+		"- ",
+		"- Chat vendor — withdrawn, we build it",
+		"- ~~Hosting~~ settled on Railway",
+		"- Retention window",
+	)
+	if s := summary(got); s != "superseded 1 Chat vendor — withdrawn, we build it\ndecided 2 Hosting settled on Railway\nopen 3 Retention window" {
+		t.Errorf("got\n%s", s)
+	}
+}
+
+// A title struck through is superseded, and so is prose that says so in
+// capitals; a marker that only opens a line with nothing after it is no
+// question.
+func TestStruckAndMarkedProseAndAnEmptyMarker(t *testing.T) {
+	if dcnMarkerStatus("~~Use MySQL~~") != "superseded" {
+		t.Error("a struck title is superseded")
+	}
+	if dcnLogStatus("Use MySQL. SUPERSEDED when Postgres landed.") != "superseded" {
+		t.Error("prose marked SUPERSEDED is superseded")
+	}
+	if got := parsed(t, "notes.md", "# Notes", "", "**[NEEDS DECISION]**"); len(got) != 0 {
+		t.Errorf("an empty marker = %+v", got)
+	}
+}
+
+// The repos read are ordered by product, unassigned last, and inside one by
+// what is still open, then by how much is written down, then by name; a repo
+// with nothing is counted and not listed.
+func TestReposAreOrderedByProductThenByWhatIsOpen(t *testing.T) {
+	mk := func(name, md string) repos.Repo {
+		dir := filepath.Join(t.TempDir(), name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if md != "" {
+			if err := os.WriteFile(filepath.Join(dir, "DECISIONS.md"), []byte(md), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return repos.Repo{Name: name, Path: dir}
+	}
+	two := "# Decisions\n\n- **A** a\n- **B** b\n"
+	one := "# Decisions\n\n- **A** a\n"
+	open := "# Open decisions\n\n- **Q** q\n"
+	ctx := &collectCtx{
+		cfg: &config.Config{Products: map[string][]string{"zeta": {"z1"}, "alpha": {"a-two", "a-one", "a-open", "a-tie"}}},
+		repos: []repos.Repo{
+			mk("loose", one), mk("z1", one), mk("a-two", two), mk("a-one", one),
+			mk("a-open", open), mk("a-tie", one), mk("empty", ""),
+		},
+	}
+	var s snapshot
+	collectDecisions(ctx, &s)
+	if got := strings.Join(s.decisionRepoOrder, ","); got != "a-open,a-two,a-one,a-tie,z1,loose" {
+		t.Errorf("order = %s", got)
+	}
+	if s.decisionNone != 1 || s.decisionProduct["a-open"] != "alpha" || s.decisionProduct["loose"] != "" {
+		t.Errorf("none = %d, products = %v", s.decisionNone, s.decisionProduct)
+	}
+}
+
+// What the caches promise: a walk stands for dcnRewalk, so a file added
+// meanwhile waits for the next one; an unchanged file is not read again; and a
+// file too large or unreadable is skipped rather than failing the repo.
+func TestWhatTheCachesHoldAndWhatIsSkipped(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) string {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	write("a.md", "# Decisions\n\n- **One** first\n")
+	first := dcnMarkdown(root)
+	write("b.md", "# x\n")
+	if got := dcnMarkdown(root); strings.Join(got, ",") != strings.Join(first, ",") {
+		t.Errorf("a walk inside its window walked again: %v", got)
+	}
+
+	p := filepath.Join(root, "a.md")
+	info, _ := os.Stat(p)
+	if n := len(dcnFileRecords(root, "a.md")); n != 1 {
+		t.Fatalf("first read: %d", n)
+	}
+	// Same size, same time, different words: the cache answers.
+	write("a.md", "# Decisions\n\n- **Two** later\n")
+	if err := os.Chtimes(p, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if got := dcnFileRecords(root, "a.md"); len(got) != 1 || got[0].title != "One" {
+		t.Errorf("an unchanged file was read again: %+v", got)
+	}
+
+	write("big.md", "# Decisions\n\n- **Big** "+strings.Repeat("x", dcnMaxBytes))
+	if got := dcnFileRecords(root, "big.md"); got != nil {
+		t.Errorf("a file past dcnMaxBytes was read: %d decisions", len(got))
+	}
+	if got := dcnFileRecords(root, "missing.md"); got != nil {
+		t.Error("a missing file has no decisions")
+	}
+	locked := write("locked.md", "# Decisions\n\n- **Secret** s\n")
+	if err := os.Chmod(locked, 0); err == nil && os.Geteuid() != 0 {
+		defer os.Chmod(locked, 0o644) //nolint:errcheck
+		if got := dcnFileRecords(root, "locked.md"); got != nil {
+			t.Error("an unreadable file was read")
+		}
+	}
+	if got := dcnAge(time.Now().Add(time.Hour)); got != "0m ago" {
+		t.Errorf("a time in the future = %q", got)
+	}
+}
+
+// A folder the walk cannot read is passed over, and a checkout of thousands
+// of markdown files stops at dcnMaxFiles rather than costing every load.
+func TestTheWalkSkipsWhatItCannotReadAndStopsAtItsLimit(t *testing.T) {
+	root := t.TempDir()
+	locked := filepath.Join(root, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "x.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gen := filepath.Join(root, "gen")
+	if err := os.MkdirAll(gen, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= dcnMaxFiles; i++ {
+		if err := os.WriteFile(filepath.Join(gen, itoa(i)+".md"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(locked, 0); err == nil {
+		defer os.Chmod(locked, 0o755) //nolint:errcheck
+	}
+	got := dcnMarkdown(root)
+	if len(got) != dcnMaxFiles {
+		t.Errorf("walked %d files, want the limit of %d", len(got), dcnMaxFiles)
 	}
 }
