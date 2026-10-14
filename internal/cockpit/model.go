@@ -28,10 +28,12 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship" | "tidy"
+	kind          string // "kill" | "ship" | "tidy" | "act"
 	feature, repo string
 	features      []string               // kill targets (marked set, or the one selected)
 	tidy          []dispatchpkg.TidyItem // the plan a tidy confirms
+	row           fleetRow               // the triage row an "act" was asked on
+	act           cqAct                  // and the act it runs once confirmed
 }
 
 // model is the whole cockpit. Every lens reads and writes these fields; each
@@ -674,6 +676,11 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		// deletion already running would be the screen lying.
 		m.notice = "tidying…"
 		return m, tidyRunCmd(c.tidy)
+	case "act":
+		// A triage act that asked first runs exactly as it would have without
+		// asking: the flash, then the row leaves with ctrl+z able to bring it
+		// back.
+		return m.cqStartFlash(c.row, c.act)
 	}
 	return m, nil
 }

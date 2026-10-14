@@ -80,7 +80,7 @@ func TestAMenuIsAMenuWhicheverKindItIs(t *testing.T) {
 
 	// The same record, so any difference in the keys is the kind's doing. Five
 	// commits, because "mark shipped" appears only once there are some and a
-	// menu must refuse it either way.
+	// menu must ask before it acts either way.
 	rec := testRec("one", 5)
 	keys := func(kind string) string {
 		var ks []string
@@ -95,8 +95,12 @@ func TestAMenuIsAMenuWhicheverKindItIs(t *testing.T) {
 	if strings.Contains(keys(ques), "r:") {
 		t.Errorf("a question offers r reply (%q) — typing at a menu picks its options", keys(ques))
 	}
-	if strings.Contains(keys(ques), "y:") {
-		t.Errorf("a question offers y (%q) — it is mid-turn, not shippable", keys(ques))
+	// Mid-turn, so y is the override and asks before it acts.
+	rec.Status = state.StatusBlocked
+	for _, a := range cqActs(rec, ques) {
+		if a.k == "y" && a.confirm == "" {
+			t.Errorf("a question's y (%q) marks it shipped without asking — the session is mid-turn", a.d)
+		}
 	}
 	for _, ask := range []string{perm, ques} {
 		if replyable(fleetRow{kind: "queue", ask: ask}) {
