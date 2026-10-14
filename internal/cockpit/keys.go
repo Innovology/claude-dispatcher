@@ -141,7 +141,7 @@ func (m model) runCommand() (model, tea.Cmd) {
 	}
 	direct := map[string]string{
 		"backlog": "backlog", "usage": "usage",
-		"decisions": "decisions", "plugins": "decisions", "velocity": "velocity",
+		"decisions": "decisions", "velocity": "velocity",
 	}
 	lens := m.lens
 	if strings.HasPrefix(c.name, "product") {

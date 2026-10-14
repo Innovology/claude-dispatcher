@@ -16,7 +16,7 @@ var footerByLens = map[string]string{
 	"product":   "O overview · R review · T team · S shipped · H history · esc close · 1 triage",
 	"backlog":   "j/k move · space pick · enter dispatch · ctrl+d dispatch picked · s source · 1 triage",
 	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
-	"decisions": "j/k records · J/K repo · → body · a status · s supersede · e sources · o where it lives",
+	"decisions": "j/k decisions · [ ] group · J/K repo · → body · o open in editor",
 	// v4 moved the product view off the digits, so the clause that named one is
 	// gone rather than renumbered: 3 is the backlog now.
 	"velocity": "velocity is what reached production, not what you set in motion · 1 triage",

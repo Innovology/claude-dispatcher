@@ -142,9 +142,8 @@ type model struct {
 	clKeyFor  string
 	clKeyText string
 
-	decRepo      int
-	decCursor    int
-	pluginCursor int
+	decRepo   int
+	decCursor int
 
 	rightTab     string
 	reviewCursor int

@@ -209,28 +209,6 @@ func TestBacklogWhereOmitsWhatTheTicketDoesNotHave(t *testing.T) {
 	}
 }
 
-// The design's fallback is PLUGINS[3]; the collector never ships four.
-func TestPluginForRepoFallbackDoesNotIndexPastTheEnd(t *testing.T) {
-	old := plugins
-	t.Cleanup(func() { plugins = old })
-
-	plugins = []plugin{
-		{id: "adr-tools", name: "adr-tools", repos: []string{"shop-api"}},
-		{id: "builtin", name: "cockpit records", repos: []string{"shop-web"}},
-	}
-	if got := pluginForRepo("shop-api").id; got != "adr-tools" {
-		t.Errorf("wired repo resolved to %q, want adr-tools", got)
-	}
-	if got := pluginForRepo("never-seen").id; got != "builtin" {
-		t.Errorf("unwired repo resolved to %q, want the builtin fallback", got)
-	}
-
-	plugins = nil
-	if got := pluginForRepo("anything"); got.id != "" {
-		t.Errorf("empty plugin list resolved to %+v, want the zero plugin", got)
-	}
-}
-
 // usgWindow used to pin pace at 1.0, which the header read as "exactly on
 // budget" on every install. Both windows are trailing; there is no pace.
 func TestUsgWindowLeavesPaceUnmeasured(t *testing.T) {

@@ -65,7 +65,8 @@ var helpSections = []struct {
 	}},
 	{section: "the other lenses", keys: []struct{ k, d string }{
 		{"j / k", "up and down the list"},
-		{"→ / ←", "into an ADR's body and back (decisions)"},
+		{"→ / ←", "into a decision's body and back (decisions)"},
+		{"[ / ]", "the previous or next group of decisions · o opens one in your editor"},
 		{"enter", "open what is selected"},
 		{"space", "pick a backlog ticket"},
 		{"ctrl+d", "dispatch every picked ticket"},
