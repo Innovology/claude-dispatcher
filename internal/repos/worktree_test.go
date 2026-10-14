@@ -391,3 +391,154 @@ func TestDiscoverGroupsAndMapsProduct(t *testing.T) {
 		t.Errorf("product: got %q, want tools — the map is keyed by the repo's name", r.Product)
 	}
 }
+
+// Git metadata that cannot be followed makes the checkout a repository of its
+// own, rather than an error or a merge into the wrong repo. That is what every
+// checkout was before repositories were a concept here, so a malformed `.git`
+// file costs a duplicate row and never a lost one.
+func TestUnfollowableGitMetadataIsARepoOfOne(t *testing.T) {
+	f := newFixture(t)
+
+	none := f.mkdir("none")
+	if got := commonDir(none); got != filepath.Join(none, ".git") {
+		t.Errorf("no .git: commonDir = %q", got)
+	}
+
+	garbled := f.mkdir("garbled")
+	f.write(filepath.Join(garbled, ".git"), "not a pointer\n")
+	if got := commonDir(garbled); got != filepath.Join(garbled, ".git") {
+		t.Errorf("a .git file with no gitdir: line: commonDir = %q", got)
+	}
+
+	// A worktree whose private git dir has no commondir is its own repository.
+	orphan := f.mkdir("orphan")
+	f.mkdir("orphan-gitdir")
+	f.write(filepath.Join(orphan, ".git"), "gitdir: ../orphan-gitdir\n")
+	if got := commonDir(orphan); got != filepath.Join(f.root, "orphan-gitdir") {
+		t.Errorf("no commondir: commonDir = %q, want the worktree's own git dir", got)
+	}
+
+	// Relative pointers at both hops — what `git worktree add --relative-paths`
+	// writes — resolve against the file that holds each.
+	common := filepath.Join(f.root, "proj", ".bare")
+	f.gitDir(common, "", true)
+	rel := f.mkdir("proj", "rel")
+	f.write(filepath.Join(rel, ".git"), "gitdir: ../.bare/worktrees/rel\n")
+	f.write(filepath.Join(common, "worktrees", "rel", "commondir"), "../..\n")
+	if got := commonDir(rel); got != common {
+		t.Errorf("relative pointers: commonDir = %q, want %q", got, common)
+	}
+
+	if os.Geteuid() != 0 { // root reads a mode-000 file anyway
+		locked := f.mkdir("locked")
+		f.write(filepath.Join(locked, ".git"), "gitdir: /elsewhere\n")
+		if err := os.Chmod(filepath.Join(locked, ".git"), 0); err != nil {
+			t.Fatal(err)
+		}
+		if got := commonDir(locked); got != filepath.Join(locked, ".git") {
+			t.Errorf("an unreadable .git file: commonDir = %q", got)
+		}
+	}
+}
+
+// Only a registry entry that names a checkout is a worktree. A stray file in
+// `worktrees/` or an entry git has half-written is skipped, not offered as a
+// place to work.
+func TestARegistryEntryWithoutACheckoutIsNotAWorktree(t *testing.T) {
+	f := newFixture(t)
+	proj := f.mkdir("proj")
+	common := filepath.Join(proj, ".bare")
+	f.gitDir(common, "git@github.com:acme/proj.git", true)
+	f.worktree(common, filepath.Join(proj, "main"), "main")
+	f.write(filepath.Join(common, "worktrees", "stray-file"), "")
+	f.mkdir("proj", ".bare", "worktrees", "half-written")
+
+	wts := worktrees(common)
+	if len(wts) != 1 || filepath.Base(wts[0].Path) != "main" {
+		t.Errorf("worktrees = %+v, want only main", wts)
+	}
+}
+
+// A detached HEAD is on no branch, and saying so as "" keeps it from ranking as
+// the trunk in canonical's choice.
+func TestADetachedHeadIsOnNoBranch(t *testing.T) {
+	f := newFixture(t)
+	dir := f.mkdir("g")
+	f.write(filepath.Join(dir, "HEAD"), "3f2a9c0d1e4b5a6978877665544332211aabbccd\n")
+	if got := headBranch(dir); got != "" {
+		t.Errorf("detached HEAD read as branch %q", got)
+	}
+	if got := headBranch(f.mkdir("empty")); got != "" {
+		t.Errorf("no HEAD read as branch %q", got)
+	}
+	if got := canonical(nil, nil); got != "" {
+		t.Errorf("no worktrees and nothing found: canonical = %q", got)
+	}
+}
+
+// The folder name stands in only for a repo with no remote, and then it is the
+// project's name whatever the layout: `x/.git`, `x/.bare` and a bare `x.git`
+// are all "x".
+func TestARepoWithNoRemoteIsNamedForItsProjectFolder(t *testing.T) {
+	for _, tc := range []struct{ common, want string }{
+		{"/src/shop/.git", "shop"},
+		{"/src/shop/.bare", "shop"},
+		{"/src/shop.git", "shop"},
+	} {
+		if got := folderName(tc.common); got != tc.want {
+			t.Errorf("folderName(%q) = %q, want %q", tc.common, got, tc.want)
+		}
+	}
+}
+
+// The config reader takes only key = value lines inside a section. A line before
+// any section, or a bare boolean key git writes without "=", must not be read
+// as the origin URL or as core.bare.
+func TestGitConfigReadsOnlyKeysInsideASection(t *testing.T) {
+	f := newFixture(t)
+	dir := f.mkdir("g")
+	f.write(filepath.Join(dir, "config"), "url = git@github.com:stray/before.git\n"+
+		"; a comment\n[core]\n\tbare\n\tbare = true\n"+
+		"[remote \"origin\"]\n\turl = \"git@github.com:acme/shop.git\"\n\turl = git@github.com:acme/second.git\n")
+	conf := gitConfig(dir)
+	if conf["core.bare"] != "true" {
+		t.Errorf("core.bare = %q", conf["core.bare"])
+	}
+	if conf["remote.origin.url"] != "git@github.com:acme/shop.git" {
+		t.Errorf("remote.origin.url = %q, want the first one, unquoted", conf["remote.origin.url"])
+	}
+	if _, ok := conf[".url"]; ok || len(conf) != 2 {
+		t.Errorf("read keys outside a section: %v", conf)
+	}
+}
+
+// A `.bare` that is not a git directory does not make its parent a project, so
+// the depth budget is not spent on it.
+func TestABareFolderWithoutAGitDirIsNotAProject(t *testing.T) {
+	f := newFixture(t)
+	f.write(filepath.Join(f.root, "proj", ".bare", "HEAD"), "ref: refs/heads/main\n")
+	if isRepoContainer(filepath.Join(f.root, "proj")) {
+		t.Error("a .bare holding only HEAD counted as a repository")
+	}
+}
+
+// Discovery walks what is there and nothing else: a root that does not exist
+// and a file among the folders are both passed over, and two repositories that
+// share a name (two clones of one remote) are both listed, in path order, so
+// the table is stable from one load to the next.
+func TestDiscoverListsSameNamedReposByPath(t *testing.T) {
+	f := newFixture(t)
+	f.write(filepath.Join(f.root, "notes.txt"), "not a repo")
+	for _, dir := range []string{"b-copy", "a-copy"} {
+		f.gitDir(filepath.Join(f.mkdir(dir), ".git"), "git@github.com:acme/shop.git", false)
+	}
+	got := Discover(&config.Config{Roots: []string{f.root, filepath.Join(f.root, "missing")}})
+	if len(got) != 2 {
+		t.Fatalf("got %d repos, want both clones", len(got))
+	}
+	if got[0].Name != "shop" || got[1].Name != "shop" ||
+		filepath.Base(got[0].Path) != "a-copy" || filepath.Base(got[1].Path) != "b-copy" {
+		t.Errorf("order = %s@%s, %s@%s; want shop@a-copy then shop@b-copy",
+			got[0].Name, got[0].Path, got[1].Name, got[1].Path)
+	}
+}

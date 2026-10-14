@@ -3,9 +3,14 @@
 package supervisor
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These exercise the Unix surface. They are best-effort like the code itself:
@@ -103,4 +108,135 @@ func TestAttachSwitchesMatchesTheCommandBuilt(t *testing.T) {
 			}
 		})
 	}
+}
+
+// privateServer starts a tmux server of the test's own, on a socket under a
+// TMUX_TMPDIR of its own, so nothing here can see or touch the developer's
+// sessions — or be seen by Servers() as one of theirs. The socket directory is
+// kept short: a unix socket path is capped near 104 bytes.
+func privateServer(t *testing.T) string {
+	t.Helper()
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	dir, err := os.MkdirTemp("", "sv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Setenv("TMUX_TMPDIR", dir)
+	sock := "disp-sup-" + strconv.Itoa(os.Getpid())
+	conf := filepath.Join(dir, "tmux.conf")
+	if err := os.WriteFile(conf, []byte("set -g exit-empty off\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("tmux", "-L", sock, "-f", conf, "start-server").CombinedOutput(); err != nil {
+		t.Skipf("tmux will not start a server here: %v: %s", err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command("tmux", "-L", sock, "kill-server").Run() })
+	return sock
+}
+
+// A session's whole life through the backend, on a repo's own server: every
+// call takes the full address, because a repo's sessions live on that repo's
+// server (ADR 0014) and a call that dropped the socket would ask the default
+// server about a session that is not there — and find nothing, every time.
+func TestASessionsLifeOnItsOwnServer(t *testing.T) {
+	sock := privateServer(t)
+	dir := t.TempDir()
+	s := Session{Name: "disp-roundtrip", Socket: sock}
+
+	if err := NewSession(s, dir, "sleep 30", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if !HasSession(s) {
+		t.Fatal("the session just started is not there")
+	}
+	if HasSession(Session{Name: s.Name}) {
+		t.Error("the session was found on the default server; it was started on its repo's")
+	}
+	if got := Sessions(sock); !slices.Contains(got, s.Name) {
+		t.Errorf("Sessions(%q) = %v, want it to name %s", sock, got, s.Name)
+	}
+	// The listing carries the address back whole, and the directory, which is
+	// what attributes a session nobody recorded.
+	var found *SessionInfo
+	for _, si := range SessionList(sock) {
+		if si.Session == s {
+			found = &si
+		}
+	}
+	if found == nil {
+		t.Fatalf("SessionList(%q) does not list %+v", sock, s)
+	}
+	resolved := func(p string) string { r, _ := filepath.EvalSymlinks(p); return r }
+	if resolved(found.Path) != resolved(dir) {
+		t.Errorf("session path = %q, want %q", found.Path, dir)
+	}
+	if !slices.Contains(Servers(), sock) {
+		t.Errorf("Servers() = %v, want it to find %s", Servers(), sock)
+	}
+
+	// Something is running in it, so it is not idle — and that is known, not
+	// guessed.
+	if idle, known := SessionIdle(s); idle || !known {
+		t.Errorf("SessionIdle on a running session = idle %v, known %v", idle, known)
+	}
+	if pids := SessionPIDs(s); len(pids) == 0 || pids[0] <= 0 {
+		t.Errorf("SessionPIDs = %v, want the pane's process first", pids)
+	}
+	// A taken name gets a suffix, on the server that has it.
+	if got := UniqueName(s); got != s.Name+"-2" {
+		t.Errorf("UniqueName(taken) = %q, want %s-2", got, s.Name)
+	}
+
+	if err := KillSession(s); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+	if HasSession(s) {
+		t.Error("the session outlived KillSession")
+	}
+	// EnsureBackKey and EnsureFocusEvents stay out of this: both act on the
+	// default server too, which on a developer's machine is their own tmux.
+}
+
+// A shell the backend is told about is a shell: a session parked at it reads
+// idle, where before it read busy and Resume would never reclaim it. Told
+// through the backend, because the cockpit only ever speaks to the supervisor.
+func TestAShellTheBackendIsToldAboutReadsIdle(t *testing.T) {
+	sock := privateServer(t)
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh to copy")
+	}
+	real, err := os.ReadFile(sh)
+	if err != nil {
+		t.Skipf("cannot read %s: %v", sh, err)
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "cdsupsh"+strconv.Itoa(os.Getpid()))
+	if err := os.WriteFile(fake, real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := Session{Name: "parked", Socket: sock}
+	if err := NewSession(s, dir, "exec "+fake+" -i", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	busy := func() bool { idle, known := SessionIdle(s); return known && !idle }
+	if !eventually(busy) {
+		t.Fatal("precondition: a shell nobody named should read busy")
+	}
+	KnowShell(fake)
+	if !eventually(func() bool { idle, known := SessionIdle(s); return known && idle }) {
+		t.Error("a shell the backend was told about still reads busy")
+	}
+}
+
+func eventually(cond func() bool) bool {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if cond() {
+			return true
+		}
+	}
+	return cond()
 }

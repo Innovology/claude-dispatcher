@@ -138,3 +138,42 @@ func TestTheEditorRowsCarryTheServer(t *testing.T) {
 		t.Errorf("s opens on %q, want the repo's own server", mm.clSockText)
 	}
 }
+
+// The server field is text entry from the keyboard: letters and digits are the
+// name being typed — `q` must not quit and a digit must not switch lens, both
+// of which would throw the half-typed name away — backspace corrects it, enter
+// saves it against the repo it was opened on, and esc leaves the config alone.
+func TestTheServerFieldTakesTheKeyboardUntilItIsSavedOrLeft(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	saved := captureVars()
+	defer restoreVars(saved)
+	reposByProduct = map[string][]repoRef{
+		"acme": {{name: "acme-api", socket: "pp"}},
+	}
+	m := newModel()
+	m.cfg = &config.Config{}
+	m.lens, m.clOpen = "products", true
+
+	for _, k := range []string{"s", "backspace", "q", "2"} {
+		m = press(m, k)
+	}
+	if !m.clSockOpen || m.clSockText != "pq2" || m.lens != "products" {
+		t.Fatalf("after s, backspace, q, 2: open=%v text=%q lens=%q", m.clSockOpen, m.clSockText, m.lens)
+	}
+	next, cmd := m.handleKey("enter")
+	m = next.(model)
+	if m.clSockOpen || cmd == nil {
+		t.Fatal("enter did not save and close the field")
+	}
+	if got := m.cfg.Sockets["acme-api"]; got != "pq2" {
+		t.Errorf("[sockets] acme-api = %q, want the typed name", got)
+	}
+
+	m = press(m, "s")
+	m = press(m, "z")
+	m = press(m, "esc")
+	if m.clSockOpen || m.clSockText != "" || m.cfg.Sockets["acme-api"] != "pq2" {
+		t.Errorf("esc: open=%v text=%q saved=%q — want it closed with nothing saved",
+			m.clSockOpen, m.clSockText, m.cfg.Sockets["acme-api"])
+	}
+}

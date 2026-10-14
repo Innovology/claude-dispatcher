@@ -277,3 +277,34 @@ func TestNixProfileSelectorReadsManifest(t *testing.T) {
 		t.Errorf("got (%q, %v), want (claude-dispatcher, true)", sel, ok)
 	}
 }
+
+// The footer's version clause prints the command `U` would run, word for word,
+// so the human knows what is about to happen to their machine before pressing it.
+func TestTheHintIsTheCommandUWouldRun(t *testing.T) {
+	in := Install{Method: MethodBrewCask, Cmd: []string{"brew", "upgrade", "--cask", "claude-dispatcher"}, Note: "unused"}
+	if got := in.Hint(); got != "brew upgrade --cask claude-dispatcher" {
+		t.Errorf("Hint() = %q, want the command", got)
+	}
+}
+
+// Nix with use-xdg-base-directories keeps the imperative profile under
+// $XDG_STATE_HOME, not in ~/.nix-profile, and a build installed there is just as
+// much the human's to upgrade.
+func TestNixProfileSelectorFindsAnXDGProfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	profile := filepath.Join(state, "nix", "profiles", "profile")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"version":3,"elements":{"claude-dispatcher":{"storePaths":["/nix/store/abc123-claude-dispatcher-3.1.2"]}}}`
+	if err := os.WriteFile(filepath.Join(profile, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sel, ok := nixProfileSelector("/nix/store/abc123-claude-dispatcher-3.1.2/bin/claude-dispatcher")
+	if !ok || sel != "claude-dispatcher" {
+		t.Errorf("got (%q, %v), want (claude-dispatcher, true)", sel, ok)
+	}
+}

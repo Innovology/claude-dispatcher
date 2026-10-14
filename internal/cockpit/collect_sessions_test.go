@@ -1,6 +1,7 @@
 package cockpit
 
 import (
+	"strings"
 	"testing"
 
 	"claude-dispatcher/internal/repos"
@@ -159,5 +160,80 @@ func TestTheDefaultServerIsNamed(t *testing.T) {
 	}
 	if got := serverLabel("player-app"); got != "player-app" {
 		t.Errorf("serverLabel(named) = %q", got)
+	}
+}
+
+// The Y tab walks the sessions it lists and hands over the one under the
+// cursor. A session that has gone since the load is a notice, not a nested
+// attach to nothing; a mark toggles, since a mark A has not spent yet can be
+// changed; and the row says what the session was launched under, which is the
+// environment every pane opened in it will get.
+func TestTheSessionsTabWalksMarksAndHandsOver(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	prevOwn := ownSessions
+	t.Cleanup(func() { ownSessions = prevOwn })
+
+	products = []product{{name: "pp"}}
+	ownSessions = map[string][]ownSession{"pp": {
+		// A socket with no server behind it: asking about it starts nothing.
+		{name: "one", socket: "cockpit-test-no-server", repo: "r", path: t.TempDir(), env: "nix develop /src/r --command"},
+		{name: "two", socket: "cockpit-test-no-server", repo: "r", path: t.TempDir()},
+	}}
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.lens = "product"
+
+	m = press(m, "Y")
+	if m.rightTab != "sessions" {
+		t.Fatalf("Y opened %q, want the sessions tab", m.rightTab)
+	}
+	if !strings.Contains(m.View(), "launched under nix develop /src/r --command") {
+		t.Error("the selected session does not say what it was launched under")
+	}
+	m = press(m, "j")
+	m = press(m, "k")
+	m = press(m, "k")
+	if m.sessionCursor != 0 {
+		t.Errorf("cursor = %d after j, k, k — want it stopped at the top", m.sessionCursor)
+	}
+
+	m = press(m, " ")
+	m = press(m, " ")
+	if len(m.sessionMarked) != 0 {
+		t.Errorf("space twice left marks %v, want the mark taken back", m.sessionMarked)
+	}
+
+	next, cmd := m.handleKey("enter")
+	m = next.(model)
+	if cmd != nil || m.notice != "no live session to attach to" {
+		t.Errorf("enter on a session that has gone: cmd=%v notice=%q", cmd != nil, m.notice)
+	}
+}
+
+// A product with none of the human's own sessions says so and says where they
+// would come from, and its keys do nothing rather than index an empty list.
+func TestAnEmptySessionsTabSaysWhatWouldBeThere(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	prevOwn := ownSessions
+	t.Cleanup(func() { ownSessions = prevOwn })
+
+	products = []product{{name: "pp"}}
+	ownSessions = map[string][]ownSession{}
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.lens = "product"
+	m = press(m, "Y")
+
+	if v := m.View(); !strings.Contains(v, "no sessions of your own in this product's repos") ||
+		!strings.Contains(v, "a session started outside the dispatcher shows up here") {
+		t.Error("an empty sessions tab does not say what would be listed")
+	}
+	for _, k := range []string{"enter", " "} {
+		next, cmd := m.handleKey(k)
+		if mm := next.(model); cmd != nil || mm.notice != "" || len(mm.sessionMarked) != 0 {
+			t.Errorf("%q on an empty tab did something: cmd=%v notice=%q", k, cmd != nil, mm.notice)
+		}
 	}
 }

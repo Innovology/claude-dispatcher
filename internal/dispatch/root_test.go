@@ -18,6 +18,7 @@ package dispatch
 // remote is asked, and anything local is resolved before it is used.
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -303,5 +304,84 @@ func TestARepoRootBranchStandsInForTheDefault(t *testing.T) {
 	// repo's root only ever chooses where a NEW branch is cut.
 	if _, err := ensureWorktreeFrom(clone, wt, "feature/feat", DefaultRoot, "dev"); err != nil {
 		t.Errorf("re-dispatch with a repo root branch was refused: %v", err)
+	}
+}
+
+// The line beside ROOT on both forms says where this dispatch will actually be
+// cut: origin's default when nothing is named, the named branch when one is,
+// and — with nothing on the form — the repo's own root branch, because "as
+// origin sees it" would describe a launch that will not happen.
+func TestTheRootHintSaysWhereTheBranchWillBeCut(t *testing.T) {
+	for _, tc := range []struct {
+		root     Root
+		repoRoot string
+		want     string
+	}{
+		{DefaultRoot, "", "the repo's default branch, as origin sees it"},
+		{Root(" dev "), "", "cut from dev"},
+		{DefaultRoot, " dev ", "dev — this repo's root branch (config)"},
+		{Root("main"), "dev", "cut from main"},
+		{"", "  ", "the repo's default branch, as origin sees it"},
+	} {
+		if got := tc.root.HintFor(tc.repoRoot); got != tc.want {
+			t.Errorf("Root(%q).HintFor(%q) = %q, want %q", tc.root, tc.repoRoot, got, tc.want)
+		}
+	}
+}
+
+// With the remote out of reach the clone's own origin/HEAD is the next answer,
+// once it is proved to point at a commit. Offline is an ordinary state for a
+// laptop, and a dispatch made on a train should still start where the repo's
+// work goes rather than on whatever happens to be checked out.
+func TestAnUnreachableRemoteFallsBackToAnOriginHEADThatResolves(t *testing.T) {
+	clone, remote := clonedRepo(t, "trunk")
+	if err := os.RemoveAll(remote); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteDefaultBranch(clone); got != "" {
+		t.Fatalf("a remote that is gone named %q as its default", got)
+	}
+	got, err := baseRef(clone, DefaultRoot)
+	if err != nil {
+		t.Fatalf("baseRef refused an offline clone: %v", err)
+	}
+	if got != "refs/remotes/origin/trunk" {
+		t.Errorf("baseRef = %q, want the clone's origin/HEAD, origin/trunk", got)
+	}
+}
+
+// A remote whose HEAD is detached names no default branch. That is an answer
+// of nothing, not an error, and the conventional names take over.
+func TestARemoteWithADetachedHeadNamesNoDefault(t *testing.T) {
+	clone, remote := clonedRepo(t, "main")
+	gitIn(t, remote, "update-ref", "--no-deref", "HEAD", gitIn(t, remote, "rev-parse", "main"))
+	if got := remoteDefaultBranch(clone); got != "" {
+		t.Errorf("a detached remote HEAD read as branch %q", got)
+	}
+	if got, err := baseRef(clone, DefaultRoot); err != nil || got != "refs/remotes/origin/main" {
+		t.Errorf("baseRef = %q, %v; want origin/main by its conventional name", got, err)
+	}
+}
+
+// A repo with no remote and no main or master still has a base: the commit
+// that is checked out. It is the last resort, and the record calls it HEAD.
+func TestARepoWithNoTrunkStartsFromWhatIsCheckedOut(t *testing.T) {
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "--quiet", "-b", "trunk")
+	gitIn(t, repo, "commit", "--allow-empty", "-m", "first")
+	got, err := baseRef(repo, DefaultRoot)
+	if err != nil || got != "HEAD" {
+		t.Fatalf("baseRef = %q, %v; want HEAD", got, err)
+	}
+	if shortRef(got) != "HEAD" {
+		t.Errorf("shortRef(HEAD) = %q", shortRef(got))
+	}
+}
+
+// The forms list nothing for a folder that is not a repository, rather than an
+// error to show beside an empty list.
+func TestRootBranchesOfANonRepoIsEmpty(t *testing.T) {
+	if got := RootBranches(t.TempDir()); got != nil {
+		t.Errorf("RootBranches(not a repo) = %v", got)
 	}
 }

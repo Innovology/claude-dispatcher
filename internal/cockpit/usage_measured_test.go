@@ -177,3 +177,31 @@ func TestUsageEdgesSayWhatTheyKnow(t *testing.T) {
 		t.Errorf("unknown models ordered %q", tail)
 	}
 }
+
+// Each subscription has limits of its own, so with two reporting, each one's
+// windows sit under its name — two "5-hour" bars with nothing to say whose
+// would be two figures the human cannot act on. One account needs no heading.
+func TestUsageHeadsEachAccountsWindowsWithItsName(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	m := newModel()
+	m.width, m.height = 160, 40
+
+	usageWindows = []usageWindow{
+		{label: "5-hour", account: "work", used: 40, measured: true},
+		{label: "weekly", account: "work", used: 20, measured: true},
+		{label: "5-hour", account: "personal", used: 70, measured: true},
+	}
+	left := strings.Join(m.usageLeft(80), "\n")
+	if strings.Count(left, "work") != 1 || strings.Count(left, "personal") != 1 {
+		t.Errorf("each account should head its windows once:\n%s", left)
+	}
+	if strings.Index(left, "work") > strings.Index(left, "personal") {
+		t.Error("the headings are not in the windows' order")
+	}
+
+	usageWindows = usageWindows[:2]
+	if left := strings.Join(m.usageLeft(80), "\n"); strings.Contains(left, "work") {
+		t.Errorf("a single account is headed by name:\n%s", left)
+	}
+}

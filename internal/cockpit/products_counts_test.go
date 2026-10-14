@@ -4,10 +4,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/gh"
+	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 )
 
@@ -105,5 +108,62 @@ func TestUntouchedReadsEveryBranch(t *testing.T) {
 	git(nil, "checkout", "-q", "main") // the checkout the row reads stays on the old commit
 	if days, ok := stqDaysSinceCommit(dir); !ok || days != 0 {
 		t.Errorf("a branch committed today leaves the repo reading %d days untouched (%v)", days, ok)
+	}
+}
+
+// The forge warm-up asks for PR detail only where the open search found some —
+// once per discovered repo that has open PRs, from that repo's own directory —
+// and asks nothing per repo while gh is refusing us: a parked client spends no
+// calls, and a repo the search names that this machine has not discovered is
+// nothing to warm.
+func TestTheForgeWarmUpAsksOnlyReposWithOpenPRs(t *testing.T) {
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	script := "#!/bin/sh\necho \"$PWD|$*\" >> " + calls + "\n" +
+		"case \"$*\" in\n" +
+		"  \"search prs --state open\"*) echo '[{\"repository\":{\"name\":\"shop\"},\"number\":7,\"title\":\"t\",\"author\":{\"login\":\"me\"},\"createdAt\":\"2026-10-01T00:00:00Z\"}," +
+		"{\"repository\":{\"name\":\"elsewhere\"},\"number\":2,\"title\":\"t\",\"author\":{\"login\":\"me\"},\"createdAt\":\"2026-10-01T00:00:00Z\"}]' ;;\n" +
+		"  *) echo '[]' ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	gh.InvalidateCache()
+	gh.ResetThrottle()
+	t.Cleanup(func() { gh.InvalidateCache(); gh.ResetThrottle() })
+
+	shop, quiet := t.TempDir(), t.TempDir()
+	disc := map[string]repos.Repo{"shop": {Name: "shop", Path: shop}, "quiet": {Name: "quiet", Path: quiet}}
+	read := func() []string {
+		b, _ := os.ReadFile(calls)
+		_ = os.Remove(calls)
+		return strings.Split(strings.TrimSpace(string(b)), "\n")
+	}
+
+	open, _ := warmProductForge(&collectCtx{cfg: &config.Config{}}, disc, true)
+	if len(open["shop"]) != 1 || open["shop"][0].Number != 7 {
+		t.Fatalf("open PRs = %+v, want shop's #7 handed back", open)
+	}
+	var detail []string
+	for _, c := range read() {
+		if strings.Contains(c, "|pr list") {
+			detail = append(detail, c)
+		}
+	}
+	if len(detail) != 1 || !strings.HasPrefix(detail[0], shop+"|") {
+		t.Errorf("PR detail was asked %v, want once, from shop's checkout", detail)
+	}
+
+	gh.InvalidateCache()
+	warmProductForge(&collectCtx{cfg: &config.Config{}}, disc, false)
+	down := read()
+	if len(down) == 0 || down[0] == "" {
+		t.Fatal("gh down asked nothing at all — the searches still go out")
+	}
+	for _, c := range down {
+		if !strings.Contains(c, "|search prs") {
+			t.Errorf("gh down, yet a per-repo read went out: %s", c)
+		}
 	}
 }

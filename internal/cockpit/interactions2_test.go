@@ -666,6 +666,19 @@ func TestRepoProductFallback(t *testing.T) {
 	}
 }
 
+// A product named in config that the last load has no record for yet — just
+// assigned, or every repo in it gone — still gets its panel summary, as zeros,
+// rather than borrowing another product's figures or drawing nothing.
+func TestAProductTheLoadHasNotSeenSummarisesAsZeros(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	products = []product{{name: "shop", inflight: 3, live: 2}}
+	reposByProduct = map[string][]repoRef{}
+	if got := productSummaryLine("brand-new"); got != "0 repos · 0 in flight · 0 live today" {
+		t.Errorf("summary = %q", got)
+	}
+}
+
 // ---- live.go: forge() branches ------------------------------------------------
 
 func TestCtxForgeBranches(t *testing.T) {

@@ -242,3 +242,39 @@ func TestSearchWithNoMatchSaysSo(t *testing.T) {
 		t.Errorf("the notice should say so, got %q", m.notice)
 	}
 }
+
+// From the keyboard, on the lens itself: `/` opens the query, the letters go
+// into it, and the portfolio header shows it where the "in no product" count
+// was — the two are competing notes on the line the eye orients by. A query
+// too long for both gives the header's subtitle up before the query.
+func TestSearchFromTheProductsLensTakesTheHeader(t *testing.T) {
+	m := searchFixture(t)
+	m.lens = "products"
+	m.width, m.height = 130, 40
+	if v := m.View(); !strings.Contains(v, "in no product") {
+		t.Fatal("the fixture's header has no unassigned count to give way")
+	}
+
+	m = press(m, "/")
+	for _, r := range "acme" {
+		m = press(m, string(r))
+	}
+	if !m.searchOpen || m.searchText != "acme" {
+		t.Fatalf("typing on the lens after / did not reach the query (open=%v text=%q)", m.searchOpen, m.searchText)
+	}
+	v := m.View()
+	if !strings.Contains(v, "/acme▏") || strings.Contains(v, "in no product") {
+		t.Error("the header does not show the query in place of the count")
+	}
+	if !strings.Contains(v, "a product is many repos") {
+		t.Error("a short query took the subtitle away")
+	}
+
+	// Plain letters: this is about the header, not which keys a query takes.
+	for _, r := range "-and-a-search-long-enough-to-crowd-the-whole-header-line" {
+		m = press(m, string(r))
+	}
+	if v := m.View(); strings.Contains(v, "a product is many repos") || !strings.Contains(v, "portfolio") {
+		t.Error("a long query should push the subtitle out and keep the title")
+	}
+}

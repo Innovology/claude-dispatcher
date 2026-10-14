@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -189,5 +190,142 @@ func TestRootBranchesSurviveSave(t *testing.T) {
 	}
 	if back.RootBranchFor("playerpulse") != "dev" || back.RootBranchFor("other") != "" {
 		t.Errorf("root_branches after a save = %v", back.RootBranches)
+	}
+}
+
+// Every table the cockpit edits in-app comes back from its own save. Save
+// rewrites the whole file from what it holds, so a field it forgot to write is
+// lost the first time anyone changes any setting — and these are the ones a
+// human sets once and stops looking at: a rebound key, a pinned checkout, a
+// server name, a repo told not to run under nix.
+func TestEverySettingTheCockpitWritesSurvivesItsOwnSave(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	none := ""
+	in := &Config{
+		Theme:        "light",
+		Worktrees:    "project",
+		BranchPrefix: &none,
+		Keys:         map[string]string{"products.new": "N", "search.next": "n"},
+		Checkouts:    map[string]string{"shop-api": "/src/shop-api/dev"},
+		Sockets:      map[string]string{"shop-api": "shop"},
+		// "" is a setting, not an absence: it stops a flake repo being
+		// launched under nix develop.
+		SessionEnv:   map[string]string{"shop-api": "", "shop-web": "direnv exec ."},
+		RootBranches: map[string]string{"shop-api": "dev"},
+	}
+	if err := Save(in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Theme != "light" || out.Worktrees != "project" {
+		t.Errorf("theme = %q, worktrees = %q", out.Theme, out.Worktrees)
+	}
+	if out.BranchPrefix == nil || *out.BranchPrefix != "" {
+		t.Errorf("an empty branch_prefix came back as %v — empty means no prefix, unset means feature/", out.BranchPrefix)
+	}
+	for name, pair := range map[string][2]map[string]string{
+		"keys":          {out.Keys, in.Keys},
+		"checkouts":     {out.Checkouts, in.Checkouts},
+		"sockets":       {out.Sockets, in.Sockets},
+		"session_env":   {out.SessionEnv, in.SessionEnv},
+		"root_branches": {out.RootBranches, in.RootBranches},
+	} {
+		if !maps.Equal(pair[0], pair[1]) {
+			t.Errorf("[%s] = %v, want %v", name, pair[0], pair[1])
+		}
+	}
+	if v, ok := out.SessionEnv["shop-api"]; !ok || v != "" {
+		t.Error("an empty session_env entry was dropped, so the repo would go back under nix develop")
+	}
+}
+
+// The prefix the forms open on: feature/ when nothing is written, nothing at
+// all when an empty string is, and what is written otherwise. Unset and empty
+// are different settings — one is the default, the other is how a layout whose
+// folders are named after their branches makes the two read the same.
+func TestBranchPrefixIsFeatureUnlessWrittenAndEmptyMeansNone(t *testing.T) {
+	empty, custom := "", " fix/ "
+	for _, tc := range []struct {
+		name string
+		cfg  *Config
+		want string
+	}{
+		{"no config", nil, DefaultBranchPrefix},
+		{"unset", &Config{}, DefaultBranchPrefix},
+		{"empty", &Config{BranchPrefix: &empty}, ""},
+		{"written", &Config{BranchPrefix: &custom}, "fix/"},
+	} {
+		if got := tc.cfg.EffectiveBranchPrefix(); got != tc.want {
+			t.Errorf("%s: EffectiveBranchPrefix() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A dispatch's checkout leaves the state directory only when the human asked
+// for "project": the state directory is ours to delete folders in, a project
+// folder is not, so anything else — a missing config included — keeps the
+// default.
+func TestWorktreesGoBesideTheProjectOnlyWhenAskedFor(t *testing.T) {
+	for _, tc := range []struct {
+		cfg  *Config
+		want bool
+	}{
+		{nil, false},
+		{&Config{}, false},
+		{&Config{Worktrees: "state"}, false},
+		{&Config{Worktrees: " Project "}, true},
+	} {
+		if got := tc.cfg.WorktreesBesideProject(); got != tc.want {
+			t.Errorf("WorktreesBesideProject(%+v) = %v, want %v", tc.cfg, got, tc.want)
+		}
+	}
+	var none *Config
+	if got := none.RootBranchFor("shop-api"); got != "" {
+		t.Errorf("no config named root %q; it must mean the remote's default", got)
+	}
+}
+
+// A config file that does not parse is an error, never an empty config: an
+// empty one has no roots and no products, and the cockpit would open on a
+// portfolio of nothing with no word about why.
+func TestAConfigThatDoesNotParseIsAnError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(Path(), []byte("roots = [unclosed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := Load(); err == nil {
+		t.Errorf("a malformed file loaded as %+v", cfg)
+	}
+}
+
+// Where the config cannot be written, Save and WriteDefault say so instead of
+// reporting a file that is not there.
+func TestAConfigThatCannotBeWrittenSaysSo(t *testing.T) {
+	// A HOME that is a file: the config directory cannot be made under it.
+	home := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(home, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	if err := Save(&Config{}); err == nil {
+		t.Error("Save reported success with nowhere to write")
+	}
+	if _, created, err := WriteDefault(); err == nil || created {
+		t.Errorf("WriteDefault: created=%v err=%v, want the failure reported", created, err)
+	}
+}
+
+// With no home directory to expand into, a ~ path is left as written rather
+// than turned into a path under the filesystem root.
+func TestExpandHomeWithNoHomeLeavesThePathAlone(t *testing.T) {
+	t.Setenv("HOME", "")
+	if got := ExpandHome("~/x"); got != "~/x" {
+		t.Errorf("ExpandHome(~/x) with no home = %q", got)
 	}
 }
