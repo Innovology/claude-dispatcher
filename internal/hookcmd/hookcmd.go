@@ -16,10 +16,11 @@
 //	SubagentStart/SubagentStop     -> no status change; the fan-out is an
 //	                                  annotation on the record (state.Subagent)
 //
-// A Stop with a non-empty background_tasks payload means the session is
-// paused waiting for background work to wake it, not waiting on the human;
-// the idle_prompt payload carries no task info, so the Stop's verdict is
-// persisted (WaitingOnTasks) and idle_prompt defers to it.
+// A Stop with background work in flight (pendingTasks: a standing artifact
+// watch is not work) means the session is paused waiting for that work to
+// wake it, not waiting on the human; the idle_prompt payload carries no task
+// info, so the Stop's verdict is persisted (WaitingOnTasks) and idle_prompt
+// defers to it.
 //
 // A done record is terminal for every event but the two that prove its session
 // is still going — see reopensDone.
@@ -52,8 +53,8 @@ type hookInput struct {
 	TranscriptPath string `json:"transcript_path"`
 	Cwd            string `json:"cwd"`
 	HookEventName  string `json:"hook_event_name"`
-	// Stop/SubagentStop only; item shape is Claude Code's business — only the
-	// count matters here.
+	// Stop/SubagentStop only; read through pendingTasks, which counts the
+	// entries the session is waiting on and leaves out standing watches.
 	BackgroundTasks []json.RawMessage `json:"background_tasks"`
 	// SubagentStart/SubagentStop carry which agent the event is about; other
 	// events fired from within a subagent carry them too, and are handled the
@@ -86,6 +87,36 @@ func (in hookInput) detail() string {
 		raw = raw[:300] + "…"
 	}
 	return raw
+}
+
+// pendingTasks is how many of the background tasks the session is waiting on:
+// work that ends and wakes it — a shell, the Monitor tool (listed as a shell
+// with its command), a background agent.
+//
+// A standing watch is not one. Measured on claude 2.1.299, an artifact the
+// session published or was asked to watch is listed for the rest of the
+// session as {"type":"monitor","status":"running","description":"live updates
+// for artifact …"}, with no command and no end. It wakes the session only when
+// somebody comments or republishes, which is a person's move like any prompt.
+// Counted, it held a dispatcher that had said it was done at "waiting on 1
+// background task" for good: the row stayed running, so it offered no "mark
+// shipped", and the tracker, which waits for the turn to end, never marked it
+// done either.
+//
+// An entry that does not parse is counted, as every entry was before.
+func (in hookInput) pendingTasks() int {
+	n := 0
+	for _, raw := range in.BackgroundTasks {
+		var t struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(raw, &t) == nil && t.Type == "monitor" && t.Command == "" {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 func Run(args []string) int {
@@ -280,7 +311,7 @@ func applyFanOut(d *state.Dispatch, event string, in hookInput) bool {
 		// the last turn go, background ones still running carry over.
 		return d.DropStoppedSubagents()
 	case "Stop":
-		if len(in.BackgroundTasks) > 0 {
+		if in.pendingTasks() > 0 {
 			return false // background agents legitimately outlive the turn
 		}
 		// The turn is over and nothing is in flight, so a subagent still
@@ -354,11 +385,12 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		// and the only thing that resets the retry count.
 		d.Failure = nil
 		d.SetSaid(in.LastAssistantMessage)
-		d.WaitingOnTasks = len(in.BackgroundTasks) > 0
+		pending := in.pendingTasks()
+		d.WaitingOnTasks = pending > 0
 		if d.WaitingOnTasks {
 			d.Status = state.StatusWorking
 			d.StatusReason = fmt.Sprintf("waiting on %d background %s",
-				len(in.BackgroundTasks), plural(len(in.BackgroundTasks), "task"))
+				pending, plural(pending, "task"))
 			break
 		}
 		d.Status = state.StatusNeedsInput
