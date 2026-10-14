@@ -832,11 +832,12 @@
   it and the cockpit matches it, and a drifting letter would not fail, it
   would file every question under "approve a permission". What the human can
   *do* about any of them is identical, because the answer is a keypress in the
-  pane. `cqMenu` is the one predicate every site asks (first rank, no `r`, no
-  "mark shipped", no quoting a mid-turn record's stale `Said`). Tone needs no
-  say in it at all, since it is taken from the blocked state they share. Tests
-  pin the kinds to one key set and one rank while requiring the words to
-  differ, so the only way to split them by accident is to edit that predicate.
+  pane. `cqMenu` is the one predicate every site asks (first rank, no `r`,
+  "mark shipped" only after asking, no quoting a mid-turn record's stale
+  `Said`). Tone needs no say in it at all, since it is taken from the blocked
+  state they share. Tests pin the kinds to one key set and one rank while
+  requiring the words to differ, so the only way to split them by accident
+  is to edit that predicate.
   **The third menu is the one before the session starts.** A dispatch sat on
   Claude Code's trust dialog while its row said "starting session" for good.
   No hook fires before a session has started, so a session stopped on a
@@ -1030,9 +1031,19 @@
 - "Done means live": a feature stays open until deployed, unless explicitly
   stated otherwise. Deploys are always GitHub Actions; `internal/track`
   flips features to done when the deploy workflow succeeds after PR merge
-  (merge counts as live for repos with no deploy workflow). `d` in the
-  cockpit is the manual override. Auto-done only advances while a cockpit
-  is open (the tracker runs from the cockpit's poll loop).
+  (merge counts as live for repos with no deploy workflow). Auto-done only
+  advances while a cockpit is open (the tracker runs from the cockpit's poll
+  loop). **`y` is the manual override, and an override does not wait on the
+  session.** It was offered only where the turn had ended, which made it
+  unreachable exactly when it was needed: the robustness dispatcher sat at
+  "working" after saying it was done (an artifact watch, above), so `y` did
+  nothing, and the tracker, which waits for the turn to end, could not finish
+  it either. Every live row with commits offers it now (running, on a menu,
+  parked, waiting on you) — commits stay the condition, because shipping
+  nothing is a claim about the work, not the session. Where the session has
+  not ended its turn (working, blocked, launching) it asks first on the
+  confirm bar, since the session carries on after its row has gone; `y` or
+  `enter` there marks it, `n` or `esc` leaves it.
 - **The dispatch form's MODE is Claude Code's permission mode, not a
   sentence about one.** A dispatch is launched with `--permission-mode` —
   `auto` (takes its own edits and safe commands), `manual` (asks before each

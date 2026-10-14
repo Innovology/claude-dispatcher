@@ -32,11 +32,14 @@ import (
 // cqAct is one offered action. keep means acting does not clear the row —
 // attach hands the terminal over and comes back to the same ask. An act with an
 // empty ok is not actionable on its own; skip is table rotation, not work.
+// confirm, when set, is the question the key puts on the confirm bar first;
+// the act runs only on y or enter there.
 type cqAct struct {
-	k    string
-	d    string
-	ok   string
-	keep bool
+	k       string
+	d       string
+	ok      string
+	keep    bool
+	confirm string
 }
 
 // ---- what it is working towards ----------------------------------------------
@@ -167,10 +170,10 @@ func cqKind(rec *state.Dispatch, st string) string {
 // cqMenu reports whether the ask is a menu: a permission prompt or a question.
 // The answer to either is a keypress inside the pane, not a line of text, so
 // the two behave identically everywhere it matters — first in the table, amber,
-// no reply key, no "mark shipped", `enter` to attach — and differ only in what
-// they say. Every site that used to compare against "permission" alone asks
-// this instead, so the one way to split them by accident is to edit this
-// function, which is the point of it.
+// no reply key, "mark shipped" only after asking, `enter` to attach — and
+// differ only in what they say. Every site that used to compare against
+// "permission" alone asks this instead, so the one way to split them by
+// accident is to edit this function, which is the point of it.
 func cqMenu(kind string) bool {
 	return kind == "permission" || kind == "question" || kind == "startup"
 }
@@ -314,6 +317,28 @@ func cqClashNote(rec *state.Dispatch, clash *cqClash) string {
 	return ""
 }
 
+// cqShipAct is y's "mark shipped": the human's word that the feature is live.
+//
+// It is an override, so it is offered whatever the session is doing. It used
+// to be offered only once the turn had ended, which made it unreachable
+// exactly when it was needed: a session the record still had as working — the
+// robustness dispatcher, held there by an artifact watch after it had said it
+// was done — could not be marked, and the tracker, which waits for the turn to
+// end, could not mark it either. Where the session has not ended its turn the
+// key asks first, because the session carries on after its row has gone.
+func cqShipAct(rec *state.Dispatch) cqAct {
+	a := cqAct{k: "y", d: "mark shipped", ok: "\"" + rec.Feature + "\" marked shipped"}
+	switch rec.Status {
+	case state.StatusWorking:
+		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session is still working?"
+	case state.StatusBlocked:
+		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session waits on a prompt?"
+	case state.StatusLaunching:
+		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session is still starting?"
+	}
+	return a
+}
+
 // cqKillAct is x on a live row: kill for a dispatcher this cockpit started,
 // release for a session it adopted, which was the human's before the record
 // and is theirs again after it (killCmd).
@@ -386,6 +411,9 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		}
 		acts = append(acts, cqAct{k: "p", d: "unpark",
 			ok: "\"" + rec.Feature + "\" back on the fleet", keep: true})
+		if len(rec.Commits) > 0 {
+			acts = append(acts, cqShipAct(rec))
+		}
 		if rec.Status != state.StatusExited {
 			acts = append(acts, cqKillAct(rec))
 		}
@@ -395,9 +423,12 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		{k: "⏎", d: "attach", ok: "attaching to " + rec.RepoName + " session…", keep: true},
 	}
 	// A running dispatcher is not asking for anything, so there is nothing to
-	// answer and nothing to skip past: it can be watched or stopped, and that is
-	// the whole list.
+	// answer and nothing to skip past: it can be watched, stopped, or declared
+	// shipped by the human who knows it is.
 	if kind == "running" {
+		if len(rec.Commits) > 0 {
+			acts = append(acts, cqShipAct(rec))
+		}
 		return append(acts, cqKillAct(rec))
 	}
 	// Marking a dispatcher shipped that produced nothing would be a lie about
@@ -410,9 +441,8 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		// real (shipCmd) rather than just marking the record done.
 		acts = append(acts, cqAct{k: "y", d: "approve merge",
 			ok: "merging #" + itoa(rec.PRNumber) + " into " + rec.RepoName})
-	case !cqMenu(kind) && len(rec.Commits) > 0:
-		acts = append(acts, cqAct{k: "y", d: "mark shipped",
-			ok: "\"" + rec.Feature + "\" marked shipped"})
+	case len(rec.Commits) > 0:
+		acts = append(acts, cqShipAct(rec))
 	}
 	acts = append(acts,
 		cqKillAct(rec))

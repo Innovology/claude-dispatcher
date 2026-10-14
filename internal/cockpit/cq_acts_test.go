@@ -69,10 +69,10 @@ func TestCQActsHidesShipWithNoCommits(t *testing.T) {
 			t.Errorf("a dispatcher with no commits should not offer %q", a.d)
 		}
 	}
-	// A permission ask never offers it either, commits or not.
-	for _, a := range cqActs(testRec("one", 5), "permission") {
+	// Not on a menu either — no session state brings it back without commits.
+	for _, a := range cqActs(testRec("one", 0), "permission") {
 		if a.k == "y" {
-			t.Errorf("a permission ask should not offer %q", a.d)
+			t.Errorf("a permission ask with no commits should not offer %q", a.d)
 		}
 	}
 }
@@ -102,16 +102,108 @@ func TestCQShedDropsCheapestFirst(t *testing.T) {
 	}
 }
 
-// A running dispatcher is not asking for anything: it can be watched or
-// stopped, and nothing else. Offering "approve merge" or "skip" there would
-// advertise an answer to a question nobody asked.
+// A running dispatcher is not asking for anything: it can be watched, stopped,
+// or declared shipped, and nothing else. Offering "approve merge" or "skip"
+// there would advertise an answer to a question nobody asked.
 func TestCQActsForARunningRow(t *testing.T) {
+	rec := testRec("one", 4)
+	rec.Status = state.StatusWorking
 	var keys []string
-	for _, a := range cqActs(testRec("one", 4), "running") {
-		keys = append(keys, a.k)
+	for _, a := range cqActs(rec, "running") {
+		keys = append(keys, a.k+" "+a.d)
 	}
-	if strings.Join(keys, " ") != "⏎ x" {
-		t.Errorf("running acts = %v, want [⏎ x]", keys)
+	if got := strings.Join(keys, " · "); got != "⏎ attach · y mark shipped · x kill" {
+		t.Errorf("running acts = %q", got)
+	}
+}
+
+// Marking shipped is the human's override, so no session state hides it — the
+// robustness dispatcher sat at "working" after saying it was done, and y did
+// nothing. What the state decides is whether y asks first: only once the turn
+// has ended does it act on the keypress alone.
+func TestMarkShippedAsksFirstWhileTheSessionIsGoing(t *testing.T) {
+	for _, c := range []struct {
+		status state.Status
+		kind   string
+		asks   bool
+	}{
+		{state.StatusWorking, "running", true},
+		{state.StatusBlocked, "question", true},
+		{state.StatusBlocked, "permission", true},
+		{state.StatusLaunching, "startup", true},
+		{state.StatusWorking, "parked", true},
+		{state.StatusNeedsInput, "turn-done", false},
+		{state.StatusNeedsInput, "parked", false},
+		{state.StatusExited, "parked", false},
+	} {
+		rec := testRec("one", 2)
+		rec.Status = c.status
+		var ship *cqAct
+		for _, a := range cqActs(rec, c.kind) {
+			if a.k == "y" {
+				ship = &a
+			}
+		}
+		if ship == nil || ship.d != "mark shipped" {
+			t.Errorf("%s %s: no mark shipped on the row", c.status, c.kind)
+			continue
+		}
+		if got := ship.confirm != ""; got != c.asks {
+			t.Errorf("%s %s: asks first = %v, want %v (%q)", c.status, c.kind, got, c.asks, ship.confirm)
+		}
+	}
+}
+
+// y on a row whose session is still going puts the question on the confirm bar
+// and does nothing else; n there leaves the record alone, and y runs the act
+// exactly as the plain key would on a finished turn.
+func TestTheConfirmBarIsWhereAGoingSessionIsMarked(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	m := cqModel(t)
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	rec := testRec("robustness", 3)
+	rec.ID, rec.Status = "rob1", state.StatusWorking
+	if err := state.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	liveRecords = map[string]*state.Dispatch{rec.Feature: rec}
+	liveByID = map[string]*state.Dispatch{rec.ID: rec}
+	fleet = append(fleet, fleetRow{id: rec.ID, kind: "run", feature: rec.Feature, acts: cqActs(rec, "running")})
+	m = m.fleetSync()
+	m = press(m, "G")
+	if r, _ := m.fleetSel(); r.id != rec.ID {
+		t.Fatalf("cursor on %q, want the robustness row", r.feature)
+	}
+
+	next, cmd := m.handleKey("y")
+	m = next.(model)
+	if cmd != nil || m.cqFlash != "" {
+		t.Fatal("y on a working session acted without asking")
+	}
+	if m.confirm == nil || !strings.Contains(m.confirm.label, "still working") {
+		t.Fatalf("confirm = %+v, want the question naming what the session is doing", m.confirm)
+	}
+	m = press(m, "n")
+	if m.confirm != nil || state.LoadAll()[0].Status != state.StatusWorking {
+		t.Fatal("n should cancel and leave the record as it was")
+	}
+
+	m = press(m, "y")
+	next, cmd = m.handleKey("y")
+	m = next.(model)
+	if m.confirm != nil || cmd == nil {
+		t.Fatal("y on the bar should run the act")
+	}
+	if !strings.Contains(m.cqFlash, "marked shipped") || m.cqFlashID != rec.ID {
+		t.Errorf("flash = %q on %q, want the act's own confirmation on the row asked about", m.cqFlash, m.cqFlashID)
+	}
+	// The flash batches the act's command beside its own timer; the command
+	// is the one the plain key runs, so run that and read the record back.
+	_, run := m.cqRun(fleetRow{id: rec.ID, kind: "run", feature: rec.Feature}, cqAct{k: "y", d: "mark shipped"})
+	run()
+	if got := state.LoadAll()[0]; got.Status != state.StatusDone || got.StatusReason != "marked shipped" {
+		t.Errorf("record = %s %q, want marked shipped", got.Status, got.StatusReason)
 	}
 }
 
