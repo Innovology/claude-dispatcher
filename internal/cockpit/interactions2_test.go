@@ -660,12 +660,6 @@ func TestDoConfirmNilAndKill(t *testing.T) {
 
 // ---- seed.go: fallback branches -----------------------------------------------
 
-func TestRepoProductFallback(t *testing.T) {
-	if got := repoProduct("no-such-repo-xyz"); got != "—" {
-		t.Errorf("repoProduct(unknown) = %q, want —", got)
-	}
-}
-
 // A product named in config that the last load has no record for yet — just
 // assigned, or every repo in it gone — still gets its panel summary, as zeros,
 // rather than borrowing another product's figures or drawing nothing.

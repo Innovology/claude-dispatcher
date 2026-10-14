@@ -142,18 +142,6 @@ type hunkLine struct{ sign, text string }
 
 // ---- cross-lens seed data ---------------------------------------------------
 
-// repoProduct maps a repo name back to its product (or "—").
-func repoProduct(repo string) string {
-	for _, p := range productOrder {
-		for _, r := range reposByProduct[p] {
-			if r.name == repo {
-				return p
-			}
-		}
-	}
-	return "—"
-}
-
 // productByName returns the product record, or a zero value if not found.
 func productByName(name string) product {
 	for _, p := range products {
