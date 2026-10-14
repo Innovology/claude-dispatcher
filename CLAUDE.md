@@ -520,6 +520,19 @@
   way to split them by accident is to edit that predicate. No ADR — one hook
   entry and one case, and the numbering is contested between unmerged branches.
   Existing installs re-run `init` to get the entry.
+  **A watch is not background work.** A `Stop` that lists background tasks
+  reads as a session waiting to be woken rather than waiting on the human
+  (`WaitingOnTasks`). An artifact the session published or was asked to watch
+  is listed in every later `Stop`'s `background_tasks` for the rest of the
+  session — measured on claude 2.1.299 as `type: "monitor"` with no
+  `command`, "live updates for artifact …" — and it never ends: it wakes the
+  session only when somebody comments or republishes, which is a person's move
+  like any prompt. Counted, it held a dispatcher that had said it was done at
+  "waiting on 1 background task" for good: a running row, so no "mark
+  shipped", and a tracker that waits for the turn to end before marking
+  anything done. `pendingTasks` leaves that one shape out. An entry it cannot
+  read still counts, and so does the Monitor tool, which lists as a shell with
+  its command.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
