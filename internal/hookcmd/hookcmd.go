@@ -23,8 +23,9 @@
 // Any event leaves the record blocked while a dialog is still open: the
 // session can end its turn under a subagent's permission prompt.
 //
-// A Stop with a non-empty background_tasks payload means the session is
-// paused waiting for background work to wake it, not waiting on the human —
+// A Stop with background work in flight (pendingTasks: a standing artifact
+// watch is not work) means the session is paused waiting for that work to
+// wake it, not waiting on the human —
 // unless its message asked something, in which case the ask wins and the
 // record is needs-input with both facts in its reason. The idle_prompt payload
 // carries no task info, so the Stop's verdict is persisted (WaitingOnTasks)
@@ -62,8 +63,8 @@ type hookInput struct {
 	TranscriptPath string `json:"transcript_path"`
 	Cwd            string `json:"cwd"`
 	HookEventName  string `json:"hook_event_name"`
-	// Stop/SubagentStop only; item shape is Claude Code's business — only the
-	// count matters here.
+	// Stop/SubagentStop only; read through pendingTasks, which counts the
+	// entries the session is waiting on and leaves out standing watches.
 	BackgroundTasks []json.RawMessage `json:"background_tasks"`
 	// SubagentStart/SubagentStop carry which agent the event is about; other
 	// events fired from within a subagent carry them too, and are handled the
@@ -99,6 +100,36 @@ func (in hookInput) detail() string {
 		raw = raw[:300] + "…"
 	}
 	return raw
+}
+
+// pendingTasks is how many of the background tasks the session is waiting on:
+// work that ends and wakes it — a shell, the Monitor tool (listed as a shell
+// with its command), a background agent.
+//
+// A standing watch is not one. Measured on claude 2.1.299, an artifact the
+// session published or was asked to watch is listed for the rest of the
+// session as {"type":"monitor","status":"running","description":"live updates
+// for artifact …"}, with no command and no end. It wakes the session only when
+// somebody comments or republishes, which is a person's move like any prompt.
+// Counted, it held a dispatcher that had said it was done at "waiting on 1
+// background task" for good: the row stayed running, so it offered no "mark
+// shipped", and the tracker, which waits for the turn to end, never marked it
+// done either.
+//
+// An entry that does not parse is counted, as every entry was before.
+func (in hookInput) pendingTasks() int {
+	n := 0
+	for _, raw := range in.BackgroundTasks {
+		var t struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(raw, &t) == nil && t.Type == "monitor" && t.Command == "" {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 func Run(args []string) int {
@@ -295,7 +326,7 @@ func applyFanOut(d *state.Dispatch, event string, in hookInput) bool {
 		// the last turn go, background ones still running carry over.
 		return d.DropStoppedSubagents()
 	case "Stop":
-		if len(in.BackgroundTasks) > 0 {
+		if in.pendingTasks() > 0 {
 			return false // background agents legitimately outlive the turn
 		}
 		// The turn is over and nothing is in flight, so a subagent still
@@ -412,7 +443,8 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		// and the only thing that resets the retry count.
 		d.Failure = nil
 		d.SetSaid(in.LastAssistantMessage)
-		d.WaitingOnTasks = len(in.BackgroundTasks) > 0
+		pending := in.pendingTasks()
+		d.WaitingOnTasks = pending > 0
 		d.DropMenus("") // a turn that ended is past any dialog of its own
 		// Background work is not a human wait — until the message asks
 		// something, and then both are true and only one of them needs a
@@ -431,7 +463,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		if d.WaitingOnTasks && ask.Of(d.Said) == "" {
 			d.Status = state.StatusWorking
 			d.StatusReason = fmt.Sprintf("waiting on %d background %s",
-				len(in.BackgroundTasks), plural(len(in.BackgroundTasks), "task"))
+				pending, plural(pending, "task"))
 			break
 		}
 		d.Status = state.StatusNeedsInput
@@ -440,7 +472,7 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 			// Both facts, so the row does not look like it has forgotten the
 			// background work it is also still waiting on.
 			d.StatusReason += fmt.Sprintf(" · %d background %s still running",
-				len(in.BackgroundTasks), plural(len(in.BackgroundTasks), "task"))
+				pending, plural(pending, "task"))
 		}
 	case "StopFailure":
 		// Fired instead of Stop, so it is the only word the session gets out:

@@ -104,6 +104,60 @@ func TestApplyBackgroundTaskWait(t *testing.T) {
 	}
 }
 
+// The entries as claude 2.1.299 lists them, captured from a Stop payload: an
+// artifact watch, and the shell a background Bash and the Monitor tool both
+// report as.
+var (
+	artifactWatch = json.RawMessage(`{"id":"slhl8cv0i","type":"monitor","status":"running","description":"live updates for artifact https://claude.ai/artifact/Rc1wwnDtjHvJsL9LHDMFnR (watch requested)"}`)
+	backgroundRun = json.RawMessage(`{"id":"bfea94d7g","type":"shell","status":"running","description":"Sleep 30s then report finished","command":"sleep 30; echo finished"}`)
+)
+
+// An artifact watch is listed as a background task for the rest of the session
+// and never ends, so a turn that ended beside one is a turn that ended. Counted
+// as work, it held the robustness dispatcher at "waiting on 1 background task"
+// after it said it was done: running for good, with no "mark shipped" on its
+// row and a tracker that waits for the turn to end.
+func TestAnArtifactWatchIsNotBackgroundWork(t *testing.T) {
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "SubagentStart", hookInput{AgentID: "a1", AgentType: "Explore"})
+
+	if !apply(d, "Stop", hookInput{BackgroundTasks: []json.RawMessage{artifactWatch}}) {
+		t.Fatal("a Stop beside a watch should report a change")
+	}
+	if d.Status != state.StatusNeedsInput || d.StatusReason != state.ReasonTurnComplete || d.WaitingOnTasks {
+		t.Fatalf("got %s %q waiting=%v, want a finished turn — the watch is nothing to wait on",
+			d.Status, d.StatusReason, d.WaitingOnTasks)
+	}
+	if d.SubagentsLive() != 0 {
+		t.Error("a watch is not a background agent: the turn's fan-out must still be swept")
+	}
+	apply(d, "Notification:idle_prompt", hookInput{})
+	if d.Status != state.StatusNeedsInput {
+		t.Errorf("the idle prompt after it left the record %s, want needs-input", d.Status)
+	}
+
+	// Beside real work it is still not counted: the session waits on the one
+	// task that will end.
+	d = &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "Stop", hookInput{BackgroundTasks: []json.RawMessage{artifactWatch, backgroundRun}})
+	if d.Status != state.StatusWorking || d.StatusReason != "waiting on 1 background task" {
+		t.Errorf("got %s %q, want working on the one task that will end", d.Status, d.StatusReason)
+	}
+}
+
+// Only the shape that was measured is left out. An entry this cannot read
+// counts, as every entry did before, and so does a monitor that runs a
+// command, because a command ends.
+func TestAnUnreadTaskIsStillWork(t *testing.T) {
+	for _, entry := range []string{`{"task_id":"t1"}`, `"t1"`, `{"type":"monitor","command":"gh run watch 1"}`} {
+		d := &state.Dispatch{Status: state.StatusWorking}
+		apply(d, "Stop", hookInput{BackgroundTasks: []json.RawMessage{json.RawMessage(entry)}})
+		if d.Status != state.StatusWorking || !d.WaitingOnTasks {
+			t.Errorf("%s: got %s waiting=%v, want it waited on", entry, d.Status, d.WaitingOnTasks)
+		}
+	}
+}
+
 func TestApplyUserPromptClearsTaskWait(t *testing.T) {
 	d := &state.Dispatch{Status: state.StatusWorking, WaitingOnTasks: true}
 	apply(d, "UserPromptSubmit", hookInput{})

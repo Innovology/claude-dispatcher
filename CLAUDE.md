@@ -879,6 +879,17 @@
   stops with an ask keeps its row anyway, under the `finished` divider, because
   nothing retires a held row but `x`. Existing installs re-run `init` to get
   the entry.
+  **And a watch is not background work.** An artifact the session published
+  or was asked to watch is listed in every later `Stop`'s `background_tasks`
+  for the rest of the session — measured on claude 2.1.299 as `type:
+  "monitor"` with no `command`, "live updates for artifact …" — and it never
+  ends: it wakes the session only when somebody comments or republishes,
+  which is a person's move like any prompt. Counted, it held the robustness
+  dispatcher at "waiting on 1 background task" for good after it said it was
+  done: a running row, so no "mark shipped", and a tracker that waits for the
+  turn to end before marking anything done. `pendingTasks` leaves that one
+  shape out. An entry it cannot read still counts, and so does the Monitor
+  tool, which lists as a shell with its command.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
