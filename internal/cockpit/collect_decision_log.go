@@ -474,7 +474,11 @@ func dcnSingle(rel string, lines []string, heads []dcnHead, h1 int, mod time.Tim
 	}
 	d.status = dcnInlineStatus(lines)
 	if d.status == "" {
-		if d.status = dcnMarkerStatus(d.title); d.status == "" {
+		// The heading as written: its marker is gone from the title.
+		if h1 >= 0 {
+			d.status = dcnMarkerStatus(heads[h1].text)
+		}
+		if d.status == "" {
 			d.status = "decided"
 		}
 	}
