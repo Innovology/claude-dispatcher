@@ -12,6 +12,7 @@ package cockpit
 //	WHAT       the work itself, wrapped over as many rows as it takes
 //	DONE WHEN  the completion condition, optional
 //	ROOT       the branch it is cut from — blank for the repo's default
+//	PREFIX     what the branch name starts with — settings' default, editable
 //	MODE       auto, manual or plan — what it may do without asking
 //	MODEL      default, or an alias the installed claude advertises
 //	ACCOUNT    which Claude subscription it runs under, with what each has left
@@ -41,6 +42,16 @@ package cockpit
 // dispatch/root.go). A name that is not a branch in the picked repo is refused
 // here, with the nearest branches named, rather than at the launch: by then the
 // form is gone and so is everything typed into it.
+//
+// PREFIX opens on the default the settings screen keeps (config's
+// branch_prefix) and is changed here for one dispatch only: a convention is
+// the default, and a branch that wants another one — a `fix/` among the
+// `feature/`s, or a bare name beside the project — is the exception typed at
+// the moment it comes up. It is filled in rather than blank-means-default, as
+// ROOT is, because here blank is itself an answer (no prefix) and the default
+// is a value the human can see. Both preview lines read it, so the branch the
+// form shows is the branch the launch cuts; they printed `feature/` whatever
+// the config said until it was.
 //
 // MODEL reaches the process the same way MODE does — as a launch flag
 // (--model, see dispatch/model.go) — and its offer comes from the claude
@@ -83,6 +94,7 @@ const (
 	dxWhatF
 	dxGoalF
 	dxRootF
+	dxPrefixF
 	dxModeF
 	dxModelF
 	dxAccountF
@@ -113,6 +125,7 @@ func (m model) dxReset() model {
 	m.dxField, m.dxRepo = dxWhereF, 0
 	m.dxFilter, m.dxTitle, m.dxWhat, m.dxGoal = "", "", "", ""
 	m.dxRoot = ""
+	m.dxPrefix = nil
 	m.dxMode = dispatchpkg.DefaultMode
 	m.dxModel, m.dxFanOut = dispatchpkg.DefaultModel, false
 	m.dxAccount = account.Default
@@ -135,8 +148,25 @@ func (m model) dxOpen(filter string) model {
 // moment there is a filter or a sentence they are letters again. dxMode,
 // dxModel, dxFanOut and dxField deliberately do not count — cycling a switch or
 // tabbing about is not typing, and must not strand the human on this screen.
+// PREFIX opens filled, so it counts only once it differs from what it opened on.
 func (m model) dxTouched() bool {
-	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != "" || m.dxRoot != ""
+	return m.dxFilter != "" || m.dxTitle != "" || m.dxWhat != "" || m.dxGoal != "" || m.dxRoot != "" ||
+		(m.dxPrefix != nil && *m.dxPrefix != m.cfg.EffectiveBranchPrefix())
+}
+
+// dxAtRest reports whether the form is exactly as it opened: focus on WHERE,
+// the repo cursor on the first row, nothing typed. Only then do 1–6 and ':'
+// leave it — and 'd' and 'h', on the form that stands in for an empty table.
+//
+// dxTouched alone was the test, and it cannot see a choice made without typing.
+// Arrow down to a repo and press enter, and every text field is still empty,
+// so the form read as untouched and the first letter of the title went to the
+// key it stands for: a title starting with "d" re-opened the form on WHERE and
+// dropped the pick, one starting with "h" left for history, "2fa…" switched
+// lens. Leaving WHERE, or moving along its list, is choosing, and from then on
+// the form owns every key; esc is still the way out.
+func (m model) dxAtRest() bool {
+	return m.dxField == dxWhereF && m.dxRepo == 0 && !m.dxTouched()
 }
 
 // ---- the repo list -----------------------------------------------------------
@@ -255,7 +285,24 @@ func (m model) dxBranch() string {
 	if slug == "" {
 		slug = "untitled"
 	}
-	return "feature/" + slug
+	return strings.TrimSpace(m.dxPrefixText()) + slug
+}
+
+// dxPrefixText is PREFIX as it reads: this dispatch's override where one was
+// typed, settings' default where none was. The default is read rather than
+// copied in when the form opens, so a form nobody touched never disagrees
+// with the config — and never counts as typed into (dxTouched).
+func (m model) dxPrefixText() string {
+	if m.dxPrefix != nil {
+		return *m.dxPrefix
+	}
+	return m.cfg.EffectiveBranchPrefix()
+}
+
+// dxSetPrefix records an edit to PREFIX as this dispatch's override.
+func (m model) dxSetPrefix(p string) model {
+	m.dxPrefix = &p
+	return m
 }
 
 // ---- what the dispatcher is actually told -------------------------------------
@@ -436,6 +483,8 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxGoal = dxChop(m.dxGoal)
 		case dxRootF:
 			m.dxRoot = dxChop(m.dxRoot)
+		case dxPrefixF:
+			m = m.dxSetPrefix(dxChop(m.dxPrefixText()))
 		}
 		return m, nil
 	}
@@ -454,6 +503,8 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxGoal += s
 		case dxRootF:
 			m.dxRoot += s
+		case dxPrefixF:
+			m = m.dxSetPrefix(m.dxPrefixText() + s)
 		}
 	}
 	// Everything else is swallowed: the form owns the keyboard, and a stray
@@ -521,6 +572,11 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		m.dxField, m.notice = dxRootF, bad
 		return m, nil
 	}
+	prefix := strings.TrimSpace(m.dxPrefixText())
+	if bad := dispatchpkg.PrefixProblem(prefix); bad != "" {
+		m.dxField, m.notice = dxPrefixF, "prefix: "+bad
+		return m, nil
+	}
 	branch := m.dxBranch()
 
 	m = m.dxReset()
@@ -560,7 +616,7 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	// table is empty. fleetSync re-keys the cursor over the row that just moved
 	// down; on an empty table it lands the cursor on the new row itself.
 	m = m.markPending(m.pendingFor(row.repo, feature, prompt)).fleetSync()
-	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, root, fanOut, acct)
+	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, root, &prefix, fanOut, acct)
 }
 
 // dxLaunch is the launch dxSubmit hands off to — see launchDispatch, which the
@@ -642,7 +698,45 @@ func (m model) dxRootHint() string {
 	if !root.IsDefault() {
 		return "cut from " + string(root) + " instead of the default branch"
 	}
+	if rb := m.dxRepoRoot(); rb != "" {
+		return "optional · blank cuts from " + rb + ", this repo's root branch (config)"
+	}
 	return "optional · blank cuts from the repo's default branch, as origin sees it"
+}
+
+// dxRepoRoot is the picked repo's own root branch (config's [root_branches]),
+// which a blank ROOT cuts from, or "" when it has none or nothing is picked.
+func (m model) dxRepoRoot() string {
+	row, ok := m.dxPicked()
+	if !ok {
+		return ""
+	}
+	return m.cfg.RootBranchFor(row.repo)
+}
+
+// dxPrefixNote sits at the right of PREFIX: whether this is the default or a
+// change for this one dispatch, and what git would refuse in it. The branch it
+// makes is TITLE's hint and the summary's, so it is not repeated here.
+func (m model) dxPrefixNote() string {
+	p, def := strings.TrimSpace(m.dxPrefixText()), m.cfg.EffectiveBranchPrefix()
+	if bad := dispatchpkg.PrefixProblem(p); bad != "" {
+		return bad
+	}
+	if p == def {
+		if p == "" {
+			// Otherwise the line is a blank field beside "the default", which
+			// reads as a value that failed to load rather than as "none".
+			return "none, the default · settings changes it for every dispatch"
+		}
+		return "the default · settings changes it for every dispatch"
+	}
+	if def == "" {
+		def = "none"
+	}
+	if p == "" {
+		return "none, for this dispatch · the default is " + def
+	}
+	return "this dispatch only · the default is " + def
 }
 
 // dxRootProblem is ROOT's validation: the sentence to show when the typed
@@ -893,6 +987,8 @@ func (m model) dxSummary() string {
 	s := row.repo + " · " + m.dxBranch() + " · " + m.dxMode.Summary()
 	if root := dispatchpkg.Root(m.dxRoot).Normalize(); !root.IsDefault() {
 		s += " · from " + string(root)
+	} else if rb := m.dxRepoRoot(); rb != "" {
+		s += " · from " + rb
 	}
 	if mdl := m.dxModel.Normalize(); mdl != dispatchpkg.DefaultModel {
 		s += " · " + string(mdl)
@@ -910,8 +1006,13 @@ func (m model) dxSummary() string {
 // keys that exist here: ctrl+d and not the design's ctrl+⏎, and the exits only
 // while they are still exits.
 func (m model) dxFooterHelp() string {
-	if m.dxTouched() {
+	if !m.dxAtRest() {
 		return "enter next field · tab moves · ctrl+d dispatch · esc cancel"
+	}
+	if !m.cqDispatch {
+		// The form standing in for an empty table, where h is still the way to
+		// history (cq_keys.go).
+		return "dispatch · enter next field · tab moves · h history · 1…6 sections"
 	}
 	return "dispatch · enter next field · tab moves · esc cancel · 1…6 sections"
 }
@@ -968,6 +1069,7 @@ func (m model) dxView(w, h int) string {
 		cqGap(8),
 		cqFixed(m.dxFieldRow(inner, "ROOT", m.dxRoot, m.dxField == dxRootF, "")),
 		cqFixed(dxHintRow(inner, m.dxRootHint())),
+		cqFixed(m.dxFieldRow(inner, "PREFIX", m.dxPrefixText(), m.dxField == dxPrefixF, m.dxPrefixNote())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModeF, "MODE", dxModeWords(), m.dxModeSel(), m.dxModeHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModelF, "MODEL", dxModelWords(), m.dxModelSel(), m.dxModelHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxAccountF, "ACCOUNT", m.dxAccountWords(), m.dxAccountSel(), m.dxAccountHint())),

@@ -23,65 +23,6 @@ type Issue struct {
 	UpdatedAt time.Time
 }
 
-// Issues returns open issues assigned to @me for the repo. The bool is false
-// when gh is unavailable or the call/parse fails; true (with a possibly empty
-// slice) otherwise.
-func Issues(repoPath string) ([]Issue, bool) {
-	type result struct {
-		issues []Issue
-		ok     bool
-	}
-	r := memo("issues:"+repoPath, RepoTTL, func() result {
-		issues, ok := issuesUncached(repoPath)
-		return result{issues, ok}
-	})
-	return r.issues, r.ok
-}
-
-func issuesUncached(repoPath string) ([]Issue, bool) {
-	if !Available() {
-		return nil, false
-	}
-	out, err := run(command(repoPath, "issue", "list",
-		"--assignee", "@me", "--state", "open",
-		"--json", "number,title,url,body,state,labels,updatedAt",
-		"--limit", "100"))
-	if err != nil {
-		return nil, false
-	}
-	var rows []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		URL    string `json:"url"`
-		Body   string `json:"body"`
-		State  string `json:"state"`
-		Labels []struct {
-			Name string `json:"name"`
-		} `json:"labels"`
-		UpdatedAt time.Time `json:"updatedAt"`
-	}
-	if json.Unmarshal(out, &rows) != nil {
-		return nil, false
-	}
-	issues := make([]Issue, 0, len(rows))
-	for _, r := range rows {
-		labels := make([]string, 0, len(r.Labels))
-		for _, l := range r.Labels {
-			labels = append(labels, l.Name)
-		}
-		issues = append(issues, Issue{
-			Number:    r.Number,
-			Title:     r.Title,
-			URL:       r.URL,
-			Body:      r.Body,
-			State:     r.State,
-			Labels:    labels,
-			UpdatedAt: r.UpdatedAt,
-		})
-	}
-	return issues, true
-}
-
 // Checks summarises the CI check-run states for a PR.
 type Checks struct {
 	Passed  int

@@ -49,7 +49,7 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		m.notice = "no live session for \"" + feature + "\""
 		return m, nil
 	}
-	if !supervisor.HasSession(rec.TmuxSession) {
+	if !supervisor.HasSession(dispatchpkg.SessionOf(rec)) {
 		if retired, _ := reconcileSessions([]*state.Dispatch{rec}); retired > 0 {
 			m.notice = "\"" + feature + "\" lost its " + supervisor.Backend() +
 				" session — retired · h for history, where ⏎ resumes it"
@@ -64,19 +64,25 @@ func (m model) attach(feature string) (model, tea.Cmd) {
 		m.notice = "no live " + supervisor.Backend() + " session for \"" + feature + "\""
 		return m, nil
 	}
-	return m.attachSession(rec.TmuxSession)
+	return m.attachSession(dispatchpkg.SessionOf(rec), rec.EnvCommand)
 }
 
-// attachSession hands the terminal to a named session. attach resolves a
-// feature to one; a resume has just started one and knows its name directly.
-func (m model) attachSession(name string) (model, tea.Cmd) {
-	if name == "" || !supervisor.HasSession(name) {
+// attachSession hands the terminal to a session. attach resolves a feature to
+// one; a resume has just started one and knows its address directly.
+//
+// env is the repo's own environment, and it is passed here as well as at launch
+// because the human is about to open panes of their own: a split or a new
+// window takes its PATH from the client they arrived through, so an attach
+// without it hands them a session whose every further pane is blind to the
+// toolchain the first one was given.
+func (m model) attachSession(sess supervisor.Session, env string) (model, tea.Cmd) {
+	if sess.Name == "" || !supervisor.HasSession(sess) {
 		m.notice = "no live session to attach to"
 		return m, nil
 	}
-	supervisor.EnsureBackKey()
+	supervisor.EnsureBackKey(sess.Socket)
 	supervisor.EnsureFocusEvents()
-	supervisor.SetStatusHint(name)
+	supervisor.SetStatusHint(sess)
 	// Whether this command's exit means "they are back" depends on how the
 	// handover works. A plain attach owns the terminal until they detach, so it
 	// exits on the way home. A switch-client (inside tmux) or a raised console
@@ -84,8 +90,8 @@ func (m model) attachSession(name string) (model, tea.Cmd) {
 	// their return is the focus their pane or window regains — so record that
 	// they are away and let that close the loop. See the attachReturnedMsg and
 	// tea.FocusMsg cases in model.go.
-	m.away = supervisor.AttachSwitches()
-	return m, tea.ExecProcess(supervisor.AttachCmd(name), func(err error) tea.Msg {
+	m.away = supervisor.AttachSwitches(sess)
+	return m, tea.ExecProcess(supervisor.AttachCmd(sess, env), func(err error) tea.Msg {
 		return attachReturnedMsg{err: err}
 	})
 }
@@ -96,14 +102,24 @@ func (m model) attachSession(name string) (model, tea.Cmd) {
 // says how many were kept.
 func killCmd(features []string) tea.Cmd {
 	return func() tea.Msg {
-		n, kept := 0, 0
+		n, kept, released := 0, 0, 0
 		for _, f := range features {
 			rec := recordFor(f)
 			if rec == nil {
 				continue
 			}
-			_ = supervisor.KillSession(rec.TmuxSession)
 			now := time.Now()
+			// An adopted session was the human's before the record and is
+			// theirs after it: x lets go of it and leaves it running. Killing
+			// it would end an orchestrator this cockpit never started, along
+			// with everything in its context.
+			if rec.Adopted() {
+				rec.Release(now)
+				_ = state.Save(rec)
+				released++
+				continue
+			}
+			_ = supervisor.KillSession(dispatchpkg.SessionOf(rec))
 			// The kill takes the session's subagents with it, and no hook
 			// will fire to say so: settle the fan-out with the record.
 			rec.SweepSubagents(now)
@@ -121,19 +137,25 @@ func killCmd(features []string) tea.Cmd {
 			// row asking them to dismiss the thing they just killed.
 			rec.Dismiss(now)
 			_ = state.Save(rec)
-			if rec.WorktreePath != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
+			// An adopted dispatcher's directory is the human's own checkout,
+			// which existed before the record and outlives it. OwnsWorktree is
+			// the only thing standing between `x` and somebody's working copy.
+			if rec.OwnsWorktree() && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
 				kept++
 			}
 			n++
 		}
-		if n == 0 {
+		if n == 0 && released == 0 {
 			return actionMsg{notice: "nothing to kill"}
 		}
-		word := "dispatcher"
-		if n != 1 {
-			word += "s"
+		var parts []string
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("killed %d %s", n, plural(n, "dispatcher", "dispatchers")))
 		}
-		notice := fmt.Sprintf("killed %d %s", n, word)
+		if released > 0 {
+			parts = append(parts, fmt.Sprintf("released %d adopted %s, still running", released, plural(released, "session", "sessions")))
+		}
+		notice := strings.Join(parts, " · ")
 		if kept > 0 {
 			notice += fmt.Sprintf(" · %d worktree(s) kept (uncommitted changes)", kept)
 		}
@@ -211,7 +233,8 @@ type launchedMsg struct {
 // tea.ExecProcess — so the command reports and Update does the handover.
 type resumedMsg struct {
 	notice  string
-	session string
+	session supervisor.Session
+	env     string
 }
 
 // resumeCmd reopens a finished dispatcher's Claude session, with prompt as the
@@ -240,13 +263,29 @@ func resumeCmd(id, prompt string) tea.Cmd {
 			if strings.TrimSpace(prompt) != "" {
 				notice += " · say it there, it was not sent"
 			}
-			return resumedMsg{notice: notice, session: session}
+			return resumedMsg{notice: notice, session: resumedAt(rec, session), env: rec.EnvCommand}
+		}
+		if mode == dispatchpkg.ResumeRelaunched {
+			return resumedMsg{
+				notice:  "started \"" + rec.Feature + "\" again in " + rec.RepoName + " · it never ran, so there was nothing to resume",
+				session: resumedAt(rec, session),
+				env:     rec.EnvCommand,
+			}
 		}
 		return resumedMsg{
 			notice:  "resumed \"" + rec.Feature + "\" in " + rec.RepoName,
-			session: session,
+			session: resumedAt(rec, session),
+			env:     rec.EnvCommand,
 		}
 	}
+}
+
+// resumedAt is where a resume left its session: the name Resume answered with,
+// on the server the record lives on. Resume may have taken a new name — the old
+// one can be occupied by the shell the finished session dropped to — but never a
+// new server, because the repo it reopens in is the one it ran in.
+func resumedAt(rec *state.Dispatch, name string) supervisor.Session {
+	return supervisor.Session{Name: name, Socket: rec.TmuxSocket}
 }
 
 // launchCmd dispatches a new feature into repoName with prompt, in the
@@ -257,7 +296,12 @@ func resumeCmd(id, prompt string) tea.Cmd {
 // rather than carried as a struct from the form, so an account removed between
 // the form and the launch is a launch that says so instead of one that runs on
 // a directory nobody configured any more.
-func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, fanOut bool, acctName string) tea.Cmd {
+//
+// prefix is the branch prefix for this one dispatch, as the form showed it —
+// settings' default unless the human changed it there. nil is the paths that
+// ask nothing (the backlog's enter, the product panel's re-dispatch): they cut
+// with the repo's configured prefix, as they always have.
+func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, root dispatchpkg.Root, prefix *string, fanOut bool, acctName string) tea.Cmd {
 	return func() tea.Msg {
 		if cfg == nil {
 			return launchFailed(feature, "no config — cannot dispatch")
@@ -276,6 +320,10 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 		}
 		if found == nil {
 			return launchFailed(feature, "repo not found: "+repoName)
+		}
+		if prefix != nil {
+			p := strings.TrimSpace(*prefix)
+			found.BranchPrefix = &p
 		}
 		d, err := dispatchpkg.Launch(*found, feature, prompt, mode, mdl, root, fanOut, acct)
 		if err != nil {

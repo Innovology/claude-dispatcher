@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -365,14 +366,18 @@ func TestCollectorsDirect(t *testing.T) {
 	if web[0].consequences != "a component that needs state says so" {
 		t.Errorf("shop-web consequences = %q", web[0].consequences)
 	}
-	if len(s4.plugins) != 3 {
-		t.Errorf("expected adr-tools + decision-log + builtin plugins, got %d", len(s4.plugins))
+	// billing-core has no decisions anywhere: it is counted as read and not
+	// listed, and the two that have some are grouped by their product.
+	if s4.decisionNone != 1 {
+		t.Errorf("repos with none = %d, want 1 (billing-core)", s4.decisionNone)
 	}
-	if p := pluginByID(s4.plugins, "decision-log"); !pluginHasRepo(p, "shop-web") {
-		t.Errorf("decision-log plugin not wired to shop-web: %+v", p)
+	// Both are shop's and neither has anything open, so the one with more
+	// written down leads.
+	if got := strings.Join(s4.decisionRepoOrder, ","); got != "shop-web,shop-api" {
+		t.Errorf("repo order = %s, want shop-web,shop-api", got)
 	}
-	if p := pluginByID(s4.plugins, "builtin"); !pluginHasRepo(p, "billing-core") {
-		t.Errorf("builtin fallback should carry the repo with no records: %+v", p)
+	if s4.decisionProduct["shop-web"] != "shop" {
+		t.Errorf("shop-web's product = %q, want shop", s4.decisionProduct["shop-web"])
 	}
 
 	var s5 snapshot

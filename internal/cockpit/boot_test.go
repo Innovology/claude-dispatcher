@@ -2,6 +2,7 @@ package cockpit
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,14 +31,18 @@ func bootAt(w, h int) model {
 func TestBootSequenceCoversEveryReportedStep(t *testing.T) {
 	// An empty state dir and an empty config give a portfolio with no records
 	// and no roots, so every stage runs and reports without touching the
-	// developer's own dispatches. The reporter is called from
-	// loadSnapshotReporting's own goroutine, in order, so the map needs no
-	// guarding.
+	// developer's own dispatches. The stages run concurrently, so the reporter
+	// is called from several goroutines and the map is guarded.
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 	defer restoreVars(captureVars())
 
+	var mu sync.Mutex
 	seen := map[string]bool{}
-	loadSnapshotReporting(&config.Config{}, func(u bootUpdate) { seen[u.id] = true })
+	loadSnapshotReporting(&config.Config{}, func(u bootUpdate) {
+		mu.Lock()
+		seen[u.id] = true
+		mu.Unlock()
+	})
 
 	for _, s := range bootSequence {
 		if !seen[s.id] {
@@ -253,5 +258,32 @@ func TestBootOnlyRunsForTheFirstLoad(t *testing.T) {
 	m.width, m.height = 80, 24
 	if out := m.View(); strings.Contains(out, "SUPERVISOR") {
 		t.Error("the opening screen rendered without one being started")
+	}
+}
+
+// A machine without tmux or gh still loads, and the opening screen names what
+// is missing as a warning on its own line rather than a zero: "0 sessions" from
+// a supervisor that is not installed, or empty check columns from a gh that is
+// not there, would read as facts about the portfolio instead of the machine.
+func TestBootNamesAMissingSupervisorAndForgeAsWarnings(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	t.Setenv("PATH", t.TempDir()) // nothing on it: no tmux, no gh
+	defer restoreVars(captureVars())
+
+	var mu sync.Mutex
+	final := map[string]bootUpdate{}
+	loadSnapshotReporting(&config.Config{}, func(u bootUpdate) {
+		mu.Lock()
+		defer mu.Unlock()
+		if u.complete {
+			final[u.id] = u
+		}
+	})
+
+	if u := final[bootSupervisor]; !u.warn || !strings.HasSuffix(u.detail, " not found") {
+		t.Errorf("supervisor step = %+v, want a warning that it is not found", u)
+	}
+	if u := final[bootForge]; !u.warn || u.detail != "gh not found — no pr or check signals" {
+		t.Errorf("forge step = %+v, want a warning naming gh", u)
 	}
 }

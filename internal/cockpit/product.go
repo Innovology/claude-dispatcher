@@ -18,7 +18,9 @@ import (
 	"claude-dispatcher/internal/account"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
+	"claude-dispatcher/internal/keymap"
 	"claude-dispatcher/internal/repos"
+	"claude-dispatcher/internal/supervisor"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -60,6 +62,10 @@ func (m model) shipSelected() shippedItem {
 
 // historyFlat is every finished dispatcher in the focused product, newest first.
 func (m model) historyFlat() []historyItem { return productHistory[m.productFocusName()] }
+
+// ownSessionsFlat is every session in the focused product that no dispatch
+// record claims — the ones the human started themselves.
+func (m model) ownSessionsFlat() []ownSession { return ownSessions[m.productFocusName()] }
 
 // historySelected returns the finished dispatcher under the history cursor.
 func (m model) historySelected() (historyItem, bool) {
@@ -203,6 +209,8 @@ func (m model) productPanel(cw, ch int) []string {
 		out = append(out, m.productShippedBody(cw)...)
 	case "history":
 		out = append(out, m.productHistoryBody(cw, ch-len(out))...)
+	case "sessions":
+		out = append(out, m.productSessionsBody(cw, ch-len(out))...)
 	default:
 		out = append(out, m.productReviewBody(cw, name)...)
 	}
@@ -239,6 +247,7 @@ func (m model) productTabStrip(name string) string {
 		tab("team", "T team"),
 		tab("shipped", "S shipped "+itoa(len(m.shippedFlat()))),
 		tab("history", "H history "+itoa(len(m.historyFlat()))),
+		tab("sessions", "Y your sessions "+itoa(len(m.ownSessionsFlat()))),
 	}, "  ")
 }
 
@@ -277,7 +286,7 @@ func (m model) productOverviewBody(cw int, name string) []string {
 	}
 
 	out = append(out, "")
-	out = append(out, line("in flight · working → claims done → review → live", cw, cDim, ""))
+	out = append(out, line("in flight · working → claims done → review", cw, cDim, ""))
 	feats := productsFocusFeatures(name)
 	if len(feats) == 0 {
 		out = append(out, fg(cFaint, productNoFlight))
@@ -724,9 +733,15 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			// takes the defaults rather than inheriting the finished
 			// dispatcher's — the human typed a new brief, and choices made for
 			// the last run are not consent for this one.
-			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, account.Default)
+			return m, launchCmd(m.cfg, t.repo, t.feature, text, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, account.Default)
 		}
 		m.resumeText = next
+		return m, nil
+	}
+
+	// After the inputs above, which take every key as text: the tabs and the
+	// sessions keys are the keymap's, so a rebind moves them.
+	if k = m.keys.Resolve(keymap.Panel, k); k == "" {
 		return m, nil
 	}
 
@@ -754,6 +769,9 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 		return m, nil
 	case "H":
 		m.rightTab, m.historyCursor = "history", 0
+		return m, nil
+	case "Y":
+		m.rightTab, m.sessionCursor = "sessions", 0
 		return m, nil
 	}
 
@@ -786,6 +804,40 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			if hasCur {
 				m.notice = "reviewer dispatched on " + cur.pr + " · claude reads it and reports findings"
 			}
+		}
+		return m, nil
+	case "sessions":
+		items := m.ownSessionsFlat()
+		switch k {
+		case "j", "down":
+			if len(items) > 0 {
+				m.sessionCursor = mini(m.sessionCursor+1, len(items)-1)
+			}
+		case "k", "up":
+			m.sessionCursor = maxi(m.sessionCursor-1, 0)
+		case "enter":
+			if len(items) == 0 {
+				return m, nil
+			}
+			s := items[clampCursor(m.sessionCursor, len(items))]
+			// Straight to the same handover a dispatcher gets, carrying the
+			// repo's environment so the panes they open once they are in there
+			// see what this repo's sessions are supposed to see.
+			return m.attachSession(supervisor.Session{Name: s.name, Socket: s.socket}, s.env)
+		case "space":
+			if len(items) == 0 {
+				return m, nil
+			}
+			s := items[clampCursor(m.sessionCursor, len(items))]
+			key := s.socket + "/" + s.name
+			if m.sessionMarked[key] {
+				delete(m.sessionMarked, key)
+			} else {
+				m.sessionMarked[key] = true
+			}
+			return m, nil
+		case "A":
+			return m.adoptOpen(items)
 		}
 		return m, nil
 	case "team", "overview":
@@ -898,4 +950,68 @@ func discoveredRepo(name string) (repos.Repo, bool) {
 		}
 	}
 	return repos.Repo{}, false
+}
+
+// productSessionsBody is the Y tab: the sessions running in this product's
+// repos that this cockpit did not start.
+//
+// They are deliberately plainer than every other list here. A dispatcher's row
+// carries a feature, a status, a PR and an effort figure; a session someone
+// opened by hand has none of those, and the honest row is the three facts that
+// exist — what it is called, which repo it is working in, and which server it
+// is on. Anything more would be a record invented for it.
+func (m model) productSessionsBody(cw, ch int) []string {
+	items := m.ownSessionsFlat()
+	if len(items) == 0 {
+		return []string{
+			fg(cFaint, "no sessions of your own in this product's repos"),
+			fg(cFaint, "a session started outside the dispatcher shows up here"),
+		}
+	}
+	sel := clampCursor(m.sessionCursor, len(items))
+	cur := items[sel]
+
+	detail := []string{fg(cRule, strings.Repeat("─", cw))}
+	detail = append(detail, fg(cMid, cur.name)+fg(cFaint, " · on "+serverLabel(cur.socket)))
+	detail = append(detail, fg(cFaint, cur.path))
+	if cur.env != "" {
+		detail = append(detail, fg(cFaint, "launched under "+cur.env))
+	}
+	// No kill key, and no status. This cockpit did not start these and does not
+	// account for them: it can hand over the terminal, or — when asked — adopt
+	// one, and the row says both, since nothing else on this screen names the
+	// adopt key.
+	detail = append(detail, fg(cDim, "enter jumps in · "+
+		prettyKey(m.keys.KeyFor("sessions.adopt"))+" adopts it as a dispatcher · "+
+		prettyKey(m.keys.KeyFor("sessions.mark"))+" marks several · yours until then"))
+
+	var rows []string
+	for i, it := range items {
+		bg, marker, nameColor := "", " ", cFg
+		if i == sel {
+			bg, marker, nameColor = cSel, "▸", cWhite
+		}
+		// A mark is what A acts on instead of the cursor, so it has to show.
+		mark := " "
+		if m.sessionMarked[it.socket+"/"+it.name] {
+			mark = "◆"
+		}
+		rows = append(rows, row(cw, bg,
+			c(marker, 2, cFaint),
+			c(mark, 2, cAmber),
+			flexc(it.name, nameColor),
+			c(it.repo, 20, cDim),
+			cr(serverLabel(it.socket), 16, cFaint)))
+	}
+	return append(historyWindow(rows, sel, ch-len(detail)), detail...)
+}
+
+// serverLabel names a socket for a reader, including the one with no name: an
+// empty socket is tmux's default server, and a blank column would read as a
+// fact nobody could find.
+func serverLabel(socket string) string {
+	if socket == "" {
+		return "default server"
+	}
+	return socket
 }

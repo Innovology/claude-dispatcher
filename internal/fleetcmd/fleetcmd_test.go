@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
 )
 
 func withStore(t *testing.T, recs ...*state.Dispatch) {
@@ -24,10 +25,10 @@ func withSessions(t *testing.T, alive, idle, known bool) *[]string {
 	t.Helper()
 	pa, pi, ps := sessionAlive, sessionIdle, sendKeys
 	t.Cleanup(func() { sessionAlive, sessionIdle, sendKeys = pa, pi, ps })
-	sessionAlive = func(string) bool { return alive }
-	sessionIdle = func(string) (bool, bool) { return idle, known }
+	sessionAlive = func(supervisor.Session) bool { return alive }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return idle, known }
 	var typed []string
-	sendKeys = func(name, text string) error { typed = append(typed, name+": "+text); return nil }
+	sendKeys = func(s supervisor.Session, text string) error { typed = append(typed, s.Name+": "+text); return nil }
 	return &typed
 }
 

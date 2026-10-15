@@ -19,7 +19,7 @@ func TestBackend(t *testing.T) {
 func TestUniqueNameFree(t *testing.T) {
 	// Isolate the registry so no session is ever "taken".
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	if got := UniqueName("disp-fresh"); got != "disp-fresh" {
+	if got := UniqueName(Session{Name: "disp-fresh"}); got != "disp-fresh" {
 		t.Errorf("UniqueName of a free name = %q, want disp-fresh", got)
 	}
 }
@@ -127,7 +127,7 @@ func TestWindowMatches(t *testing.T) {
 // clear error, never a silent success or a panic.
 func TestSendKeysUnknownSession(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	if err := SendKeys("disp-nope", "hello"); err == nil {
+	if err := SendKeys(Session{Name: "disp-nope"}, "hello"); err == nil {
 		t.Error("SendKeys on an unknown session returned nil, want a clear error")
 	}
 }

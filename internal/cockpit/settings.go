@@ -9,13 +9,14 @@ package cockpit
 
 import (
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/keymap"
 )
 
 type settingsKind int
@@ -23,7 +24,6 @@ type settingsKind int
 const (
 	setString settingsKind = iota
 	setSecret
-	setInt
 	setRoots
 	// setChoice is a field with a fixed set of answers: enter steps to the next
 	// one and saves it, because a typed "lihgt" is a mistake the editor should
@@ -53,8 +53,8 @@ var settingsFields = []settingsField{
 	{key: "linear_api_key", label: "Linear API key", hint: "the unscoped Linear read · a token per product on 2, a, l", kind: setSecret},
 	{key: "azure_org", label: "Azure DevOps org", hint: "org URL, e.g. https://dev.azure.com/acme", kind: setString},
 	{key: "azure_project", label: "Azure project", hint: "Azure Boards project name", kind: setString},
-	{key: "weekly_token_limit", label: "weekly token budget", hint: "0 = unknown → usage shows raw tokens", kind: setInt},
 	{key: "theme", label: "theme", hint: "enter cycles · system follows your light/dark switch while open", kind: setChoice},
+	{key: "branch_prefix", label: "branch prefix", hint: "every dispatch's branch starts with it · blank is none · a dispatch form can change it for one", kind: setString},
 }
 
 func newSettings(cfg *config.Config) *settingsState {
@@ -77,14 +77,22 @@ func settingsValue(cfg *config.Config, f settingsField) string {
 		return cfg.AzureOrg
 	case "azure_project":
 		return cfg.AzureProject
-	case "weekly_token_limit":
-		if cfg.WeeklyTokenLimit == 0 {
-			return ""
-		}
-		return strconv.Itoa(cfg.WeeklyTokenLimit)
 	case "theme":
 		mode, _ := themeModeOf(cfg.Theme)
 		return mode
+	case "branch_prefix":
+		return cfg.EffectiveBranchPrefix()
+	}
+	return ""
+}
+
+// settingsProblem is why val cannot be saved for f, or "". The editor stays
+// open on a refusal, so what was typed is still there to fix.
+func settingsProblem(f settingsField, val string) string {
+	if f.key == "branch_prefix" {
+		if bad := dispatchpkg.PrefixProblem(strings.TrimSpace(val)); bad != "" {
+			return "branch prefix: " + bad
+		}
 	}
 	return ""
 }
@@ -107,9 +115,10 @@ func settingsCommit(cfg *config.Config, f settingsField, val string) {
 		cfg.AzureOrg = val
 	case "azure_project":
 		cfg.AzureProject = val
-	case "weekly_token_limit":
-		n, _ := strconv.Atoi(val)
-		cfg.WeeklyTokenLimit = n
+	case "branch_prefix":
+		// Always written, blank included: blank is "no prefix", which config
+		// can only say with the key present (see config.BranchPrefix).
+		cfg.BranchPrefix = &val
 	}
 }
 
@@ -126,6 +135,10 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 			st.input.Blur()
 			return m, nil
 		case "enter":
+			if bad := settingsProblem(st.fields[st.cursor], st.input.Value()); bad != "" {
+				m.notice = bad
+				return m, nil
+			}
 			if m.cfg != nil {
 				settingsCommit(m.cfg, st.fields[st.cursor], st.input.Value())
 				if err := config.Save(m.cfg); err != nil {
@@ -145,9 +158,15 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 			return m, cmd
 		}
 	}
+	if k = m.keys.Resolve(keymap.Settings, k); k == "" {
+		return m, nil
+	}
 	switch k {
 	case "esc", "q", ",":
 		m.settings = nil
+	case "e":
+		// Everything this screen does not show is in the file (editconfig.go).
+		return m.editConfig()
 	case "j", "down":
 		if st.cursor < len(st.fields)-1 {
 			st.cursor++
@@ -222,7 +241,7 @@ func (m model) viewSettings(w, h int) string {
 	iw := w - 2*pad
 	var lines []string
 	lines = append(lines, fg(cWhite, "settings"))
-	lines = append(lines, fg(cDim, "config.toml · enter edits · esc closes · env vars override secrets"))
+	lines = append(lines, fg(cDim, "config.toml · enter edits · e opens the whole file in your editor · esc closes · env vars override secrets"))
 	lines = append(lines, "")
 	for i, f := range st.fields {
 		marker := "  "
@@ -236,6 +255,9 @@ func (m model) viewSettings(w, h int) string {
 		switch {
 		case f.kind == setSecret && val != "":
 			display = "•••••••• (set)"
+		case f.key == "branch_prefix" && val == "":
+			// Empty is an answer here — no prefix — not a field left blank.
+			display = "none" + fg(cFaint, " · the branch is the feature's name")
 		case val == "":
 			display = fg(cFaint, "— not set")
 		case f.key == "theme" && m.themeMode == themeSystem:

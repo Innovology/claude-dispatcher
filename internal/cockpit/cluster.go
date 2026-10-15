@@ -11,12 +11,15 @@ package cockpit
 // already in it survives a round trip.
 
 import (
+	"maps"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/keymap"
 )
 
 // clUnassigned is the product key collectProducts folds unmapped repos into.
@@ -24,10 +27,22 @@ import (
 // config and never offered as an assignment target.
 const clUnassigned = "unassigned"
 
-// clRepoRow is one row of the editor's left pane.
+// clRepoRow is one row of the editor's left pane. One row is one repository,
+// which may be many checkouts on disk — path and worktrees are what `p` unfolds
+// to say which.
 type clRepoRow struct {
 	name, forge, product, last string
 	out                        int
+	path                       string
+	pinned                     bool
+	worktrees                  []repoWorktree
+	// root is the branch new dispatches are cut from when the form names none
+	// ([root_branches]), or "" for origin's default.
+	root string
+	// socket is the tmux server this repo's sessions live on, and env what they
+	// are launched under. Both are resolved answers rather than config: the
+	// editor shows what a dispatch would actually do.
+	socket, env string
 }
 
 // clRepos lists every discovered repo, mapped or not, in a stable order: the
@@ -49,7 +64,12 @@ func (m model) clRepos() []clRepoRow {
 			if last == "" {
 				last = "—"
 			}
-			out = append(out, clRepoRow{name: r.name, forge: r.forge, product: p, out: r.out, last: last})
+			out = append(out, clRepoRow{
+				name: r.name, forge: r.forge, product: p, out: r.out, last: last,
+				path: r.path, pinned: r.pinned, worktrees: r.worktrees,
+				root:   m.cfg.RootBranchFor(r.name),
+				socket: r.socket, env: r.env,
+			})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -172,6 +192,135 @@ func (m model) clPersist() tea.Cmd {
 	return func() tea.Msg { return actionMsg{notice: ""} } // reloads the snapshot so every lens regroups
 }
 
+// clPinCheckout writes which working tree a repo is read and dispatched from
+// into `[checkouts]`, and persists.
+//
+// The automatic choice knows three spellings of a trunk — the main worktree,
+// `main`, `master` — and a repository whose trunk is none of those gets a row
+// pointed at a branch nobody ships from: its staleness log, its decisions scan
+// and the tree a dispatch starts in all come from this directory. The human
+// picks instead, from the checkouts git actually lists, which is why this is a
+// selection in the fold rather than a path typed anywhere.
+//
+// Choosing the one already pinned CLEARS the entry rather than rewriting it.
+// Otherwise a pin would be a door with no handle on the inside: nothing else on
+// this screen removes one, and "back to choosing automatically" is a state the
+// human has to be able to get back to.
+//
+// Pinning also sets the repo's root branch ([root_branches]) to the branch the
+// checkout has out: picking "the dev folder" was the human saying where this
+// repo's work lives, and a dispatch still cut from origin's main afterwards
+// read as the pin not working. The two stay separate entries, because a folder
+// is not a branch — switch the clone to a feature and the pin follows the
+// folder, while dispatches must keep starting from dev. So the root is a
+// snapshot taken at the pin, and unpinning clears it only if it is still the
+// one the pin wrote; a root set by hand to something else is left alone. A
+// detached checkout has no branch to offer and leaves the root as it was.
+//
+// Same write discipline as clPersist and clSetLinearKey — a copy saved first,
+// and only a save that worked published into the cockpit's own config, so the
+// file on disk and the config every collector reads are never two different
+// things.
+func (m model) clPinCheckout(r clRepoRow, path string) (model, tea.Cmd) {
+	if m.cfg == nil {
+		return m, func() tea.Msg { return actionMsg{notice: "no config — nothing saved"} }
+	}
+	branch := ""
+	for _, w := range r.worktrees {
+		if w.path == path {
+			branch = w.branch
+		}
+	}
+	next := map[string]string{}
+	maps.Copy(next, m.cfg.Checkouts)
+	roots := map[string]string{}
+	maps.Copy(roots, m.cfg.RootBranches)
+	unpin := r.pinned && r.path == path
+	if unpin {
+		delete(next, r.name)
+		if branch != "" && roots[r.name] == branch {
+			delete(roots, r.name)
+		}
+	} else {
+		next[r.name] = path
+		if branch != "" {
+			roots[r.name] = branch
+		}
+	}
+	cfg := *m.cfg
+	cfg.Checkouts, cfg.RootBranches = next, roots
+	if err := config.Save(&cfg); err != nil {
+		return m, func() tea.Msg { return actionMsg{notice: "could not save the checkout: " + err.Error()} }
+	}
+	m.cfg.Checkouts, m.cfg.RootBranches = next, roots
+	notice := r.name + " works in " + filepath.Base(path)
+	switch {
+	case unpin:
+		notice = r.name + " chooses its checkout again"
+		if rb := roots[r.name]; rb != "" {
+			notice += " · dispatches still cut from " + rb + " ([root_branches])"
+		} else {
+			notice += " · dispatches cut from origin's default"
+		}
+	case branch != "":
+		notice += " · dispatches cut from " + branch
+	default:
+		notice += " · detached, so the root branch is unchanged"
+	}
+	// The notice rides the message because the reload it queues sets one of its
+	// own: Repo.Path is what the next snapshot reads every repo through.
+	return m, func() tea.Msg { return actionMsg{notice: notice} }
+}
+
+// clSetSocket writes the tmux server a repo's sessions live on into [sockets],
+// and persists.
+//
+// Typing the repo's own name CLEARS the entry rather than storing it, for the
+// reason choosing the pinned checkout clears a pin: "back to the default" has
+// to be reachable from the same field that left it, and a stored value equal to
+// the default is a line in the config that does nothing but go stale when the
+// default changes.
+//
+// An empty name is a real answer, not a cleared one — it means the default
+// server, which is where every dispatch ran before repos had one of their own.
+// It is stored as "", which config reads back as an entry that exists and is
+// empty, distinct from no entry at all.
+//
+// Same write discipline as clPersist and clPinCheckout: a copy saved first, and
+// only a save that worked published into the cockpit's own config.
+func (m model) clSetSocket(repo, socket string) (model, tea.Cmd) {
+	if m.cfg == nil {
+		return m, func() tea.Msg { return actionMsg{notice: "no config — nothing saved"} }
+	}
+	socket = strings.TrimSpace(socket)
+	next := map[string]string{}
+	maps.Copy(next, m.cfg.Sockets)
+	back := socket == repo
+	if back {
+		delete(next, repo)
+	} else {
+		next[repo] = socket
+	}
+	cfg := *m.cfg
+	cfg.Sockets = next
+	if err := config.Save(&cfg); err != nil {
+		return m, func() tea.Msg { return actionMsg{notice: "could not save the server: " + err.Error()} }
+	}
+	m.cfg.Sockets = next
+	var notice string
+	switch {
+	case back:
+		notice = repo + " is its own server again"
+	case socket == "":
+		notice = repo + " dispatches on the default server"
+	default:
+		notice = repo + " dispatches on " + socket
+	}
+	// The notice rides the message because the reload it queues sets one of its
+	// own: every repo's socket is resolved by the next discovery.
+	return m, func() tea.Msg { return actionMsg{notice: notice} }
+}
+
 // clLinearKey is the Linear token a product's backlog is read with, or "" when
 // it names none and reads with the unscoped key.
 func (m model) clLinearKey(product string) string {
@@ -231,6 +380,66 @@ func (m model) clSetLinearKey(product, key string) (model, tea.Cmd) {
 	// queues sets one of its own — collectBacklog reads per token, so the next
 	// snapshot is already the one this changed.
 	return m, func() tea.Msg { return actionMsg{notice: notice} }
+}
+
+// clCanonicalIdx is where in a row's checkouts the one it works in sits, so the
+// fold opens on it rather than at the top: the list can be sixty-nine long and
+// the answer to "which one is it now" should not have to be scrolled for.
+func clCanonicalIdx(r clRepoRow) int {
+	for i, w := range r.worktrees {
+		if w.path == r.path {
+			return i
+		}
+	}
+	return 0
+}
+
+// clFoldTarget is the row the fold has the keyboard for, and whether it is still
+// on screen. A reload can retire a repo while its fold is open — the roots
+// changed, or it was moved — and the fold must then let go rather than act on a
+// row that is not there.
+func clFoldTarget(rows []clRepoRow, name string) (clRepoRow, bool) {
+	for _, r := range rows {
+		if r.name == name {
+			return r, true
+		}
+	}
+	return clRepoRow{}, false
+}
+
+// updateClFold handles the keys an unfolded row owns while it is focused. done
+// is false for everything it does not claim, which goes on to the editor's own
+// keys — `a`, `n`, `tab` and the rest still work with a fold open.
+func (m model) updateClFold(k string, rows []clRepoRow) (model, tea.Cmd, bool) {
+	row, ok := clFoldTarget(rows, m.clFoldRow)
+	if !ok || len(row.worktrees) == 0 {
+		m.clFoldRow = ""
+		return m, nil, false
+	}
+	switch k {
+	case "j", "down":
+		m.clFoldIdx = mini(m.clFoldIdx+1, len(row.worktrees)-1)
+		return m, nil, true
+	case "k", "up":
+		m.clFoldIdx = maxi(m.clFoldIdx-1, 0)
+		return m, nil, true
+	case "esc":
+		// Out of the fold, not out of the editor, and the fold stays open: esc
+		// here means "stop steering this list", and closing what the human is
+		// reading as well would make the key ambiguous with `p`.
+		m.clFoldRow = ""
+		return m, nil, true
+	case "tab":
+		// tab moves to the products pane, which the fold's cursor has nothing to
+		// do with — it lets go rather than leaving two cursors lit at once.
+		m.clFoldRow = ""
+		return m, nil, false
+	case "enter":
+		w := row.worktrees[clampCursor(m.clFoldIdx, len(row.worktrees))]
+		mm, cmd := m.clPinCheckout(row, w.path)
+		return mm, cmd, true
+	}
+	return m, nil, false
 }
 
 // ---- keys -------------------------------------------------------------------
@@ -303,7 +512,47 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 
+	// Typing a repo's server. Unlike the token this is short and typed rather
+	// than pasted, but it comes off the key message the same way: one path in,
+	// one set of rules about what a key means while a field is open.
+	if m.clSockOpen {
+		switch k {
+		case "esc":
+			m.clSockOpen, m.clSockFor, m.clSockText = false, "", ""
+			return m, nil, true
+		case "enter":
+			repo, sock := m.clSockFor, m.clSockText
+			m.clSockOpen, m.clSockFor, m.clSockText = false, "", ""
+			mm, cmd := m.clSetSocket(repo, sock)
+			return mm, cmd, true
+		case "backspace":
+			r := []rune(m.clSockText)
+			if len(r) > 0 {
+				m.clSockText = string(r[:len(r)-1])
+			}
+			return m, nil, true
+		}
+		if s, ok := typedTextFor(m.key, k); ok {
+			m.clSockText += s
+		}
+		return m, nil, true
+	}
+
+	// An unfolded row can take the keyboard, and while it has it j/k/enter are
+	// about its checkouts rather than about the repo list. Resolved before the
+	// editor's own keys for the same reason the naming prompt is resolved before
+	// them: the alternative is one key meaning two things at once.
+	if m.clFoldRow != "" {
+		if mm, cmd, done := m.updateClFold(m.keys.Resolve(keymap.Fold, k), rows); done {
+			return mm, cmd, true
+		}
+	}
+
+	k = m.keys.Resolve(keymap.Editor, k)
+
 	switch k {
+	case "/":
+		return m.searchStart(), nil, true
 	case "esc", "a":
 		m.clOpen, m.clMarked = false, map[string]bool{}
 		return m, nil, true
@@ -324,7 +573,7 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		// pre-filling a buffer with a secret the human cannot read is how you
 		// get a half-deleted key saved over a working one.
 		if len(prods) == 0 {
-			m.notice = "no product to hold a token — n names one"
+			m.notice = "no product to hold a token — " + m.keys.KeyFor("products.new") + " names one"
 			return m, nil, true
 		}
 		m.clPane = "products"
@@ -359,6 +608,44 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		}
 		m.clRepo = mini(m.clRepo+1, maxi(len(rows)-1, 0))
 		return m, nil, true
+	case "p":
+		// Where a repo actually is, and which of its checkouts it works in. A row
+		// is a repository now, not a folder — one row can stand for sixty-nine
+		// checkouts and be named for none of them — so both questions have to be
+		// answerable without leaving the screen you are assigning from.
+		//
+		// Unfolding also hands the fold the keyboard, because the second question
+		// is answered by moving through the list and picking one. The fold is
+		// remembered by name, so leaving it with esc keeps it open and the cursor
+		// can move on with it still showing.
+		if len(rows) == 0 {
+			return m, nil, true
+		}
+		row := rows[clampCursor(m.clRepo, len(rows))]
+		if m.clExpanded == nil {
+			m.clExpanded = map[string]bool{}
+		}
+		if m.clFoldRow == row.name {
+			m.clFoldRow = ""
+			delete(m.clExpanded, row.name)
+			return m, nil, true
+		}
+		m.clExpanded[row.name] = true
+		m.clFoldRow, m.clFoldIdx = row.name, clCanonicalIdx(row)
+		return m, nil, true
+	case "s":
+		// The server is a fact about a repo — its sessions and its binaries —
+		// so it is typed against a repo row and nowhere else. Pre-filled with
+		// the name in force, because this is a short string being corrected
+		// rather than a secret being replaced: the useful starting point is
+		// what it says now.
+		if len(rows) == 0 {
+			return m, nil, true
+		}
+		row := rows[clampCursor(m.clRepo, len(rows))]
+		m.clPane = "repos"
+		m.clSockOpen, m.clSockFor, m.clSockText = true, row.name, row.socket
+		return m, nil, true
 	case "u":
 		mm, cmd := m.clAssign(m.clTargets(), "")
 		return mm, cmd, true
@@ -376,7 +663,7 @@ func (m model) updateCluster(k string) (model, tea.Cmd, bool) {
 		return mm, cmd, true
 	case "enter":
 		if len(prods) == 0 {
-			m.notice = "no product to assign to — n names one"
+			m.notice = "no product to assign to — " + m.keys.KeyFor("products.new") + " names one"
 			return m, nil, true
 		}
 		target := prods[clampCursor(m.clProd, len(prods))]

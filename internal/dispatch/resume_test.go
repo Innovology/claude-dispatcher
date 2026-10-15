@@ -3,40 +3,58 @@
 package dispatch
 
 import (
+	"claude-dispatcher/internal/supervisor"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 )
 
 // stubSupervisor swaps every supervisor call Resume makes and records the
 // session it was asked to start.
 type stubSupervisor struct {
-	alive   map[string]bool
+	alive map[string]bool
+	// born is when each live session was created, where a test says; a
+	// session with none listed is one whose creation the backend cannot say.
+	born    map[string]time.Time
 	idle    bool
 	known   bool
 	killed  []string
-	started struct{ name, dir, cmd string }
+	started struct{ name, socket, dir, cmd, env string }
 }
 
 func stubSessions(t *testing.T, s *stubSupervisor) {
 	t.Helper()
-	pAlive, pIdle, pKill, pUniq, pNew := sessionAlive, sessionIdle, killSession, uniqueName, newSession
+	pAlive, pIdle, pKill, pUniq, pNew, pList := sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList
 	t.Cleanup(func() {
-		sessionAlive, sessionIdle, killSession, uniqueName, newSession = pAlive, pIdle, pKill, pUniq, pNew
+		sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList = pAlive, pIdle, pKill, pUniq, pNew, pList
 	})
-	sessionAlive = func(name string) bool { return s.alive[name] }
-	sessionIdle = func(string) (bool, bool) { return s.idle, s.known }
-	killSession = func(name string) error {
-		s.killed = append(s.killed, name)
-		s.alive[name] = false
+	sessionAlive = func(sess supervisor.Session) bool { return s.alive[sess.Name] }
+	sessionList = func(socket string) []supervisor.SessionInfo {
+		var out []supervisor.SessionInfo
+		for name, ok := range s.alive {
+			if ok {
+				out = append(out, supervisor.SessionInfo{
+					Session: supervisor.Session{Name: name, Socket: socket}, Created: s.born[name],
+				})
+			}
+		}
+		return out
+	}
+	sessionIdle = func(supervisor.Session) (bool, bool) { return s.idle, s.known }
+	killSession = func(sess supervisor.Session) error {
+		s.killed = append(s.killed, sess.Name)
+		s.alive[sess.Name] = false
 		return nil
 	}
-	uniqueName = func(base string) string { return base }
-	newSession = func(name, dir, cmd string) error {
-		s.started.name, s.started.dir, s.started.cmd = name, dir, cmd
+	uniqueName = func(sess supervisor.Session) string { return sess.Name }
+	newSession = func(sess supervisor.Session, dir, cmd, env string) error {
+		s.started.name, s.started.socket = sess.Name, sess.Socket
+		s.started.dir, s.started.cmd, s.started.env = dir, cmd, env
 		return nil
 	}
 }
@@ -130,7 +148,11 @@ func TestResumeWithoutAPromptPassesNone(t *testing.T) {
 	if _, _, err := Resume(finished(t, initRepo(t)), ""); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(sup.started.cmd, "''") {
+	// The claude invocation only: the tail that picks the pane's shell carries
+	// an empty pair of quotes of its own when no shell is configured, and it is
+	// not an argument to anything (see exitShell).
+	claudePart, _, _ := strings.Cut(sup.started.cmd, "; cdsh=")
+	if strings.Contains(claudePart, "''") {
 		t.Errorf("empty prompt passed as an argument: %q", sup.started.cmd)
 	}
 }
@@ -220,6 +242,39 @@ func TestResumeLeavesAnUnknownSessionAlone(t *testing.T) {
 	}
 }
 
+// A session that took the record's name after the record's own ended is
+// somebody else's: an adopted session's name comes back every time the human's
+// wrapper opens one. It is not handed back as the dispatcher's — that would
+// attach ⏎ to another conversation — and it is never killed for sitting at its
+// shell, which would end the human's session. A new one is started alongside.
+func TestResumeLeavesAYoungerSessionUnderItsNameAlone(t *testing.T) {
+	for _, idle := range []bool{false, true} {
+		t.Run(map[bool]string{false: "busy", true: "idle"}[idle], func(t *testing.T) {
+			t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+			held := time.Date(2026, 10, 13, 11, 54, 36, 0, time.Local)
+			sup := &stubSupervisor{
+				alive: map[string]bool{"disp-payment-retry": true},
+				born:  map[string]time.Time{"disp-payment-retry": held.Add(50 * time.Hour)},
+				idle:  idle, known: true,
+			}
+			stubSessions(t, sup)
+
+			d := finished(t, initRepo(t))
+			d.SessionStartedAt = &held
+			mode, _, err := Resume(d, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode != ResumeStarted {
+				t.Errorf("mode = %q, want a new session started alongside", mode)
+			}
+			if len(sup.killed) != 0 {
+				t.Errorf("killed %v, a session that only shares the name", sup.killed)
+			}
+		})
+	}
+}
+
 // Nothing is invented: with no session id, or with the transcript gone, there
 // is nothing to resume and the human is told so rather than handed a fresh
 // session wearing the old one's name.
@@ -229,10 +284,12 @@ func TestResumeRefusesWhatItCannotResume(t *testing.T) {
 	stubSessions(t, sup)
 
 	// A repo each: one branch cannot be checked out in two worktrees at once.
+	// No conversation is started again (below) — unless there is not even a
+	// prompt to start it with.
 	noSession := finished(t, initRepo(t))
-	noSession.SessionID, noSession.TranscriptPath = "", ""
-	if _, _, err := Resume(noSession, ""); err == nil || !strings.Contains(err.Error(), "nothing to resume") {
-		t.Errorf("no session id: err = %v", err)
+	noSession.SessionID, noSession.TranscriptPath, noSession.Prompt = "", "", ""
+	if _, _, err := Resume(noSession, ""); err == nil || !strings.Contains(err.Error(), "never started") {
+		t.Errorf("no session id and no prompt: err = %v", err)
 	}
 
 	gone := finished(t, initRepo(t))
@@ -264,5 +321,53 @@ func TestSessionIDOfFallsBackToTheTranscript(t *testing.T) {
 		if got := SessionIDOf(c.d); got != c.want {
 			t.Errorf("SessionIDOf(%#v) = %q, want %q", c.d, got, c.want)
 		}
+	}
+}
+
+// A launch that died before claude ran keeps its row (ADR 0009), and ⏎ on it
+// used to refuse — "nothing to resume" — leaving the human to type the whole
+// dispatch again. It launches it again instead: same worktree, the prompt it
+// was sent with, and an environment that works where it now stands. The
+// reported case was a flake on the checkout's branch and not on main, so the
+// record carried a bare `nix develop` that found nothing in the worktree.
+func TestResumeStartsANeverStartedLaunchAgain(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	sup := &stubSupervisor{alive: map[string]bool{}}
+	stubSessions(t, sup)
+
+	repo := initRepo(t)
+	d := finished(t, repo)
+	d.SessionID, d.TranscriptPath = "", ""
+	d.EnvCommand = repos.NixDevelop
+	d.Status, d.StatusReason = state.StatusExited, "did not start: tmux new-session: path … does not contain a 'flake.nix'"
+	// The checkout's branch has a flake; the worktree, cut from elsewhere, not.
+	if err := os.WriteFile(filepath.Join(repo, "flake.nix"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !NeverStarted(d) {
+		t.Fatal("a record with no session id and no transcript never started")
+	}
+
+	mode, session, err := Resume(d, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != ResumeRelaunched || session == "" {
+		t.Fatalf("mode = %q session = %q, want a relaunch", mode, session)
+	}
+	if sup.started.dir != d.WorktreePath {
+		t.Errorf("started in %q, want its own worktree %q", sup.started.dir, d.WorktreePath)
+	}
+	if strings.Contains(sup.started.cmd, "--resume") || !strings.Contains(sup.started.cmd, state.PromptPath(d.ID)) {
+		t.Errorf("command %q is not the original launch", sup.started.cmd)
+	}
+	if b, err := os.ReadFile(state.PromptPath(d.ID)); err != nil || string(b) != "retry the payments" {
+		t.Errorf("prompt file = %q, %v; want what it was dispatched with", b, err)
+	}
+	if want := "nix develop " + repo + " --no-write-lock-file --command"; sup.started.env != want || d.EnvCommand != want {
+		t.Errorf("env = %q (record %q), want the checkout's flake named: %q", sup.started.env, d.EnvCommand, want)
+	}
+	if d.Status != state.StatusLaunching || d.StatusReason != "starting again" {
+		t.Errorf("record left at %q / %q", d.Status, d.StatusReason)
 	}
 }

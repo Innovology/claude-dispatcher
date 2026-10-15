@@ -1,0 +1,179 @@
+package cockpit
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"claude-dispatcher/internal/config"
+)
+
+// The server a repo's sessions live on is typed against the repo, saved into
+// [sockets], and published into the running config only when the save worked.
+func TestClSetSocketWritesAndPublishes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := clFixture(t)
+	m.cfg = &config.Config{Products: map[string][]string{"acme": {"acme-api"}}}
+
+	mm, cmd := m.clSetSocket("pp-calendar-sync", "pp_calendar_isolated")
+	if cmd == nil {
+		t.Fatal("a save must report")
+	}
+	if got := mm.cfg.Sockets["pp-calendar-sync"]; got != "pp_calendar_isolated" {
+		t.Errorf("running config has %q, want the typed name", got)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Sockets["pp-calendar-sync"]; got != "pp_calendar_isolated" {
+		t.Errorf("config.toml has %q, want the typed name", got)
+	}
+}
+
+// Typing the repo's own name is how you get back to the default, from the same
+// field that left it. It clears the entry rather than storing a value equal to
+// the default, which would be a line that does nothing until the default moves.
+func TestClSetSocketToTheRepoNameClearsTheEntry(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := clFixture(t)
+	m.cfg = &config.Config{Sockets: map[string]string{"playerpulse": "pp-old"}}
+
+	mm, cmd := m.clSetSocket("playerpulse", "playerpulse")
+	if _, ok := mm.cfg.Sockets["playerpulse"]; ok {
+		t.Errorf("naming the default stored it anyway: %v", mm.cfg.Sockets)
+	}
+	if msg, ok := cmd().(actionMsg); !ok || !strings.Contains(msg.notice, "its own server again") {
+		t.Errorf("notice = %+v, want it to say the default is back", msg)
+	}
+}
+
+// An empty name is an answer — the default server, shared with everything that
+// names none — and not the same act as clearing the entry.
+func TestClSetSocketEmptyMeansTheDefaultServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := clFixture(t)
+	m.cfg = &config.Config{}
+
+	mm, cmd := m.clSetSocket("legacy", "  ")
+	got, ok := mm.cfg.Sockets["legacy"]
+	if !ok || got != "" {
+		t.Errorf("sockets = %v, want an entry that exists and is empty", mm.cfg.Sockets)
+	}
+	if msg, ok := cmd().(actionMsg); !ok || !strings.Contains(msg.notice, "default server") {
+		t.Errorf("notice = %+v, want it to name the default server", msg)
+	}
+}
+
+// A save that could not be written is never published, and always reported —
+// the same rule clPersist and clSetLinearKey follow.
+func TestClSetSocketDoesNotPublishAFailedSave(t *testing.T) {
+	blocker := t.TempDir() + "/home"
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", blocker)
+
+	m := clFixture(t)
+	m.cfg = &config.Config{Sockets: map[string]string{"acme-api": "acme-old"}}
+
+	mm, cmd := m.clSetSocket("acme-api", "acme-new")
+	if cmd == nil {
+		t.Fatal("a failed save must still report")
+	}
+	if msg, ok := cmd().(actionMsg); !ok || !strings.Contains(msg.notice, "could not save") {
+		t.Fatalf("notice = %+v, want a failure the human can see", msg)
+	}
+	if mm.cfg.Sockets["acme-api"] != "acme-old" {
+		t.Errorf("a failed save was published anyway: %v", mm.cfg.Sockets)
+	}
+}
+
+// The fold names the server even when it is the default one: a gap where a name
+// goes reads as a failure to find one, not as an answer.
+func TestTheFoldNamesTheServerAndWhatLaunchesThere(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  clRepoRow
+		want []string
+	}{
+		{"a repo on its own server", clRepoRow{socket: "playerpulse"}, []string{"server playerpulse", "s to change"}},
+		{"and what it launches under", clRepoRow{socket: "pp", env: "nix develop --command"}, []string{"server pp", "nix develop"}},
+		{"the default server is named", clRepoRow{}, []string{"default server"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := newModel().clServerLine(tc.row)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("clServerLine = %q, want it to contain %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+// The rows the editor draws come from clRepos, which built them without the
+// repo's server and environment: every fold said "default server", and `s`
+// opened on an empty field, so enter saved `[sockets] repo = ""` and moved the
+// repo onto the default server without a word. Read through clRepos, not a
+// hand-built row.
+func TestTheEditorRowsCarryTheServer(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	reposByProduct = map[string][]repoRef{
+		"acme": {{name: "acme-api", socket: "pp", env: "nix develop --command"}},
+	}
+	m := newModel()
+	m.cfg = &config.Config{}
+
+	rows := m.clRepos()
+	if len(rows) != 1 || rows[0].socket != "pp" || rows[0].env != "nix develop --command" {
+		t.Fatalf("rows = %+v, want the repo's server and environment", rows)
+	}
+	if line := m.clServerLine(rows[0]); !strings.Contains(line, "server pp") {
+		t.Errorf("fold says %q", line)
+	}
+	mm, _, _ := m.updateCluster("s")
+	if mm.clSockText != "pp" {
+		t.Errorf("s opens on %q, want the repo's own server", mm.clSockText)
+	}
+}
+
+// The server field is text entry from the keyboard: letters and digits are the
+// name being typed — `q` must not quit and a digit must not switch lens, both
+// of which would throw the half-typed name away — backspace corrects it, enter
+// saves it against the repo it was opened on, and esc leaves the config alone.
+func TestTheServerFieldTakesTheKeyboardUntilItIsSavedOrLeft(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	saved := captureVars()
+	defer restoreVars(saved)
+	reposByProduct = map[string][]repoRef{
+		"acme": {{name: "acme-api", socket: "pp"}},
+	}
+	m := newModel()
+	m.cfg = &config.Config{}
+	m.lens, m.clOpen = "products", true
+
+	for _, k := range []string{"s", "backspace", "q", "2"} {
+		m = press(m, k)
+	}
+	if !m.clSockOpen || m.clSockText != "pq2" || m.lens != "products" {
+		t.Fatalf("after s, backspace, q, 2: open=%v text=%q lens=%q", m.clSockOpen, m.clSockText, m.lens)
+	}
+	next, cmd := m.handleKey("enter")
+	m = next.(model)
+	if m.clSockOpen || cmd == nil {
+		t.Fatal("enter did not save and close the field")
+	}
+	if got := m.cfg.Sockets["acme-api"]; got != "pq2" {
+		t.Errorf("[sockets] acme-api = %q, want the typed name", got)
+	}
+
+	m = press(m, "s")
+	m = press(m, "z")
+	m = press(m, "esc")
+	if m.clSockOpen || m.clSockText != "" || m.cfg.Sockets["acme-api"] != "pq2" {
+		t.Errorf("esc: open=%v text=%q saved=%q — want it closed with nothing saved",
+			m.clSockOpen, m.clSockText, m.cfg.Sockets["acme-api"])
+	}
+}

@@ -1,9 +1,15 @@
 package tmux
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -29,7 +35,7 @@ func TestShellCommandsCoverALoginShell(t *testing.T) {
 // A session tmux cannot answer for is unknown, never idle: the caller reclaims
 // an idle session and leaves an unknown one alone.
 func TestSessionIdleIsUnknownForAMissingSession(t *testing.T) {
-	idle, known := SessionIdle("definitely-not-a-real-tmux-session-xyz")
+	idle, known := Default.SessionIdle("definitely-not-a-real-tmux-session-xyz")
 	if known || idle {
 		t.Errorf("SessionIdle(missing) = idle:%v known:%v", idle, known)
 	}
@@ -105,5 +111,183 @@ func TestProcessParentsSeesThisProcess(t *testing.T) {
 	}
 	if !parents[itoa(os.Getppid())] {
 		t.Error("the parent of this test process is not in the parent set")
+	}
+}
+
+// The sockets we are looking for were made by somebody else's tmux, so the only
+// way to find them is tmux's own rule for where they go: TMUX_TMPDIR, or /tmp.
+func TestSocketDirFollowsTmuxsOwnRule(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", "/run/user/1000")
+	if got := SocketDir(); !strings.HasPrefix(got, "/run/user/1000/tmux-") {
+		t.Errorf("SocketDir() = %q, want it under TMUX_TMPDIR", got)
+	}
+	t.Setenv("TMUX_TMPDIR", "")
+	if got := SocketDir(); !strings.HasPrefix(got, "/tmp/tmux-") {
+		t.Errorf("SocketDir() with no TMUX_TMPDIR = %q, want it under /tmp", got)
+	}
+}
+
+// Every socket found is a candidate, never a server: the file outlives the
+// process that made it. Listing one that is dead must answer nothing, and must
+// not start a server to find that out — only new-session may do that.
+func TestServersFindsSocketsAndADeadOneAnswersNothing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", dir)
+	sockets := filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()))
+	if err := os.MkdirAll(sockets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A socket file with nothing behind it — a reboot's leftover.
+	dead := filepath.Join(sockets, "dead-project")
+	if err := os.WriteFile(dead, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(sockets, "a-directory"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Servers()
+	if len(got) != 1 || got[0].Socket != "dead-project" {
+		t.Fatalf("Servers() = %+v, want just the socket file", got)
+	}
+	if s := got[0].SessionList(); len(s) != 0 {
+		t.Errorf("a dead socket listed %+v, want nothing", s)
+	}
+	// The probe must not have brought a server into being.
+	if HasSession := (Server{Socket: "dead-project"}).HasSession("anything"); HasSession {
+		t.Error("probing a dead socket started a server")
+	}
+	if fi, err := os.Stat(dead); err != nil || fi.Size() != 0 {
+		t.Errorf("the dead socket file changed under the probe: %v", err)
+	}
+}
+
+// Asked of a real server, the listing says when the session was made, to the
+// second — between the moment before new-session and the moment it returned.
+func TestARealSessionListsWhenItWasMade(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	srv := Server{Socket: "disp-test-born-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	before := time.Now().Truncate(time.Second)
+	if err := srv.NewSession("s", t.TempDir(), "sleep 30", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	after := time.Now()
+	got := srv.SessionList()
+	if len(got) != 1 {
+		t.Fatalf("SessionList = %+v, want the one session", got)
+	}
+	if c := got[0].Created; c.Before(before) || c.After(after) {
+		t.Errorf("created = %v, want between %v and %v", c, before, after)
+	}
+}
+
+// The launch that reported this: dispatching into a flake repo from a cockpit
+// started in ~ died with `path "/home/…" does not contain a 'flake.nix'`,
+// because the `nix develop` wrapping the client looked for its flake where the
+// cockpit stood. The prefix here is a script that records where it was run, on
+// a private server, so the test is about the directory and not about nix.
+func TestTheEnvironmentPrefixStandsInTheSession(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	tmp := t.TempDir()
+	worktree := filepath.Join(tmp, "worktree")
+	if err := os.Mkdir(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(tmp, "cwd")
+	prefix := filepath.Join(tmp, "record-cwd")
+	script := "#!/bin/sh\npwd > " + marker + "\nexec \"$@\"\n"
+	if err := os.WriteFile(prefix, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := Server{Socket: "disp-test-cwd-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	if err := srv.NewSession("s", worktree, "sleep 30", prefix); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("the prefix never ran: %v", err)
+	}
+	if want, _ := filepath.EvalSymlinks(worktree); strings.TrimSpace(string(got)) != want {
+		t.Errorf("the environment prefix ran in %q, want the session's %q", strings.TrimSpace(string(got)), want)
+	}
+
+	if c := srv.AttachCmd("s", prefix); c.Dir != worktree {
+		t.Errorf("attach ran its prefix in %q, want the session's %q", c.Dir, worktree)
+	}
+	// No prefix, nothing to stand anywhere for: the plain client is unchanged.
+	if c := srv.AttachCmd("s", ""); c.Dir != "" {
+		t.Errorf("a plain attach was given a directory: %q", c.Dir)
+	}
+	// A directory that has gone is left out, not a chdir failure.
+	if c := srv.clientIn(filepath.Join(tmp, "gone"), prefix, "list-sessions"); c.Dir != "" {
+		t.Errorf("a missing dir was kept: %q", c.Dir)
+	}
+}
+
+func TestASessionListIsReadWholeNameAndPath(t *testing.T) {
+	got := parseSessionList("disp-app-2\t/src/app-2\ndisp-app\t/src/app \r\n\nnot-a-row\n")
+	want := []SessionInfo{{Name: "disp-app-2", Path: "/src/app-2"}, {Name: "disp-app", Path: "/src/app"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseSessionList = %+v, want %+v", got, want)
+	}
+}
+
+// The creation time is what tells two sessions at one name apart, so it is
+// read with the rest — off the end, so a path with a tab in it stays whole.
+func TestASessionListCarriesWhenEachSessionWasMade(t *testing.T) {
+	got := parseSessionList("player-app__main\t/src/player-app/main\t1792071023\n" +
+		"odd\t/src/a\tb\t1792000000\r\n" +
+		"no-time\t/src/c\t\n")
+	want := []SessionInfo{
+		{Name: "player-app__main", Path: "/src/player-app/main", Created: time.Unix(1792071023, 0)},
+		{Name: "odd", Path: "/src/a\tb", Created: time.Unix(1792000000, 0)},
+		{Name: "no-time", Path: "/src/c"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseSessionList = %+v, want %+v", got, want)
+	}
+}
+
+// The report: on a machine whose tmux.conf makes nu the default shell, every
+// dispatch sat at "starting session" for good. Handed one argument, tmux runs a
+// pane's command through default-shell, nu could not parse the POSIX launch
+// line, and the pane died with the server behind it — after new-session had
+// returned 0. The default shell here is the extreme case, one that runs
+// nothing at all: a session must survive it, because the launch line names
+// its own shell.
+func TestALaunchDoesNotRideTheHumansDefaultShell(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	tmp := t.TempDir()
+	refuse := filepath.Join(tmp, "refuse-everything")
+	if err := os.WriteFile(refuse, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conf := filepath.Join(tmp, "tmux.conf")
+	if err := os.WriteFile(conf, []byte("set -g exit-empty off\nset -g default-shell "+refuse+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := Server{Socket: "disp-test-shell-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	if out, err := exec.Command("tmux", "-L", srv.Socket, "-f", conf, "start-server").CombinedOutput(); err != nil {
+		t.Fatalf("start-server: %v: %s", err, out)
+	}
+
+	if err := srv.NewSession("s", tmp, `X="posix only"; sleep 30; exec ${SHELL:-/bin/sh}`, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	// The pane running its sleep is the session having survived its start; a
+	// line handed to the refusing shell never gets that far.
+	eventually(t, func() bool { idle, known := srv.SessionIdle("s"); return known && !idle })
+	if !srv.HasSession("s") {
+		t.Fatal("the session died: its command went through the server's default-shell")
 	}
 }

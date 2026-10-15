@@ -3,6 +3,7 @@
 package dispatch
 
 import (
+	"claude-dispatcher/internal/supervisor"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -202,13 +203,13 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 	// developer's own tmux server answer for a session this test invented.
 	busy := true
 	prevAlive, prevIdle, prevNew, prevUniq := sessionAlive, sessionIdle, newSession, uniqueName
-	sessionAlive = func(name string) bool { return alive[name] }
-	sessionIdle = func(string) (bool, bool) { return !busy, true }
+	sessionAlive = func(s supervisor.Session) bool { return alive[s.Name] }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return !busy, true }
 	// Launch really does start a session, so the supervisor is stubbed too —
 	// without it a passing assertion below left disp-payment-retry-2 and -3 on
 	// the machine running the suite.
-	newSession = func(string, string, string) error { return nil }
-	uniqueName = func(base string) string { return base }
+	newSession = func(supervisor.Session, string, string, string) error { return nil }
+	uniqueName = func(s supervisor.Session) string { return s.Name }
 	defer func() {
 		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
 	}()
@@ -276,8 +277,8 @@ func TestLaunchRefusesWhenIdlenessIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	prevAlive, prevIdle := sessionAlive, sessionIdle
-	sessionAlive = func(string) bool { return true }
-	sessionIdle = func(string) (bool, bool) { return true, false } // idle, but unknowably so
+	sessionAlive = func(supervisor.Session) bool { return true }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return true, false } // idle, but unknowably so
 	defer func() { sessionAlive, sessionIdle = prevAlive, prevIdle }()
 
 	if got := liveDispatch("payment-retry"); got == nil {
@@ -385,8 +386,8 @@ func TestLiveDispatchReadsTheRecordAsWellAsTheSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	prevAlive, prevIdle := sessionAlive, sessionIdle
-	sessionAlive = func(string) bool { return true }
-	sessionIdle = func(string) (bool, bool) { return false, true } // claude is up
+	sessionAlive = func(supervisor.Session) bool { return true }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return false, true } // claude is up
 	defer func() { sessionAlive, sessionIdle = prevAlive, prevIdle }()
 
 	// Working, with claude running in its session: the collision the rule is
@@ -415,6 +416,21 @@ func TestLiveDispatchReadsTheRecordAsWellAsTheSession(t *testing.T) {
 		}
 		if got := liveDispatch("payment-retry"); got != nil {
 			t.Errorf("a %s dispatcher blocked its own name from being used again", st)
+		}
+	}
+}
+
+// A prefix is refused for exactly what git refuses in a branch name, checked
+// with a slug after it, since a slug always follows.
+func TestPrefixProblem(t *testing.T) {
+	for _, ok := range []string{"", "feature/", "fix/", "vk-", "team/vk/", "release-2.1/"} {
+		if bad := PrefixProblem(ok); bad != "" {
+			t.Errorf("PrefixProblem(%q) = %q, want none", ok, bad)
+		}
+	}
+	for _, bad := range []string{"-x/", "/x", "a//", "a..b/", "a@{/", "my fix/", "a~/", "a^/", "a:/", "a?/", "a*/", "a[/", `a\/`, ".hidden/", "x/.y/", "a.lock/", "tab\t/"} {
+		if PrefixProblem(bad) == "" {
+			t.Errorf("PrefixProblem(%q) accepted a prefix git refuses", bad)
 		}
 	}
 }

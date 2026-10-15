@@ -41,7 +41,8 @@ import (
 )
 
 // Root is the branch a dispatch's feature branch is cut from — a branch name,
-// or RootDefault for the repo's default branch as the remote sees it.
+// or RootDefault for the repo's own root branch ([root_branches]) where it
+// names one, else its default branch as the remote sees it.
 type Root string
 
 // RootDefault resolves at launch rather than naming a branch. A form cannot
@@ -79,6 +80,16 @@ func (r Root) Hint() string {
 		return "the repo's default branch, as origin sees it"
 	}
 	return "cut from " + string(r.Normalize())
+}
+
+// HintFor is Hint for a repo that may name a root branch of its own (config's
+// [root_branches]): the default then means that branch, and a form saying
+// "as origin sees it" would be describing a launch that will not happen.
+func (r Root) HintFor(repoRoot string) string {
+	if name := strings.TrimSpace(repoRoot); r.IsDefault() && name != "" {
+		return name + " — this repo's root branch (config)"
+	}
+	return r.Hint()
 }
 
 // fetchTimeout bounds every network call made on the way to a base. Refreshing
@@ -165,7 +176,9 @@ func rootRef(repoPath, branch string) string {
 	return ""
 }
 
-// baseRef resolves the start point for a new feature branch.
+// baseRefFrom resolves the start point for a new feature branch: the root the
+// form names, else the repo's own root branch (repoRoot, from config's
+// [root_branches]), else the remote's default.
 //
 // Letting git default the start point to the repo's HEAD — what `worktree add
 // -b` does with no explicit base — silently cuts the branch from whatever the
@@ -175,7 +188,12 @@ func rootRef(repoPath, branch string) string {
 //
 // It fetches first, so every candidate below is judged against what origin has
 // now rather than whenever the human last pulled.
-func baseRef(repoPath string, root Root) (string, error) {
+//
+// The repo's own root is for a repo whose work does not go where origin's HEAD
+// points. Reported on playerpulse, which merges into `dev` while origin says
+// `main`: every dispatch had to have ROOT typed, and the one that was not was
+// cut from a branch the repo's work does not go to.
+func baseRefFrom(repoPath string, root Root, repoRoot string) (string, error) {
 	fetchOrigin(repoPath)
 
 	// A branch the human named. Nothing falls back: they said where to start,
@@ -186,6 +204,17 @@ func baseRef(repoPath string, root Root) (string, error) {
 			return ref, nil
 		}
 		return "", fmt.Errorf("%q is not a branch in this repo — origin has no %s and there is no local one; pick another root branch",
+			name, name)
+	}
+	// The repo's own root branch. Named in config rather than on the form, but
+	// named all the same, so it does not fall back either: a [root_branches]
+	// entry for a branch that has gone would otherwise cut from main without a
+	// word, which is the silently-wrong base this file exists to stop.
+	if name := strings.TrimSpace(repoRoot); name != "" {
+		if ref := rootRef(repoPath, name); ref != "" {
+			return ref, nil
+		}
+		return "", fmt.Errorf("this repo's root branch %q (config [root_branches]) is not a branch — origin has no %s and there is no local one; fix it in config.toml or name a root on the form",
 			name, name)
 	}
 

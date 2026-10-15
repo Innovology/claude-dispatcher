@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
@@ -313,17 +311,50 @@ func TestCQFormFallThrough(t *testing.T) {
 		t.Fatalf("a digit should leave an untouched form, lens = %q", m2.lens)
 	}
 
-	// Once anything is typed, those same keys are letters again. The form opens
-	// on WHERE, so they land in the repo filter.
+	// A form the human opened is a text field: letters type from the first
+	// one, `d` included, and they land in the repo filter it opens on.
 	m = press(m, "d")
 	m = press(m, "a")
 	m = press(m, "w")
-	if m.dxFilter != "aw" || !m.cqDispatch {
-		t.Fatalf("a touched form should take w as text: %q open=%v", m.dxFilter, m.cqDispatch)
+	if m.dxFilter != "daw" || !m.cqDispatch {
+		t.Fatalf("an opened form should take every letter as text: %q open=%v", m.dxFilter, m.cqDispatch)
 	}
 	m = press(m, "backspace")
-	if m.dxFilter != "a" {
+	if m.dxFilter != "da" {
 		t.Errorf("backspace: %q", m.dxFilter)
+	}
+}
+
+// Reported as "I can't really type design-system": on a form opened with `d`,
+// a filter starting with d or h was swallowed as the key it also stands for.
+func TestCQOpenedFormTypesDAndH(t *testing.T) {
+	m := cqModel(t)
+	m = press(m, "d")
+	for _, k := range strings.Split("design-system", "") {
+		m = press(m, k)
+	}
+	if m.dxFilter != "design-system" {
+		t.Errorf("typed %q into WHERE", m.dxFilter)
+	}
+	m = press(m, "esc")
+	m = press(m, "d")
+	m = press(m, "h")
+	if m.dxFilter != "h" || m.fleetFilter() == fleetHistory {
+		t.Errorf("h on an opened form should type: filter %q, history %v", m.dxFilter, m.fleetFilter() == fleetHistory)
+	}
+}
+
+// The form standing in for an empty table is the only screen there is, so
+// while it is untouched h still reaches history — the one place left to look.
+func TestCQStandInFormKeepsHForHistory(t *testing.T) {
+	m := cqModel(t)
+	fleet = nil
+	if !m.cqFormOn() || m.cqDispatch {
+		t.Fatalf("precondition: the form should be up on its own (on=%v opened=%v)", m.cqFormOn(), m.cqDispatch)
+	}
+	m = press(m, "h")
+	if m.fleetFilter() != fleetHistory || m.dxFilter != "" {
+		t.Errorf("h on the stand-in form: history %v, filter %q", m.fleetFilter() == fleetHistory, m.dxFilter)
 	}
 }
 
@@ -332,7 +363,7 @@ func TestCQFormFallThrough(t *testing.T) {
 func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxRootF, dxModeF} {
+	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxRootF, dxPrefixF, dxModeF} {
 		m = press(m, "enter")
 		if m.dxField != want {
 			t.Fatalf("enter should advance to field %d, got %d", want, m.dxField)
@@ -400,13 +431,7 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 	const title = "dispatching immediate look up when"
 	const what = "dispatching immediate look up when the branch already has a dispatcher"
 
-	var gotFeature, gotPrompt string
-	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, _ string) tea.Cmd {
-		gotFeature, gotPrompt = feature, prompt
-		return nil
-	}
-	t.Cleanup(func() { dxLaunch = prev })
+	got := captureLaunches(t)
 
 	m := cqModel(t)
 	m.cfg = &config.Config{Roots: []string{seedRepoRoot(t, "alpha-api")}}
@@ -416,18 +441,18 @@ func TestCQFormDispatchesTheSentenceNotTheName(t *testing.T) {
 
 	// The name is the title, which is what keeps the record, the branch, the
 	// worktree and the session saying one thing.
-	if gotFeature != title {
-		t.Errorf("feature = %q, want %q", gotFeature, title)
+	if got.feature != title {
+		t.Errorf("feature = %q, want %q", got.feature, title)
 	}
 	// The brief is not the name: the title leads, and WHAT follows it whole.
-	if first := strings.SplitN(gotPrompt, "\n", 2)[0]; first != title {
+	if first := strings.SplitN(got.prompt, "\n", 2)[0]; first != title {
 		t.Errorf("prompt line 1 = %q\nwant %q", first, title)
 	}
-	if !strings.Contains(gotPrompt, what) {
-		t.Errorf("prompt lost the brief:\n%s", gotPrompt)
+	if !strings.Contains(got.prompt, what) {
+		t.Errorf("prompt lost the brief:\n%s", got.prompt)
 	}
-	if !strings.Contains(gotPrompt, "done when: the pr is merged") {
-		t.Errorf("prompt lost DONE WHEN:\n%s", gotPrompt)
+	if !strings.Contains(got.prompt, "done when: the pr is merged") {
+		t.Errorf("prompt lost DONE WHEN:\n%s", got.prompt)
 	}
 }
 

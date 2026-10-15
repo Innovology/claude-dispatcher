@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // withRetrySeams stands a fake supervisor up for the retry: which sessions are
@@ -17,12 +18,12 @@ func withRetrySeams(t *testing.T, alive bool, idle, known bool) *[]string {
 	t.Cleanup(func() {
 		sessionAlive, sessionIdle, supervisorReady, sendKeys = prevAlive, prevIdle, prevReady, prevSend
 	})
-	sessionAlive = func(string) bool { return alive }
-	sessionIdle = func(string) (bool, bool) { return idle, known }
+	sessionAlive = func(supervisor.Session) bool { return alive }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return idle, known }
 	supervisorReady = func() bool { return true }
 	var typed []string
-	sendKeys = func(name, text string) error {
-		typed = append(typed, name+": "+text)
+	sendKeys = func(s supervisor.Session, text string) error {
+		typed = append(typed, s.Name+": "+text)
 		return nil
 	}
 	return &typed

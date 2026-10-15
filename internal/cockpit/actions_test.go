@@ -9,6 +9,7 @@ package cockpit
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,7 +17,9 @@ import (
 
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
 )
 
 func TestFirstLine(t *testing.T) {
@@ -286,7 +289,7 @@ func TestReplyCmdNoSession(t *testing.T) {
 }
 
 func TestLaunchCmdNoConfig(t *testing.T) {
-	msg := launchCmd(nil, "repo", "feature", "prompt", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, "")()
+	msg := launchCmd(nil, "repo", "feature", "prompt", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, "")()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || lm.feature != "feature" || !strings.Contains(lm.notice, "no config") {
 		t.Errorf("launchCmd(nil cfg) = %#v", msg)
@@ -294,9 +297,10 @@ func TestLaunchCmdNoConfig(t *testing.T) {
 }
 
 func TestLaunchCmdRepoNotFound(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir()) // a launch audits itself; never into the real event log
 	dir := t.TempDir()
 	cfg := &config.Config{Roots: []string{dir}}
-	msg := launchCmd(cfg, "nonexistent-repo", "feature", "prompt", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, "")()
+	msg := launchCmd(cfg, "nonexistent-repo", "feature", "prompt", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, "")()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || lm.feature != "feature" || !strings.Contains(lm.notice, "repo not found") {
 		t.Errorf("launchCmd(repo not found) = %#v", msg)
@@ -304,6 +308,7 @@ func TestLaunchCmdRepoNotFound(t *testing.T) {
 }
 
 func TestLaunchCmdEnsureBranchFails(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir()) // a launch audits itself; never into the real event log
 	// repos.Discover only requires a ".git" entry to exist — it does not
 	// validate the repo. An empty ".git" directory passes discovery but
 	// fails every real git operation, so dispatch.Launch's ensureBranch step
@@ -316,7 +321,7 @@ func TestLaunchCmdEnsureBranchFails(t *testing.T) {
 	}
 	cfg := &config.Config{Roots: []string{root}}
 
-	msg := launchCmd(cfg, "fake-repo", "new feature", "do something", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, "")()
+	msg := launchCmd(cfg, "fake-repo", "new feature", "do something", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, "")()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || lm.feature != "new feature" || !strings.Contains(lm.notice, "launch failed") {
 		t.Errorf("launchCmd(broken repo) = %#v", msg)
@@ -547,5 +552,118 @@ func TestApplyConfigEnv(t *testing.T) {
 func TestAnimateHelpersDirect(t *testing.T) {
 	if cmd := shipTick(); cmd == nil {
 		t.Error("shipTick should return a cmd")
+	}
+}
+
+// `o` opens the pull request it names, in the repo it belongs to, and says so —
+// or says what gh said when it could not. The lens once printed "opening #144"
+// and opened nothing, so the notice has to be the outcome, not the intent.
+func TestOpenPROpensWhatItNamesAndQuotesAFailure(t *testing.T) {
+	repo := t.TempDir()
+	saved := lastDiscovered
+	lastDiscovered = []repos.Repo{{Name: "other", Path: t.TempDir()}, {Name: "shop", Path: repo}}
+	t.Cleanup(func() { lastDiscovered = saved })
+
+	bin := t.TempDir()
+	asked := filepath.Join(bin, "asked")
+	script := "#!/bin/sh\necho \"$PWD $*\" > " + asked + "\n" +
+		"[ -n \"$GH_FAIL\" ] && { echo 'no pull requests found for 12'; echo 'second line'; exit 1; }\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	t.Setenv("GH_FAIL", "")
+	if am, _ := openPRCmd("shop", "#12")().(actionMsg); am.notice != "opened #12 in the browser" {
+		t.Errorf("notice = %q", am.notice)
+	}
+	got, _ := os.ReadFile(asked)
+	if want := repo + " pr view 12 --web\n"; string(got) != want {
+		t.Errorf("gh was asked %q, want %q — the number bare, from the repo's own dir", got, want)
+	}
+
+	t.Setenv("GH_FAIL", "1")
+	if am, _ := openPRCmd("shop", "#12")().(actionMsg); am.notice != "could not open #12: no pull requests found for 12" {
+		t.Errorf("a failed open reads %q, want gh's own first line", am.notice)
+	}
+}
+
+// Before gh is ever asked, the two things that would make it a guess are
+// refused by name: a row with no pull request, and a repo the last discovery
+// did not find (gh run from the wrong directory opens another repo's #12).
+func TestOpenPRSaysWhyItCannot(t *testing.T) {
+	saved := lastDiscovered
+	lastDiscovered = []repos.Repo{{Name: "shop", Path: t.TempDir()}}
+	t.Cleanup(func() { lastDiscovered = saved })
+	t.Setenv("PATH", t.TempDir()) // no gh: reaching it would fail differently
+
+	for _, pr := range []string{"", "#", "!"} {
+		if am, _ := openPRCmd("shop", pr)().(actionMsg); am.notice != "no pull request to open" {
+			t.Errorf("openPRCmd(%q) = %q", pr, am.notice)
+		}
+	}
+	if am, _ := openPRCmd("gone", "#3")().(actionMsg); am.notice != "cannot find gone to open #3" {
+		t.Errorf("an unknown repo reads %q", am.notice)
+	}
+}
+
+// A kill takes the worktree only when git agrees it can go: one with
+// uncommitted changes is kept for inspection, and the notice counts it, so
+// the human knows there is work on disk the kill did not throw away.
+func TestKillKeepsADirtyWorktreeAndSaysSo(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := newTestGitRepo(t, "kill")
+	wts := t.TempDir()
+	clean, dirty := filepath.Join(wts, "clean"), filepath.Join(wts, "dirty")
+	for _, wt := range []string{clean, dirty} {
+		if out, err := gitCmd(t, repo, "worktree", "add", "-q", "-b", "feature/"+filepath.Base(wt), wt).CombinedOutput(); err != nil {
+			t.Fatalf("git worktree add: %v\n%s", err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dirty, "README.md"), []byte("unsaved work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	liveRecords = map[string]*state.Dispatch{}
+	for _, wt := range []string{clean, dirty} {
+		rec := &state.Dispatch{
+			ID: "kill-" + filepath.Base(wt), Feature: filepath.Base(wt), Status: state.StatusWorking,
+			// A socket with no server: the kill asks it and finds nothing, and the
+			// developer's own default server is never addressed.
+			TmuxSocket: "cockpit-test-no-server", TmuxSession: "cockpit-test-nonexistent-" + filepath.Base(wt),
+			RepoPath: repo, WorktreePath: wt,
+		}
+		if err := state.Save(rec); err != nil {
+			t.Fatal(err)
+		}
+		liveRecords[rec.Feature] = rec
+	}
+
+	am, _ := killCmd([]string{"clean", "dirty"})().(actionMsg)
+	if !strings.Contains(am.notice, "killed 2 dispatchers") || !strings.HasSuffix(am.notice, " · 1 worktree(s) kept (uncommitted changes)") {
+		t.Errorf("notice = %q", am.notice)
+	}
+	if _, err := os.Stat(clean); !os.IsNotExist(err) {
+		t.Error("the clean worktree was left behind")
+	}
+	if b, err := os.ReadFile(filepath.Join(dirty, "README.md")); err != nil || string(b) != "unsaved work\n" {
+		t.Errorf("the dirty worktree's change is gone: %q %v", b, err)
+	}
+}
+
+// A resume whose session is not there to attach to by the time it lands still
+// reports what the resume did — "no live session to attach to" would describe
+// the handover instead — and reloads, so the record's new state reaches the row.
+func TestAResumeWithNothingToAttachSaysWhatTheResumeDid(t *testing.T) {
+	m := newModel()
+	m.cfg = &config.Config{}
+	next, cmd := m.Update(resumedMsg{notice: "resumed \"retry\" in shop", session: supervisor.Session{}})
+	m = next.(model)
+	if m.notice != "resumed \"retry\" in shop" {
+		t.Errorf("notice = %q, want the resume's own", m.notice)
+	}
+	if cmd == nil || !m.loadBusy {
+		t.Error("the resume did not reload to pick the record up")
 	}
 }

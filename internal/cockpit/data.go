@@ -64,6 +64,10 @@ var (
 	staleRepos     []staleRepo
 	working        []workingItem
 	productStats   = map[string]productStat{}
+	// ownSessions is keyed by product: the sessions on this machine that no
+	// dispatch record claims. They are not dispatchers and never appear in the
+	// fleet — see collect_sessions.go.
+	ownSessions = map[string][]ownSession{}
 )
 
 // ---- product detail ---------------------------------------------------------
@@ -98,7 +102,11 @@ var backlogTickets []ticket
 var (
 	decisions         = map[string][]decision{}
 	decisionRepoOrder []string
-	plugins           []plugin
+	decisionProduct   = map[string]string{}
+	decisionNone      int
+	// decisionIndex is the decisions cut up for `/` (decsearch.go), by the
+	// load that read them.
+	decisionIndex *decIndex
 )
 
 // ---- usage ------------------------------------------------------------------

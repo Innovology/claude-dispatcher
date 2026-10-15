@@ -9,7 +9,7 @@ the config. Nothing here is compiled into the product.
 
 Every name is invented. Do not put a real repo, product or person in this file.
 """
-import json, os, pathlib, shutil, subprocess, sys, time
+import hashlib, json, os, pathlib, shutil, subprocess, sys, time
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/cd-shots")
 REPOS, STATE, HOME = ROOT / "repos", ROOT / "state", ROOT / "home"
@@ -161,6 +161,29 @@ def main():
             rec["pr_merged_at"] = iso(ago(age))
             rec["deployed_at"] = iso(ago(age - 5))
         (STATE / "dispatches" / f"{rec['id']}.json").write_text(json.dumps(rec, indent=2))
+
+    # The usage lens: Claude Code's own limit figures, as its status line hands
+    # them over (the reading `claude-dispatcher statusline` keeps per config
+    # dir), and a week of token usage in the default login's transcripts.
+    claude_dir = str(HOME / ".claude")
+    key = hashlib.sha256(claude_dir.encode()).hexdigest()[:16]
+    (STATE / "accounts").mkdir(parents=True, exist_ok=True)
+    (STATE / "accounts" / f"{key}.json").write_text(json.dumps({
+        "config_dir": claude_dir,
+        "five_hour": {"used_percentage": 38, "resets_at": int(NOW + 2 * 3600 + 900)},
+        "seven_day": {"used_percentage": 41, "resets_at": int(NOW + 2 * 86400 + 5 * 3600)},
+        "at": iso(ago(1)),
+    }, indent=2))
+    used = HOME / ".claude" / "projects" / "fixture" / "week.jsonl"
+    used.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for h, model, tok in [(1, "claude-opus-4", 900_000), (3, "claude-sonnet-4", 2_400_000),
+                          (30, "claude-opus-4", 6_100_000), (60, "claude-sonnet-4", 9_800_000),
+                          (100, "claude-haiku-4", 700_000)]:
+        rows.append({"type": "assistant", "timestamp": iso(ago(h * 60)), "session_id": f"s{h}",
+                     "message": {"model": model, "usage": {"input_tokens": tok // 4, "output_tokens": tok // 4,
+                                 "cache_creation_input_tokens": tok // 2}}})
+    used.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
 
     cfg = [f'roots = ["{REPOS}"]', "", "[products]"]
     for p, rs in PRODUCTS.items():

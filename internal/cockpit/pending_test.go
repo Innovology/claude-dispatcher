@@ -8,33 +8,15 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"claude-dispatcher/internal/config"
-	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 )
-
-// stubLaunch swaps the form's hand-off so a submit can be driven all the way
-// through without starting a real worktree or tmux session, and reports what it
-// was passed.
-func stubLaunch(t *testing.T) *struct{ repo, feature, prompt string } {
-	t.Helper()
-	got := &struct{ repo, feature, prompt string }{}
-	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, repo, feature, prompt string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, _ string) tea.Cmd {
-		got.repo, got.feature, got.prompt = repo, feature, prompt
-		return nil
-	}
-	t.Cleanup(func() { dxLaunch = prev })
-	return got
-}
 
 // submitting is a model that has just dispatched "retry backoff" into a seeded
 // repo, with nothing else in flight.
 func submitting(t *testing.T) model {
 	t.Helper()
-	stubLaunch(t)
+	captureLaunches(t)
 	m := newModel()
 	m.width, m.height = 130, 40
 	m.cfg = &config.Config{Roots: []string{seedRepoRoot(t, "alpha-api")}}

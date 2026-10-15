@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
 )
@@ -31,11 +32,14 @@ import (
 // cqAct is one offered action. keep means acting does not clear the row —
 // attach hands the terminal over and comes back to the same ask. An act with an
 // empty ok is not actionable on its own; skip is table rotation, not work.
+// confirm, when set, is the question the key puts on the confirm bar first;
+// the act runs only on y or enter there.
 type cqAct struct {
-	k    string
-	d    string
-	ok   string
-	keep bool
+	k       string
+	d       string
+	ok      string
+	keep    bool
+	confirm string
 }
 
 // ---- what it is working towards ----------------------------------------------
@@ -134,9 +138,12 @@ func cqAllDigits(s string) bool {
 // the honest "it stopped".
 func cqKind(rec *state.Dispatch, st string) string {
 	if st == "blocked" {
-		// Both waits are blocked, so the reason is the only thing that tells
-		// them apart — and they are told apart only to be worded differently:
-		// see cqMenu for everything they share.
+		// All three waits are blocked, so the reason is the only thing that
+		// tells them apart — and they are told apart only to be worded
+		// differently: see cqMenu for everything they share.
+		if dispatchpkg.LaunchStalled(rec, time.Now()) {
+			return "startup"
+		}
 		if rec.StatusReason == state.ReasonQuestion {
 			return "question"
 		}
@@ -148,10 +155,13 @@ func cqKind(rec *state.Dispatch, st string) string {
 	if rec.Failure != nil {
 		return "api-error"
 	}
-	switch rec.StatusReason {
-	case "turn complete — waiting on you":
+	switch {
+	case strings.HasPrefix(rec.StatusReason, state.ReasonTurnComplete):
+		// A prefix, not the whole string: a turn that ended on a question with
+		// background work still running carries that too, and it is still a
+		// finished turn.
 		return "turn-done"
-	case "waiting for your next prompt":
+	case rec.StatusReason == "waiting for your next prompt":
 		return "idle"
 	}
 	return "needs"
@@ -160,16 +170,18 @@ func cqKind(rec *state.Dispatch, st string) string {
 // cqMenu reports whether the ask is a menu: a permission prompt or a question.
 // The answer to either is a keypress inside the pane, not a line of text, so
 // the two behave identically everywhere it matters — first in the table, amber,
-// no reply key, no "mark shipped", `enter` to attach — and differ only in what
-// they say. Every site that used to compare against "permission" alone asks
-// this instead, so the one way to split them by accident is to edit this
-// function, which is the point of it.
+// no reply key, "mark shipped" only after asking, `enter` to attach — and
+// differ only in what they say. Every site that used to compare against
+// "permission" alone asks this instead, so the one way to split them by
+// accident is to edit this function, which is the point of it.
 func cqMenu(kind string) bool {
-	return kind == "permission" || kind == "question"
+	return kind == "permission" || kind == "question" || kind == "startup"
 }
 
 func cqWant(kind string) string {
 	switch kind {
+	case "startup":
+		return "answer its startup prompt"
 	case "permission":
 		return "approve a permission"
 	case "question":
@@ -226,6 +238,15 @@ func cqToneOf(st string, checks gh.Checks, review gh.Review, clash *cqClash) str
 func cqLeadOf(s *snapshot, rec *state.Dispatch, kind string) string {
 	if kind == "api-error" {
 		return cqFailLead(rec)
+	}
+	if kind == "startup" {
+		// Named only when the launch recorded why: a worktree it could not
+		// mark trusted is a session on its trust prompt. Otherwise the silence
+		// is the whole of the evidence, and the lead says only that.
+		if rec.StatusReason == state.ReasonUntrustedLaunch {
+			return "Claude Code is asking whether to trust this worktree. Attach and answer it."
+		}
+		return "Claude has said nothing since its session started — it is most likely on a startup prompt, such as trusting the folder. Attach to answer it."
 	}
 	// A menu's wait is mid-turn, so rec.Said is the last thing it said on some
 	// earlier turn: stale, and never the menu that is on the screen now.
@@ -296,6 +317,38 @@ func cqClashNote(rec *state.Dispatch, clash *cqClash) string {
 	return ""
 }
 
+// cqShipAct is y's "mark shipped": the human's word that the feature is live.
+//
+// It is an override, so it is offered whatever the session is doing. It used
+// to be offered only once the turn had ended, which made it unreachable
+// exactly when it was needed: a session the record still had as working — the
+// robustness dispatcher, held there by an artifact watch after it had said it
+// was done — could not be marked, and the tracker, which waits for the turn to
+// end, could not mark it either. Where the session has not ended its turn the
+// key asks first, because the session carries on after its row has gone.
+func cqShipAct(rec *state.Dispatch) cqAct {
+	a := cqAct{k: "y", d: "mark shipped", ok: "\"" + rec.Feature + "\" marked shipped"}
+	switch rec.Status {
+	case state.StatusWorking:
+		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session is still working?"
+	case state.StatusBlocked:
+		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session waits on a prompt?"
+	case state.StatusLaunching:
+		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session is still starting?"
+	}
+	return a
+}
+
+// cqKillAct is x on a live row: kill for a dispatcher this cockpit started,
+// release for a session it adopted, which was the human's before the record
+// and is theirs again after it (killCmd).
+func cqKillAct(rec *state.Dispatch) cqAct {
+	if rec.Adopted() {
+		return cqAct{k: "x", d: "release", ok: "released \"" + rec.Feature + "\" — its session is yours again"}
+	}
+	return cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""}
+}
+
 // cqActs offers only acts wired to a real action today.
 //
 // Deliberately absent, and not to be added without the action behind them:
@@ -322,6 +375,12 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 	if kind == "past" || kind == "done" {
 		acts := []cqAct{
 			{k: "⏎", d: "resume", ok: "resuming \"" + rec.Feature + "\"…", keep: true},
+		}
+		// A launch that died before claude ran has no conversation, so ⏎
+		// launches it again (dispatch.Resume) — and says that, rather than
+		// offering a resume it cannot perform.
+		if dispatchpkg.NeverStarted(rec) {
+			acts[0] = cqAct{k: "⏎", d: "start again", ok: "starting \"" + rec.Feature + "\" again…", keep: true}
 		}
 		if rec.PRNumber > 0 {
 			// No forge is threaded in here, so the flash names the feature rather
@@ -352,8 +411,11 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		}
 		acts = append(acts, cqAct{k: "p", d: "unpark",
 			ok: "\"" + rec.Feature + "\" back on the fleet", keep: true})
+		if len(rec.Commits) > 0 {
+			acts = append(acts, cqShipAct(rec))
+		}
 		if rec.Status != state.StatusExited {
-			acts = append(acts, cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+			acts = append(acts, cqKillAct(rec))
 		}
 		return acts
 	}
@@ -361,10 +423,13 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		{k: "⏎", d: "attach", ok: "attaching to " + rec.RepoName + " session…", keep: true},
 	}
 	// A running dispatcher is not asking for anything, so there is nothing to
-	// answer and nothing to skip past: it can be watched or stopped, and that is
-	// the whole list.
+	// answer and nothing to skip past: it can be watched, stopped, or declared
+	// shipped by the human who knows it is.
 	if kind == "running" {
-		return append(acts, cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+		if len(rec.Commits) > 0 {
+			acts = append(acts, cqShipAct(rec))
+		}
+		return append(acts, cqKillAct(rec))
 	}
 	// Marking a dispatcher shipped that produced nothing would be a lie about
 	// "done means live", so the act only appears once there are commits. The key
@@ -376,12 +441,11 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		// real (shipCmd) rather than just marking the record done.
 		acts = append(acts, cqAct{k: "y", d: "approve merge",
 			ok: "merging #" + itoa(rec.PRNumber) + " into " + rec.RepoName})
-	case !cqMenu(kind) && len(rec.Commits) > 0:
-		acts = append(acts, cqAct{k: "y", d: "mark shipped",
-			ok: "\"" + rec.Feature + "\" marked shipped"})
+	case len(rec.Commits) > 0:
+		acts = append(acts, cqShipAct(rec))
 	}
 	acts = append(acts,
-		cqAct{k: "x", d: "kill", ok: "killed \"" + rec.Feature + "\""})
+		cqKillAct(rec))
 	if !cqMenu(kind) {
 		// No ok, like park: the key opens the reply line, and nothing is typed
 		// into the session until enter. Not on a permission prompt or a

@@ -9,14 +9,10 @@ import (
 
 const pad = 2 // left/right page gutter, in columns (the design's 24px)
 
+// footerByLens is the footer of a lens whose keys the keymap does not own. The
+// ones it does are built from it (footerFromKeys).
 var footerByLens = map[string]string{
-	"products": "j/k move · enter opens the product panel · a assign · n new product · : palette",
-	// The design also offers J/K scroll and q close. Neither is wired — the
-	// panel does not scroll, and q is quit everywhere — so neither is offered.
-	"product":   "O overview · R review · T team · S shipped · H history · esc close · 1 triage",
-	"backlog":   "j/k move · space pick · enter dispatch · ctrl+d dispatch picked · s source · 1 triage",
-	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
-	"decisions": "j/k records · J/K repo · → body · a status · s supersede · e sources · o where it lives",
+	"usage": "budget by window, model and product · 6 velocity · 1 triage",
 	// v4 moved the product view off the digits, so the clause that named one is
 	// gone rather than renumbered: 3 is the backlog now.
 	"velocity": "velocity is what reached production, not what you set in motion · 1 triage",
@@ -100,8 +96,21 @@ func (m model) headerView() string {
 	// counted or omitted instead: a header that states a number the user cannot
 	// act on is worse than a header that says nothing.
 	parts := []string{fg(cDim, m.portfolioLine())}
+	if s := m.loadState(); s != "" {
+		parts = append(parts, fg(cAmber, s))
+	}
 	if w := weekWindow(); w != nil {
-		parts = append(parts, fg(cFaint, "week ")+fg(usageBandColor(w.pace), itoa(w.used)+"%")+fg(cFaint, " · resets "+usageResetDay()))
+		fig := itoa(w.used) + "%"
+		if !w.measured {
+			fig = "≈" + fig
+		}
+		clause := fg(cFaint, "week ") + fg(usageBandColor(w.pace), fig)
+		// Only a reported window knows when it resets; the estimate's week is
+		// trailing and has no such day.
+		if !w.resets.IsZero() {
+			clause += fg(cFaint, " · resets "+strings.ToLower(w.resets.Local().Format("Mon")))
+		}
+		parts = append(parts, clause)
 	}
 	parts = append(parts, fg(cFaint, fitv.cols+" · "+nowHHMM()))
 
@@ -142,16 +151,82 @@ func (m model) footerHelp() string {
 	if m.lens == "floor" {
 		return m.cqFooterHelp()
 	}
+	if m.adoptOpenInput {
+		return "type the name · enter adopts it · esc cancels"
+	}
 	if m.lens == "products" && m.clOpen {
 		if m.clNaming {
 			return "type the name · enter creates it · esc cancels"
 		}
-		return "j/k move · tab pane · space mark · enter assign · u unassign · ctrl+u start over · n new · a done"
+		return strings.Join([]string{
+			m.pairHint("editor.down", "editor.up", "move"), m.keyHint("editor.pane", "pane"),
+			m.keyHint("editor.mark", "mark"), m.keyHint("editor.move", "assign"),
+			m.keyHint("editor.unassign", "unassign"), m.keyHint("editor.reset", "start over"),
+			m.keyHint("products.new", "new"), m.keyHint("editor.close", "done"),
+		}, " · ")
+	}
+	if h, ok := m.footerFromKeys(m.lens); ok {
+		return h
+	}
+	if m.lens == "decisions" {
+		return m.decFooter()
 	}
 	if h, ok := footerByLens[m.lens]; ok {
 		return h
 	}
 	return "1 triage"
+}
+
+// decFooter is the decisions lens's footer, which changes with its search. The
+// keys the keymap owns are read from it; the ones only this lens has, and the
+// ones a query being typed answers to, are its own.
+func (m model) decFooter() string {
+	switch {
+	case m.decTyping:
+		return "type to search · ↑/↓ move · enter keeps it · ctrl+u clears · esc cancels"
+	case m.decSearching():
+		return strings.Join([]string{m.pairHint("list.down", "list.up", "matches"), "→ body",
+			"o open in editor", m.keyHint("search.open", "edit"), "esc go to it"}, " · ")
+	}
+	return strings.Join([]string{m.pairHint("list.down", "list.up", "decisions"), "[ ] group", "J/K repo",
+		"→ body", "o open in editor", m.keyHint("search.open", "search")}, " · ")
+}
+
+// footerFromKeys is the footer of a lens whose keys the keymap owns, built from
+// it rather than written beside it: a footer naming a key that has been
+// rebound is the same lie a hand-written help sheet would be.
+func (m model) footerFromKeys(lens string) (string, bool) {
+	var parts []string
+	switch lens {
+	case "products":
+		parts = []string{m.pairHint("products.down", "products.up", "move"),
+			m.keyHint("products.open", "opens the product panel"), m.keyHint("products.assign", "assign"),
+			m.keyHint("products.new", "new product"), m.keyHint("palette", "palette")}
+	case "product":
+		// The design also offers J/K scroll and q close. Neither is wired — the
+		// panel does not scroll, and q is quit everywhere — so neither is offered.
+		parts = []string{m.keyHint("panel.overview", "overview"), m.keyHint("panel.review", "review"),
+			m.keyHint("panel.team", "team"), m.keyHint("panel.shipped", "shipped"),
+			m.keyHint("panel.history", "history"), m.keyHint("panel.sessions", "your sessions"),
+			"esc close", "1 triage"}
+	case "backlog":
+		parts = []string{m.pairHint("list.down", "list.up", "move"), m.keyHint("list.pick", "pick"),
+			m.keyHint("list.open", "dispatch"), m.keyHint("list.dispatch", "dispatch picked"),
+			"s source", "1 triage"}
+	default:
+		return "", false
+	}
+	return strings.Join(parts, " · "), true
+}
+
+// keyHint is "<key> <what>" for an action, with the key it answers to now.
+func (m model) keyHint(action, what string) string {
+	return prettyKey(m.keys.KeyFor(action)) + " " + what
+}
+
+// pairHint is keyHint for a list's down/up pair: "j/k move".
+func (m model) pairHint(down, up, what string) string {
+	return prettyKey(m.keys.KeyFor(down)) + "/" + prettyKey(m.keys.KeyFor(up)) + " " + what
 }
 
 // barsView renders the bars that sit above the footer: the upgrade running
@@ -212,6 +287,8 @@ func (m model) overlayView(w, h int) (string, bool) {
 		return m.viewPark(w, h), true
 	case m.replyOpen:
 		return m.viewReply(w, h), true
+	case m.adoptOpenInput && m.adoptAt != nil:
+		return m.viewAdopt(w, h), true
 	case m.paletteOpen:
 		return m.viewPalette(w, h), true
 	}
@@ -233,6 +310,31 @@ func spread(left, right string, w int) string {
 	}
 	gap := inner - lw - rw
 	return strings.Repeat(" ", pad) + left + strings.Repeat(" ", gap) + right + strings.Repeat(" ", pad)
+}
+
+// loadState says a rebuild is happening, and "" when none is.
+//
+// Loads are deliberately one at a time and requests coalesce (see load.go), so
+// a change the human just made is not applied when they made it: it is applied
+// when the load already out comes back, and a load is 4.5s warm and a minute
+// cold on a real portfolio. Nothing said so. Edit your scan roots while a poll
+// is in flight and the screen goes on showing the old repositories for as long
+// as that takes, with "settings saved" in the footer and no way to tell a
+// rescan that is coming from one that never started — which is the reason the
+// reported symptom was "they didn't show up", and why the first thing that
+// looked like it worked was navigating away and back.
+//
+// It is not a progress bar: the stages are not counted here and a figure we
+// cannot measure is the fabricated number this cockpit refuses everywhere else.
+// It says which of the two states it is in and nothing more.
+func (m model) loadState() string {
+	switch {
+	case m.loadBusy && m.loadNext != loadNone:
+		return "rescanning · another queued"
+	case m.loadBusy:
+		return "rescanning"
+	}
+	return ""
 }
 
 // portfolioLine is the header's "N out · M products · R repos" summary, counted
@@ -292,11 +394,6 @@ func usageBandColor(pace float64) string {
 		return cAmber
 	}
 	return cMid
-}
-
-// usageResetDay names the weekday the weekly window rolls over on.
-func usageResetDay() string {
-	return strings.ToLower(time.Now().Add(7 * 24 * time.Hour).Format("Mon"))
 }
 
 // nowHHMM is the wall clock in the header.

@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
@@ -62,13 +60,7 @@ func TestDXAccountShowsWhatEachHasLeft(t *testing.T) {
 }
 
 func TestDXAccountReachesTheLaunch(t *testing.T) {
-	var got string
-	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, acct string) tea.Cmd {
-		got = acct
-		return nil
-	}
-	t.Cleanup(func() { dxLaunch = prev })
+	got := captureLaunches(t)
 
 	m := withAccounts(dxFormModel(t))
 	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
@@ -81,8 +73,8 @@ func TestDXAccountReachesTheLaunch(t *testing.T) {
 		t.Errorf("summary %q does not say which account", m.dxSummary())
 	}
 	m, _ = m.dxSubmit()
-	if got != "work" {
-		t.Errorf("the launch got account %q, want work", got)
+	if got.account != "work" {
+		t.Errorf("the launch got account %q, want work", got.account)
 	}
 	if !strings.Contains(m.notice, "on work") {
 		t.Errorf("notice = %q", m.notice)
@@ -91,8 +83,8 @@ func TestDXAccountReachesTheLaunch(t *testing.T) {
 	// Untouched, it is the human's own login.
 	m = withAccounts(dxFormModel(t))
 	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
-	if _, _ = m.dxSubmit(); got != account.Default {
-		t.Errorf("an untouched ACCOUNT launched on %q, want default", got)
+	if _, _ = m.dxSubmit(); got.account != account.Default {
+		t.Errorf("an untouched ACCOUNT launched on %q, want default", got.account)
 	}
 }
 
@@ -108,13 +100,7 @@ func TestDXAccountFallsBackWhenRemoved(t *testing.T) {
 }
 
 func TestDispatchFormAccountStep(t *testing.T) {
-	var got string
-	prev := launchDispatch
-	launchDispatch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, acct string) tea.Cmd {
-		got = acct
-		return nil
-	}
-	t.Cleanup(func() { launchDispatch = prev })
+	got := captureLaunches(t)
 
 	m := newModel()
 	m.width, m.height = 130, 30
@@ -142,8 +128,8 @@ func TestDispatchFormAccountStep(t *testing.T) {
 	m = press(m, "enter") // → prompt
 	m = typeStr(m, "do it")
 	m = press(m, "enter")
-	if got != "work" {
-		t.Errorf("the launch got account %q, want work", got)
+	if got.account != "work" {
+		t.Errorf("the launch got account %q, want work", got.account)
 	}
 	if !strings.Contains(m.notice, "on work") {
 		t.Errorf("notice = %q", m.notice)
@@ -154,7 +140,7 @@ func TestDispatchFormAccountStep(t *testing.T) {
 // with the reason, rather than running on some other login.
 func TestLaunchRefusesAnUnknownAccount(t *testing.T) {
 	msg := launchCmd(&config.Config{}, "repo", "feature", "prompt", dispatchpkg.ModeAuto,
-		dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, "nope")()
+		dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, "nope")()
 	lm, ok := msg.(launchedMsg)
 	if !ok || !lm.failed || !strings.Contains(lm.reason, "no account named nope") {
 		t.Fatalf("msg = %#v", msg)

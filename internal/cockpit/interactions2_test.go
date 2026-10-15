@@ -366,25 +366,15 @@ func TestDecisionsEmptyRepoBranch(t *testing.T) {
 	defer restoreVars(saved)
 	decisions = map[string][]decision{"empty-repo": {}}
 	decisionRepoOrder = []string{"empty-repo"}
-	// pluginForRepo falls back to the plugin whose id is "builtin", so the
-	// slice must carry one even in this synthetic scenario.
-	plugins = []plugin{
-		{id: "p0", name: "p0"}, {id: "p1", name: "p1"}, {id: "p2", name: "p2"},
-		{id: "builtin", name: "cockpit records"},
-	}
 
 	m := newModel()
 	m.width, m.height = 190, 44
 	m = press(m, "5")
-	m = press(m, "a")
-	if m.notice != "" {
-		t.Errorf("accept on an empty record list should leave no notice, got %q", m.notice)
+	next, cmd := m.handleKey("o")
+	m = next.(model)
+	if cmd != nil || m.notice != "" {
+		t.Errorf("o with nothing selected should do nothing, got notice %q", m.notice)
 	}
-	m = press(m, "s")
-	if m.notice != "" {
-		t.Errorf("supersede on an empty record list should leave no notice, got %q", m.notice)
-	}
-	m = press(m, "o")
 	renderClean(t, m, "decisions open on empty repo")
 }
 
@@ -547,11 +537,6 @@ func TestSettingsEditEveryField(t *testing.T) {
 			t.Fatalf("field %s: enter should start editing", f.key)
 		}
 		switch f.kind {
-		case setInt:
-			for _, ch := range "42" {
-				mm, _ = m.handleKey(string(ch))
-				m = mm.(model)
-			}
 		case setRoots:
 			for _, ch := range "/tmp/a, /tmp/b" {
 				mm, _ = m.handleKey(string(ch))
@@ -573,8 +558,8 @@ func TestSettingsEditEveryField(t *testing.T) {
 		}
 	}
 
-	if m.cfg.WeeklyTokenLimit != 42 {
-		t.Errorf("weekly_token_limit = %d, want 42", m.cfg.WeeklyTokenLimit)
+	if m.cfg.AzureProject != "value" {
+		t.Errorf("azure_project = %q, want value", m.cfg.AzureProject)
 	}
 	if len(m.cfg.Roots) != 2 {
 		t.Errorf("roots = %v, want 2 entries", m.cfg.Roots)
@@ -665,9 +650,16 @@ func TestDoConfirmNilAndKill(t *testing.T) {
 
 // ---- seed.go: fallback branches -----------------------------------------------
 
-func TestRepoProductFallback(t *testing.T) {
-	if got := repoProduct("no-such-repo-xyz"); got != "—" {
-		t.Errorf("repoProduct(unknown) = %q, want —", got)
+// A product named in config that the last load has no record for yet — just
+// assigned, or every repo in it gone — still gets its panel summary, as zeros,
+// rather than borrowing another product's figures or drawing nothing.
+func TestAProductTheLoadHasNotSeenSummarisesAsZeros(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	products = []product{{name: "shop", inflight: 3, live: 2}}
+	reposByProduct = map[string][]repoRef{}
+	if got := productSummaryLine("brand-new"); got != "0 repos · 0 in flight · 0 live today" {
+		t.Errorf("summary = %q", got)
 	}
 }
 

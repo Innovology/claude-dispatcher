@@ -85,12 +85,15 @@ func hookSpecs() []hookSpec {
 		// no other hook, because the turn has not ended and the prompt is not
 		// idle. The matcher is the tool's name, as PreToolUse matchers are.
 		{event: "PreToolUse", matcher: "AskUserQuestion", arg: "PreToolUse:AskUserQuestion"},
+		// Every dialog as it goes up — questions included — with whose it is:
+		// a subagent's carries its agent_id, so only that agent's tool
+		// completing closes it. The permission_prompt notification below says
+		// neither, and stays for a claude too old to send this one.
+		{event: "PermissionRequest", arg: "PermissionRequest"},
 		{event: "Notification", matcher: "idle_prompt", arg: "Notification:idle_prompt"},
 		{event: "Notification", matcher: "permission_prompt", arg: "Notification:permission_prompt"},
 	}
 }
-
-const hookMarker = "claude-dispatcher hook"
 
 const nixStore = "/nix/store/"
 
@@ -119,10 +122,23 @@ func hookExe(exe, argv0 string, lookPath, eval func(string) (string, error)) str
 	if err != nil {
 		return exe
 	}
-	if resolved, err := eval(cand); err != nil || resolved != exe {
+	if resolved, err := eval(cand); err != nil || (resolved != exe && !wraps(resolved, exe)) {
 		return exe
 	}
 	return cand
+}
+
+// wraps reports whether wrapper is the makeWrapper script in front of exe. The
+// Nix package wraps the binary to put git and tmux on its PATH, and wrapProgram
+// does it by moving bin/claude-dispatcher to bin/.claude-dispatcher-wrapped and
+// writing a script that execs it in its place. So the name on PATH resolves to
+// the script and os.Executable to the moved binary: the two never compare
+// equal, and without this every Nix install pinned its hook to the store path
+// — which the next garbage collection deletes. Same directory is the proof: a
+// store path's hash names exactly one build.
+func wraps(wrapper, exe string) bool {
+	return filepath.Dir(wrapper) == filepath.Dir(exe) &&
+		filepath.Base(exe) == "."+filepath.Base(wrapper)+"-wrapped"
 }
 
 // installExe is the binary the hooks and the status line are baked to, or ""
@@ -189,18 +205,31 @@ func installInto(configDir, exe, name string) error {
 		}
 	}
 
-	added := addHooks(root, exe)
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	ch := reconcileHooks(hooks, exe)
+	if ch != (hookChanges{}) {
+		root["hooks"] = hooks
+	}
 	line := addStatusLine(root, exe)
-	if added == 0 && line == "" {
+	if ch == (hookChanges{}) && line == "" {
 		fmt.Printf("✓ hooks and status line already installed in %s (%s)\n", settingsPath, name)
 		return nil
 	}
 
 	fmt.Printf("\nAbout to change %s (account %s):\n", settingsPath, name)
-	if added > 0 {
-		fmt.Printf("  · add %d hook entries, each running: %s hook <event>\n", added, exe)
+	if ch.added > 0 {
+		fmt.Printf("  · add %d hook %s, each running: %s hook <event>\n", ch.added, plural(ch.added, "entry", "entries"), exe)
 		fmt.Println("    They fire on every Claude Code session using this config (that is how")
 		fmt.Println("    status tracking works; sessions started outside the cockpit are logged too).")
+	}
+	if ch.repointed > 0 {
+		fmt.Printf("  · repoint %d hook %s at this binary (they named another path)\n", ch.repointed, plural(ch.repointed, "entry", "entries"))
+	}
+	if ch.dropped > 0 {
+		fmt.Printf("  · remove %d duplicate hook %s left by earlier installs\n", ch.dropped, plural(ch.dropped, "entry", "entries"))
 	}
 	if line != "" {
 		fmt.Println("  · " + line)
@@ -236,34 +265,98 @@ func installInto(configDir, exe, name string) error {
 	return nil
 }
 
-// addHooks adds every hook entry root lacks and says how many it added.
-func addHooks(root map[string]any, exe string) int {
-	hooks, _ := root["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-	added := 0
+// hookChanges counts what reconcileHooks did to the settings.
+type hookChanges struct {
+	added, repointed, dropped int
+}
+
+// reconcileHooks leaves hooks holding exactly one hook of ours per hookSpec,
+// each running exe. It used to add a spec only when no entry of ours was
+// there, which could not repair anything: a hook naming a build that has since
+// been garbage-collected was "already installed", and one naming
+// .claude-dispatcher-wrapped was not recognised as ours at all, so every re-run
+// of init appended another full set beside the dead ones. Ours is recognised by
+// what the command runs, never by its exact path, so a hook left by any earlier
+// install is repointed or removed; hooks that are not ours, including ones
+// sharing an entry with ours, are left exactly as they were.
+func reconcileHooks(hooks map[string]any, exe string) hookChanges {
+	var ch hookChanges
 	for _, spec := range hookSpecs() {
+		want := fmt.Sprintf("%s hook %s", exe, spec.arg)
 		entries, _ := hooks[spec.event].([]any)
-		if hasOurHook(entries, spec.matcher) {
-			continue
+		kept := make([]any, 0, len(entries))
+		have, stale := false, 0
+		for _, e := range entries {
+			entry, ok := e.(map[string]any)
+			if m, _ := entry["matcher"].(string); !ok || m != spec.matcher {
+				kept = append(kept, e)
+				continue
+			}
+			inner, _ := entry["hooks"].([]any)
+			rest := make([]any, 0, len(inner))
+			for _, h := range inner {
+				hm, _ := h.(map[string]any)
+				cmd, _ := hm["command"].(string)
+				switch {
+				case !isOurCommand(cmd, spec.arg):
+					rest = append(rest, h)
+				case cmd == want && !have:
+					have = true
+					rest = append(rest, h)
+				default:
+					stale++
+				}
+			}
+			switch {
+			case len(rest) == len(inner):
+				kept = append(kept, e)
+			case len(rest) > 0:
+				entry["hooks"] = rest
+				kept = append(kept, entry)
+			}
 		}
-		entry := map[string]any{
-			"hooks": []any{map[string]any{
-				"type":    "command",
-				"command": fmt.Sprintf("%s hook %s", exe, spec.arg),
-			}},
+		if !have {
+			entry := map[string]any{
+				"hooks": []any{map[string]any{"type": "command", "command": want}},
+			}
+			if spec.matcher != "" {
+				entry["matcher"] = spec.matcher
+			}
+			kept = append(kept, any(entry))
+			if stale > 0 {
+				ch.repointed++
+				stale--
+			} else {
+				ch.added++
+			}
 		}
-		if spec.matcher != "" {
-			entry["matcher"] = spec.matcher
-		}
-		hooks[spec.event] = append(entries, any(entry))
-		added++
+		ch.dropped += stale
+		hooks[spec.event] = kept
 	}
-	if added > 0 {
-		root["hooks"] = hooks
+	return ch
+}
+
+// isOurCommand reports whether cmd is this dispatcher's hook for arg, whatever
+// install wrote it: `<path>/claude-dispatcher hook <arg>`, the Nix-wrapped
+// `.claude-dispatcher-wrapped`, or Windows' `claude-dispatcher.exe`. The path
+// is everything before " hook ", so a directory with a space in it does not
+// hide an entry.
+func isOurCommand(cmd, arg string) bool {
+	bin, ok := strings.CutSuffix(cmd, " hook "+arg)
+	if !ok {
+		return false
 	}
-	return added
+	name := bin[strings.LastIndexAny(bin, `/\`)+1:]
+	name = strings.TrimSuffix(name, ".exe")
+	name = strings.TrimSuffix(strings.TrimPrefix(name, "."), "-wrapped")
+	return name == "claude-dispatcher"
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // addStatusLine installs our status line in root, and describes the change —
@@ -300,27 +393,4 @@ func addStatusLine(root map[string]any, exe string) string {
 // shellQuote single-quotes s for a POSIX shell.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-func hasOurHook(entries []any, matcher string) bool {
-	for _, e := range entries {
-		entry, ok := e.(map[string]any)
-		if !ok {
-			continue
-		}
-		if m, _ := entry["matcher"].(string); m != matcher {
-			continue
-		}
-		inner, _ := entry["hooks"].([]any)
-		for _, h := range inner {
-			hm, ok := h.(map[string]any)
-			if !ok {
-				continue
-			}
-			if cmd, _ := hm["command"].(string); strings.Contains(cmd, hookMarker) {
-				return true
-			}
-		}
-	}
-	return false
 }

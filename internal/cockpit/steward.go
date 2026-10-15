@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/steward"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // stewardStartedMsg is a start attempt coming back. A steward that was already
@@ -112,5 +113,7 @@ func (m model) onStewardStarted(msg stewardStartedMsg) (model, tea.Cmd) {
 		return m, nil
 	}
 	stewardOn, stewardEnabled = true, true
-	return m.attachSession(steward.Session)
+	// No socket: the steward belongs to no repository, so it lives on the
+	// default server rather than any repo's own (ADR 0014).
+	return m.attachSession(supervisor.Session{Name: steward.Session}, "")
 }

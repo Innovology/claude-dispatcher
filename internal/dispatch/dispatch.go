@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
@@ -78,8 +79,8 @@ func capSlug(s string) string {
 // Prompt is the prompt the session actually received.
 //
 // root is where the feature branch is cut from (see root.go): a branch the
-// human named on the form, or RootDefault for the repo's default branch as the
-// remote sees it. Unlike the other three it is not carried to Resume — a branch
+// human named on the form, or RootDefault for the repo's [root_branches] entry,
+// else its default branch as the remote sees it. Unlike the other three it is not carried to Resume — a branch
 // is cut once, and a resumed dispatcher goes back to the branch it has.
 //
 // acct is the Claude subscription the session runs under (internal/account):
@@ -125,17 +126,17 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		return nil, fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
 			live.Feature, live.RepoName, live.TmuxSession)
 	}
-	branch := "feature/" + slug
-	worktree := filepath.Join(state.WorktreesDir(), r.Name, slug)
+	branch := branchFor(r, slug)
+	worktree := worktreePath(r, slug)
 	root = root.Normalize()
-	cutFrom, err := ensureWorktree(r.Path, worktree, branch, root)
+	cutFrom, err := ensureWorktreeFrom(r.Path, worktree, branch, root, r.RootBranch)
 	if err != nil {
 		return nil, err
 	}
 	// A fresh worktree is a folder Claude Code has never seen, and it blocks on
 	// its trust prompt before reading the prompt we launched it with. Inherit
 	// the repo's own trust decision so an unattended session can actually start.
-	InheritTrustFor(acct.Env(), r.Path, worktree)
+	trusted := InheritTrustFor(acct.Env(), r.Path, worktree)
 
 	baseSHA := ""
 	if out, err := exec.Command("git", "-C", worktree, "rev-parse", "HEAD").Output(); err == nil {
@@ -167,10 +168,14 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		Mode:         string(mode),
 		Model:        string(model),
 		FanOut:       fanOut,
+		TmuxSocket:   r.Socket,
+		EnvCommand:   repos.EnvIn(r.Env, r.Path, worktree),
+		PaneShell:    r.Shell,
 		Account:      accountName(acct),
 		ConfigDir:    acct.Env(),
-		TmuxSession:  uniqueName("disp-" + slug),
+		TmuxSession:  uniqueName(supervisor.Session{Name: "disp-" + slug, Socket: r.Socket}),
 		Status:       state.StatusLaunching,
+		StatusReason: launchReason(trusted),
 		CreatedAt:    time.Now(),
 	}
 	if err := state.Save(d); err != nil {
@@ -185,14 +190,125 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		return d, failLaunch(d, fmt.Errorf("could not write the prompt file: %w", err))
 	}
 
-	// launchCommand is OS-specific (bash on Unix, cmd.exe on Windows); it keeps
+	// launchCommand is OS-specific (/bin/sh on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := launchCommand(d.ID, promptPath, mode, model, d.ConfigDir)
-	if err := newSession(d.TmuxSession, worktree, cmd); err != nil {
+	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir)
+	if err := newSession(SessionOf(d), worktree, cmd, d.EnvCommand); err != nil {
 		return d, failLaunch(d, err)
 	}
+	markSessionStarted(d, time.Now())
 	return d, nil
+}
+
+// markSessionStarted stamps SessionStartedAt on the record as it stands on disk,
+// under the hook lock. Launch saved its record before the session existed, and
+// by the time new-session returns a hook may already have written it — a fast
+// SessionStart can land first — so saving Launch's own copy would put
+// "launching" back over whatever the session had said. Reloaded under the lock,
+// the stamp joins the record the hooks left and changes nothing else.
+func markSessionStarted(d *state.Dispatch, at time.Time) {
+	d.SessionStartedAt = &at
+	release := state.Lock()
+	defer release()
+	for _, cur := range state.LoadAll() {
+		if cur.ID != d.ID {
+			continue
+		}
+		if cur.SessionStartedAt == nil {
+			cur.SessionStartedAt = &at
+			_ = state.Save(cur)
+		}
+		return
+	}
+}
+
+// branchFor is the branch this dispatch cuts: the repo's prefix and the
+// feature's slug.
+//
+// The default stays `feature/<slug>` — every dispatch works on a feature
+// branch, including in repos that ship from main, and the prefix is what says
+// at a glance that a branch is one. A repo may name a different one, or none
+// at all (config's `branch_prefix`), which is for the layout where a checkout
+// is a folder named after its branch: there a prefix makes every dispatch a
+// folder whose name is not its branch, and dropping it makes a dispatch
+// indistinguishable from a worktree cut by hand, which is the point.
+//
+// A nil prefix is the default rather than an empty one, so a Repo value nobody
+// configured cuts `feature/…` as it always did.
+func branchFor(r repos.Repo, slug string) string {
+	if r.BranchPrefix == nil {
+		return config.DefaultBranchPrefix + slug
+	}
+	return *r.BranchPrefix + slug
+}
+
+// PrefixProblem is why prefix cannot start a branch name, or "" when it can.
+//
+// These are git's rules for a ref (git check-ref-format --branch) applied to
+// the prefix with a slug after it: a slug is [a-z0-9-] and never empty, so
+// anything a slug can follow is a prefix git will take. It is asked where the
+// human is still looking — both forms and the settings screen — because a
+// prefix git refuses is otherwise a launch that fails after the form is gone;
+// one that gets past them anyway (a hand-edited config) is refused by git at
+// the launch, on the failed row (ADR 0009).
+func PrefixProblem(prefix string) string {
+	if prefix == "" {
+		return ""
+	}
+	ref := prefix + "x"
+	switch {
+	case strings.HasPrefix(ref, "-"):
+		return "a branch cannot start with -"
+	case strings.HasPrefix(ref, "/"):
+		return "a branch cannot start with /"
+	case strings.Contains(ref, "//"):
+		return "a branch cannot hold //"
+	case strings.Contains(ref, ".."):
+		return "a branch cannot hold .."
+	case strings.Contains(ref, "@{"):
+		return "a branch cannot hold @{"
+	}
+	for _, r := range ref {
+		switch {
+		case r == ' ':
+			return "a branch cannot hold a space"
+		case r < 0x20 || r == 0x7f:
+			return "a branch cannot hold a control character"
+		case strings.ContainsRune(`~^:?*[\`, r):
+			return "a branch cannot hold " + string(r)
+		}
+	}
+	for _, part := range strings.Split(ref, "/") {
+		if strings.HasPrefix(part, ".") {
+			return "no part of a branch can start with ."
+		}
+		if strings.HasSuffix(part, ".lock") {
+			return "no part of a branch can end with .lock"
+		}
+	}
+	return ""
+}
+
+// worktreePath is where this dispatch's own checkout is cut.
+//
+// The default is the state directory, keyed by repo and feature, which keeps
+// this tool's bookkeeping inside this tool's own folder. A repo whose layout
+// has a place to join (config's `worktrees = "project"`, resolved in
+// repos.worktreeLayoutFor) gets its dispatch checkout beside the repo's other
+// ones instead, named for the feature exactly as the human's own are, because
+// a checkout git lists as a worktree of this repository and that is nowhere
+// near it is a checkout nobody will find.
+//
+// There is no repo component there: a project folder IS the repo, so
+// `<project>/<repo>/<slug>` would be a directory named after the repository
+// inside the repository, and beside a clone the folder already starts with
+// the clone's name (`app-<slug>`), because that is how the others read.
+func worktreePath(r repos.Repo, slug string) string {
+	if r.WorktreeRoot != "" {
+		return filepath.Join(r.WorktreeRoot, r.WorktreePrefix+slug)
+	}
+	return filepath.Join(state.WorktreesDir(), r.Name, slug)
 }
 
 // MaxPromptBytes is the largest prompt a dispatch will carry.
@@ -229,6 +345,17 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return strings.TrimSpace(s)
+}
+
+// SessionOf is where d's session can be reached. The name alone stopped being
+// an address when a repo could name a socket of its own: asking the wrong
+// server about a session gets a confident "no such session", so the pair is
+// read off the record together everywhere it is used.
+func SessionOf(d *state.Dispatch) supervisor.Session {
+	if d == nil {
+		return supervisor.Session{}
+	}
+	return supervisor.Session{Name: d.TmuxSession, Socket: d.TmuxSocket}
 }
 
 // probeAccount is the seam Launch asks who an account is through. The default
@@ -284,8 +411,8 @@ var audit = state.AppendEvent
 // still going: a done or exited one has finished, and re-dispatching its name
 // is the case per-dispatch worktrees explicitly allow. Reading the session
 // alone refused every feature that had ever completed, because launchCommand
-// ends `; exec ${SHELL}` on purpose and the session outlives its claude by
-// design — and on a real machine the claude itself often outlives the work too,
+// ends by exec'ing a shell on purpose (exitShell) and the session outlives its
+// claude by design — and on a real machine the claude itself often outlives the work too,
 // sitting at its prompt for days after the PR merged.
 //
 // The live session is what catches a record the hooks could not correct: a
@@ -301,10 +428,10 @@ func liveDispatch(slug string) *state.Dispatch {
 		if d.Slug != slug || d.TmuxSession == "" || !unfinished(d.Status) {
 			continue
 		}
-		if !sessionAlive(d.TmuxSession) {
+		if !sessionAlive(SessionOf(d)) {
 			continue
 		}
-		if idle, known := sessionIdle(d.TmuxSession); known && idle {
+		if idle, known := sessionIdle(SessionOf(d)); known && idle {
 			continue // claude has ended; what is left is the shell it dropped to
 		}
 		return d
@@ -324,13 +451,27 @@ func unfinished(s state.Status) bool {
 	return false
 }
 
-// sessionAlive, sessionNames and supervisorReady are seams: tests swap them
+// sessionAlive, sessionList and supervisorReady are seams: tests swap them
 // rather than stand up real sessions.
 var (
 	sessionAlive    = supervisor.HasSession
-	sessionNames    = supervisor.Sessions
+	sessionList     = supervisor.SessionList
 	supervisorReady = supervisor.Available
 )
+
+// socketsOf is every server the given records live on, each once.
+func socketsOf(ds []*state.Dispatch) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range ds {
+		if d.TmuxSession == "" || seen[d.TmuxSocket] {
+			continue
+		}
+		seen[d.TmuxSocket] = true
+		out = append(out, d.TmuxSocket)
+	}
+	return out
+}
 
 // ReconcileSessions re-derives status from the one fact the lifecycle hook
 // cannot report — whether the session behind a record still exists — and marks
@@ -348,7 +489,7 @@ var (
 // ground truth — the same call liveDispatch makes.
 //
 // Note what does NOT strand a record: claude merely exiting. launchCommand
-// drops to a login shell so the session survives for inspection, and SessionEnd
+// drops to a shell so the session survives for inspection, and SessionEnd
 // fires on the way out. A missing session means something took it away.
 //
 // The three statuses swept are a boundary, not caution. Each is reachable only
@@ -356,11 +497,14 @@ var (
 // existed and its absence now proves it ended. A launching record has had no
 // hook at all, and there is a window — between Launch saving it and NewSession
 // returning — where its session does not exist yet and never did; absence
-// there proves nothing, so nothing is claimed. Likewise a supervisor we cannot
+// there proves nothing, so nothing is claimed. Once NewSession has returned the
+// record carries SessionStartedAt, and from then on it is evidence again: the
+// session existed, and gone before any hook fired means its command never ran.
+// That is the one launching record swept, and its reason says so. Likewise a supervisor we cannot
 // even reach is not evidence that every session is gone, which is why an
 // unavailable backend sweeps nothing rather than retiring the whole fleet.
 //
-// It reads the whole fleet's liveness from ONE listing, because the cockpit now
+// It reads the whole fleet's liveness from one listing per server, because the cockpit now
 // runs it on every load rather than once per jump-in: a probe per record would
 // be a subprocess per record on every poll and every state-file change. The
 // listing screens; it never convicts on its own. A record it says is missing is
@@ -373,28 +517,58 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 	if !supervisorReady() {
 		return 0, 0
 	}
-	listed := make(map[string]bool)
-	for _, name := range sessionNames() {
-		listed[name] = true
+	// One listing per SERVER the fleet is spread over, not one per record: a
+	// repo names its own socket, so the single listing this used to take is now
+	// as many as there are servers in play — bounded by repos, not by
+	// dispatches, and still nothing like a probe apiece.
+	//
+	// Each with when it was made, because a name is not a session: a session
+	// that took the name after the record took hold of its own is somebody
+	// else's (state.Dispatch.HoldsSessionBorn), and a record reading it as its
+	// own would claim "working" over a human's new session for good.
+	listed := make(map[supervisor.Session]time.Time)
+	for _, sock := range socketsOf(ds) {
+		for _, s := range sessionList(sock) {
+			listed[supervisor.Session{Name: s.Name, Socket: sock}] = s.Created
+		}
 	}
 	for _, d := range ds {
 		if d.TmuxSession == "" {
 			continue
 		}
-		if listed[d.TmuxSession] {
+		born, named := listed[SessionOf(d)]
+		if named && d.HoldsSessionBorn(born) {
 			live++
 			continue
+		}
+		reason := "its " + supervisor.Backend() + " session is gone"
+		if named {
+			reason += " — a newer session has its name"
 		}
 		switch d.Status {
 		case state.StatusWorking, state.StatusNeedsInput, state.StatusBlocked:
+		case state.StatusLaunching:
+			// No hook has fired, so absence proves nothing — unless the supervisor
+			// already said the session existed. Then it is a launch that died
+			// before claude ran: a pane whose command could not start, which no
+			// hook will ever report, and whose row would otherwise say "starting"
+			// for as long as the record exists.
+			if d.SessionStartedAt == nil {
+				continue
+			}
+			reason = "its " + supervisor.Backend() + " session ended before claude reported in"
 		default:
 			continue
 		}
-		if sessionAlive(d.TmuxSession) {
+		// The probe is for a listing that came back without the name, which may
+		// be a listing that failed. One that named it, younger than the record's
+		// hold, answered: the session this record held is gone, and asking the
+		// name again would only find the newer one.
+		if !named && sessionAlive(SessionOf(d)) {
 			live++
 			continue
 		}
-		d.Stop(state.StatusExited, "its "+supervisor.Backend()+" session is gone", time.Now())
+		d.Stop(state.StatusExited, reason, time.Now())
 		// The session died without a SessionEnd, so its fan-out died without
 		// SubagentStops: settle the annotation here, where the death is
 		// proven, or the history row claims live subagents forever.
@@ -416,6 +590,14 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 // is invisible from anywhere else, which is how a dead one went unnoticed until
 // a launch finally failed on it.
 func ensureWorktree(repoPath, path, branch string, root Root) (string, error) {
+	return ensureWorktreeFrom(repoPath, path, branch, root, "")
+}
+
+// ensureWorktreeFrom is ensureWorktree for a repo with a root branch of its own
+// (config's [root_branches]): the branch a new feature is cut from when root
+// is the default. It is used only to cut — a feature branch that already exists
+// is reused as it is, exactly as with no root branch configured.
+func ensureWorktreeFrom(repoPath, path, branch string, root Root, repoRoot string) (string, error) {
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		on := strings.TrimSpace(string(out))
 		if on == branch {
@@ -427,8 +609,10 @@ func ensureWorktree(repoPath, path, branch string, root Root) (string, error) {
 		// feature renaming its own branch — two worktrees in the reporter's own
 		// fleet sit on fix/… branches their dispatchers moved them to — and the
 		// worktree is kept rather than reset, because it may hold work nobody
-		// has pushed.
-		return "", fmt.Errorf("its worktree %s is on %s, not %s — a previous session moved it; switch it back or remove it",
+		// has pushed. Since dispatches can be cut beside the human's own
+		// checkouts, named the way theirs are, the folder may also simply be one
+		// of theirs, so the refusal says that too and never suggests removing it.
+		return "", fmt.Errorf("%s is already a checkout, on %s rather than %s — an earlier session of this feature moved it, or it is one of your own; name the feature differently or switch it back",
 			path, on, branch)
 	}
 	// Recover bookkeeping for worktree dirs deleted behind git's back.
@@ -447,7 +631,7 @@ func ensureWorktree(repoPath, path, branch string, root Root) (string, error) {
 		// the base is normally a remote-tracking ref, and inheriting it as
 		// upstream would make a later plain `git push` refuse: push.default
 		// simple rejects a branch whose upstream carries a different name.
-		base, err := baseRef(repoPath, root)
+		base, err := baseRefFrom(repoPath, root, repoRoot)
 		if err != nil {
 			return "", err
 		}
@@ -497,4 +681,15 @@ func CleanupWorktree(repoPath, worktreePath string) bool {
 	_ = exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
 	_, err := os.Stat(worktreePath)
 	return os.IsNotExist(err)
+}
+
+// launchReason is a new record's reason. A worktree that could not be marked
+// trusted is a session that will stop on claude's trust prompt before it reads
+// the prompt it was sent, and saying so at the launch is what lets the row name
+// that prompt when the session goes quiet (LaunchStalled) instead of guessing.
+func launchReason(trusted bool) string {
+	if trusted {
+		return ""
+	}
+	return state.ReasonUntrustedLaunch
 }

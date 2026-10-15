@@ -33,6 +33,11 @@ import (
 // feature — not even one named "steward" — can ever be given this name.
 const Session = "disp_steward"
 
+// session is the steward's whole supervisor address. It names no socket, so it
+// lives on the default server: the steward belongs to no repository, and a
+// repo's own server (ADR 0014) is for that repo's dispatchers.
+func session() supervisor.Session { return supervisor.Session{Name: Session} }
+
 // Opening is the steward's first message. The brief itself is CLAUDE.md in its
 // folder, which claude loads on every start and keeps through compaction.
 const Opening = "Start stewarding the fleet, as your CLAUDE.md describes."
@@ -43,6 +48,7 @@ func Dir() string { return filepath.Join(state.Dir(), "steward") }
 
 // The supervisor calls, as seams for tests.
 var (
+	available   = supervisor.Available
 	sessionIdle = supervisor.SessionIdle
 	hasSession  = supervisor.HasSession
 	newSession  = supervisor.NewSession
@@ -52,7 +58,7 @@ var (
 )
 
 // Running reports whether the steward's session is up.
-func Running() bool { return hasSession(Session) }
+func Running() bool { return hasSession(session()) }
 
 // enabledPath is the steward's switch: present means on. It lives in the state
 // dir, not the config, because it is a fact about this machine's fleet — and so
@@ -89,15 +95,15 @@ func setEnabled(on bool) error {
 // answer leaves it alone, since replacing a steward that is working would be
 // worse than a steward that is late. It reports whether it started one.
 func Ensure() (bool, error) {
-	if !Enabled() || !supervisor.Available() {
+	if !Enabled() || !available() {
 		return false, nil
 	}
 	if Running() {
-		idle, known := sessionIdle(Session)
+		idle, known := sessionIdle(session())
 		if !idle || !known {
 			return false, nil
 		}
-		if err := killSession(Session); err != nil {
+		if err := killSession(session()); err != nil {
 			return false, err
 		}
 	}
@@ -116,7 +122,7 @@ var ErrRunning = errors.New("the steward is already running")
 // binary, so an upgrade changes how it works on its next start — trusts it,
 // and starts the session. One already up is left alone (ErrRunning).
 func Start() error {
-	if !supervisor.Available() {
+	if !available() {
 		return errors.New(supervisor.Backend() + " is not available")
 	}
 	if Running() {
@@ -134,7 +140,7 @@ func Start() error {
 		return err
 	}
 	trusted := trustDir(dir)
-	if err := newSession(Session, dir, dispatch.StewardCommand(os.Getenv("CLAUDE_DISPATCHER_STATE"), Opening)); err != nil {
+	if err := newSession(session(), dir, dispatch.StewardCommand(os.Getenv("CLAUDE_DISPATCHER_STATE"), Opening), ""); err != nil {
 		return err
 	}
 	if err := setEnabled(true); err != nil {
@@ -162,7 +168,7 @@ func Stop() error {
 	if !Running() {
 		return errors.New("the steward is not running")
 	}
-	return killSession(Session)
+	return killSession(session())
 }
 
 // binary is the dispatcher's own path, which the brief and the permission

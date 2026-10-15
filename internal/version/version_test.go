@@ -86,10 +86,10 @@ func TestIsReleaseAndDisplay(t *testing.T) {
 	}
 }
 
-func TestUpgradeHintNamesTheBinary(t *testing.T) {
+func TestTheUpgradeHintNamesTheBinary(t *testing.T) {
 	// Whichever package manager the platform ships through, the hint has to be
 	// a runnable command naming this tool.
-	if got := UpgradeHint(); !strings.Contains(got, "claude-dispatcher") {
-		t.Errorf("UpgradeHint() = %q, want a command naming claude-dispatcher", got)
+	if got := Detect().Hint(); !strings.Contains(got, "claude-dispatcher") {
+		t.Errorf("Detect().Hint() = %q, want a command naming claude-dispatcher", got)
 	}
 }

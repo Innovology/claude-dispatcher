@@ -1,0 +1,308 @@
+package cockpit
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"claude-dispatcher/internal/repos"
+	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
+)
+
+func withServers(t *testing.T, servers map[string][]supervisor.SessionInfo) {
+	t.Helper()
+	prevS, prevL := listServers, listSessions
+	names := []string{}
+	for s := range servers {
+		names = append(names, s)
+	}
+	listServers = func() []string { return names }
+	listSessions = func(sock string) []supervisor.SessionInfo { return servers[sock] }
+	t.Cleanup(func() { listServers, listSessions = prevS, prevL })
+}
+
+func sessAt(sock, name, path string) supervisor.SessionInfo {
+	return supervisor.SessionInfo{Session: supervisor.Session{Name: name, Socket: sock}, Path: path}
+}
+
+// A record claims a session by its whole address. The same name on two servers
+// is two sessions, and claiming a name everywhere would hide a human's own
+// session because a dispatcher elsewhere happens to share it.
+func TestASessionIsClaimedByAddressNotByName(t *testing.T) {
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"player-app":  {sessAt("player-app", "disp-login", "/repos/player-app")},
+		"playerpulse": {sessAt("playerpulse", "disp-login", "/repos/playerpulse")},
+	})
+	records := []*state.Dispatch{
+		{TmuxSession: "disp-login", TmuxSocket: "player-app", Status: state.StatusWorking},
+	}
+
+	got := unclaimedSessions(records)
+	if len(got) != 1 {
+		t.Fatalf("unclaimed = %+v, want the one on the other server", got)
+	}
+	if got[0].Socket != "playerpulse" {
+		t.Errorf("unclaimed = %+v, want the playerpulse one", got[0])
+	}
+}
+
+// A finished dispatcher's session outlives its claude by design, and it is
+// still the dispatcher's. Records of every status claim.
+func TestAFinishedDispatchersSessionIsStillClaimed(t *testing.T) {
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"acme": {sessAt("acme", "disp-old", "/repos/acme")},
+	})
+	records := []*state.Dispatch{
+		{TmuxSession: "disp-old", TmuxSocket: "acme", Status: state.StatusDone},
+	}
+	if got := unclaimedSessions(records); len(got) != 0 {
+		t.Errorf("unclaimed = %+v, want nothing — that session is a dispatcher's", got)
+	}
+}
+
+// The report: a session `ndt player-app` started that afternoon never reached
+// the sessions tab, so it could not be adopted. Its wrapper names every
+// session it makes `<repo>__<branch>`, and a record that adopted the one under
+// that name two days earlier — marked shipped and dismissed since — still
+// claimed the name, and with it today's session. A record holds the session it
+// took hold of, never a younger one that has its name.
+func TestAYoungerSessionUnderAnOldAdoptionsNameIsYours(t *testing.T) {
+	adopted := time.Date(2026, 10, 13, 11, 54, 36, 900_000_000, time.Local)
+	today := time.Date(2026, 10, 15, 15, 30, 23, 0, time.Local)
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"player-app": {{
+			Session: supervisor.Session{Name: "player-app__main", Socket: "player-app"},
+			Path:    "/src/player-app/main", Created: today,
+		}},
+	})
+	old := &state.Dispatch{
+		TmuxSession: "player-app__main", TmuxSocket: "player-app", Status: state.StatusDone,
+		AdoptedAt: &adopted, SessionStartedAt: &adopted, DismissedAt: &adopted,
+	}
+	got := unclaimedSessions([]*state.Dispatch{old})
+	if len(got) != 1 || got[0].Name != "player-app__main" {
+		t.Fatalf("unclaimed = %+v, want today's session listed — the record held another one", got)
+	}
+}
+
+// The other side of it: the session a record did take hold of keeps being its
+// own however long it runs. An adopted session was there before the record,
+// and a dispatched one was made in the moment before the stamp — tmux rounding
+// its creation down to the second never makes it look younger than that.
+func TestTheSessionARecordTookHoldOfStaysClaimed(t *testing.T) {
+	made := time.Date(2026, 10, 15, 9, 0, 0, 0, time.Local)
+	adopted := made.Add(3 * time.Hour)
+	launched := time.Date(2026, 10, 15, 14, 0, 7, 400_000_000, time.Local)
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"player-app": {
+			{Session: supervisor.Session{Name: "player-app__main", Socket: "player-app"}, Created: made},
+			// new-session at 14:00:07.2, stamped once it returned at 07.4.
+			{Session: supervisor.Session{Name: "disp-login", Socket: "player-app"}, Created: launched.Truncate(time.Second)},
+		},
+	})
+	records := []*state.Dispatch{
+		{TmuxSession: "player-app__main", TmuxSocket: "player-app", Status: state.StatusWorking,
+			AdoptedAt: &adopted, SessionStartedAt: &adopted},
+		{TmuxSession: "disp-login", TmuxSocket: "player-app", Status: state.StatusWorking,
+			SessionStartedAt: &launched},
+	}
+	if got := unclaimedSessions(records); len(got) != 0 {
+		t.Errorf("unclaimed = %+v, want both held by their records", got)
+	}
+}
+
+// Of several records at one address, any one holding the session claims it: a
+// feature dispatched again names the same `disp-<slug>` its finished run did.
+func TestAnyRecordHoldingTheSessionClaimsIt(t *testing.T) {
+	first := time.Date(2026, 10, 1, 10, 0, 0, 0, time.Local)
+	again := time.Date(2026, 10, 15, 10, 0, 1, 0, time.Local)
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"acme": {{Session: supervisor.Session{Name: "disp-login", Socket: "acme"}, Created: again.Add(-time.Second)}},
+	})
+	records := []*state.Dispatch{
+		{TmuxSession: "disp-login", TmuxSocket: "acme", Status: state.StatusDone, SessionStartedAt: &first},
+		{TmuxSession: "disp-login", TmuxSocket: "acme", Status: state.StatusWorking, SessionStartedAt: &again},
+	}
+	if got := unclaimedSessions(records); len(got) != 0 {
+		t.Errorf("unclaimed = %+v, want it held by the dispatch that started it", got)
+	}
+}
+
+// Attribution: the socket when it names a repo, the working directory when it
+// does not. The second is the case that matters — a server a human named
+// themselves matches no repo, and only where it is working says whose it is.
+func TestSessionsAreFiledUnderTheProductOfTheRepoTheyWorkIn(t *testing.T) {
+	found := []repos.Repo{
+		{Name: "player-app", Product: "playerpulse", Socket: "player-app", Path: "/src/player-app/main",
+			Worktrees: []repos.Worktree{{Path: "/src/player-app/main", Main: true}}},
+		{Name: "pp-calendar-sync", Product: "playerpulse", Socket: "pp-calendar-sync", Path: "/src/pp-calendar-sync",
+			Worktrees: []repos.Worktree{{Path: "/src/pp-calendar-sync", Main: true}}, Env: "nix develop --command"},
+		{Name: "steve", Product: "steve", Socket: "steve", Path: "/src/steve"},
+	}
+	sessions := []supervisor.SessionInfo{
+		sessAt("player-app", "player-app__main", "/src/player-app/main"),
+		// The socket is named for nothing in the fleet; the path is the only
+		// thing tying it to a repo.
+		sessAt("pp_calendar_isolated", "cal", "/src/pp-calendar-sync"),
+		sessAt("steve", "steve", "/src/steve"),
+		// Neither a known socket nor a known path.
+		sessAt("somewhere-else", "misc", "/tmp/scratch"),
+	}
+
+	got := sessionsByProduct(found, sessions)
+
+	if n := len(got["playerpulse"]); n != 2 {
+		t.Fatalf("playerpulse got %d sessions, want 2: %+v", n, got["playerpulse"])
+	}
+	byName := map[string]ownSession{}
+	for _, s := range got["playerpulse"] {
+		byName[s.name] = s
+	}
+	if byName["cal"].repo != "pp-calendar-sync" {
+		t.Errorf("a session on an unrecognised socket was not placed by its path: %+v", byName["cal"])
+	}
+	if byName["cal"].env != "nix develop --command" {
+		t.Errorf("the repo's environment did not reach the row: %+v", byName["cal"])
+	}
+	if len(got["steve"]) != 1 {
+		t.Errorf("steve got %+v, want its one session", got["steve"])
+	}
+	for p, rows := range got {
+		for _, r := range rows {
+			if r.name == "misc" {
+				t.Errorf("a session belonging to no repo was filed under %q anyway: %+v", p, r)
+			}
+		}
+	}
+}
+
+// A repo in no product goes where its repo already goes. Dropping these made
+// the tab invisible on a machine with no products assigned, which is every
+// machine on its first run — and the portfolio already lists unassigned repos
+// in a bucket of their own, so there is one to use rather than one to invent.
+func TestSessionsInAnUnassignedRepoGoToTheBucketThatAlreadyExists(t *testing.T) {
+	found := []repos.Repo{{Name: "loose", Socket: "loose", Path: "/src/loose"}}
+	got := sessionsByProduct(found, []supervisor.SessionInfo{sessAt("loose", "x", "/src/loose")})
+	if len(got[clUnassigned]) != 1 {
+		t.Fatalf("sessionsByProduct = %+v, want it under %q", got, clUnassigned)
+	}
+	if got[clUnassigned][0].repo != "loose" {
+		t.Errorf("row = %+v, want it to name its repo", got[clUnassigned][0])
+	}
+	// Still nothing invented for a session belonging to no repo at all.
+	none := sessionsByProduct(found, []supervisor.SessionInfo{sessAt("elsewhere", "y", "/tmp/x")})
+	if len(none) != 0 {
+		t.Errorf("a session in no repo was filed anyway: %+v", none)
+	}
+}
+
+// Checkouts nest, and folder names share prefixes. Both have to be handled by
+// path segment: "/src/app" must not swallow "/src/app-2", and a worktree inside
+// another repo's tree belongs to the nearer one.
+func TestPathAttributionIsBySegmentAndNearest(t *testing.T) {
+	found := []repos.Repo{
+		{Name: "app", Product: "p", Path: "/src/app", Worktrees: []repos.Worktree{{Path: "/src/app"}}},
+		{Name: "app-2", Product: "p", Path: "/src/app-2", Worktrees: []repos.Worktree{{Path: "/src/app-2"}}},
+		{Name: "inner", Product: "p", Path: "/src/app/vendor/inner", Worktrees: []repos.Worktree{{Path: "/src/app/vendor/inner"}}},
+	}
+	for _, tc := range []struct{ path, want string }{
+		{"/src/app-2/cmd", "app-2"},
+		{"/src/app/cmd", "app"},
+		{"/src/app/vendor/inner/pkg", "inner"},
+	} {
+		r, ok := repoForPath(found, tc.path)
+		if !ok || r.Name != tc.want {
+			t.Errorf("repoForPath(%q) = %q (ok=%v), want %q", tc.path, r.Name, ok, tc.want)
+		}
+	}
+	if _, ok := repoForPath(found, ""); ok {
+		t.Error("an empty path matched a repo — it would prefix-match every one of them")
+	}
+}
+
+// The default server has no name, and a blank column reads as a fact nobody can
+// find rather than as an answer.
+func TestTheDefaultServerIsNamed(t *testing.T) {
+	if got := serverLabel(""); got != "default server" {
+		t.Errorf("serverLabel(\"\") = %q", got)
+	}
+	if got := serverLabel("player-app"); got != "player-app" {
+		t.Errorf("serverLabel(named) = %q", got)
+	}
+}
+
+// The Y tab walks the sessions it lists and hands over the one under the
+// cursor. A session that has gone since the load is a notice, not a nested
+// attach to nothing; a mark toggles, since a mark A has not spent yet can be
+// changed; and the row says what the session was launched under, which is the
+// environment every pane opened in it will get.
+func TestTheSessionsTabWalksMarksAndHandsOver(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	prevOwn := ownSessions
+	t.Cleanup(func() { ownSessions = prevOwn })
+
+	products = []product{{name: "pp"}}
+	ownSessions = map[string][]ownSession{"pp": {
+		// A socket with no server behind it: asking about it starts nothing.
+		{name: "one", socket: "cockpit-test-no-server", repo: "r", path: t.TempDir(), env: "nix develop /src/r --command"},
+		{name: "two", socket: "cockpit-test-no-server", repo: "r", path: t.TempDir()},
+	}}
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.lens = "product"
+
+	m = press(m, "Y")
+	if m.rightTab != "sessions" {
+		t.Fatalf("Y opened %q, want the sessions tab", m.rightTab)
+	}
+	if !strings.Contains(m.View(), "launched under nix develop /src/r --command") {
+		t.Error("the selected session does not say what it was launched under")
+	}
+	m = press(m, "j")
+	m = press(m, "k")
+	m = press(m, "k")
+	if m.sessionCursor != 0 {
+		t.Errorf("cursor = %d after j, k, k — want it stopped at the top", m.sessionCursor)
+	}
+
+	m = press(m, " ")
+	m = press(m, " ")
+	if len(m.sessionMarked) != 0 {
+		t.Errorf("space twice left marks %v, want the mark taken back", m.sessionMarked)
+	}
+
+	next, cmd := m.handleKey("enter")
+	m = next.(model)
+	if cmd != nil || m.notice != "no live session to attach to" {
+		t.Errorf("enter on a session that has gone: cmd=%v notice=%q", cmd != nil, m.notice)
+	}
+}
+
+// A product with none of the human's own sessions says so and says where they
+// would come from, and its keys do nothing rather than index an empty list.
+func TestAnEmptySessionsTabSaysWhatWouldBeThere(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	prevOwn := ownSessions
+	t.Cleanup(func() { ownSessions = prevOwn })
+
+	products = []product{{name: "pp"}}
+	ownSessions = map[string][]ownSession{}
+	m := newModel()
+	m.width, m.height = 190, 44
+	m.lens = "product"
+	m = press(m, "Y")
+
+	if v := m.View(); !strings.Contains(v, "no sessions of your own in this product's repos") ||
+		!strings.Contains(v, "a session started outside the dispatcher shows up here") {
+		t.Error("an empty sessions tab does not say what would be listed")
+	}
+	for _, k := range []string{"enter", " "} {
+		next, cmd := m.handleKey(k)
+		if mm := next.(model); cmd != nil || mm.notice != "" || len(mm.sessionMarked) != 0 {
+			t.Errorf("%q on an empty tab did something: cmd=%v notice=%q", k, cmd != nil, mm.notice)
+		}
+	}
+}

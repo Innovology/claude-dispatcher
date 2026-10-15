@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 )
@@ -155,26 +153,20 @@ func TestDXModeLineMarksTheArmedModeWithoutColour(t *testing.T) {
 // started with (--permission-mode), and a form that composed a sentence about
 // being unattended and then left the flag off is the defect this field had.
 func TestDXSubmitPassesTheMode(t *testing.T) {
-	var got dispatchpkg.Mode
-	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, _, _ string, mode dispatchpkg.Mode, _ dispatchpkg.Model, _ dispatchpkg.Root, _ bool, _ string) tea.Cmd {
-		got = mode
-		return nil
-	}
-	t.Cleanup(func() { dxLaunch = prev })
+	got := captureLaunches(t)
 
 	m := dxFormModel(t)
 	m.dxTitle, m.dxWhat, m.dxMode = "payment retries", "retry declined cards", dispatchpkg.ModePlan
-	if _, _ = m.dxSubmit(); got != dispatchpkg.ModePlan {
-		t.Errorf("the launch got mode %q, want plan", got)
+	if _, _ = m.dxSubmit(); got.mode != dispatchpkg.ModePlan {
+		t.Errorf("the launch got mode %q, want plan", got.mode)
 	}
 
 	// And the default is auto: a dispatcher is work sent somewhere else to
 	// happen, and the form must not open on a mode that stops on step one.
 	m = dxFormModel(t)
 	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
-	if _, _ = m.dxSubmit(); got != dispatchpkg.ModeAuto {
-		t.Errorf("an untouched MODE launched as %q, want auto", got)
+	if _, _ = m.dxSubmit(); got.mode != dispatchpkg.ModeAuto {
+		t.Errorf("an untouched MODE launched as %q, want auto", got.mode)
 	}
 }
 
@@ -183,14 +175,7 @@ func TestDXSubmitPassesTheMode(t *testing.T) {
 // because the offer is read from the installed help and a hard-coded alias
 // would only pass on machines that advertise it.
 func TestDXSubmitPassesModelAndFanOut(t *testing.T) {
-	var gotModel dispatchpkg.Model
-	var gotFan bool
-	prev := dxLaunch
-	dxLaunch = func(_ *config.Config, _, _, _ string, _ dispatchpkg.Mode, mdl dispatchpkg.Model, _ dispatchpkg.Root, fanOut bool, _ string) tea.Cmd {
-		gotModel, gotFan = mdl, fanOut
-		return nil
-	}
-	t.Cleanup(func() { dxLaunch = prev })
+	got := captureLaunches(t)
 
 	all := dispatchpkg.Models()
 	pick := all[len(all)-1]
@@ -198,15 +183,15 @@ func TestDXSubmitPassesModelAndFanOut(t *testing.T) {
 	m := dxFormModel(t)
 	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
 	m.dxModel, m.dxFanOut = pick, true
-	if _, _ = m.dxSubmit(); gotModel != pick || !gotFan {
-		t.Errorf("the launch got model %q fanOut %v, want %q and true", gotModel, gotFan, pick)
+	if _, _ = m.dxSubmit(); got.model != pick || !got.fanOut {
+		t.Errorf("the launch got model %q fanOut %v, want %q and true", got.model, got.fanOut, pick)
 	}
 
 	// And untouched switches launch as the defaults: no flag, no fan-out.
 	m = dxFormModel(t)
 	m.dxTitle, m.dxWhat = "payment retries", "retry declined cards"
-	if _, _ = m.dxSubmit(); gotModel != dispatchpkg.DefaultModel || gotFan {
-		t.Errorf("untouched switches launched as model %q fanOut %v, want the defaults", gotModel, gotFan)
+	if _, _ = m.dxSubmit(); got.model != dispatchpkg.DefaultModel || got.fanOut {
+		t.Errorf("untouched switches launched as model %q fanOut %v, want the defaults", got.model, got.fanOut)
 	}
 }
 

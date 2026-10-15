@@ -44,6 +44,11 @@ func TestProdSameDayAcrossZones(t *testing.T) {
 // afternoon must land under one heading, whichever zone their timestamps came
 // from.
 func TestProdDayLabelIsStableAcrossZones(t *testing.T) {
+	// prodDay reads in the local zone, so the test says which one: the machine's
+	// own put 09:00 UTC on the previous day anywhere west of UTC-9.
+	prev := time.Local
+	time.Local = bst
+	t.Cleanup(func() { time.Local = prev })
 	now := time.Date(2026, 8, 16, 14, 0, 0, 0, bst)
 	fromForge := time.Date(2026, 8, 16, 9, 0, 0, 0, time.UTC)
 	fromClock := time.Date(2026, 8, 16, 11, 0, 0, 0, bst)
