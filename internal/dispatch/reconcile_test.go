@@ -2,7 +2,9 @@ package dispatch
 
 import (
 	"claude-dispatcher/internal/supervisor"
+	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/state"
 )
@@ -26,12 +28,18 @@ func withFakeSessions(t *testing.T, alive map[string]bool, ready bool) {
 // separately, for the cases where they do not agree.
 func withSessionSeams(t *testing.T, list func() []string, probe func(string) bool, ready bool) {
 	t.Helper()
-	prevAlive, prevNames, prevReady := sessionAlive, sessionNames, supervisorReady
-	t.Cleanup(func() { sessionAlive, sessionNames, supervisorReady = prevAlive, prevNames, prevReady })
+	prevAlive, prevList, prevReady := sessionAlive, sessionList, supervisorReady
+	t.Cleanup(func() { sessionAlive, sessionList, supervisorReady = prevAlive, prevList, prevReady })
 	// The seams are addressed by (socket, name) now; these tests are about what
 	// the listing and the probe say, not about which server was asked, so the
 	// socket is dropped on the way in and the name is all either one sees.
-	sessionNames = func(string) []string { return list() }
+	sessionList = func(socket string) []supervisor.SessionInfo {
+		var out []supervisor.SessionInfo
+		for _, name := range list() {
+			out = append(out, supervisor.SessionInfo{Session: supervisor.Session{Name: name, Socket: socket}})
+		}
+		return out
+	}
 	sessionAlive = func(sess supervisor.Session) bool { return probe(sess.Name) }
 	supervisorReady = func() bool { return ready }
 }
@@ -228,5 +236,52 @@ func TestReconcileSessionsProbesOnlyWhatTheListingMissed(t *testing.T) {
 	}
 	if probes != 0 {
 		t.Errorf("probed %d times, want 0 — the listing already answered for every record", probes)
+	}
+}
+
+// A session that took the record's name after the record took hold of its own
+// is not the record's session. The listing named the address, so it answered —
+// it is not the empty listing the probe guards against — and probing the name
+// would only find the newer session again. Left alone, an adopted record whose
+// session died with the machine would read "working" for as long as the human
+// kept reopening a session under the same name.
+func TestReconcileSessionsRetiresARecordWhoseNameANewerSessionHas(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	held := time.Date(2026, 10, 13, 11, 54, 36, 0, time.Local)
+	saveAll(t,
+		&state.Dispatch{ID: "old", Feature: "orchestrator", Status: state.StatusWorking,
+			TmuxSession: "player-app__main", TmuxSocket: "player-app", SessionStartedAt: &held},
+		&state.Dispatch{ID: "own", Feature: "own", Status: state.StatusWorking,
+			TmuxSession: "disp-own", TmuxSocket: "player-app", SessionStartedAt: &held},
+	)
+	probes := 0
+	prevAlive, prevList, prevReady := sessionAlive, sessionList, supervisorReady
+	t.Cleanup(func() { sessionAlive, sessionList, supervisorReady = prevAlive, prevList, prevReady })
+	sessionList = func(socket string) []supervisor.SessionInfo {
+		return []supervisor.SessionInfo{
+			{Session: supervisor.Session{Name: "player-app__main", Socket: socket}, Created: held.Add(50 * time.Hour)},
+			{Session: supervisor.Session{Name: "disp-own", Socket: socket}, Created: held.Add(-time.Second)},
+		}
+	}
+	sessionAlive = func(supervisor.Session) bool { probes++; return true }
+	supervisorReady = func() bool { return true }
+
+	retired, live := ReconcileSessions(state.LoadAll())
+	if retired != 1 || live != 1 {
+		t.Errorf("ReconcileSessions = retired:%d live:%d, want the older record retired and its neighbour kept", retired, live)
+	}
+	if probes != 0 {
+		t.Errorf("probed %d times, want 0 — the listing named the address and said who has it", probes)
+	}
+	if got := statusOnDisk(t, "old"); got != state.StatusExited {
+		t.Errorf("old: status = %q, want exited", got)
+	}
+	for _, d := range state.LoadAll() {
+		if d.ID == "old" && !strings.Contains(d.StatusReason, "newer session") {
+			t.Errorf("old: reason = %q, want it to say a newer session has the name", d.StatusReason)
+		}
+	}
+	if got := statusOnDisk(t, "own"); got != state.StatusWorking {
+		t.Errorf("own: status = %q, want working", got)
 	}
 }

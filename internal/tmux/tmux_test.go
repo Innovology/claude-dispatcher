@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -161,6 +162,28 @@ func TestServersFindsSocketsAndADeadOneAnswersNothing(t *testing.T) {
 	}
 }
 
+// Asked of a real server, the listing says when the session was made, to the
+// second — between the moment before new-session and the moment it returned.
+func TestARealSessionListsWhenItWasMade(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	srv := Server{Socket: "disp-test-born-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	before := time.Now().Truncate(time.Second)
+	if err := srv.NewSession("s", t.TempDir(), "sleep 30", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	after := time.Now()
+	got := srv.SessionList()
+	if len(got) != 1 {
+		t.Fatalf("SessionList = %+v, want the one session", got)
+	}
+	if c := got[0].Created; c.Before(before) || c.After(after) {
+		t.Errorf("created = %v, want between %v and %v", c, before, after)
+	}
+}
+
 // The launch that reported this: dispatching into a flake repo from a cockpit
 // started in ~ died with `path "/home/…" does not contain a 'flake.nix'`,
 // because the `nix develop` wrapping the client looked for its flake where the
@@ -211,6 +234,22 @@ func TestTheEnvironmentPrefixStandsInTheSession(t *testing.T) {
 func TestASessionListIsReadWholeNameAndPath(t *testing.T) {
 	got := parseSessionList("disp-app-2\t/src/app-2\ndisp-app\t/src/app \r\n\nnot-a-row\n")
 	want := []SessionInfo{{Name: "disp-app-2", Path: "/src/app-2"}, {Name: "disp-app", Path: "/src/app"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parseSessionList = %+v, want %+v", got, want)
+	}
+}
+
+// The creation time is what tells two sessions at one name apart, so it is
+// read with the rest — off the end, so a path with a tab in it stays whole.
+func TestASessionListCarriesWhenEachSessionWasMade(t *testing.T) {
+	got := parseSessionList("player-app__main\t/src/player-app/main\t1792071023\n" +
+		"odd\t/src/a\tb\t1792000000\r\n" +
+		"no-time\t/src/c\t\n")
+	want := []SessionInfo{
+		{Name: "player-app__main", Path: "/src/player-app/main", Created: time.Unix(1792071023, 0)},
+		{Name: "odd", Path: "/src/a\tb", Created: time.Unix(1792000000, 0)},
+		{Name: "no-time", Path: "/src/c"},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseSessionList = %+v, want %+v", got, want)
 	}

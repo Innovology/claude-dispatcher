@@ -235,7 +235,8 @@ func SessionList(socket string) []SessionInfo {
 	for _, name := range Sessions(socket) {
 		// No path: the registry records a pid, not where it was started. A
 		// session with nowhere to attribute it to is dropped by the caller
-		// rather than guessed at.
+		// rather than guessed at. No creation time either, which leaves every
+		// record's claim on its name exactly as it was.
 		out = append(out, SessionInfo{Session: Session{Name: name}})
 	}
 	return out

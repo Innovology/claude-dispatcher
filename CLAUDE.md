@@ -290,7 +290,13 @@
   on a dead socket errors rather than starting one, which is what makes
   enumeration possible at all. A record claims a session by its **whole
   address** and at **any status** (a finished dispatcher's session outlives its
-  claude by design and is still its own). What is left is attributed by the
+  claude by design and is still its own) — but only **the session it took hold
+  of**. A wrapper that names its sessions `<repo>__<branch>` brings the name back
+  every time, and an adoption finished two days earlier was hiding the session
+  `ndt player-app` had started under it that afternoon, which could then not be
+  adopted. So a session created after the record's `SessionStartedAt` only has
+  its name (`HoldsSessionBorn`), and the ghost sweep and `Resume` ask the same
+  rule. What is left is attributed by the
   socket when it names a repo — the launcher's own rule, so exact rather than
   inferred — and otherwise by the directory it runs in, matched against the
   repo's checkouts by path *segment* and longest-first, since `/src/app` must
