@@ -59,6 +59,9 @@ func (m model) helpNotes() map[string][]helpRow {
 		"products · lens 2": {
 			{"esc", "close the panel · again closes the assignment editor"},
 		},
+		"the other lenses": {
+			{"", "enter keeps the matches · esc on one goes to it in its repo"},
+		},
 	}
 }
 

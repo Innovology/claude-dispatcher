@@ -760,6 +760,36 @@
   gone; `o` opens the decision at its line in `$EDITOR`. Nobody was asked to
   move their decisions into a format: adopting the tool's format would have
   meant renumbering some 1,300 citations of "per D18" in player-app.
+- **A decision is found by its number or by what it says.** Reported as "the
+  decisions are great, but hard to navigate": hundreds a repo across a dozen
+  repos, reached by J/K and j/k. `/` on the lens is one query over every
+  repo's decisions, its hits best first where the repo's list was
+  (`decsearch.go`). The matcher is fzf's own, linked in (`internal/fuzzy`),
+  and so is the reading of a query: words apart must all match, each
+  smart-case. A word matches three ways. An **id** is compared as a number —
+  `4`, `0004`, `#4` and `adr-4` name ADR 0004, `d18` names D18 — and that
+  decision is first whatever else matches, because a number is the one query
+  that means one decision. The **title** matches as fzf matches a line
+  ("ghostclr" finds "A ghost cannot clear itself"). The **prose** matches
+  fuzzily **inside one word** only: fzf over a paragraph matches nearly
+  anything — measured on this file, "gate" was found in 46 of its 50
+  decisions, the second best "get a te" — and a word is a run of letters and
+  digits unless the query word has punctuation of its own, because split on
+  spaces `(README.md:163-181).` is one word, and "D18" matched it. The list
+  is **filtered**, not lit in place: a hit found in its prose cannot show why
+  on a row that carries only its title, so the line under it quotes the words
+  that matched, lit, and the body pane lights them where they sit. Typing owns
+  the keyboard (`q` and digits are the query's); enter keeps the hits for
+  j/k, `o` and →; esc on one lands on it in its repo's list, among its
+  neighbours. `/` is the products search's own action, `search.open`, bound
+  in the list lenses' scope too, so one `[keys]` rebind moves both, and the
+  footer and `?` name it from the keymap; the keys of a query being typed are
+  not the keymap's, because every letter is text. The prose is cut up **in
+  the load**, never on the keyboard's thread; a word is matched once however
+  often it is written; only the hits on screen are drawn and lit. Measured on
+  75 checkouts of one repo — 14,526 decisions, 2.9 million words — a
+  one-letter query went from 1.1s to 22ms and drawing its hits from 1.3s to
+  2ms, for 0.4s added to the load.
 - **Parking is an annotation, never a status.** A session reaches a point
   where it asks something the human cannot answer right now; `p` on that queue
   row shelves it under a required, human-typed reason
@@ -1194,6 +1224,8 @@
   windows around the cursor and counts what it hides rather than stopping mute.
   `prodDay` normalises to **local** before truncating: forge timestamps are UTC
   and the clock's are local, and a day compared across the two is never equal.
+  `decsearch.go` is `/` on the decisions lens: every repo's decisions, cut up
+  for matching once per load.
 - `internal/effort` — the hand-coding equivalent: how long a senior developer
   would have taken to write a diff by hand. The ONLY figure in the product
   that is a model rather than a measurement, so every screen showing it says

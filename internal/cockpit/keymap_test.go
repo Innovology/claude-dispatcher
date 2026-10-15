@@ -192,3 +192,57 @@ func TestTheEditorFooterNamesTheKeysAsBound(t *testing.T) {
 		t.Errorf("naming footer = %q", got)
 	}
 }
+
+// `/` on the decisions lens is search.open, the products lens's action, so one
+// rebind moves both: the old key stops opening the search, the new one opens
+// it, and the footer and the sheet name the key it is on now. The keys of a
+// query being typed are not the keymap's — every letter is text.
+func TestRebindReachesTheDecisionsSearch(t *testing.T) {
+	m := keymapFixture(t, map[string]string{"search.open": "ctrl+f", "list.down": "ctrl+j"})
+	decisionRepoOrder = []string{"r"}
+	decisions = map[string][]decision{"r": {
+		{id: "0004", title: "A ghost cannot clear itself", status: "decided", by: "a.md:1"},
+		{id: "0005", title: "A ghost town", status: "decided", by: "b.md:1"},
+	}}
+	m.height = 44
+	m.lens = "decisions"
+	if m = press(m, "/"); m.decTyping {
+		t.Fatal("/ should not open the search once search.open has left it")
+	}
+	if m = press(m, "ctrl+f"); !m.decTyping {
+		t.Fatal("the rebound key should open the search")
+	}
+	if !strings.Contains(m.footerHelp(), "esc cancels") {
+		t.Errorf("typing footer = %q", m.footerHelp())
+	}
+	m = typeDec(m, "ghost j")
+	if m.decQuery != "ghost j" {
+		t.Fatalf("query = %q: a letter the keymap binds is still text while typing", m.decQuery)
+	}
+	m = press(m, "ctrl+u")
+	m = press(press(typeDec(m, "ghost"), "enter"), "ctrl+j")
+	if m.decAt != 1 {
+		t.Errorf("the rebound list.down should walk the hits, at %d", m.decAt)
+	}
+	for _, want := range []string{"ctrl+j/k matches", "ctrl+f edit"} {
+		if !strings.Contains(m.footerHelp(), want) {
+			t.Errorf("the footer should name %q, got %q", want, m.footerHelp())
+		}
+	}
+	if m = press(m, "ctrl+f"); !m.decTyping || m.decQuery != "ghost" {
+		t.Error("the rebound key should edit the query it left")
+	}
+	m = press(press(m, "esc"), "esc")
+	if !strings.Contains(m.footerHelp(), "ctrl+f search") {
+		t.Errorf("the lens footer should name the rebound key, got %q", m.footerHelp())
+	}
+	var onSheet bool
+	for _, r := range sectionRows(m, "the other lenses") {
+		if r.k == "ctrl+f" && strings.Contains(r.d, "decisions") {
+			onSheet = true
+		}
+	}
+	if !onSheet {
+		t.Error("the sheet should list the decisions search under its rebound key")
+	}
+}

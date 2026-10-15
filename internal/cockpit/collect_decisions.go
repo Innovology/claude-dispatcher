@@ -91,6 +91,9 @@ func collectDecisions(ctx *collectCtx, s *snapshot) {
 	s.decisionRepoOrder = order
 	s.decisionProduct = product
 	s.decisionNone = none
+	// Cut up for `/` here, in the load, so a search never waits on it: on a
+	// large portfolio it is the most expensive thing the search does.
+	s.decisionIndex = buildDecIndex(order, decs)
 }
 
 // ---- finding the markdown -----------------------------------------------------

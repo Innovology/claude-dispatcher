@@ -12,8 +12,7 @@ const pad = 2 // left/right page gutter, in columns (the design's 24px)
 // footerByLens is the footer of a lens whose keys the keymap does not own. The
 // ones it does are built from it (footerFromKeys).
 var footerByLens = map[string]string{
-	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
-	"decisions": "j/k decisions · [ ] group · J/K repo · → body · o open in editor",
+	"usage": "budget by window, model and product · 6 velocity · 1 triage",
 	// v4 moved the product view off the digits, so the clause that named one is
 	// gone rather than renumbered: 3 is the backlog now.
 	"velocity": "velocity is what reached production, not what you set in motion · 1 triage",
@@ -169,10 +168,28 @@ func (m model) footerHelp() string {
 	if h, ok := m.footerFromKeys(m.lens); ok {
 		return h
 	}
+	if m.lens == "decisions" {
+		return m.decFooter()
+	}
 	if h, ok := footerByLens[m.lens]; ok {
 		return h
 	}
 	return "1 triage"
+}
+
+// decFooter is the decisions lens's footer, which changes with its search. The
+// keys the keymap owns are read from it; the ones only this lens has, and the
+// ones a query being typed answers to, are its own.
+func (m model) decFooter() string {
+	switch {
+	case m.decTyping:
+		return "type to search · ↑/↓ move · enter keeps it · ctrl+u clears · esc cancels"
+	case m.decSearching():
+		return strings.Join([]string{m.pairHint("list.down", "list.up", "matches"), "→ body",
+			"o open in editor", m.keyHint("search.open", "edit"), "esc go to it"}, " · ")
+	}
+	return strings.Join([]string{m.pairHint("list.down", "list.up", "decisions"), "[ ] group", "J/K repo",
+		"→ body", "o open in editor", m.keyHint("search.open", "search")}, " · ")
 }
 
 // footerFromKeys is the footer of a lens whose keys the keymap owns, built from

@@ -4,7 +4,8 @@ package cockpit
 // written down, wherever they wrote it (collect_decisions.go). The left column
 // is the repos that have any, grouped by product; the middle is the selected
 // repo's decisions, grouped by the file or folder they came from; the right is
-// the selected one in full, with `o` to open it where it was written.
+// the selected one in full, with `o` to open it where it was written. `/`
+// searches every repo's decisions at once (decsearch.go).
 //
 // It was a port of a design in which Claude proposed decisions and the human
 // accepted them, and kept the parts of that nothing ever did: a "plugins" box,
@@ -101,6 +102,14 @@ func (m model) viewDecisions(w, h int) string {
 	repo := repos[ri]
 	list := decisions[repo]
 	ci := clampCursor(m.decCursor, len(list))
+	// A search is drawn in the same columns: its hits where the repo's list
+	// was, and the selected hit in the body.
+	mid := func(cw, budget int) string {
+		if m.decSearchShown() {
+			return m.decHitsBlock(cw, budget)
+		}
+		return decMidBlock(cw, budget, repo, list, ci)
+	}
 
 	// Single column: mid when not in detail, body when in detail.
 	if dec <= 1 {
@@ -113,8 +122,8 @@ func (m model) viewDecisions(w, h int) string {
 			// inline block carries the decision's prose as well as the repos.
 			// The list keeps at least half the height: a decision's prose can
 			// run to a screen, and is cut at the bottom here — → shows it whole.
-			narrow := decNarrowBlock(cw, list, ci, true)
-			block = vjoin(append([]string{decMidBlock(cw, maxi(h-len(narrow), maxi(h*55/100, 8)), repo, list, ci)},
+			narrow := m.decNarrowBlock(cw, list, ci, true)
+			block = vjoin(append([]string{mid(cw, maxi(h-len(narrow), maxi(h*55/100, 8)))},
 				narrow...)...)
 		}
 		return clampLines(gutter(padBlockTo(block, h), pad), h)
@@ -126,9 +135,9 @@ func (m model) viewDecisions(w, h int) string {
 		mw := maxi(w*38/100, 1)
 		bw := maxi(w-2-lw-mw, 1)
 		left := gutter(padBlockTo(m.decLeftBlock(maxi(lw-pad, 1), repo), h), pad)
-		mid := gutter(padBlockTo(decMidBlock(maxi(mw-pad, 1), h, repo, list, ci), h), pad)
+		middle := gutter(padBlockTo(mid(maxi(mw-pad, 1), h), h), pad)
 		body := gutter(padBlockTo(m.decBodyBlock(maxi(bw-pad, 1), list, ci), h), pad)
-		blocks = []string{left, vrule(h, cRule), mid, vrule(h, cRule), body}
+		blocks = []string{left, vrule(h, cRule), middle, vrule(h, cRule), body}
 	} else { // dec == 2: mid + body, left hidden.
 		mw := maxi(w*42/100, 1)
 		bw := maxi(w-1-mw, 1)
@@ -136,12 +145,12 @@ func (m model) viewDecisions(w, h int) string {
 		// Only the left column is hidden at this tier, and the body pane is
 		// still showing the prose — so the inline block re-homes just what the
 		// left column carried, without repeating the decision side by side.
-		narrow := decNarrowBlock(mwi, list, ci, false)
-		midBlock := vjoin(append([]string{decMidBlock(mwi, maxi(h-len(narrow), 8), repo, list, ci)},
+		narrow := m.decNarrowBlock(mwi, list, ci, false)
+		midBlock := vjoin(append([]string{mid(mwi, maxi(h-len(narrow), 8))},
 			narrow...)...)
-		mid := gutter(padBlockTo(midBlock, h), pad)
+		middle := gutter(padBlockTo(midBlock, h), pad)
 		body := gutter(padBlockTo(m.decBodyBlock(maxi(bw-pad, 1), list, ci), h), pad)
-		blocks = []string{mid, vrule(h, cRule), body}
+		blocks = []string{middle, vrule(h, cRule), body}
 	}
 	return clampLines(hjoin(blocks...), h)
 }
@@ -164,6 +173,19 @@ func decRepoCount(repo string) (count, color string) {
 	return itoa(len(rl)), cDim
 }
 
+// decRepoTally is a repo's count as the lens draws it now: decRepoCount, or
+// while a query is up how many of its hits are that repo's — "·" for none, so
+// a repo the search found nothing in is still listed where it was.
+func decRepoTally(repo string, hits map[string]int) (count, color string) {
+	if hits == nil {
+		return decRepoCount(repo)
+	}
+	if n := hits[repo]; n > 0 {
+		return itoa(n), cSearchHit
+	}
+	return "·", cFaint
+}
+
 // decProduct is the label a repo is grouped under in the left column.
 func decProduct(repo string) string {
 	if p := decisionProduct[repo]; p != "" {
@@ -176,31 +198,29 @@ func decProduct(repo string) string {
 // At two columns only the left column is hidden, so it carries just the repos;
 // at one column the body pane is gone too and the selected decision's prose
 // comes with it. At three columns nothing is missing and this is not rendered.
-func decNarrowBlock(cw int, list []decision, ci int, prose bool) []string {
+func (m model) decNarrowBlock(cw int, list []decision, ci int, prose bool) []string {
 	out := []string{"", fg(cRule, strings.Repeat("─", cw))}
 
-	if prose && len(list) > 0 {
-		x := list[ci]
-		section := func(label, body, hex string) {
+	if x, lit, ok := m.decShown(list, ci); prose && ok {
+		section := func(label, body string, lit map[int]bool, hex string) {
 			if body == "" {
 				return
 			}
 			out = append(out, "")
 			out = append(out, line(label, cw, cDim, ""))
-			for _, l := range decWrap(body, cw) {
-				out = append(out, fg(hex, l))
-			}
+			out = append(out, decWrapLit(body, cw, lit, hex)...)
 		}
-		section("context", x.context, cMid)
-		section("decision", x.decision, cFg)
-		section("consequences", x.consequences, cMid)
+		section("context", x.context, lit.prose[0], cMid)
+		section("decision", x.decision, lit.prose[1], cFg)
+		section("consequences", x.consequences, lit.prose[2], cMid)
 		out = append(out, "", line(x.by, cw, cFaint, ""))
 	}
 
 	out = append(out, "")
 	out = append(out, line("where decisions live", cw, cDim, ""))
+	hits := m.decHitCounts()
 	for _, r := range decisionRepoOrder {
-		count, countColor := decRepoCount(r)
+		count, countColor := decRepoTally(r, hits)
 		out = append(out, row(cw, "", flexc(r, cMid), cr(count, 6, countColor)))
 	}
 	return out
@@ -209,6 +229,15 @@ func decNarrowBlock(cw int, list []decision, ci int, prose bool) []string {
 // decLeftBlock is the "where decisions live" column: the repos that have any,
 // under their products, with each one's open count or total.
 func (m model) decLeftBlock(cw int, selRepo string) string {
+	// While a query is up the repo marked is the selected hit's, and each
+	// count is how many hits that repo has.
+	hits := m.decHitCounts()
+	if hits != nil {
+		selRepo = ""
+		if rec, ok := m.decSelectedRec(); ok {
+			selRepo = rec.repo
+		}
+	}
 	var lines []string
 	lines = append(lines, line("where decisions live", cw, cDim, ""))
 	prev := "\x00"
@@ -220,8 +249,10 @@ func (m model) decLeftBlock(cw int, selRepo string) string {
 		bg, nameColor, marker := "", cFg, ""
 		if r == selRepo {
 			bg, nameColor, marker = cSel, cWhite, "▸"
+		} else if hits != nil && hits[r] == 0 {
+			nameColor = cFaint
 		}
-		count, countColor := decRepoCount(r)
+		count, countColor := decRepoTally(r, hits)
 		lines = append(lines, row(cw, bg, c(marker, 2, cMid), flexc(r, nameColor), cr(count, 6, countColor)))
 	}
 	lines = append(lines, "")
@@ -229,7 +260,11 @@ func (m model) decLeftBlock(cw int, selRepo string) string {
 	if decisionNone > 0 {
 		lines = append(lines, line(countOf(decisionNone, "repo", "repos")+" with none found", cw, cFaint, ""))
 	}
-	lines = append(lines, line("J/K another repo", cw, cFaint, ""))
+	if hits != nil {
+		lines = append(lines, line("matches in each repo", cw, cFaint, ""))
+	} else {
+		lines = append(lines, line("J/K another repo · / search them all", cw, cFaint, ""))
+	}
 	return vjoin(lines...)
 }
 
@@ -302,10 +337,13 @@ func decMidBlock(cw, budget int, repo string, list []decision, ci int) string {
 // decBodyBlock is the selected decision in full: where it was found, its
 // state, and its prose.
 func (m model) decBodyBlock(cw int, list []decision, ci int) string {
-	if len(list) == 0 {
+	x, lit, ok := m.decShown(list, ci)
+	if !ok {
+		if m.decSearching() {
+			return fg(cFaint, "no decision matches")
+		}
 		return fg(cFaint, "no decisions")
 	}
-	x := list[ci]
 	st := decisionStatusMeta[x.status]
 	wrapW := mini(cw, 74)
 
@@ -322,25 +360,21 @@ func (m model) decBodyBlock(cw int, list []decision, ci int) string {
 		c(tag, dispWidth(tag)+2, cDim),
 		seg{text: when, flex: true, align: alignRight, hex: st.color},
 	))
-	for _, l := range decWrap(x.title, cw) {
-		lines = append(lines, fg(cWhite, l))
-	}
+	lines = append(lines, decWrapLit(x.title, cw, lit.title, cWhite)...)
 	lines = append(lines, fg(cFaint, x.by))
 	lines = append(lines, fg(st.color, st.note))
 
-	section := func(label, body, hex string) {
+	section := func(label, body string, lit map[int]bool, hex string) {
 		if body == "" {
 			return
 		}
 		lines = append(lines, "")
 		lines = append(lines, fg(cDim, label))
-		for _, l := range decWrap(body, wrapW) {
-			lines = append(lines, fg(hex, l))
-		}
+		lines = append(lines, decWrapLit(body, wrapW, lit, hex)...)
 	}
-	section("context", x.context, cMid)
-	section("decision", x.decision, cFg)
-	section("consequences", x.consequences, cMid)
+	section("context", x.context, lit.prose[0], cMid)
+	section("decision", x.decision, lit.prose[1], cFg)
+	section("consequences", x.consequences, lit.prose[2], cMid)
 
 	lines = append(lines, "")
 	lines = append(lines, fg(cDim, "o opens it in your editor"))
@@ -349,11 +383,21 @@ func (m model) decBodyBlock(cw int, list []decision, ci int) string {
 
 // updateDecisions handles the lens's keys: j/k move within a repo's
 // decisions, ] and [ to the next or previous group, J/K change repo, →/←
-// toggle the detail pane, and o opens the selected one in the human's editor
-// at its line.
+// toggle the detail pane, o opens the selected one in the human's editor at
+// its line, and / searches every repo's (decsearch.go), whose keys come first
+// while a search is up.
 func (m model) updateDecisions(k string) (model, tea.Cmd) {
+	// A query being typed takes the key as it was pressed: every letter is text,
+	// so none may be resolved into something else first.
+	if m.decTyping {
+		mm, cmd, _ := m.updateDecSearch(k)
+		return mm, cmd
+	}
 	if k = m.keys.Resolve(keymap.List, k); k == "" {
 		return m, nil
+	}
+	if mm, cmd, handled := m.updateDecSearch(k); handled {
+		return mm, cmd
 	}
 	repos := decisionRepoOrder
 	if len(repos) == 0 {
@@ -385,6 +429,8 @@ func (m model) updateDecisions(k string) (model, tea.Cmd) {
 			return m, nil
 		}
 		return m.decOpen(list[clampCursor(m.decCursor, len(list))])
+	case "/":
+		return m.decSearchStart(), nil
 	case "right", "l":
 		m.pane = "detail"
 	case "left", "h", "esc":

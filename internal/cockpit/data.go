@@ -104,6 +104,9 @@ var (
 	decisionRepoOrder []string
 	decisionProduct   = map[string]string{}
 	decisionNone      int
+	// decisionIndex is the decisions cut up for `/` (decsearch.go), by the
+	// load that read them.
+	decisionIndex *decIndex
 )
 
 // ---- usage ------------------------------------------------------------------

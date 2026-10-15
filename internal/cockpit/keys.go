@@ -270,6 +270,12 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateProducts(k)
 		return mm, cmd
 	}
+	// A decisions query is text entry for the same reason: "q" and "0004" are
+	// what someone searching decisions types.
+	if m.lens == "decisions" && m.decTyping {
+		mm, cmd := m.updateDecisions(k)
+		return mm, cmd
+	}
 
 	// From here down the key is whatever the human bound it to. Resolving
 	// translates it back to the action's canonical spelling, which is what the
@@ -337,6 +343,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clKeying, m.clKeyFor, m.clKeyText = false, "", ""
 		m.clMarked = map[string]bool{}
 		m.clExpanded, m.clFoldRow = map[string]bool{}, ""
+		m = m.decSearchClear()
 		return m, nil
 	}
 
