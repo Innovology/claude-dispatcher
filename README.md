@@ -28,7 +28,7 @@ Switch with the number keys. Each lens is a different question about the same fa
 | `2` | **products** | how is each product (many repos) doing? `enter` opens one |
 | `3` | **backlog** | GitHub Issues · Linear · Azure Boards, in one list |
 | `4` | **usage** | 5-hour and weekly consumption vs my learned limits |
-| `5` | **decisions** | ADRs, and the decision sections written in each repo's own markdown |
+| `5` | **decisions** | every decision your repos have written down, wherever it is — ADRs, registers, decided and open sections, rulings — grouped by the file it came from; `[` `]` step a group, `o` opens it in your editor, `/` searches every repo's at once — by number (`4` finds 0004), title or what it says |
 | `6` | **velocity** | DORA + what actually reached production |
 
 **Triage is the whole fleet, ranked.** One table of everything in flight — the dispatchers that want you above the ones getting on with it — and a detail panel for the row under the cursor: what it wants, where it stands, and the keys that answer it. The cursor holds its row across refreshes, so nothing moves under your hands.
@@ -310,6 +310,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `t` | steward on/off — it answers what each brief settles and notes the rest on your rows |
 | `p` | park an ask with a reason · on a parked row, take it back up |
 | `d` · `ctrl+z` | dispatch · put back the last thing you cleared |
+| `/` | on decisions: search every repo's — `enter` keeps the matches, `esc` on one goes to it in its repo |
 | `,` · `:` · `?` | settings · command palette · all keys |
 | `U` | upgrade to the published build — runs behind the cockpit, then comes straight back on the new build |
 | `q` | quit |

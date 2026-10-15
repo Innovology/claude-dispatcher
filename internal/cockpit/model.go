@@ -142,9 +142,16 @@ type model struct {
 	clKeyFor  string
 	clKeyText string
 
-	decRepo      int
-	decCursor    int
-	pluginCursor int
+	decRepo   int
+	decCursor int
+	// The decisions lens's `/` search (decsearch.go). decQuery is the query, ""
+	// when none is up, and decTyping its line having the keyboard; decFound is
+	// what it found across every repo, best first, and decAt the hit the
+	// cursor is on.
+	decQuery  string
+	decTyping bool
+	decFound  *decFound
+	decAt     int
 
 	rightTab     string
 	reviewCursor int
@@ -370,7 +377,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(boot, queued)
 		}
 		applySnapshot(snapshot(msg))
-		m = m.noteQuota()
+		m = m.noteQuota().decSearchRefresh()
 		// The fleet is rebuilt from the fresh records; fold the user's ordering
 		// and cleared set back onto it before anything renders, then re-key the
 		// cursor onto the row it was on — a rank that changed in this refresh

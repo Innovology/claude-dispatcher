@@ -98,7 +98,11 @@ var backlogTickets []ticket
 var (
 	decisions         = map[string][]decision{}
 	decisionRepoOrder []string
-	plugins           []plugin
+	decisionProduct   = map[string]string{}
+	decisionNone      int
+	// decisionIndex is the decisions cut up for `/` (decsearch.go), by the
+	// load that read them.
+	decisionIndex *decIndex
 )
 
 // ---- usage ------------------------------------------------------------------

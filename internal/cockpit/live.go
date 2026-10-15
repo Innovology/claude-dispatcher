@@ -74,7 +74,9 @@ type snapshot struct {
 
 	decisions         map[string][]decision
 	decisionRepoOrder []string
-	plugins           []plugin
+	decisionProduct   map[string]string // repo → product, for the left column's groups
+	decisionNone      int               // repos read that had no decisions
+	decisionIndex     *decIndex         // the same decisions, cut up for `/`
 
 	usageWindows    []usageWindow
 	usageModels     []usageModel
@@ -309,7 +311,7 @@ func loadSnapshotReporting(cfg *config.Config, r bootReport) snapshot {
 	collectBacklog(ctx, &s)
 	r.done(bootBacklog, countOf(len(s.backlogTickets), "ticket", "tickets"), false)
 
-	r.begin(bootDecisions, "scanning repos for adrs and decision logs…")
+	r.begin(bootDecisions, "reading every repo's markdown for decisions…")
 	collectDecisions(ctx, &s)
 	r.done(bootDecisions, countOf(countDecisions(s.decisions), "record", "records")+
 		" in "+countOf(len(s.decisionRepoOrder), "repo", "repos"), false)
@@ -445,12 +447,14 @@ func applySnapshot(s snapshot) {
 	}
 	if s.decisions != nil {
 		decisions = s.decisions
+		decisionNone = s.decisionNone
+		decisionIndex = s.decisionIndex
 	}
 	if s.decisionRepoOrder != nil {
 		decisionRepoOrder = s.decisionRepoOrder
 	}
-	if s.plugins != nil {
-		plugins = s.plugins
+	if s.decisionProduct != nil {
+		decisionProduct = s.decisionProduct
 	}
 	if s.usageWindows != nil {
 		usageWindows = s.usageWindows

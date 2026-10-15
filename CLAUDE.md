@@ -428,7 +428,7 @@
   which matched exactly that tier plus the queue it duplicated, left with it.
   The full record is `docs/adr/0003-amber-is-a-claim-about-the-human.md`.
 - **Decisions are read where they were written, never invented.** The
-  DECISIONS lens has two sources: an adr-tools folder, and a heading that
+  DECISIONS lens first had two sources: an adr-tools folder, and a heading that
   names a set of decisions in the repo's own markdown (`CLAUDE.md`,
   `DECISIONS.md`, `ARCHITECTURE.md`, `README.md`) — this section is one, and
   the lens reads it. Nothing writes a record: not the cockpit, not a
@@ -436,6 +436,55 @@
   inventing records is worse than an empty pane. It shipped reading only
   `doc/adr/`, which no repo in the fleet keeps, so the lens was empty for
   every repo while decisions sat in plain sight one file away.
+  **And where they were written is anywhere.** The two sources were still a
+  fixed list of places, and on the machine it was reported from they found
+  one repo, this one, while the repos worked in daily kept hundreds:
+  player-app a numbered register (`_docs/spec/stack-decisions.md`, D1–D48)
+  and a record of rulings marked RATIFIED, playerpulse its open questions in
+  "Open decisions" sections and `[NEEDS DECISION]` markers through `docs/`.
+  So every `.md` in a checkout is read (not dependencies, build output,
+  hidden folders or a nested checkout), and a decision is known by its
+  **shape**: an ADR; a file titled as decisions, one per `##`; a file named
+  for one decision; a section named for decisions, decided or open, one per
+  bullet, sub-heading or table row; a heading marked RATIFIED, RULED,
+  WITHDRAWN or "Decision N"; a line marked `[NEEDS DECISION]`. The **status
+  is the repo's own word** — decided, open, superseded — taken from the
+  decision's own marker or status line, never from something its body
+  describes. Each is **grouped by the file it came from** (its folder beside
+  it), by the folder where the file's name says nothing, and the root's
+  generic files are the plain list. Measured on player-app: 116 files, 210
+  decisions, 53 open, read in 28ms cold; the walk is cached two minutes and
+  a file re-read only when it changes. The "plugins" box and the `a`/`s`/`e`
+  keys — leftovers of a design where the cockpit accepted decisions — are
+  gone; `o` opens the decision at its line in `$EDITOR`. Nobody was asked to
+  move their decisions into a format: adopting the tool's format would have
+  meant renumbering some 1,300 citations of "per D18" in player-app.
+- **A decision is found by its number or by what it says.** Reported as "the
+  decisions are great, but hard to navigate": hundreds a repo across a dozen
+  repos, reached by J/K and j/k. `/` on the lens is one query over every
+  repo's decisions, its hits best first where the repo's list was
+  (`decsearch.go`). The matcher is fzf's own, linked in (`internal/fuzzy`),
+  and so is the reading of a query: words apart must all match, each
+  smart-case. A word matches three ways. An **id** is compared as a number —
+  `4`, `0004`, `#4` and `adr-4` name ADR 0004, `d18` names D18 — and that
+  decision is first whatever else matches, because a number is the one query
+  that means one decision. The **title** matches as fzf matches a line
+  ("ghostclr" finds "A ghost cannot clear itself"). The **prose** matches
+  fuzzily **inside one word** only: fzf over a paragraph matches nearly
+  anything — measured on this file, "gate" was found in 46 of its 50
+  decisions, the second best "get a te" — and a word is a run of letters and
+  digits unless the query word has punctuation of its own, because split on
+  spaces `(README.md:163-181).` is one word, and "D18" matched it. The list
+  is **filtered**, not lit in place: a hit found in its prose cannot show why
+  on a row that carries only its title, so the line under it quotes the words
+  that matched, lit, and the body pane lights them where they sit. Typing owns
+  the keyboard (`q` and digits are the query's); enter keeps the hits for
+  j/k, `o` and →; esc on one lands on it in its repo's list, among its
+  neighbours. The prose is cut up **in the load**, never on the keyboard's
+  thread; a word is matched once however often it is written; only the hits
+  on screen are drawn and lit. Measured on 75 checkouts of one repo — 14,526
+  decisions, 2.9 million words — a one-letter query went from 1.1s to 22ms and
+  drawing its hits from 1.3s to 2ms, for 0.4s added to the load.
 - **Parking is an annotation, never a status.** A session reaches a point
   where it asks something the human cannot answer right now; `p` on that queue
   row shelves it under a required, human-typed reason
@@ -731,6 +780,10 @@
   windows around the cursor and counts what it hides rather than stopping mute.
   `prodDay` normalises to **local** before truncating: forge timestamps are UTC
   and the clock's are local, and a day compared across the two is never equal.
+  `decsearch.go` is `/` on the decisions lens: every repo's decisions, cut up
+  for matching once per load.
+- `internal/fuzzy` — `/` search, wrapping fzf's own matcher in process; returns
+  match positions so a hit is highlighted where it sits.
 - `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
 - `internal/effort` — the hand-coding equivalent: how long a senior developer
   would have taken to write a diff by hand. The ONLY figure in the product
