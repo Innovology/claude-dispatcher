@@ -3,6 +3,7 @@ package cockpit
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -57,6 +58,74 @@ func TestAFinishedDispatchersSessionIsStillClaimed(t *testing.T) {
 	}
 	if got := unclaimedSessions(records); len(got) != 0 {
 		t.Errorf("unclaimed = %+v, want nothing — that session is a dispatcher's", got)
+	}
+}
+
+// The report: a session `ndt player-app` started that afternoon never reached
+// the sessions tab, so it could not be adopted. Its wrapper names every
+// session it makes `<repo>__<branch>`, and a record that adopted the one under
+// that name two days earlier — marked shipped and dismissed since — still
+// claimed the name, and with it today's session. A record holds the session it
+// took hold of, never a younger one that has its name.
+func TestAYoungerSessionUnderAnOldAdoptionsNameIsYours(t *testing.T) {
+	adopted := time.Date(2026, 10, 13, 11, 54, 36, 900_000_000, time.Local)
+	today := time.Date(2026, 10, 15, 15, 30, 23, 0, time.Local)
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"player-app": {{
+			Session: supervisor.Session{Name: "player-app__main", Socket: "player-app"},
+			Path:    "/src/player-app/main", Created: today,
+		}},
+	})
+	old := &state.Dispatch{
+		TmuxSession: "player-app__main", TmuxSocket: "player-app", Status: state.StatusDone,
+		AdoptedAt: &adopted, SessionStartedAt: &adopted, DismissedAt: &adopted,
+	}
+	got := unclaimedSessions([]*state.Dispatch{old})
+	if len(got) != 1 || got[0].Name != "player-app__main" {
+		t.Fatalf("unclaimed = %+v, want today's session listed — the record held another one", got)
+	}
+}
+
+// The other side of it: the session a record did take hold of keeps being its
+// own however long it runs. An adopted session was there before the record,
+// and a dispatched one was made in the moment before the stamp — tmux rounding
+// its creation down to the second never makes it look younger than that.
+func TestTheSessionARecordTookHoldOfStaysClaimed(t *testing.T) {
+	made := time.Date(2026, 10, 15, 9, 0, 0, 0, time.Local)
+	adopted := made.Add(3 * time.Hour)
+	launched := time.Date(2026, 10, 15, 14, 0, 7, 400_000_000, time.Local)
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"player-app": {
+			{Session: supervisor.Session{Name: "player-app__main", Socket: "player-app"}, Created: made},
+			// new-session at 14:00:07.2, stamped once it returned at 07.4.
+			{Session: supervisor.Session{Name: "disp-login", Socket: "player-app"}, Created: launched.Truncate(time.Second)},
+		},
+	})
+	records := []*state.Dispatch{
+		{TmuxSession: "player-app__main", TmuxSocket: "player-app", Status: state.StatusWorking,
+			AdoptedAt: &adopted, SessionStartedAt: &adopted},
+		{TmuxSession: "disp-login", TmuxSocket: "player-app", Status: state.StatusWorking,
+			SessionStartedAt: &launched},
+	}
+	if got := unclaimedSessions(records); len(got) != 0 {
+		t.Errorf("unclaimed = %+v, want both held by their records", got)
+	}
+}
+
+// Of several records at one address, any one holding the session claims it: a
+// feature dispatched again names the same `disp-<slug>` its finished run did.
+func TestAnyRecordHoldingTheSessionClaimsIt(t *testing.T) {
+	first := time.Date(2026, 10, 1, 10, 0, 0, 0, time.Local)
+	again := time.Date(2026, 10, 15, 10, 0, 1, 0, time.Local)
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"acme": {{Session: supervisor.Session{Name: "disp-login", Socket: "acme"}, Created: again.Add(-time.Second)}},
+	})
+	records := []*state.Dispatch{
+		{TmuxSession: "disp-login", TmuxSocket: "acme", Status: state.StatusDone, SessionStartedAt: &first},
+		{TmuxSession: "disp-login", TmuxSocket: "acme", Status: state.StatusWorking, SessionStartedAt: &again},
+	}
+	if got := unclaimedSessions(records); len(got) != 0 {
+		t.Errorf("unclaimed = %+v, want it held by the dispatch that started it", got)
 	}
 }
 

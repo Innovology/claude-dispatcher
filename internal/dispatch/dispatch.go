@@ -451,11 +451,11 @@ func unfinished(s state.Status) bool {
 	return false
 }
 
-// sessionAlive, sessionNames and supervisorReady are seams: tests swap them
+// sessionAlive, sessionList and supervisorReady are seams: tests swap them
 // rather than stand up real sessions.
 var (
 	sessionAlive    = supervisor.HasSession
-	sessionNames    = supervisor.Sessions
+	sessionList     = supervisor.SessionList
 	supervisorReady = supervisor.Available
 )
 
@@ -521,21 +521,30 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 	// repo names its own socket, so the single listing this used to take is now
 	// as many as there are servers in play — bounded by repos, not by
 	// dispatches, and still nothing like a probe apiece.
-	listed := make(map[supervisor.Session]bool)
+	//
+	// Each with when it was made, because a name is not a session: a session
+	// that took the name after the record took hold of its own is somebody
+	// else's (state.Dispatch.HoldsSessionBorn), and a record reading it as its
+	// own would claim "working" over a human's new session for good.
+	listed := make(map[supervisor.Session]time.Time)
 	for _, sock := range socketsOf(ds) {
-		for _, name := range sessionNames(sock) {
-			listed[supervisor.Session{Name: name, Socket: sock}] = true
+		for _, s := range sessionList(sock) {
+			listed[supervisor.Session{Name: s.Name, Socket: sock}] = s.Created
 		}
 	}
 	for _, d := range ds {
 		if d.TmuxSession == "" {
 			continue
 		}
-		if listed[SessionOf(d)] {
+		born, named := listed[SessionOf(d)]
+		if named && d.HoldsSessionBorn(born) {
 			live++
 			continue
 		}
 		reason := "its " + supervisor.Backend() + " session is gone"
+		if named {
+			reason += " — a newer session has its name"
+		}
 		switch d.Status {
 		case state.StatusWorking, state.StatusNeedsInput, state.StatusBlocked:
 		case state.StatusLaunching:
@@ -551,7 +560,11 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 		default:
 			continue
 		}
-		if sessionAlive(SessionOf(d)) {
+		// The probe is for a listing that came back without the name, which may
+		// be a listing that failed. One that named it, younger than the record's
+		// hold, answered: the session this record held is gone, and asking the
+		// name again would only find the newer one.
+		if !named && sessionAlive(SessionOf(d)) {
 			live++
 			continue
 		}

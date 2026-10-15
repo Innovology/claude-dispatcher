@@ -104,7 +104,14 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// shell in (see tmux.SessionIdle): "idle" here kills the session, and a
 	// probe that called every live claude idle was killing the very dispatcher
 	// the human had just asked to reopen.
-	if d.TmuxSession != "" && sessionAlive(SessionOf(d)) {
+	//
+	// And why it must be the dispatcher's own session, not a younger one that
+	// has taken the name since: a human's wrapper names its sessions after the
+	// repo and branch, so an adopted record's name comes back every time they
+	// open one. Handed back as live, ⏎ on the old row attached them to some
+	// other conversation; read as idle, it killed their session. A younger one
+	// is left alone and a new name is taken below, as for an unknown answer.
+	if d.TmuxSession != "" && sessionAlive(SessionOf(d)) && holdsOwnSession(d) {
 		idle, known := sessionIdle(SessionOf(d))
 		switch {
 		case known && !idle:
@@ -216,6 +223,19 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		return mode, name, err
 	}
 	return mode, name, nil
+}
+
+// holdsOwnSession reports whether the session at d's address is the one d took
+// hold of. Only a listing that names it, created after the record's hold, says
+// otherwise: one that cannot say when it was made, or does not list it at all,
+// leaves the claim the name has always carried.
+func holdsOwnSession(d *state.Dispatch) bool {
+	for _, s := range sessionList(d.TmuxSocket) {
+		if s.Name == d.TmuxSession {
+			return d.HoldsSessionBorn(s.Created)
+		}
+	}
+	return true
 }
 
 // NeverStarted reports whether d has no conversation to resume: no session id

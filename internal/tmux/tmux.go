@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 func Available() bool {
@@ -582,38 +583,53 @@ func Servers() []Server {
 	return out
 }
 
-// SessionInfo is one session on a server: what it is called, and the directory
-// it was started in.
+// SessionInfo is one session on a server: what it is called, the directory it
+// was started in, and when it was created.
 //
 // The path is what makes a session attributable. A session this cockpit did not
 // start carries no record and no dispatcher id, so the only thing tying it to a
 // repository is where it is working — and `#{session_path}` is that, straight
 // from tmux, for free in the listing we are already making.
+//
+// The creation time is what tells two sessions at one address apart. A name is
+// free again the moment its session ends, and a per-project wrapper names every
+// session it makes after the repo and the branch, so the session under a name
+// today need not be the one a record took hold of last week. Whole seconds, as
+// tmux keeps it; zero where it could not be read.
 type SessionInfo struct {
-	Name string
-	Path string
+	Name    string
+	Path    string
+	Created time.Time
 }
 
 // SessionList is every session on this server with the directory it runs in.
 // A server that is not there lists nothing, which is not an error anyone acts
 // on: it is what a socket file whose server has gone looks like.
 func (s Server) SessionList() []SessionInfo {
-	out, err := s.cmd("list-sessions", "-F", "#{session_name}\t#{session_path}").Output()
+	out, err := s.cmd("list-sessions", "-F", "#{session_name}\t#{session_path}\t#{session_created}").Output()
 	if err != nil {
 		return nil
 	}
 	return parseSessionList(string(out))
 }
 
-// parseSessionList reads list-sessions output of name<TAB>path.
+// parseSessionList reads list-sessions output of name<TAB>path<TAB>created.
+// The time is taken off the END, so a path holding a tab of its own is still
+// read whole, and a row without one is a name and a path with no time known.
 func parseSessionList(out string) []SessionInfo {
 	var sessions []SessionInfo
 	for _, ln := range strings.Split(out, "\n") {
-		name, path, ok := strings.Cut(strings.TrimRight(ln, "\r"), "\t")
+		name, rest, ok := strings.Cut(strings.TrimRight(ln, "\r"), "\t")
 		if !ok || strings.TrimSpace(name) == "" {
 			continue
 		}
-		sessions = append(sessions, SessionInfo{Name: name, Path: strings.TrimSpace(path)})
+		var created time.Time
+		if i := strings.LastIndexByte(rest, '\t'); i >= 0 {
+			if sec, err := strconv.ParseInt(strings.TrimSpace(rest[i+1:]), 10, 64); err == nil && sec > 0 {
+				rest, created = rest[:i], time.Unix(sec, 0)
+			}
+		}
+		sessions = append(sessions, SessionInfo{Name: name, Path: strings.TrimSpace(rest), Created: created})
 	}
 	return sessions
 }

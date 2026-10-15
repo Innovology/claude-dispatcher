@@ -23,11 +23,13 @@
 //	EnsureFocusEvents()                       — have the host report focus changes
 //	AttachSwitches(s) bool                    — does AttachCmd exit on the way out
 //	Servers() []string                        — every server found by looking
-//	SessionList(socket) []SessionInfo         — its sessions, with their directories
+//	SessionList(socket) []SessionInfo         — its sessions, with directories and births
 //	SessionIdle(s) (idle, known bool)         — has claude ended, leaving the shell
 //	SessionPIDs(s) []int                      — the processes running in it
 //	KnowShell(shell)                          — a shell name to count as idle
 package supervisor
+
+import "time"
 
 // Session is where a dispatcher's session can be reached: its name, and the
 // server it lives on.
@@ -47,12 +49,19 @@ type Session struct {
 }
 
 // SessionInfo is a session found by looking rather than by remembering: its
-// address and the directory it runs in.
+// address, the directory it runs in, and when it was created.
 //
 // The path is what makes an unknown session attributable. A session this
 // cockpit did not start has no record and no dispatcher id, so where it is
 // working is the only thing tying it to a repository.
+//
+// Created is what makes an address a session rather than a slot. A name is
+// free again the moment its session ends, so a record naming one is only
+// naming the session it took hold of if that session is no younger than the
+// record's hold on it (state.Dispatch.HoldsSessionBorn). Zero where the backend
+// cannot say, which claims nothing either way.
 type SessionInfo struct {
 	Session
-	Path string
+	Path    string
+	Created time.Time
 }

@@ -163,11 +163,11 @@ func TestTheSweepAsksEachServerOnceAndStillProbes(t *testing.T) {
 
 	listed := map[string]int{}
 	var probed []supervisor.Session
-	prevNames, prevAlive, prevReady := sessionNames, sessionAlive, supervisorReady
-	sessionNames = func(socket string) []string {
+	prevList, prevAlive, prevReady := sessionList, sessionAlive, supervisorReady
+	sessionList = func(socket string) []supervisor.SessionInfo {
 		listed[socket]++
 		if socket == "player-app" {
-			return []string{"disp-live"}
+			return []supervisor.SessionInfo{{Session: supervisor.Session{Name: "disp-live", Socket: socket}}}
 		}
 		return nil
 	}
@@ -176,7 +176,7 @@ func TestTheSweepAsksEachServerOnceAndStillProbes(t *testing.T) {
 		return true // the listing was wrong; the session is there
 	}
 	supervisorReady = func() bool { return true }
-	t.Cleanup(func() { sessionNames, sessionAlive, supervisorReady = prevNames, prevAlive, prevReady })
+	t.Cleanup(func() { sessionList, sessionAlive, supervisorReady = prevList, prevAlive, prevReady })
 
 	retired, liveN := ReconcileSessions([]*state.Dispatch{live, ghost})
 
