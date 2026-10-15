@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -16,7 +17,10 @@ import (
 // stubSupervisor swaps every supervisor call Resume makes and records the
 // session it was asked to start.
 type stubSupervisor struct {
-	alive   map[string]bool
+	alive map[string]bool
+	// born is when each live session was created, where a test says; a
+	// session with none listed is one whose creation the backend cannot say.
+	born    map[string]time.Time
 	idle    bool
 	known   bool
 	killed  []string
@@ -25,11 +29,22 @@ type stubSupervisor struct {
 
 func stubSessions(t *testing.T, s *stubSupervisor) {
 	t.Helper()
-	pAlive, pIdle, pKill, pUniq, pNew := sessionAlive, sessionIdle, killSession, uniqueName, newSession
+	pAlive, pIdle, pKill, pUniq, pNew, pList := sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList
 	t.Cleanup(func() {
-		sessionAlive, sessionIdle, killSession, uniqueName, newSession = pAlive, pIdle, pKill, pUniq, pNew
+		sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList = pAlive, pIdle, pKill, pUniq, pNew, pList
 	})
 	sessionAlive = func(sess supervisor.Session) bool { return s.alive[sess.Name] }
+	sessionList = func(socket string) []supervisor.SessionInfo {
+		var out []supervisor.SessionInfo
+		for name, ok := range s.alive {
+			if ok {
+				out = append(out, supervisor.SessionInfo{
+					Session: supervisor.Session{Name: name, Socket: socket}, Created: s.born[name],
+				})
+			}
+		}
+		return out
+	}
 	sessionIdle = func(supervisor.Session) (bool, bool) { return s.idle, s.known }
 	killSession = func(sess supervisor.Session) error {
 		s.killed = append(s.killed, sess.Name)
@@ -224,6 +239,39 @@ func TestResumeLeavesAnUnknownSessionAlone(t *testing.T) {
 	}
 	if len(sup.killed) != 0 {
 		t.Errorf("killed %v on a guess", sup.killed)
+	}
+}
+
+// A session that took the record's name after the record's own ended is
+// somebody else's: an adopted session's name comes back every time the human's
+// wrapper opens one. It is not handed back as the dispatcher's — that would
+// attach ⏎ to another conversation — and it is never killed for sitting at its
+// shell, which would end the human's session. A new one is started alongside.
+func TestResumeLeavesAYoungerSessionUnderItsNameAlone(t *testing.T) {
+	for _, idle := range []bool{false, true} {
+		t.Run(map[bool]string{false: "busy", true: "idle"}[idle], func(t *testing.T) {
+			t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+			held := time.Date(2026, 10, 13, 11, 54, 36, 0, time.Local)
+			sup := &stubSupervisor{
+				alive: map[string]bool{"disp-payment-retry": true},
+				born:  map[string]time.Time{"disp-payment-retry": held.Add(50 * time.Hour)},
+				idle:  idle, known: true,
+			}
+			stubSessions(t, sup)
+
+			d := finished(t, initRepo(t))
+			d.SessionStartedAt = &held
+			mode, _, err := Resume(d, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode != ResumeStarted {
+				t.Errorf("mode = %q, want a new session started alongside", mode)
+			}
+			if len(sup.killed) != 0 {
+				t.Errorf("killed %v, a session that only shares the name", sup.killed)
+			}
+		})
 	}
 }
 

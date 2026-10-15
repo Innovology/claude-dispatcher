@@ -42,6 +42,22 @@ because a dispatcher elsewhere happened to share it. Records of every status
 claim, not just live ones: a finished dispatcher's session outlives its claude
 by design and is still the dispatcher's.
 
+**And only the session it took hold of.** An address is a slot: its name is
+free the moment its session ends, and a per-project wrapper names every session
+it makes after the repo and the branch, so the same name comes back every time
+the human opens one. Reported as a session `ndt player-app` started that
+afternoon missing from the Y tab, so it could not be adopted: a record that had
+adopted `player-app__main` two days earlier, marked shipped and dismissed since,
+still claimed the name and with it today's session. So the listing carries when
+each session was made (`#{session_created}`), and a session younger than the
+record's `SessionStartedAt` — stamped once the supervisor accepts a launch or a
+resume, and at adoption — is not that record's
+(`state.Dispatch.HoldsSessionBorn`). tmux keeps whole seconds and rounds down,
+which never makes a record's own session look younger than its stamp; a record
+with no stamp, or a backend that cannot say, keeps the claim the name carried.
+The same rule keeps the ghost sweep from reading a newer session as the record's
+own, and keeps `Resume` from attaching to it, or killing it at its shell.
+
 **Attribution is the socket, then the path.** A server named for a repo is that
 repo's — the rule the launcher itself follows, so it is exact rather than
 inferred. Otherwise it is where the session is actually working, matched

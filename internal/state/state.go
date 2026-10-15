@@ -228,7 +228,9 @@ type Dispatch struct {
 	// proves nothing; with it, the session was there and has gone before claude
 	// fired a single hook, which is a launch that died — a pane whose command
 	// could not run — and nothing else will ever report it. Stamped by Launch
-	// and Resume after the supervisor says yes, never before.
+	// and Resume after the supervisor says yes, never before, and by Adopt at
+	// the adoption. It is also the record's hold on its address: a session
+	// created after it has only taken the name (HoldsSessionBorn).
 	SessionStartedAt *time.Time `json:"session_started_at,omitempty"`
 	// Failure is the API error that ended the session's last turn, as Claude
 	// Code's StopFailure hook reported it. That hook fires *instead of* Stop, so
@@ -319,6 +321,28 @@ func (d *Dispatch) Adopted() bool {
 // and was there before the record.
 func (d *Dispatch) OwnsWorktree() bool {
 	return d != nil && d.WorktreePath != "" && d.AdoptedAt == nil
+}
+
+// HoldsSessionBorn reports whether a session found at this record's address
+// (TmuxSocket, TmuxSession), created at born, is the session the record took
+// hold of — or a younger one that has the name now.
+//
+// An address is a slot, not a session. The name is free the moment its session
+// ends, and a per-project wrapper names every session it makes after the repo
+// and the branch, so `player-app__main` today is not the `player-app__main` a
+// record adopted two days ago. Reported as a session started that afternoon
+// missing from the sessions tab: a record adopted on another day, finished and
+// dismissed since, still claimed the name, and so the session under it.
+//
+// SessionStartedAt is the moment the record took hold: stamped after the
+// supervisor accepted the session at launch and at resume, and at adoption of a
+// session that already existed. Any session that is the record's was therefore
+// created no later than it. tmux keeps whole seconds, which rounds a creation
+// down and so never makes the record's own session look younger. A record with
+// no stamp, or a backend that cannot say when a session was made, keeps the
+// claim it always had on the name alone.
+func (d *Dispatch) HoldsSessionBorn(born time.Time) bool {
+	return d != nil && (born.IsZero() || d.SessionStartedAt == nil || !born.After(*d.SessionStartedAt))
 }
 
 // Release gives an adopted session back: the record stops claiming it, so the

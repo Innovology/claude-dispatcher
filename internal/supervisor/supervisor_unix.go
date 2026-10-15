@@ -53,6 +53,7 @@ func SessionList(socket string) []SessionInfo {
 		out = append(out, SessionInfo{
 			Session: Session{Name: s.Name, Socket: socket},
 			Path:    s.Path,
+			Created: s.Created,
 		})
 	}
 	return out

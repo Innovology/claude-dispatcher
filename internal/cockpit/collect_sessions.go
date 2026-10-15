@@ -53,8 +53,14 @@ type ownSession struct {
 // name. Records of every status count, not just live ones — a finished
 // dispatcher's session outlives its claude by design, and it is still the
 // dispatcher's.
+//
+// But only the session it took hold of, never a younger one that has the name
+// now (state.Dispatch.HoldsSessionBorn). A human's wrapper names its sessions
+// after the repo and branch, so the same name comes back every time it makes
+// one: an adoption from two days ago, finished and dismissed, was hiding the
+// session started this afternoon under it, which could then not be adopted.
 func unclaimedSessions(records []*state.Dispatch) []supervisor.SessionInfo {
-	claimed := map[supervisor.Session]bool{}
+	claims := map[supervisor.Session][]*state.Dispatch{}
 	for _, d := range records {
 		// A released record is the human handing an adopted session back, so
 		// it stops claiming it and the session is listed here again. The
@@ -63,18 +69,30 @@ func unclaimedSessions(records []*state.Dispatch) []supervisor.SessionInfo {
 			continue
 		}
 		if d.TmuxSession != "" {
-			claimed[supervisor.Session{Name: d.TmuxSession, Socket: d.TmuxSocket}] = true
+			at := supervisor.Session{Name: d.TmuxSession, Socket: d.TmuxSocket}
+			claims[at] = append(claims[at], d)
 		}
 	}
 	var out []supervisor.SessionInfo
 	for _, sock := range listServers() {
 		for _, s := range listSessions(sock) {
-			if !claimed[s.Session] {
+			if !heldBy(claims[s.Session], s) {
 				out = append(out, s)
 			}
 		}
 	}
 	return out
+}
+
+// heldBy reports whether any of the records naming s's address took hold of s
+// itself rather than of an older session that once had its name.
+func heldBy(records []*state.Dispatch, s supervisor.SessionInfo) bool {
+	for _, d := range records {
+		if d.HoldsSessionBorn(s.Created) {
+			return true
+		}
+	}
+	return false
 }
 
 // sessionsByProduct files each unclaimed session under the product whose repo
