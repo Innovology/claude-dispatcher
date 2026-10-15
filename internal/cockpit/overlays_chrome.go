@@ -67,6 +67,8 @@ var helpSections = []struct {
 		{"j / k", "up and down the list"},
 		{"→ / ←", "into a decision's body and back (decisions)"},
 		{"[ / ]", "the previous or next group of decisions · o opens one in your editor"},
+		{"/", "search every repo's decisions · by number, title or what they say"},
+		{"", "enter keeps the matches · esc on one goes to it in its repo"},
 		{"enter", "open what is selected"},
 		{"space", "pick a backlog ticket"},
 		{"ctrl+d", "dispatch every picked ticket"},

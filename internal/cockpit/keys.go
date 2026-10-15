@@ -257,6 +257,12 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateProducts(k)
 		return mm, cmd
 	}
+	// A decisions query is text entry for the same reason: "q" and "0004" are
+	// what someone searching decisions types.
+	if m.lens == "decisions" && m.decTyping {
+		mm, cmd := m.updateDecisions(k)
+		return mm, cmd
+	}
 
 	if k == "?" {
 		m.helpOpen = true
@@ -316,6 +322,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clOpen, m.clNaming, m.clNewName = false, false, ""
 		m.clKeying, m.clKeyFor, m.clKeyText = false, "", ""
 		m.clMarked = map[string]bool{}
+		m = m.decSearchClear()
 		return m, nil
 	}
 

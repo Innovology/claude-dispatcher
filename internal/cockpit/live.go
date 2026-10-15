@@ -76,6 +76,7 @@ type snapshot struct {
 	decisionRepoOrder []string
 	decisionProduct   map[string]string // repo → product, for the left column's groups
 	decisionNone      int               // repos read that had no decisions
+	decisionIndex     *decIndex         // the same decisions, cut up for `/`
 
 	usageWindows    []usageWindow
 	usageModels     []usageModel
@@ -447,6 +448,7 @@ func applySnapshot(s snapshot) {
 	if s.decisions != nil {
 		decisions = s.decisions
 		decisionNone = s.decisionNone
+		decisionIndex = s.decisionIndex
 	}
 	if s.decisionRepoOrder != nil {
 		decisionRepoOrder = s.decisionRepoOrder

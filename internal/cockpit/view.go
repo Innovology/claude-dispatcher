@@ -16,7 +16,7 @@ var footerByLens = map[string]string{
 	"product":   "O overview · R review · T team · S shipped · H history · esc close · 1 triage",
 	"backlog":   "j/k move · space pick · enter dispatch · ctrl+d dispatch picked · s source · 1 triage",
 	"usage":     "budget by window, model and product · 6 velocity · 1 triage",
-	"decisions": "j/k decisions · [ ] group · J/K repo · → body · o open in editor",
+	"decisions": "j/k decisions · [ ] group · J/K repo · → body · o open in editor · / search",
 	// v4 moved the product view off the digits, so the clause that named one is
 	// gone rather than renumbered: 3 is the backlog now.
 	"velocity": "velocity is what reached production, not what you set in motion · 1 triage",
@@ -147,6 +147,12 @@ func (m model) footerHelp() string {
 			return "type the name · enter creates it · esc cancels"
 		}
 		return "j/k move · tab pane · space mark · enter assign · u unassign · ctrl+u start over · n new · a done"
+	}
+	if m.lens == "decisions" && m.decTyping {
+		return "type to search · ↑/↓ move · enter keeps it · ctrl+u clears · esc cancels"
+	}
+	if m.lens == "decisions" && m.decSearching() {
+		return "j/k matches · → body · o open in editor · / edit · esc go to it"
 	}
 	if h, ok := footerByLens[m.lens]; ok {
 		return h
