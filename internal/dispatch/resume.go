@@ -116,11 +116,14 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		switch {
 		case known && !idle:
 			return ResumeLive, d.TmuxSession, nil
-		case known && idle:
+		case known && idle && d.AdoptedAt == nil:
 			_ = killSession(SessionOf(d))
 		}
 		// Unknown: leave it running and take a new name below. A backend that
-		// cannot see into a session must not have it killed on a guess.
+		// cannot see into a session must not have it killed on a guess. Nor is
+		// an adopted session's, idle or not: the human started it, it may hold
+		// other windows, and claude exiting in it does not make it ours to end
+		// — the same reason x releases one rather than killing it.
 	}
 
 	// The worktree may have been reclaimed when the dispatcher was killed

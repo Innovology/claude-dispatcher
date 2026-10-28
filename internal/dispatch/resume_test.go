@@ -275,6 +275,34 @@ func TestResumeLeavesAYoungerSessionUnderItsNameAlone(t *testing.T) {
 	}
 }
 
+// An adopted session is the human's even when it is the record's own: claude
+// exiting in it leaves their shell, and perhaps other windows, which ⏎ must
+// not end. Idle, it is left running and a new session is started alongside.
+func TestResumeNeverKillsAnAdoptedSession(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	held := time.Date(2026, 10, 13, 11, 54, 36, 0, time.Local)
+	sup := &stubSupervisor{
+		alive: map[string]bool{"disp-payment-retry": true},
+		born:  map[string]time.Time{"disp-payment-retry": held.Add(-time.Hour)},
+		idle:  true, known: true,
+	}
+	stubSessions(t, sup)
+
+	d := finished(t, initRepo(t))
+	d.SessionStartedAt = &held
+	d.AdoptedAt = &held
+	mode, _, err := Resume(d, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != ResumeStarted {
+		t.Errorf("mode = %q, want a new session started alongside", mode)
+	}
+	if len(sup.killed) != 0 {
+		t.Errorf("killed %v, the human's own session", sup.killed)
+	}
+}
+
 // Nothing is invented: with no session id, or with the transcript gone, there
 // is nothing to resume and the human is told so rather than handed a fresh
 // session wearing the old one's name.
