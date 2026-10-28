@@ -593,6 +593,35 @@ func ensureWorktree(repoPath, path, branch string, root Root) (string, error) {
 	return ensureWorktreeFrom(repoPath, path, branch, root, "")
 }
 
+// cutByUs reports whether the checkout at path is one this cockpit made: under
+// its own worktrees folder, where nothing else puts one, or named by a record
+// that owns its worktree (an adopted record's folder is the human's).
+func cutByUs(path string) bool {
+	if within(state.WorktreesDir(), path) {
+		return true
+	}
+	for _, d := range state.LoadAll() {
+		if d.OwnsWorktree() && samePath(d.WorktreePath, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(resolved(dir), resolved(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func samePath(a, b string) bool { return resolved(a) == resolved(b) }
+
+func resolved(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
 // ensureWorktreeFrom is ensureWorktree for a repo with a root branch of its own
 // (config's [root_branches]): the branch a new feature is cut from when root
 // is the default. It is used only to cut — a feature branch that already exists
@@ -601,6 +630,15 @@ func ensureWorktreeFrom(repoPath, path, branch string, root Root, repoRoot strin
 	if out, err := exec.Command("git", "-C", path, "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		on := strings.TrimSpace(string(out))
 		if on == branch {
+			// Beside the human's checkouts a folder on the right branch proves
+			// nothing about whose it is: theirs are named the way ours are, so
+			// dispatching "login" would take over their own app-login, and a
+			// later x or tidy would remove it with everything git ignores in it.
+			// Only a checkout one of our records cut is ours to reuse.
+			if !cutByUs(path) {
+				return "", fmt.Errorf("%s is already a checkout on %s that no dispatch cut — it looks like one of your own; name the feature differently",
+					path, branch)
+			}
 			return "", reusedRootErr(branch, root)
 		}
 		// Names what it is on, because this reaches a human now (the failed row

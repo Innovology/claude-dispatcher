@@ -200,7 +200,7 @@ func TestEnsureWorktreeCutsFromTheNamedRoot(t *testing.T) {
 func TestEnsureWorktreeRefusesANamedRootForAnExistingBranch(t *testing.T) {
 	repo := initRepo(t)
 	gitIn(t, repo, "branch", "release/24")
-	wt := filepath.Join(t.TempDir(), "feat")
+	wt := ourWorktreePath(t, "feat")
 	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestARepoRootBranchStandsInForTheDefault(t *testing.T) {
 		t.Errorf("a [root_branches] entry for a missing branch: err = %v", err)
 	}
 	// And the record says where it was actually cut from.
-	wt := filepath.Join(t.TempDir(), "feat")
+	wt := ourWorktreePath(t, "feat")
 	if from, err := ensureWorktreeFrom(clone, wt, "feature/feat", DefaultRoot, "dev"); err != nil || from != "origin/dev" {
 		t.Fatalf("cut from %q, %v; want origin/dev", from, err)
 	}

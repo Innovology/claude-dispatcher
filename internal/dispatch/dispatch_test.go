@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -38,9 +39,47 @@ func worktreeBranch(t *testing.T, path string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// ourWorktreePath is a checkout path where a dispatch cuts one: under the
+// state dir's own worktrees folder, which is the proof a reuse needs.
+func ourWorktreePath(t *testing.T, name string) string {
+	t.Helper()
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	return filepath.Join(state.WorktreesDir(), "repo", name)
+}
+
+// Beside the human's own checkouts, a folder on the dispatch's branch is not
+// proof the folder is ours: theirs are named the way ours are. It is reused
+// only when a record of ours cut it, because x and tidy remove what a record
+// owns — and with it every file git ignores.
+func TestEnsureWorktreeLeavesTheHumansOwnCheckoutAlone(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+	theirs := filepath.Join(t.TempDir(), "app-login")
+	gitIn(t, repo, "worktree", "add", "-b", "login", theirs)
+
+	if _, err := ensureWorktree(repo, theirs, "login", DefaultRoot); err == nil || !strings.Contains(err.Error(), "your own") {
+		t.Fatalf("the human's own checkout was taken: err = %v", err)
+	}
+	// An adopted record names the folder too, but it is the human's.
+	at := time.Now()
+	if err := state.Save(&state.Dispatch{ID: "adopted1", Feature: "login", WorktreePath: theirs, AdoptedAt: &at}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorktree(repo, theirs, "login", DefaultRoot); err == nil {
+		t.Fatal("an adopted record's folder was taken as one we cut")
+	}
+	// One a record of ours cut there is a re-dispatch, and reused.
+	if err := state.Save(&state.Dispatch{ID: "ours1", Feature: "login", WorktreePath: theirs}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorktree(repo, theirs, "login", DefaultRoot); err != nil {
+		t.Fatalf("a checkout our own record cut was refused: %v", err)
+	}
+}
+
 func TestEnsureWorktree(t *testing.T) {
 	repo := initRepo(t)
-	wt := filepath.Join(t.TempDir(), "wt", "feat")
+	wt := ourWorktreePath(t, "feat")
 
 	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatal(err)
