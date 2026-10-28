@@ -153,3 +153,19 @@ func TestNixCountsOnlyWhereFlakesRun(t *testing.T) {
 		}
 	}
 }
+
+// Older nix answers with every setting at once; the features are read out of
+// it, and a list that merely mentions a word elsewhere does not count.
+func TestConfigValueReadsOneSettingOutOfShowConfig(t *testing.T) {
+	all := "accept-flake-config = false\nexperimental-features = flakes nix-command\nflake-registry = https://x/flakes.json\n"
+	got := configValue(all, "experimental-features")
+	if got != "flakes nix-command" {
+		t.Fatalf("configValue = %q", got)
+	}
+	if !flakesOn(got, "nix (Nix) 2.18.1") {
+		t.Error("flakes read off from nix show-config")
+	}
+	if configValue("accept-flake-config = false\n", "experimental-features") != "" {
+		t.Error("a missing setting read as present")
+	}
+}

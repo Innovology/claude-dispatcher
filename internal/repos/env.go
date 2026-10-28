@@ -220,11 +220,29 @@ var nixAvailable = sync.OnceValue(func() bool {
 	}
 	out, err := exec.Command("nix", "config", "show", "experimental-features").Output()
 	if err != nil {
-		return false
+		// Before nix 2.20 (NixOS 23.11 ships 2.18) the command is `nix
+		// show-config`, which takes no name and prints every setting.
+		all, err := exec.Command("nix", "show-config").Output()
+		if err != nil {
+			return false
+		}
+		out = []byte(configValue(string(all), "experimental-features"))
 	}
 	version, _ := exec.Command("nix", "--version").Output()
 	return flakesOn(string(out), string(version))
 })
+
+// configValue is one setting's value out of `nix show-config`'s
+// "name = value" lines, "" when it is not there.
+func configValue(all, name string) string {
+	for _, ln := range strings.Split(all, "\n") {
+		k, v, ok := strings.Cut(ln, "=")
+		if ok && strings.TrimSpace(k) == name {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
 
 // flakesOn reads the two answers nixAvailable asks for: the enabled features,
 // and the version line, which names Determinate Nix where it is that build.
