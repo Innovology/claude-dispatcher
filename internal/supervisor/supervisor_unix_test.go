@@ -218,6 +218,11 @@ func TestAShellTheBackendIsToldAboutReadsIdle(t *testing.T) {
 	if err := os.WriteFile(fake, real, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// macOS kills a copied platform binary on sight (arm64e /bin/sh outside the
+	// system paths), so the pane would die before there was anything to read.
+	if err := exec.Command(fake, "-c", "true").Run(); err != nil {
+		t.Skipf("a copy of %s will not run here: %v", sh, err)
+	}
 	s := Session{Name: "parked", Socket: sock}
 	if err := NewSession(s, dir, "exec "+fake+" -i", ""); err != nil {
 		t.Fatalf("NewSession: %v", err)

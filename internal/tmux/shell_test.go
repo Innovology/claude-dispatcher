@@ -60,6 +60,11 @@ func TestAnUnknownPaneAsksTheServerWhatItsShellIs(t *testing.T) {
 	if err := os.WriteFile(fake, real, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// macOS kills a copied platform binary on sight (arm64e /bin/sh outside the
+	// system paths), so the pane would die before there was anything to read.
+	if err := exec.Command(fake, "-c", "true").Run(); err != nil {
+		t.Skipf("a copy of %s will not run here: %v", sh, err)
+	}
 	conf := filepath.Join(tmp, "tmux.conf")
 	if err := os.WriteFile(conf, []byte("set -g exit-empty off\nset -g default-shell "+fake+"\n"), 0o644); err != nil {
 		t.Fatal(err)

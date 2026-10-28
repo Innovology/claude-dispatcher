@@ -214,8 +214,11 @@ func TestTheEnvironmentPrefixStandsInTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the prefix never ran: %v", err)
 	}
-	if want, _ := filepath.EvalSymlinks(worktree); strings.TrimSpace(string(got)) != want {
-		t.Errorf("the environment prefix ran in %q, want the session's %q", strings.TrimSpace(string(got)), want)
+	// Both sides resolved: the shell's pwd keeps the logical path the client
+	// was handed, and on macOS the temp dir is /var, a link to /private/var.
+	ran, _ := filepath.EvalSymlinks(strings.TrimSpace(string(got)))
+	if want, _ := filepath.EvalSymlinks(worktree); ran != want {
+		t.Errorf("the environment prefix ran in %q, want the session's %q", ran, want)
 	}
 
 	if c := srv.AttachCmd("s", prefix); c.Dir != worktree {
