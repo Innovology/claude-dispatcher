@@ -130,3 +130,38 @@ func TestNoConfigStartsNoLoad(t *testing.T) {
 		t.Error("a cockpit with no config started a load")
 	}
 }
+
+// The same rule seen through Update, which is where a landing load is actually
+// handled: the late snapshot books its load in (so whatever queued behind it
+// still starts) but the fleet on screen stays the newer one's.
+func TestALateSnapshotLeavesTheNewerFleetOnScreen(t *testing.T) {
+	saved := captureVars()
+	t.Cleanup(func() { restoreVars(saved) })
+	m := loaded()
+
+	next, _ := m.Update(snapshotMsg(snapshot{seq: 5, fleet: []fleetRow{{id: "new", feature: "just dispatched", kind: "run"}}}))
+	m = next.(model)
+	m, _ = m.requestLoad(loadPlain) // the load that will land late
+	m, _ = m.requestLoad(loadPlain) // and one asked for while it is out
+	next, queued := m.Update(snapshotMsg(snapshot{seq: 4, fleet: []fleetRow{{id: "old", feature: "from before", kind: "run"}}}))
+	m = next.(model)
+
+	if len(fleet) != 1 || fleet[0].id != "new" {
+		t.Errorf("fleet after a late snapshot = %+v, want the newer one kept", fleet)
+	}
+	if queued == nil || m.loading {
+		t.Error("a dropped snapshot still has to finish its load and start the queued one")
+	}
+}
+
+// A launch whose session never reports in writes nothing, so nothing would
+// reload in time to show it stalled. The check scheduled just past the stall
+// threshold is a reload — the one that turns the row.
+func TestTheLaunchStallCheckIsAReload(t *testing.T) {
+	m := loaded()
+	next, cmd := m.Update(launchStallCheckMsg{})
+	m = next.(model)
+	if cmd == nil || !m.loadBusy {
+		t.Errorf("the stall check started no load (cmd=%v, busy=%v)", cmd != nil, m.loadBusy)
+	}
+}

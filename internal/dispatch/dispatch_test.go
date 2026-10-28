@@ -3,11 +3,13 @@
 package dispatch
 
 import (
+	"claude-dispatcher/internal/supervisor"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -37,9 +39,63 @@ func worktreeBranch(t *testing.T, path string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// ourWorktreePath is a checkout path where a dispatch cuts one: under the
+// state dir's own worktrees folder, which is the proof a reuse needs.
+func ourWorktreePath(t *testing.T, name string) string {
+	t.Helper()
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	return filepath.Join(state.WorktreesDir(), "repo", name)
+}
+
+// Beside the human's own checkouts, a folder on the dispatch's branch is not
+// proof the folder is ours: theirs are named the way ours are. It is reused
+// only when a record of ours cut it, because x and tidy remove what a record
+// owns — and with it every file git ignores.
+func TestEnsureWorktreeLeavesTheHumansOwnCheckoutAlone(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+	theirs := filepath.Join(t.TempDir(), "app-login")
+	gitIn(t, repo, "worktree", "add", "-b", "login", theirs)
+
+	if _, err := ensureWorktree(repo, theirs, "login", DefaultRoot); err == nil || !strings.Contains(err.Error(), "your own") {
+		t.Fatalf("the human's own checkout was taken: err = %v", err)
+	}
+	// An adopted record names the folder too, but it is the human's.
+	at := time.Now()
+	if err := state.Save(&state.Dispatch{ID: "adopted1", Feature: "login", WorktreePath: theirs, AdoptedAt: &at}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorktree(repo, theirs, "login", DefaultRoot); err == nil {
+		t.Fatal("an adopted record's folder was taken as one we cut")
+	}
+	// One a record of ours cut there is a re-dispatch, and reused.
+	if err := state.Save(&state.Dispatch{ID: "ours1", Feature: "login", WorktreePath: theirs}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorktree(repo, theirs, "login", DefaultRoot); err != nil {
+		t.Fatalf("a checkout our own record cut was refused: %v", err)
+	}
+}
+
+// Two clones that share a name share a worktrees folder, so one's checkout
+// can sit where the other's dispatch would cut. It is not reused for it.
+func TestEnsureWorktreeLeavesAnotherReposCheckoutAlone(t *testing.T) {
+	first, second := initRepo(t), initRepo(t)
+	wt := ourWorktreePath(t, "x")
+	if _, err := ensureWorktree(first, wt, "feature/x", DefaultRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorktree(second, wt, "feature/x", DefaultRoot); err == nil || !strings.Contains(err.Error(), "another repository") {
+		t.Fatalf("another repo's checkout was reused: err = %v", err)
+	}
+	if _, err := ensureWorktree(first, wt, "feature/x", DefaultRoot); err != nil {
+		t.Errorf("its own repo's re-dispatch was refused: %v", err)
+	}
+}
+
 func TestEnsureWorktree(t *testing.T) {
 	repo := initRepo(t)
-	wt := filepath.Join(t.TempDir(), "wt", "feat")
+	wt := ourWorktreePath(t, "feat")
 
 	if _, err := ensureWorktree(repo, wt, "feature/feat", DefaultRoot); err != nil {
 		t.Fatal(err)
@@ -202,13 +258,13 @@ func TestLaunchRefusesDuplicateOfLiveFeature(t *testing.T) {
 	// developer's own tmux server answer for a session this test invented.
 	busy := true
 	prevAlive, prevIdle, prevNew, prevUniq := sessionAlive, sessionIdle, newSession, uniqueName
-	sessionAlive = func(name string) bool { return alive[name] }
-	sessionIdle = func(string) (bool, bool) { return !busy, true }
+	sessionAlive = func(s supervisor.Session) bool { return alive[s.Name] }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return !busy, true }
 	// Launch really does start a session, so the supervisor is stubbed too —
 	// without it a passing assertion below left disp-payment-retry-2 and -3 on
 	// the machine running the suite.
-	newSession = func(string, string, string) error { return nil }
-	uniqueName = func(base string) string { return base }
+	newSession = func(supervisor.Session, string, string, string) error { return nil }
+	uniqueName = func(s supervisor.Session) string { return s.Name }
 	defer func() {
 		sessionAlive, sessionIdle, newSession, uniqueName = prevAlive, prevIdle, prevNew, prevUniq
 	}()
@@ -276,8 +332,8 @@ func TestLaunchRefusesWhenIdlenessIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	prevAlive, prevIdle := sessionAlive, sessionIdle
-	sessionAlive = func(string) bool { return true }
-	sessionIdle = func(string) (bool, bool) { return true, false } // idle, but unknowably so
+	sessionAlive = func(supervisor.Session) bool { return true }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return true, false } // idle, but unknowably so
 	defer func() { sessionAlive, sessionIdle = prevAlive, prevIdle }()
 
 	if got := liveDispatch("payment-retry"); got == nil {
@@ -385,8 +441,8 @@ func TestLiveDispatchReadsTheRecordAsWellAsTheSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	prevAlive, prevIdle := sessionAlive, sessionIdle
-	sessionAlive = func(string) bool { return true }
-	sessionIdle = func(string) (bool, bool) { return false, true } // claude is up
+	sessionAlive = func(supervisor.Session) bool { return true }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return false, true } // claude is up
 	defer func() { sessionAlive, sessionIdle = prevAlive, prevIdle }()
 
 	// Working, with claude running in its session: the collision the rule is
@@ -415,6 +471,21 @@ func TestLiveDispatchReadsTheRecordAsWellAsTheSession(t *testing.T) {
 		}
 		if got := liveDispatch("payment-retry"); got != nil {
 			t.Errorf("a %s dispatcher blocked its own name from being used again", st)
+		}
+	}
+}
+
+// A prefix is refused for exactly what git refuses in a branch name, checked
+// with a slug after it, since a slug always follows.
+func TestPrefixProblem(t *testing.T) {
+	for _, ok := range []string{"", "feature/", "fix/", "vk-", "team/vk/", "release-2.1/"} {
+		if bad := PrefixProblem(ok); bad != "" {
+			t.Errorf("PrefixProblem(%q) = %q, want none", ok, bad)
+		}
+	}
+	for _, bad := range []string{"-x/", "/x", "a//", "a..b/", "a@{/", "my fix/", "a~/", "a^/", "a:/", "a?/", "a*/", "a[/", `a\/`, ".hidden/", "x/.y/", "a.lock/", "tab\t/"} {
+		if PrefixProblem(bad) == "" {
+			t.Errorf("PrefixProblem(%q) accepted a prefix git refuses", bad)
 		}
 	}
 }

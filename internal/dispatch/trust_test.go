@@ -49,7 +49,7 @@ func TestInheritTrustFromATrustedRepo(t *testing.T) {
 	home := writeClaudeConfig(t, map[string]any{
 		"/repos/shop": map[string]any{"hasTrustDialogAccepted": true, "allowedTools": []string{"Bash"}},
 	})
-	if !InheritTrust("/repos/shop", "/state/worktrees/shop/csv-export") {
+	if !InheritTrustFor("", "/repos/shop", "/state/worktrees/shop/csv-export") {
 		t.Fatal("a worktree of a trusted repo should inherit trust")
 	}
 	got := readProjects(t, home)
@@ -70,7 +70,7 @@ func TestInheritTrustRefusesWhenTheRepoIsNotTrusted(t *testing.T) {
 	home := writeClaudeConfig(t, map[string]any{
 		"/repos/shop": map[string]any{"hasTrustDialogAccepted": false},
 	})
-	if InheritTrust("/repos/shop", "/state/worktrees/shop/x") {
+	if InheritTrustFor("", "/repos/shop", "/state/worktrees/shop/x") {
 		t.Error("an untrusted repo must not confer trust on its worktree")
 	}
 	if _, ok := readProjects(t, home)["/state/worktrees/shop/x"]; ok {
@@ -78,7 +78,7 @@ func TestInheritTrustRefusesWhenTheRepoIsNotTrusted(t *testing.T) {
 	}
 
 	// A repo Claude Code has never seen is equally not a licence.
-	if InheritTrust("/repos/never-opened", "/state/worktrees/never/x") {
+	if InheritTrustFor("", "/repos/never-opened", "/state/worktrees/never/x") {
 		t.Error("an unknown repo must not confer trust")
 	}
 }
@@ -88,7 +88,7 @@ func TestInheritTrustPreservesTheRestOfTheConfig(t *testing.T) {
 	home := writeClaudeConfig(t, map[string]any{
 		"/repos/shop": map[string]any{"hasTrustDialogAccepted": true},
 	})
-	InheritTrust("/repos/shop", "/state/worktrees/shop/y")
+	InheritTrustFor("", "/repos/shop", "/state/worktrees/shop/y")
 
 	b, _ := os.ReadFile(filepath.Join(home, ".claude.json"))
 	var cfg map[string]any
@@ -107,7 +107,7 @@ func TestInheritTrustPreservesTheRestOfTheConfig(t *testing.T) {
 // just shows a trust prompt.
 func TestInheritTrustDegradesQuietly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // no .claude.json at all
-	if InheritTrust("/repos/shop", "/state/worktrees/shop/z") {
+	if InheritTrustFor("", "/repos/shop", "/state/worktrees/shop/z") {
 		t.Error("with no config there is nothing to inherit")
 	}
 
@@ -116,7 +116,7 @@ func TestInheritTrustDegradesQuietly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if InheritTrust("/repos/shop", "/state/worktrees/shop/z") {
+	if InheritTrustFor("", "/repos/shop", "/state/worktrees/shop/z") {
 		t.Error("a corrupt config must not be treated as trust")
 	}
 	// And it must be left exactly as found, not half-rewritten.
@@ -131,10 +131,10 @@ func TestInheritTrustIsIdempotent(t *testing.T) {
 		"/repos/shop": map[string]any{"hasTrustDialogAccepted": true},
 	})
 	wt := "/state/worktrees/shop/again"
-	if !InheritTrust("/repos/shop", wt) {
+	if !InheritTrustFor("", "/repos/shop", wt) {
 		t.Fatal("first call should inherit")
 	}
-	if !InheritTrust("/repos/shop", wt) {
+	if !InheritTrustFor("", "/repos/shop", wt) {
 		t.Fatal("second call should report the worktree is already trusted")
 	}
 	if v, _ := readProjects(t, home)[wt]["hasTrustDialogAccepted"].(bool); !v {

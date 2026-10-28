@@ -13,6 +13,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"claude-dispatcher/internal/keymap"
 )
 
 // cqUndoEntry is the last row ctrl+z can put back. It restores the table row
@@ -294,12 +296,30 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		// "h" into the repo filter instead — with nothing in flight, the form is
 		// always up, so `h` would be unreachable exactly when history is the only
 		// thing left to look at.
-		navKey := isLensDigit(k) || k == ":" || k == "d" || k == "h"
-		if m.dxTouched() || !navKey {
+		//
+		// "Untouched" means at rest (dxAtRest), not merely "nothing typed": a repo
+		// picked with the arrows and enter is a choice, and the title typed after
+		// it may well start with one of these keys.
+		//
+		// And `d` and `h` stay keys only on the form that stands in for an empty
+		// table. A form the human opened with `d` is a text field they asked
+		// for, with the caret in WHERE: there both are letters, and esc is the
+		// way out. Reported as "I can't really type design-system" — every repo
+		// starting with d or h was unreachable by typing, and the d vanished
+		// without a trace. The digits and `:` still leave an untouched form of
+		// either kind; a repo whose name starts with one is a filter typed
+		// from its second character.
+		navKey := isLensDigit(k) || k == ":" || (!m.cqDispatch && (k == "d" || k == "h"))
+		if !m.dxAtRest() || !navKey {
 			mm, cmd := m.dxKey(k)
 			return mm, cmd, true
 		}
 	}
+
+	// Resolved here rather than above, because the dispatch form is text entry:
+	// a key the human is typing into the prompt is not an action, and rebinding
+	// must not change which letters you can type.
+	k = m.keys.Resolve(keymap.Fleet, k)
 
 	switch k {
 	case "j", "down":
@@ -375,6 +395,13 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 		for _, a := range r.acts {
 			if a.ok == "" || !cqActKeyMatches(a.k, k) {
 				continue
+			}
+			// An act that asks first holds the row and the act as they were
+			// when the key landed: the table is rebuilt under the bar while it
+			// waits, and the answer is about the row the question named.
+			if a.confirm != "" {
+				m.confirm = &confirmState{kind: "act", label: a.confirm, row: r, act: a}
+				return m, nil, true
 			}
 			mm, cmd := m.cqStartFlash(r, a)
 			return mm, cmd, true

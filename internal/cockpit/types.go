@@ -86,6 +86,25 @@ type repoRef struct {
 	// not say). The assignment editor shows it so a repo nobody has touched in
 	// months is obvious while you are deciding where it belongs.
 	last string
+	// path is the checkout the row acts in, and worktrees is every checkout git
+	// knows of. One row is one repository however many checkouts it has, so the
+	// row alone can no longer say which folders it stands for — `p` in the
+	// assignment editor unfolds these.
+	path      string
+	pinned    bool
+	worktrees []repoWorktree
+	// socket is the tmux server this repo's sessions live on, and env is what
+	// they are launched under so they see this repo's own binaries. Both are
+	// resolved answers, not config: socket defaults to the repo's name and env
+	// is read off the checkout, so the editor shows what a dispatch would
+	// actually do rather than what somebody wrote down.
+	socket string
+	env    string
+}
+
+// repoWorktree is one checkout of a repo, as the assignment editor shows it.
+type repoWorktree struct {
+	path, branch string
 }
 
 type staleRepo struct {
@@ -123,18 +142,6 @@ type hunkLine struct{ sign, text string }
 
 // ---- cross-lens seed data ---------------------------------------------------
 
-// repoProduct maps a repo name back to its product (or "—").
-func repoProduct(repo string) string {
-	for _, p := range productOrder {
-		for _, r := range reposByProduct[p] {
-			if r.name == repo {
-				return p
-			}
-		}
-	}
-	return "—"
-}
-
 // productByName returns the product record, or a zero value if not found.
 func productByName(name string) product {
 	for _, p := range products {
@@ -152,8 +159,7 @@ var commands = []command{
 	{name: "backlog", hint: "open tickets · github, linear, azure boards"},
 	{name: "usage", hint: "subscription budget by window, model and product"},
 	{name: "velocity", hint: "dora + what actually shipped, tracked over time"},
-	{name: "decisions", hint: "adrs and decision logs found in your repos"},
-	{name: "plugins", hint: "which source each repo's records were read from"},
+	{name: "decisions", hint: "every decision written down in your repos, wherever it is"},
 	{name: "dispatch", hint: "repo → feature → prompt, or paste a batch"},
 	{name: "new dispatch", hint: "open the repo → feature → prompt form"},
 	{name: "product", hint: "open the product under the cursor"},
@@ -168,7 +174,8 @@ var commands = []command{
 	{name: "kill", hint: "end the tmux session and mark exited"},
 	{name: "tidy", hint: "remove the worktrees and node_modules finished dispatchers left on disk"},
 	{name: "roots", hint: "edit the directories scanned for repos"},
-	{name: "settings", hint: "scan roots · Linear key · Azure org · weekly token budget"},
+	{name: "settings", hint: "scan roots · Linear key · Azure board · theme · branch prefix"},
+	{name: "config", hint: "open config.toml in your editor — everything settings does not show"},
 }
 
 // ---- small shared metadata --------------------------------------------------

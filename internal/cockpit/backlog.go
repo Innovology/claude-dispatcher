@@ -15,6 +15,7 @@ import (
 
 	"claude-dispatcher/internal/account"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/keymap"
 )
 
 // backlogList filters the tickets by the active source filter. "all" is
@@ -357,6 +358,9 @@ func backlogFeature(t ticket) string {
 // updateBacklog mirrors handleKey('backlog'), with the dispatching keys wired
 // to real launches.
 func (m model) updateBacklog(k string) (model, tea.Cmd) {
+	if k = m.keys.Resolve(keymap.List, k); k == "" {
+		return m, nil
+	}
 	l := m.backlogList()
 	t := m.ticketSelected()
 	switch k {
@@ -394,7 +398,7 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 			// work handed off to happen elsewhere, with nobody sitting on its
 			// permission prompt. Anything else is dispatched from a form that
 			// asks.
-			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, account.Default)
+			return m, launchCmd(m.cfg, t.repo, backlogFeature(t), t.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, account.Default)
 		}
 	case "ctrl+d":
 		// This used to announce a dispatch and launch nothing — the worst kind
@@ -415,7 +419,7 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 				continue
 			}
 			m = m.markPending(m.pendingFor(bt.repo, backlogFeature(bt), bt.prompt))
-			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, false, account.Default))
+			cmds = append(cmds, launchCmd(m.cfg, bt.repo, backlogFeature(bt), bt.prompt, dispatchpkg.DefaultMode, dispatchpkg.DefaultModel, dispatchpkg.DefaultRoot, nil, false, account.Default))
 		}
 		m.picked = map[string]bool{}
 		var why []string

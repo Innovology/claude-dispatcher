@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"claude-dispatcher/internal/keymap"
 )
 
 // typedText returns the literal text a key message types, and whether it types
@@ -117,6 +119,10 @@ func (m model) runCommand() (model, tea.Cmd) {
 		m.settings = newSettings(m.cfg)
 		return m, nil
 	}
+	if c.name == "config" {
+		m.paletteOpen, m.paletteText = false, ""
+		return m.editConfig()
+	}
 	if c.name == "dispatch" || c.name == "new dispatch" {
 		m.paletteOpen, m.paletteText = false, ""
 		m.dispatchForm = newDispatchForm(m.cfg)
@@ -141,7 +147,7 @@ func (m model) runCommand() (model, tea.Cmd) {
 	}
 	direct := map[string]string{
 		"backlog": "backlog", "usage": "usage",
-		"decisions": "decisions", "plugins": "decisions", "velocity": "velocity",
+		"decisions": "decisions", "velocity": "velocity",
 	}
 	lens := m.lens
 	if strings.HasPrefix(c.name, "product") {
@@ -208,6 +214,12 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateReply(k)
 		return mm, cmd
 	}
+	// Naming an adoption is text entry too, and it opens over the products
+	// lens, whose own letters would otherwise take the keyboard back.
+	if m.adoptOpenInput {
+		mm, cmd := m.adoptKey(k)
+		return mm, cmd
+	}
 	if m.paletteOpen {
 		switch k {
 		case "esc":
@@ -253,10 +265,24 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	// the cockpit mid-name and a digit switched lens, both discarding what had
 	// been typed, and the footer promised only "esc cancels". A token makes that
 	// worse, not better: `lin_api_1…` would switch lens on its first digit.
-	if m.clNaming || m.clKeying {
+	// A `/` query is the same: it was left out, so `q` quit mid-query.
+	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
 		mm, cmd := m.updateProducts(k)
 		return mm, cmd
 	}
+	// A decisions query is text entry for the same reason: "q" and "0004" are
+	// what someone searching decisions types.
+	if m.lens == "decisions" && m.decTyping {
+		mm, cmd := m.updateDecisions(k)
+		return mm, cmd
+	}
+
+	// From here down the key is whatever the human bound it to. Resolving
+	// translates it back to the action's canonical spelling, which is what the
+	// switches below are written against — so a rebind changes which physical
+	// key arrives at an action, not what this code is about. ctrl+c is resolved
+	// above and is deliberately not in the map: nothing may trap the process.
+	k = m.keys.Resolve(keymap.Global, k)
 
 	if k == "?" {
 		m.helpOpen = true
@@ -316,6 +342,8 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clOpen, m.clNaming, m.clNewName = false, false, ""
 		m.clKeying, m.clKeyFor, m.clKeyText = false, "", ""
 		m.clMarked = map[string]bool{}
+		m.clExpanded, m.clFoldRow = map[string]bool{}, ""
+		m = m.decSearchClear()
 		return m, nil
 	}
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDcnIsDecisionHeading(t *testing.T) {
@@ -73,15 +74,15 @@ func TestDcnLogTitle(t *testing.T) {
 
 func TestDcnLogStatus(t *testing.T) {
 	cases := map[string]string{
-		"we use postgres":                           "accepted",
+		"we use postgres":                           "decided",
 		"~~we used mysql~~ moved on":                "superseded",
 		"the old rule, superseded by the one below": "superseded",
-		"(proposed) move the queue out of process":  "proposed",
-		"still open: which broker":                  "proposed",
-		"Status: Draft":                             "proposed",
-		// A record that supersedes an earlier call is itself accepted — the
+		"(proposed) move the queue out of process":  "open",
+		"still open: which broker":                  "open",
+		"Status: Draft":                             "open",
+		// A record that supersedes an earlier call is itself decided — the
 		// keyword sweep the ADR parser uses would read this as superseded.
-		"Multi-worktree. (Supersedes the original single-checkout call.)": "accepted",
+		"Multi-worktree. (Supersedes the original single-checkout call.)": "decided",
 	}
 	for in, want := range cases {
 		if got := dcnLogStatus(in); got != want {
@@ -112,7 +113,7 @@ func TestDcnLogRecordsBullets(t *testing.T) {
 		"- make build",                                        // 15
 	}, "\n")
 
-	recs := dcnLogRecords("CLAUDE.md", md, "3d ago")
+	recs := dcnParse("CLAUDE.md", md, time.Now().Add(-72*time.Hour))
 	if len(recs) != 2 {
 		t.Fatalf("got %d records, want 2: %+v", len(recs), recs)
 	}
@@ -128,8 +129,8 @@ func TestDcnLogRecordsBullets(t *testing.T) {
 		t.Errorf("context = %q, want the section preamble", first.context)
 	}
 	// The heading's later date dates the section, not the file's mtime.
-	if first.at == "3d ago" {
-		t.Errorf("at = %q, want the age of 2026-02-09", first.at)
+	if got := first.when.Format("2006-01-02"); got != "2026-02-09" {
+		t.Errorf("dated %s, want 2026-02-09", got)
 	}
 	// A nested bullet's wrapped second line belongs to that bullet, not to the
 	// record's own prose — the difference between "three axes:" and that
@@ -178,49 +179,56 @@ func TestDcnLogRecordsHeadings(t *testing.T) {
 		"Status: proposed",
 	}, "\n")
 
-	recs := dcnLogRecords("DECISIONS.md", md, "1d ago")
+	mod := time.Now().Add(-24 * time.Hour)
+	recs := dcnParse("DECISIONS.md", md, mod)
 	if len(recs) != 2 {
 		t.Fatalf("got %d records, want 2: %+v", len(recs), recs)
 	}
 	if recs[0].title != "Postgres over DynamoDB" || recs[0].decision != "Relational access patterns won." {
 		t.Errorf("first = %+v", recs[0])
 	}
-	if recs[0].at != "1d ago" {
-		t.Errorf("at = %q, want the file's age when the heading carries no date", recs[0].at)
+	if !recs[0].when.Equal(mod) {
+		t.Errorf("dated %v, want the file's time when the heading carries no date", recs[0].when)
 	}
 	// The section has no preamble, so the context names where it was read.
 	if !strings.Contains(recs[0].context, "DECISIONS.md · Decisions") {
 		t.Errorf("context = %q", recs[0].context)
 	}
-	if recs[1].status != "proposed" {
-		t.Errorf("second status = %q, want proposed", recs[1].status)
+	if recs[1].status != "open" {
+		t.Errorf("second status = %q, want open", recs[1].status)
 	}
 }
 
-func TestDcnScanLogs(t *testing.T) {
-	repo := t.TempDir()
-	if got := dcnScanLogs(repo); got != nil {
-		t.Errorf("empty repo: got %d records, want none", len(got))
+func TestDecisionsAreReadFromEveryFileThatHasThem(t *testing.T) {
+	if got := dcnMarkdown(t.TempDir()); len(got) != 0 {
+		t.Errorf("empty repo: found %v", got)
 	}
+	repo := t.TempDir()
 
 	md := "## Decisions\n\n- We ship on Fridays.\n"
 	if err := os.WriteFile(filepath.Join(repo, "CLAUDE.md"), []byte(md), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(repo, "docs"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(repo, "docs", "ops"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "docs", "DECISIONS.md"), []byte(md), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "docs", "ops", "release-notes.md"), []byte(md), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	got := dcnScanLogs(repo)
-	// Two files, one record each — and on a case-insensitive filesystem
-	// docs/DECISIONS.md and docs/decisions.md are the same file read once.
+	var got []decision
+	for _, rel := range dcnMarkdown(repo) {
+		got = append(got, dcnFileRecords(repo, rel)...)
+	}
 	if len(got) != 2 {
-		t.Fatalf("got %d records, want 2: %+v", len(got), got)
+		t.Fatalf("got %d records, want one from each file: %+v", len(got), got)
 	}
 	if got[0].title != "We ship on Fridays" {
 		t.Errorf("title = %q", got[0].title)
+	}
+	// The root file is in no group; the other is named for itself, with its
+	// folder beside it.
+	if got[0].group != "" || got[1].group != "release notes" || got[1].where != "docs/ops" {
+		t.Errorf("groups = %q, %q (%q)", got[0].group, got[1].group, got[1].where)
 	}
 }

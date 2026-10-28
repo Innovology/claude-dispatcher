@@ -2,12 +2,14 @@ package cockpit
 
 import (
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fsnotify/fsnotify"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
 )
 
@@ -37,9 +39,21 @@ func Run() error {
 	m := newModel()
 
 	if cfg, err := config.Load(); err == nil {
-		m.cfg = cfg
-		applyConfigEnv(cfg)
+		// Before any session is judged: a dispatcher left parked at the
+		// configured shell by an earlier run is read on the first load, long
+		// before a launch in this one could mention it (applyConfig).
+		var err error
+		// A bad `[keys]` line keeps the defaults and says so, rather than
+		// refusing to open: the cockpit is how you would find out what the
+		// action ids are, and a binding typo must not be the thing that stops
+		// you looking them up.
+		if m, err = m.applyConfig(cfg); err != nil {
+			m.notice = "keys: " + err.Error() + " — using the defaults"
+		}
 		_ = state.EnsureDirs()
+		// Answers that cannot change any more are kept across launches, so a
+		// cockpit opened again within the half hour does not ask for them again.
+		gh.KeepSettled(filepath.Join(state.Dir(), "gh-settled.json"))
 		ch := make(chan struct{}, 1)
 		if watcher, err := fsnotify.NewWatcher(); err == nil {
 			if watcher.Add(state.DispatchesDir()) == nil {
@@ -71,7 +85,7 @@ func Run() error {
 	if m.cfg != nil {
 		configured = m.cfg.Theme
 	}
-	m = m.initTheme(configured)
+	m = m.initTheme(configured, m.cfg.AppearancePath())
 	if m.themeTerm {
 		// Whatever mode it ends in — settings can switch to system mid-run.
 		defer func() { _, _ = os.Stdout.WriteString(termThemeOff) }()

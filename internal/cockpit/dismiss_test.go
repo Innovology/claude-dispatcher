@@ -189,7 +189,7 @@ func TestFinishedDispatcherHoldsItsRowUntilDismissed(t *testing.T) {
 // x on a finished row dismisses the ending; it must not reach killCmd, which
 // would go looking for a session to take down and a worktree to clean up.
 func TestDismissIsNotAKill(t *testing.T) {
-	rec := &state.Dispatch{ID: "r3", Feature: "ended", Status: state.StatusExited,
+	rec := &state.Dispatch{ID: "r3", Feature: "ended", Status: state.StatusExited, SessionID: "sess-r3",
 		FinishedAt: ptrTime(time.Now())}
 	acts := cqActs(rec, "done")
 	var x cqAct

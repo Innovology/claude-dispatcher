@@ -1,21 +1,28 @@
 package cockpit
 
-import "strings"
+import (
+	"strings"
+
+	"claude-dispatcher/internal/keymap"
+)
 
 // overlays_chrome.go renders the two "chrome" overlays — the HELP sheet and the
 // command PALETTE. Both are full-screen modals handed the whole body area; they
 // centre their content within a capped max width, mirroring the design's
 // max-width:1000px help sheet and 720px palette box.
 
-// helpSections is the key sheet: each section a heading and its k/d rows.
-// "every action is one key" — the k column is the chord, the d column what it
-// does. The triage section's act keys are the ones cqActs really offers; an act
-// with no command behind it is not listed here either.
-var helpSections = []struct {
+type helpRow struct{ k, d string }
+
+type helpSection struct {
 	section string
-	keys    []struct{ k, d string }
-}{
-	{section: "the fleet · lens 1", keys: []struct{ k, d string }{
+	keys    []helpRow
+}
+
+// helpLegend is the part of the sheet that is not keys: what the glyphs mean,
+// and the few things the cockpit does that no single action names. It stays
+// hand-written because none of it is a binding.
+var helpLegend = []helpSection{
+	{section: "the fleet · lens 1", keys: []helpRow{
 		{"●", "blocking — it cannot move until you answer"},
 		{"○", "waiting on you, not blocking anything else"},
 		{"·", "running · nothing there needs you yet"},
@@ -23,61 +30,136 @@ var helpSections = []struct {
 		{"‖", "parked · you shelved it, its row keeps your reason"},
 		{"", "sorted by what needs you, not by product — the top row is next"},
 	}},
-	{section: "work the fleet", keys: []struct{ k, d string }{
-		{"j / k", "move the cursor — the panel and the key hints follow it"},
-		{"g / G", "first row · last row"},
-		{"f", "filter: all → wants you → running → history"},
-		{"⏎", "attach the session"},
-		{"r", "reply · type one line into a waiting session, no jump-in"},
-		{"y", "approve the merge, or mark it shipped once it has commits"},
-		{"x", "kill it · the branch and any dirty worktree survive"},
-		{"x", "on a ✓ row: dismiss it · nothing to kill, it goes to history"},
-		{"s", "skip · send it to the back, it comes round again"},
-		{"p", "park it · say why, it waits below the fleet · p unparks"},
-		{"d", "dispatch · pick a repo, say what it does"},
-		{"t", "steward on/off · it answers what the brief settles, notes the rest on your rows"},
-		{"ctrl+z", "put back the last thing you cleared"},
-	}},
-	{section: "what has finished", keys: []struct{ k, d string }{
-		{"h", "history · every dispatcher that is over, newest worked first"},
-		{"", "a dispatcher that ends keeps its row until you dismiss it"},
-		{"", "one you killed or merged yourself goes straight there — you read it"},
-		{"⏎", "resume it · its own transcript, in its own worktree"},
-		{"o", "open its pull request"},
-		{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
-	}},
-	{section: "move", keys: []struct{ k, d string }{
+	{section: "move", keys: []helpRow{
 		{"1…6", "triage · products · backlog · usage · decisions · velocity"},
 		{"esc", "leave the dispatch form"},
-		{":", "command palette"},
-		{"?", "this help"},
-	}},
-	{section: "products · lens 2", keys: []struct{ k, d string }{
-		{"⏎", "open the product panel beside the table"},
-		{"O R T S H", "in the panel: overview · review · team · shipped · history"},
-		{"esc", "close the panel"},
-		{"a", "assign repos to products"},
-		{"n", "new product — names it and moves the marked repos in"},
-		{"l", "the Linear token this product's backlog is read with"},
-		{"space", "mark a repo · enter moves every marked one"},
-		{"tab", "between the repo list and the products"},
-		{"u / ctrl+u", "take repos back out of a product · start over"},
-	}},
-	{section: "the other lenses", keys: []struct{ k, d string }{
-		{"j / k", "up and down the list"},
-		{"→ / ←", "into an ADR's body and back (decisions)"},
-		{"enter", "open what is selected"},
-		{"space", "pick a backlog ticket"},
-		{"ctrl+d", "dispatch every picked ticket"},
-	}},
-	{section: "anywhere", keys: []struct{ k, d string }{
-		{",", "settings"},
-		{"+", "new dispatch, repo first"},
-		{"U", "upgrade to the published build — behind the cockpit, in place"},
-		{"ctrl+l", "redraw a garbled screen"},
-		{"q", "quit"},
+		{"→ / ←", "into a decision's body and back (decisions)"},
+		{"[ / ]", "the previous or next group of decisions · o opens one in your editor"},
 	}},
 }
+
+// helpNotes are lines that belong to a generated section but are not bindings:
+// a key whose meaning depends on the row it is pressed on, and the sentence
+// that says what happens after. They are appended to their section, so nothing
+// the hand-written sheet used to say was lost when it started being built. A
+// key they name is still read from the keymap.
+func (m model) helpNotes() map[string][]helpRow {
+	kill := prettyKey(m.keys.KeyFor("fleet.kill"))
+	return map[string][]helpRow{
+		"work the fleet": {
+			{kill, "on a ✓ row: dismiss it · nothing to kill, it goes to history"},
+			{kill, "on an adopted row: release it · the session keeps running, yours again"},
+		},
+		"what has finished": {
+			{"", "a dispatcher that ends keeps its row until you dismiss it"},
+			{"", "one you killed or merged yourself goes straight there — you read it"},
+			{prettyKey(m.keys.KeyFor("fleet.attach")), "resume it · its own transcript, in its own worktree"},
+			{"", "a resumed dispatcher rejoins the fleet and you land in its session"},
+		},
+		"products · lens 2": {
+			{"esc", "close the panel · again closes the assignment editor"},
+		},
+		"the other lenses": {
+			{"", "enter keeps the matches · esc on one goes to it in its repo"},
+		},
+	}
+}
+
+// helpOrder is the order the generated sections are printed in. A section a
+// binding names and this does not is still printed, at the end — a new action
+// must never be invisible because someone forgot a list.
+var helpOrder = []string{
+	"work the fleet", "what has finished", "products · lens 2",
+	"search", "the other lenses", "anywhere",
+}
+
+// helpSections is the key sheet, BUILT from the live keymap rather than written
+// beside it.
+//
+// Every key here is the one that action currently answers to, so a rebind
+// appears in `?` the moment it takes effect. The sheet used to be a literal
+// table maintained by hand, which was merely duplicated effort while the keys
+// were fixed and becomes a lie the first time anybody edits `[keys]` — and the
+// help sheet is exactly where someone goes to find out what their keys are.
+func (m model) helpSections() []helpSection {
+	rows := map[string][]helpRow{}
+	var order []string
+	for _, b := range m.keys.Bindings() {
+		if b.Help == "" {
+			continue // a motion key the sheet describes once, beside its pair
+		}
+		if _, seen := rows[b.Section]; !seen {
+			order = append(order, b.Section)
+		}
+		rows[b.Section] = append(rows[b.Section], helpRow{k: helpKeyLabel(m, b), d: b.Help})
+	}
+
+	out := append([]helpSection{}, helpLegend...)
+	helpNotes := m.helpNotes()
+	printed := map[string]bool{}
+	add := func(name string) {
+		if printed[name] || len(rows[name]) == 0 {
+			return
+		}
+		printed[name] = true
+		out = append(out, helpSection{section: name, keys: append(rows[name], helpNotes[name]...)})
+	}
+	for _, name := range helpOrder {
+		add(name)
+	}
+	for _, name := range order {
+		add(name)
+	}
+	return out
+}
+
+// helpKeyLabel pairs the up/down keys of a list onto one row, the way the sheet
+// has always read: "j / k" rather than two lines for one idea. The pair is
+// found by id — an action ending ".down" is printed with its ".up".
+func helpKeyLabel(m model, b keymap.Binding) string {
+	label := prettyKey(b.Key)
+	// The product panel's tabs are one idea, printed as one row.
+	if b.Action == "panel.overview" {
+		tabs := []string{label}
+		for _, a := range []string{"panel.review", "panel.team", "panel.shipped", "panel.history", "panel.sessions"} {
+			tabs = append(tabs, prettyKey(m.keys.KeyFor(a)))
+		}
+		return strings.Join(tabs, " ")
+	}
+	if mate, ok := strings.CutSuffix(b.Action, ".down"); ok {
+		if up := m.keys.KeyFor(mate + ".up"); up != "" {
+			return label + " / " + prettyKey(up)
+		}
+	}
+	if mate, ok := strings.CutSuffix(b.Action, ".first"); ok {
+		if last := m.keys.KeyFor(mate + ".last"); last != "" {
+			return label + " / " + prettyKey(last)
+		}
+	}
+	return label
+}
+
+func prettyKey(k string) string {
+	if k == "enter" {
+		return "⏎"
+	}
+	return k
+}
+
+const (
+	// helpKeyCol is the width of the sheet's key column. The widest label it
+	// has to hold is the product panel's tabs, "O R T S H Y".
+	helpKeyCol = 11
+	// helpMaxWidth caps the sheet so its prose stays readable — a sentence run
+	// across a 200-column terminal is one the eye loses its place in.
+	//
+	// It was 100, which is narrower than the longest line the sheet has to
+	// print: split into two columns that left 36 characters for a description,
+	// and every description longer than that was cut. On a wide terminal the
+	// result was a sheet of half-sentences with most of the screen empty. 160
+	// is two columns of about 66, which is the longest description there is.
+	helpMaxWidth = 160
+)
 
 // viewHelp renders the "keys" sheet: title + subtitle, then the sections laid
 // out in two columns when width allows, one column otherwise.
@@ -86,10 +168,7 @@ func (m model) viewHelp(w, h int) string {
 	if inner < 10 {
 		inner = w
 	}
-	contentW := inner
-	if contentW > 100 {
-		contentW = 100
-	}
+	contentW := mini(inner, helpMaxWidth)
 
 	const colGap = 5
 	twoCol := contentW >= 80
@@ -99,28 +178,33 @@ func (m model) viewHelp(w, h int) string {
 	}
 
 	// Each section becomes a block: heading, an underline rule, then k/d rows.
-	renderSection := func(sec struct {
-		section string
-		keys    []struct{ k, d string }
-	}) string {
+	//
+	// A description WRAPS onto a second line rather than being cut. It is the
+	// only explanation a key has, and the half a truncation keeps is the half
+	// that says least — "upgrade to the published build — be…" is the sentence
+	// with its point removed. The continuation lines sit under the description
+	// column, so the key column still reads as a column.
+	renderSection := func(sec helpSection) string {
 		lines := []string{
 			fg(cDim, padTo(sec.section, colW, alignLeft)),
 			fg(cRule, strings.Repeat("─", colW)),
 		}
-		dw := colW - 11 // 9ch key + 2ch gap
-		if dw < 1 {
-			dw = 1
-		}
+		dw := maxi(colW-helpKeyCol-2, 1) // key column + a 2ch gap
 		for _, kr := range sec.keys {
-			k := fg(cWhite, padTo(kr.k, 9, alignLeft))
-			d := fg(cMid, truncate(kr.d, dw))
-			lines = append(lines, k+"  "+d)
+			for i, part := range productsWrap(kr.d, dw) {
+				key := ""
+				if i == 0 {
+					key = kr.k
+				}
+				lines = append(lines, fg(cWhite, padTo(key, helpKeyCol, alignLeft))+"  "+fg(cMid, part))
+			}
 		}
 		return vjoin(lines...)
 	}
 
-	blocks := make([]string, len(helpSections))
-	for i, sec := range helpSections {
+	sections := m.helpSections()
+	blocks := make([]string, len(sections))
+	for i, sec := range sections {
 		blocks[i] = renderSection(sec)
 	}
 

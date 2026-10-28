@@ -4,25 +4,35 @@
 //
 //	SessionStart                   -> working (binds session_id/transcript)
 //	UserPromptSubmit               -> working
-//	PostToolUse                    -> working, only to clear "blocked"
+//	PermissionRequest              -> blocked: a dialog is up, and whose
+//	PreToolUse:AskUserQuestion     -> blocked (a menu, so attach to answer it)
+//	PostToolUse                    -> working, once it closes the last dialog
+//	                                  open (only its own agent's — state.Menu)
 //	Stop                           -> needs-input (turn complete), or working
 //	                                  if background tasks are still in flight
+//	                                  AND the message asked nothing
 //	StopFailure                    -> needs-input, with the API error that
 //	                                  ended the turn recorded as its Failure
 //	Notification:idle_prompt       -> needs-input (unless waiting on tasks)
-//	Notification:permission_prompt -> blocked
-//	PreToolUse:AskUserQuestion     -> blocked (a menu, so attach to answer it)
+//	Notification:permission_prompt -> blocked, if nothing reported the dialog
 //	SessionEnd                     -> exited (unless already done)
 //	SubagentStart/SubagentStop     -> no status change; the fan-out is an
 //	                                  annotation on the record (state.Subagent)
+//	                                  — but a subagent ending closes its dialogs
 //
-// A Stop with a non-empty background_tasks payload means the session is
-// paused waiting for background work to wake it, not waiting on the human;
-// the idle_prompt payload carries no task info, so the Stop's verdict is
-// persisted (WaitingOnTasks) and idle_prompt defers to it.
+// Any event leaves the record blocked while a dialog is still open: the
+// session can end its turn under a subagent's permission prompt.
 //
-// A done record is terminal for every event but the two that prove its session
-// is still going — see reopensDone.
+// A Stop with background work in flight (pendingTasks: a standing artifact
+// watch is not work) means the session is paused waiting for that work to
+// wake it, not waiting on the human —
+// unless its message asked something, in which case the ask wins and the
+// record is needs-input with both facts in its reason. The idle_prompt payload
+// carries no task info, so the Stop's verdict is persisted (WaitingOnTasks)
+// and idle_prompt defers to it either way.
+//
+// A done record is terminal for every event but those that prove its
+// session is still going — see reopensDone.
 //
 // Events are attributed to a dispatch by, in order: the CLAUDE_DISPATCHER_ID
 // env var (set at launch, inherited through tmux -> claude -> hook), the
@@ -44,6 +54,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/ask"
 	"claude-dispatcher/internal/state"
 )
 
@@ -52,14 +63,17 @@ type hookInput struct {
 	TranscriptPath string `json:"transcript_path"`
 	Cwd            string `json:"cwd"`
 	HookEventName  string `json:"hook_event_name"`
-	// Stop/SubagentStop only; item shape is Claude Code's business — only the
-	// count matters here.
+	// Stop/SubagentStop only; read through pendingTasks, which counts the
+	// entries the session is waiting on and leaves out standing watches.
 	BackgroundTasks []json.RawMessage `json:"background_tasks"`
 	// SubagentStart/SubagentStop carry which agent the event is about; other
 	// events fired from within a subagent carry them too, and are handled the
 	// same as from the main thread.
 	AgentID   string `json:"agent_id"`
 	AgentType string `json:"agent_type"`
+	// PermissionRequest/PreToolUse/PostToolUse: the tool the event is about,
+	// which with AgentID says which dialog a tool completing closes.
+	ToolName string `json:"tool_name"`
 	// StopFailure only: Claude Code's category for the API error that ended
 	// the turn, and whatever detail it sent with it. error_details is decoded
 	// loosely — its shape is Claude Code's business, and a detail we cannot
@@ -86,6 +100,36 @@ func (in hookInput) detail() string {
 		raw = raw[:300] + "…"
 	}
 	return raw
+}
+
+// pendingTasks is how many of the background tasks the session is waiting on:
+// work that ends and wakes it — a shell, the Monitor tool (listed as a shell
+// with its command), a background agent.
+//
+// A standing watch is not one. Measured on claude 2.1.299, an artifact the
+// session published or was asked to watch is listed for the rest of the
+// session as {"type":"monitor","status":"running","description":"live updates
+// for artifact …"}, with no command and no end. It wakes the session only when
+// somebody comments or republishes, which is a person's move like any prompt.
+// Counted, it held a dispatcher that had said it was done at "waiting on 1
+// background task" for good: the row stayed running, so it offered no "mark
+// shipped", and the tracker, which waits for the turn to end, never marked it
+// done either.
+//
+// An entry that does not parse is counted, as every entry was before.
+func (in hookInput) pendingTasks() int {
+	n := 0
+	for _, raw := range in.BackgroundTasks {
+		var t struct {
+			Type    string `json:"type"`
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(raw, &t) == nil && t.Type == "monitor" && t.Command == "" {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 func Run(args []string) int {
@@ -185,7 +229,8 @@ func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
 	return nil
 }
 
-// reopensDone names the three events that outrank "done means live".
+// reopensDone names the events that outrank "done means live": a human's new
+// prompt, and a dialog going up however it is reported.
 //
 // internal/track flips a record to done the moment its PR merges, and a
 // dispatcher told to open and merge its own PR and keep working routinely
@@ -211,6 +256,7 @@ func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
 // fix, surviving in the one state where it still bit.
 func reopensDone(event string) bool {
 	return event == "Notification:permission_prompt" ||
+		event == "PermissionRequest" ||
 		event == "PreToolUse:AskUserQuestion" ||
 		event == "UserPromptSubmit"
 }
@@ -280,7 +326,7 @@ func applyFanOut(d *state.Dispatch, event string, in hookInput) bool {
 		// the last turn go, background ones still running carry over.
 		return d.DropStoppedSubagents()
 	case "Stop":
-		if len(in.BackgroundTasks) > 0 {
+		if in.pendingTasks() > 0 {
 			return false // background agents legitimately outlive the turn
 		}
 		// The turn is over and nothing is in flight, so a subagent still
@@ -312,57 +358,129 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusWorking
 		d.StatusReason = "session started"
 		d.WaitingOnTasks = false
+		d.Menus = nil
 	case "UserPromptSubmit":
 		d.Status = state.StatusWorking
 		d.StatusReason = "processing your prompt"
 		d.WaitingOnTasks = false
-		d.Said = "" // whatever it last asked has just been answered
+		d.Said = ""     // whatever it last asked has just been answered
+		d.DropMenus("") // the session took a prompt, so nothing of its own is up
 		// A prompt reaching the session answers the question it was parked on:
 		// the park said "I cannot answer that right now", and someone just did.
 		// No other event clears the shelf — a Stop, an idle prompt or a session
 		// dying with the machine are all things a parked dispatcher is allowed
 		// to do while it waits.
 		d.ParkedReason, d.ParkedAt = "", nil
-	case "PreToolUse:AskUserQuestion":
-		// The one wait no other hook reports. A session that asks through the
-		// question tool has not ended its turn, so no Stop fires; it is not
-		// idle at the prompt, so no idle notification fires; and it is not a
-		// permission prompt. Measured on a live dispatcher sitting on a menu
-		// with four options: the only hooks arriving were its background
-		// agent's SubagentStops, every 32 seconds, which read as a session
-		// working away — "0 want you" over a question with the human's name
-		// on it.
+	case "PreToolUse:AskUserQuestion", "PermissionRequest":
+		// A dialog going up, recorded with whose it is (state.Menu); the
+		// blocked status follows from it below.
+		//
+		// The question was the one wait no hook reported at all. A session that
+		// asks through the question tool has not ended its turn, so no Stop
+		// fires; it is not idle at the prompt, so no idle notification fires;
+		// and on the claude it was measured on, no permission prompt fired
+		// either. The only hooks arriving under a four-option menu were its
+		// background agent's SubagentStops, every 32 seconds, which read as a
+		// session working away — "0 want you" over a question with the human's
+		// name on it. PermissionRequest is the precise report of every dialog,
+		// a question included, and the only one that says whose a subagent's
+		// permission prompt is; the PreToolUse stays for installs that have not
+		// re-run init.
 		//
 		// Blocked rather than needs-input, and for the reason blocked exists:
 		// a menu is not a sentence you can reply to. `r` types a line at the
 		// prompt, and the prompt is not what has the keyboard — the answer is
 		// a keypress in the pane, so the row has to send the human in.
-		d.Status = state.StatusBlocked
-		d.StatusReason = state.ReasonQuestion
-		d.WaitingOnTasks = false
+		tool := in.ToolName
+		if event == "PreToolUse:AskUserQuestion" {
+			tool = state.QuestionTool
+		}
+		d.OpenMenu(in.AgentID, tool, time.Now())
+		d.Status = state.StatusBlocked // set here as well: this may be reopening a done record
+		if in.AgentID == "" {
+			d.WaitingOnTasks = false // the session itself is on the menu, not idle
+		}
 	case "PostToolUse":
-		// A tool completing means any permission prompt was approved — or a
-		// question answered, which arrives the same way: the tool returns once
-		// the human has picked.
-		if d.Status != state.StatusBlocked {
+		// A tool completing closes what it proves answered — its own agent's
+		// dialog, never another agent's (state.SettleMenus). It used to clear
+		// any block: a session sat on a question while its background agent
+		// ran 29 tools in five minutes, the first of which put the row back to
+		// working for the hour the question stood.
+		if len(d.Menus) == 0 {
+			// A block with no dialog on record — one from before Menus — is
+			// cleared the way every block was.
+			if d.Status != state.StatusBlocked {
+				return false
+			}
+			d.Status = state.StatusWorking
+			d.StatusReason = "permission approved, working"
+			break
+		}
+		asked := d.MenuAsks()
+		if !d.SettleMenus(in.AgentID, in.ToolName) {
 			return false
+		}
+		if len(d.Menus) > 0 {
+			break // another dialog is still up
 		}
 		d.Status = state.StatusWorking
 		d.StatusReason = "permission approved, working"
+		if asked {
+			d.StatusReason = "question answered, working"
+		}
+	case "SubagentStop":
+		// A subagent that ended takes its dialogs with it — the end of one it
+		// was refused, since a refusal fires no hook of its own.
+		if in.AgentID == "" || !d.DropMenus(in.AgentID) {
+			return false
+		}
+		if len(d.Menus) == 0 && d.Status == state.StatusBlocked {
+			d.Status = state.StatusWorking
+			d.StatusReason = "permission settled, working"
+		}
 	case "Stop":
 		// A turn that completed is the proof whatever last failed is past it,
 		// and the only thing that resets the retry count.
 		d.Failure = nil
 		d.SetSaid(in.LastAssistantMessage)
-		d.WaitingOnTasks = len(in.BackgroundTasks) > 0
-		if d.WaitingOnTasks {
+		pending := in.pendingTasks()
+		d.WaitingOnTasks = pending > 0
+		d.DropMenus("") // a turn that ended is past any dialog of its own
+		if pending == 0 {
+			// Nothing in flight, so no subagent is either: a dialog still
+			// open under one is a SubagentStop that never arrived — the case
+			// the subagent sweep exists for — and kept, it held the row at
+			// blocked until the session ended.
+			d.Menus = nil
+		}
+		// Background work is not a human wait — until the message asks
+		// something, and then both are true and only one of them needs a
+		// human. This branch used to be taken on the task count alone, so a
+		// turn that ended on a question with an agent still running read as
+		// working and never reached the table.
+		//
+		// The ask is read off d.Said rather than the payload so that the
+		// status and the cockpit's SIGNAL cannot disagree: cqAsk is this same
+		// ask.Of over this same field, so a wait claimed here is a question
+		// the row can quote.
+		//
+		// WaitingOnTasks stays set either way. It is true, and the idle prompt
+		// that trails a stop defers to it; what changes is that it no longer
+		// decides the status on its own.
+		if d.WaitingOnTasks && ask.Of(d.Said) == "" {
 			d.Status = state.StatusWorking
 			d.StatusReason = fmt.Sprintf("waiting on %d background %s",
-				len(in.BackgroundTasks), plural(len(in.BackgroundTasks), "task"))
+				pending, plural(pending, "task"))
 			break
 		}
 		d.Status = state.StatusNeedsInput
-		d.StatusReason = "turn complete — waiting on you"
+		d.StatusReason = state.ReasonTurnComplete
+		if d.WaitingOnTasks {
+			// Both facts, so the row does not look like it has forgotten the
+			// background work it is also still waiting on.
+			d.StatusReason += fmt.Sprintf(" · %d background %s still running",
+				pending, plural(pending, "task"))
+		}
 	case "StopFailure":
 		// Fired instead of Stop, so it is the only word the session gets out:
 		// without it the record went on saying "working". The retry count
@@ -378,11 +496,15 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Failure = f
 		d.SetSaid(in.LastAssistantMessage)
 		d.WaitingOnTasks = false
+		d.DropMenus("")
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "stopped on an API error: " + strings.ReplaceAll(f.Error, "_", " ")
 	case "Notification:idle_prompt":
 		if d.WaitingOnTasks {
 			return false // paused on background work, not on the human
+		}
+		if len(d.Menus) > 0 {
+			return false // a dialog is up, and it is the better account of the wait
 		}
 		if d.Failure != nil && d.Status == state.StatusNeedsInput {
 			// The idle prompt a failed turn leaves behind a minute later. It
@@ -392,13 +514,31 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		d.Status = state.StatusNeedsInput
 		d.StatusReason = "waiting for your next prompt"
 	case "Notification:permission_prompt":
+		// Says neither whose dialog it is nor what for, and trails the hook
+		// that did by about six seconds — claude 2.1.296 sends one after every
+		// question too, so taking it at its word re-worded each of them as a
+		// permission prompt. Only a dialog nothing else reported is news.
+		if len(d.Menus) > 0 {
+			return false
+		}
+		d.OpenMenu("", "", time.Now())
 		d.Status = state.StatusBlocked
-		d.StatusReason = "waiting on a permission approval"
 	case "SessionEnd":
 		d.Failure = nil // nothing left to retry
+		d.Menus = nil
 		d.Stop(state.StatusExited, "session ended", time.Now())
 	default:
 		return false
+	}
+	// A dialog on screen outranks whatever else the event said: a session can
+	// end its turn, or take a prompt, while a subagent's permission prompt is
+	// still waiting, and that prompt is the human's either way.
+	if len(d.Menus) > 0 && d.Status != state.StatusDone && d.Status != state.StatusExited {
+		d.Status = state.StatusBlocked
+		d.StatusReason = "waiting on a permission approval"
+		if d.MenuAsks() {
+			d.StatusReason = state.ReasonQuestion
+		}
 	}
 	return true
 }

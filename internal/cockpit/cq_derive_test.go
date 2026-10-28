@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
 )
@@ -40,6 +41,11 @@ func TestCQKindFromRecord(t *testing.T) {
 		{"blocked on a question is a question ask", "blocked", state.ReasonQuestion, "question"},
 		{"an open PR is a merge ask", "review", "turn complete — waiting on you", "review"},
 		{"finished turn", "needs", "turn complete — waiting on you", "turn-done"},
+		// A turn that ended on a question while background work was still
+		// running carries both facts, and is still a finished turn — so the
+		// lead is matched as a prefix, not whole.
+		{"finished turn with background work", "needs",
+			state.ReasonTurnComplete + " · 2 background tasks still running", "turn-done"},
 		{"idle at the prompt", "needs", "waiting for your next prompt", "idle"},
 		{"anything else stopped", "needs", "something odd", "needs"},
 	}
@@ -80,7 +86,7 @@ func TestAMenuIsAMenuWhicheverKindItIs(t *testing.T) {
 
 	// The same record, so any difference in the keys is the kind's doing. Five
 	// commits, because "mark shipped" appears only once there are some and a
-	// menu must refuse it either way.
+	// menu must ask before it acts either way.
 	rec := testRec("one", 5)
 	keys := func(kind string) string {
 		var ks []string
@@ -95,8 +101,12 @@ func TestAMenuIsAMenuWhicheverKindItIs(t *testing.T) {
 	if strings.Contains(keys(ques), "r:") {
 		t.Errorf("a question offers r reply (%q) — typing at a menu picks its options", keys(ques))
 	}
-	if strings.Contains(keys(ques), "y:") {
-		t.Errorf("a question offers y (%q) — it is mid-turn, not shippable", keys(ques))
+	// Mid-turn, so y is the override and asks before it acts.
+	rec.Status = state.StatusBlocked
+	for _, a := range cqActs(rec, ques) {
+		if a.k == "y" && a.confirm == "" {
+			t.Errorf("a question's y (%q) marks it shipped without asking — the session is mid-turn", a.d)
+		}
 	}
 	for _, ask := range []string{perm, ques} {
 		if replyable(fleetRow{kind: "queue", ask: ask}) {
@@ -393,5 +403,65 @@ func TestFleetRepoStemsOnlyTheProductPrefix(t *testing.T) {
 		if got := fleetRepo(c.repo, c.product); got != c.want {
 			t.Errorf("fleetRepo(%q,%q) = %q, want %q", c.repo, c.product, got, c.want)
 		}
+	}
+}
+
+// A session that started and has said nothing since is sitting on a startup
+// prompt no hook reports — reported as a row reading "starting session" while
+// the pane asked whether to trust the folder. It is a menu like the other two:
+// first in the table, amber, enter to attach; only its words are its own.
+func TestAStalledLaunchWantsYou(t *testing.T) {
+	started := time.Now().Add(-dispatchpkg.LaunchStallAfter - 10*time.Second)
+	rec := &state.Dispatch{ID: "s1", Feature: "find-mannequin", Status: state.StatusLaunching, SessionStartedAt: &started}
+	if st := floorState(rec); st != "blocked" {
+		t.Fatalf("floorState = %q, want blocked", st)
+	}
+	kind := cqKind(rec, "blocked")
+	if kind != "startup" || !cqMenu(kind) {
+		t.Fatalf("kind = %q (menu %v), want a startup menu", kind, cqMenu(kind))
+	}
+	if cqUrgency(fleetRow{ask: kind}) != cqUrgency(fleetRow{ask: "permission"}) {
+		t.Error("a stalled launch must rank with the other menus")
+	}
+	keys := func(kind string) string {
+		var ks []string
+		for _, a := range cqActs(rec, kind) {
+			ks = append(ks, a.k+":"+a.d)
+		}
+		return strings.Join(ks, " ")
+	}
+	if keys("startup") != keys("permission") {
+		t.Errorf("acts differ: startup %q, permission %q", keys("startup"), keys("permission"))
+	}
+	if cqWant(kind) == cqWant("permission") {
+		t.Error("a startup prompt is worded as a permission")
+	}
+	s := &snapshot{}
+	if lead := cqLeadOf(s, rec, kind); !strings.Contains(lead, "startup prompt") {
+		t.Errorf("lead with nothing recorded = %q", lead)
+	}
+	rec.StatusReason = state.ReasonUntrustedLaunch
+	if lead := cqLeadOf(s, rec, kind); !strings.Contains(lead, "trust this worktree") {
+		t.Errorf("lead for an untrusted launch = %q", lead)
+	}
+
+	fresh := time.Now().Add(-5 * time.Second)
+	rec.SessionStartedAt = &fresh
+	if st := floorState(rec); st != "working" {
+		t.Errorf("a launch inside the threshold reads %q, want working", st)
+	}
+}
+
+// A row whose launch never ran offers to start it again, not a resume that can
+// only refuse — "never recorded a session id — there is nothing to resume" was
+// the whole of what ⏎ did there.
+func TestANeverStartedRowOffersToStartAgain(t *testing.T) {
+	never := &state.Dispatch{Feature: "explore-code", Status: state.StatusExited, StatusReason: "did not start: …"}
+	if acts := cqActs(never, "done"); len(acts) == 0 || acts[0].k != "⏎" || acts[0].d != "start again" {
+		t.Errorf("acts = %+v", acts)
+	}
+	ran := &state.Dispatch{Feature: "robustness", Status: state.StatusExited, SessionID: "sess-1"}
+	if acts := cqActs(ran, "done"); acts[0].d != "resume" {
+		t.Errorf("a dispatcher with a conversation should resume it: %+v", acts[0])
 	}
 }

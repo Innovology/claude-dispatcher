@@ -12,24 +12,31 @@ package cockpit
 import (
 	"strconv"
 	"strings"
+	"time"
 )
 
 // usageWindows are the rolling budget windows (USAGE.windows). used is the
 // percentage of the window's cap consumed.
 //
-// pace is the burn rate versus a flat draw-down (1.0 = on track) — and is 0,
-// meaning "not measured", for every window the cockpit can see today. Both
-// windows internal/usage computes are *trailing* (the last 5 hours, the last 7
-// days), so there is no elapsed fraction of a window to compare a spend
-// fraction against; a pace only exists once we can see a window's reset. The
-// field stays because 0 is the honest answer and the header reads it: the
-// alternative was the constant 1.0 this used to store, which drew every weekly
-// figure amber and told the user their burn was exactly on budget, always.
+// measured says used is Claude Code's own figure for account (its status
+// line's rate_limits) rather than the learned estimate, and resets is when the
+// window rolls over — known only for a measured window.
+//
+// pace is the burn rate versus a flat draw-down (1.0 = on track), and 0 means
+// "not measured". The estimate's windows are *trailing* (the last 5 hours, the
+// last 7 days), so there is no elapsed fraction to compare a spend fraction
+// against and they never have one; a measured window knows its reset, so it
+// does. 0 stays the honest answer where there is none: the alternative was the
+// constant 1.0 this used to store, which drew every weekly figure amber and
+// told the user their burn was exactly on budget, always.
 type usageWindow struct {
-	label string
-	used  int
-	note  string
-	pace  float64
+	label    string
+	account  string
+	used     int
+	note     string
+	pace     float64
+	measured bool
+	resets   time.Time
 }
 
 // usageModels is the week's spend split by model (USAGE.models). share is the
@@ -71,17 +78,32 @@ func (m model) viewUsage(w, h int) string {
 func (m model) usageLeft(w int) []string {
 	out := []string{fg(cDim, "subscription usage · all seats")}
 
+	// Each subscription has its own limits, so with more than one reporting
+	// the windows are headed by the account they belong to.
+	accounts := map[string]bool{}
 	for _, win := range usageWindows {
+		accounts[win.account] = true
+	}
+	heading := ""
+	for _, win := range usageWindows {
+		if len(accounts) > 1 && win.account != heading {
+			heading = win.account
+			out = append(out, "", fg(cWhite, heading))
+		}
 		out = append(out, "") // padding-top between windows
 		col := cGreen
 		if win.used > 60 {
 			col = cAmber
 		}
+		fig := itoa(win.used) + "%"
+		if !win.measured {
+			fig = "≈" + fig // the learned estimate, a model rather than a reading
+		}
 		lead := fg(cMid, padTo(win.label, 12, alignLeft)) + "  " +
 			fg(col, bar(win.used, 18)) + "  " +
-			fg(col, itoa(win.used)+"%")
+			fg(col, fig)
 		// The pace column only appears once a pace has been measured; see
-		// usageWindow. A trailing window has none, so today it never appears.
+		// usageWindow. A trailing window has none, so the estimate never shows it.
 		pace := ""
 		if win.pace > 0 {
 			paceCol := cMid
@@ -90,7 +112,7 @@ func (m model) usageLeft(w int) []string {
 			}
 			pace = fg(paceCol, usagePace(win.pace)+" pace")
 		}
-		out = append(out, usageFill(w, lead, pace))
+		out = append(out, usageFill(w-1, lead, pace)) // a column clear of the rule
 		out = append(out, strings.Repeat(" ", 12)+fg(cFaint, truncatePlain(win.note, w-12)))
 	}
 

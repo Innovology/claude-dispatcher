@@ -17,13 +17,40 @@ import (
 type Config struct {
 	// Roots are directories scanned (a few levels deep) for git repositories.
 	Roots []string `toml:"roots"`
-	// Products maps a product name to the repo directory names that belong to
-	// it, powering the portfolio roll-up lens.
+	// Products maps a product name to the repos that belong to it, powering the
+	// portfolio roll-up lens. A repo is named as the cockpit shows it — from its
+	// origin remote, which is not always the name of its folder.
 	Products map[string][]string `toml:"products"`
-	// DeployWorkflows overrides deploy-workflow auto-detection per repo
-	// directory name. Unlisted repos use the first workflow whose name looks
+	// DeployWorkflows overrides deploy-workflow auto-detection per repo, keyed
+	// by repo name. Unlisted repos use the first workflow whose name looks
 	// deploy-ish (deploy/release/publish/ship/prod).
 	DeployWorkflows map[string]string `toml:"deploy_workflows"`
+	// Checkouts pins which working tree a repo's row acts in, keyed by repo
+	// name, for repos whose trunk is not spelled the way the automatic choice
+	// guesses — the main worktree, then a checkout on main, then on master.
+	// A repo that merges into `dev` matches none of those and would be read from
+	// a branch nobody ships. Set from the assignment editor (`p`), and ignored
+	// when it names a path git does not list as a worktree of that repo, since a
+	// pin is a choice between the checkouts that exist, not a way to invent one.
+	Checkouts map[string]string `toml:"checkouts,omitempty"`
+	// RootBranches is the branch a repo's dispatches are cut from when the form
+	// names none, keyed by repo name. Unlisted repos are cut from the remote's
+	// default branch, read from origin at launch (dispatch/root.go). A pinned
+	// checkout is not this: [checkouts] decides what a row reads, and a repo
+	// whose work merges into `dev` while origin's HEAD says `main` needs both.
+	RootBranches map[string]string `toml:"root_branches,omitempty"`
+	// Sockets names the supervisor server a repo's sessions live on, keyed by
+	// repo name. Unlisted repos use their own name, so every repo is its own
+	// server without anyone configuring anything; an entry is for a human who
+	// already keeps per-project servers under names of their own choosing,
+	// which is a label chosen outside the repository and therefore not
+	// something any amount of reading the repo could discover.
+	Sockets map[string]string `toml:"sockets,omitempty"`
+	// SessionEnv overrides the command a repo's sessions are launched under,
+	// keyed by repo name. Unlisted repos are read: a checkout with a flake.nix
+	// on a machine with nix is launched under `nix develop`. An entry set to ""
+	// turns that off for a repo whose flake nix develop cannot open.
+	SessionEnv map[string]string `toml:"session_env,omitempty"`
 
 	// Integrations (optional). Matching env vars, when set, override these so a
 	// secret can be kept out of the file. Edited in-app from the cockpit.
@@ -40,6 +67,14 @@ type Config struct {
 	// means retyping a key that has to match one exactly, in another file, with
 	// silence as the only feedback when it does not.
 	Linear map[string]string `toml:"linear,omitempty"`
+	// Keys rebinds cockpit actions: action id → the key that runs it. Every
+	// action the cockpit has is listed by `?`, which is built from the same
+	// table this overrides, so the help sheet can never describe a binding the
+	// cockpit does not have. An id that is not an action, a key already bound to
+	// something else in the same scope, or an attempt to rebind ctrl+c, is
+	// refused by name at startup rather than dropped — a silently ignored line
+	// presents as a key that stopped working.
+	Keys map[string]string `toml:"keys,omitempty"`
 	// Gates names the ONE check that is a repo's verdict, keyed by the repo
 	// NAME as the cockpit shows it — the name git knows the repository by,
 	// which is not always the name of the folder it sits in: a checkout whose
@@ -68,15 +103,117 @@ type Config struct {
 	// account add`, which also logs the directory in and installs the hooks
 	// and status line it needs.
 	Accounts map[string]string `toml:"accounts,omitempty"`
-	// WeeklyTokenLimit is the subscription's weekly token budget. There is no
-	// API to read it (Claude Code exposes usage only interactively), so it is a
-	// user setting; 0 means unknown and the usage lens shows raw tokens instead
-	// of a percentage.
-	WeeklyTokenLimit int `toml:"weekly_token_limit,omitempty"`
 	// Theme is the cockpit's colours: "system" (and empty) follows the light/
 	// dark switch, live while the cockpit is open; a theme's name — "light",
 	// "dark" — holds that theme whatever the switch says. Edited in settings.
 	Theme string `toml:"theme,omitempty"`
+	// Shell is the interactive shell a dispatch pane drops to once claude
+	// exits. The launch line itself is POSIX and always runs under /bin/sh —
+	// that is not configurable, because a line written for sh handed to a shell
+	// that cannot parse it is a session that dies before claude ever starts.
+	// This names only what replaces it at the end, so the pane you jump into is
+	// the shell you use everywhere else.
+	//
+	// Empty is not "bash": it means ask tmux for the `default-shell` the pane
+	// is sitting in, and fall back to $SHELL. The key exists because that
+	// answer is only available from a running server — a tmux.conf may compute
+	// its default-shell in a `run-shell` job, so there is nothing in the file
+	// to read — and because a shell we were told about is one the idle check
+	// can recognise by name. It is a path, not a name: the pane checks it is
+	// executable, and a bare "fish" falls through to $SHELL.
+	Shell string `toml:"shell,omitempty"`
+	// AppearanceFile is a file whose contents are the word "light" or "dark":
+	// the light/dark switch as a desktop that writes it to a file publishes it,
+	// read before the portal is asked.
+	//
+	// The portal is not universal. On a NixOS/niri desktop running
+	// dankMaterialShell it answers "no preference" while the desktop is in
+	// light mode and writes that word to a file its tmux config reads. A
+	// reporter that can only ask D-Bus is blind there, and a theme switch that
+	// is a script rather than a desktop environment is blind the same way.
+	//
+	// Naming one is cheaper as well as truer: it is a read rather than a
+	// subprocess, so following the switch costs nothing. A file that is
+	// missing or says something else is skipped, never obeyed — see
+	// appearance.FromFile.
+	AppearanceFile string `toml:"appearance_file,omitempty"`
+	// Worktrees is where a dispatch's own checkout is cut: "state" (the
+	// default, and what every install did before this key existed) puts it
+	// under ~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>, and
+	// "project" puts it beside the repository's other checkouts.
+	//
+	// The state directory is the safe default: a dispatch worktree is this
+	// tool's bookkeeping, `x` deletes a clean one, and deleting inside
+	// somebody's project directory on a keypress is a different proposition
+	// from deleting inside our own. It is the wrong default for a machine that
+	// already keeps one folder per branch beside a bare repo, where a dispatch
+	// is the only checkout that lives somewhere else — invisible in the project
+	// it belongs to, and listed by git as a worktree whose folder is not there.
+	//
+	// "project" needs somewhere the others already are. That is the layout
+	// where the repository's common git dir is NOT inside a working tree
+	// (`<project>/.bare` with the checkouts as siblings, giving
+	// `<project>/<slug>`), or a clone whose own worktrees sit beside it named
+	// after it (`app` with `app-login` next to it, giving `app-<slug>`). A
+	// clone with no worktree there falls back to the state directory rather
+	// than inventing a convention next to it.
+	Worktrees string `toml:"worktrees,omitempty"`
+	// BranchPrefix is what a dispatch's branch name starts with, before the
+	// feature's slug. Unset means "feature/", which is what every dispatch has
+	// always been cut as; `branch_prefix = ""` means none, so the branch is the
+	// slug and nothing else.
+	//
+	// It is a pointer because those two are different answers and a string
+	// cannot tell them apart: an absent key and an explicitly empty one both
+	// decode to "", and one of them has to mean the default while the other
+	// means the human asking for a bare name.
+	//
+	// Why anyone would: with `worktrees = "project"` the checkout is a folder
+	// named for the feature beside the repo's others, and a prefixed branch
+	// makes every one of them a folder whose name is not its branch — the
+	// mismatch a per-branch-folder layout exists to avoid. Dropping the prefix
+	// makes a dispatch indistinguishable from a worktree the human cut by
+	// hand, which on such a machine is the point.
+	BranchPrefix *string `toml:"branch_prefix,omitempty"`
+}
+
+// DefaultBranchPrefix is what a dispatch's branch is called when nobody says
+// otherwise: every dispatch works on a feature branch, including in repos that
+// ship from main.
+const DefaultBranchPrefix = "feature/"
+
+// RootBranchFor is the branch repo's dispatches are cut from when the form
+// names none, or "" for the remote's default.
+func (c *Config) RootBranchFor(repo string) string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.RootBranches[repo])
+}
+
+// EffectiveBranchPrefix is the prefix a dispatch is cut with when nobody
+// changes it on the form: branch_prefix as written, or DefaultBranchPrefix
+// where it is not written at all. It is what both forms open on, so the branch
+// they preview is the branch the launch cuts.
+func (c *Config) EffectiveBranchPrefix() string {
+	if c == nil || c.BranchPrefix == nil {
+		return DefaultBranchPrefix
+	}
+	return strings.TrimSpace(*c.BranchPrefix)
+}
+
+// WorktreesBesideProject reports whether a dispatch's checkout is cut beside
+// the repository's other ones rather than under the state directory.
+func (c *Config) WorktreesBesideProject() bool {
+	return c != nil && strings.EqualFold(strings.TrimSpace(c.Worktrees), "project")
+}
+
+// AppearancePath is AppearanceFile with ~ expanded, or "" when none is named.
+func (c *Config) AppearancePath() string {
+	if c == nil {
+		return ""
+	}
+	return ExpandHome(strings.TrimSpace(c.AppearanceFile))
 }
 
 func Dir() string {
@@ -108,7 +245,7 @@ func (c *Config) ExpandedRoots() []string {
 	return out
 }
 
-// ProductFor returns the product a repo directory name belongs to, or "".
+// ProductFor returns the product a repo (by name) belongs to, or "".
 func (c *Config) ProductFor(repoName string) string {
 	for product, names := range c.Products {
 		for _, n := range names {
@@ -151,25 +288,59 @@ func Save(c *Config) error {
 	var b strings.Builder
 	b.WriteString("# Claude Dispatcher configuration.\n\n")
 	b.WriteString("# Directories scanned (up to 3 levels deep) for git repositories.\n")
-	b.WriteString("# Editable from the cockpit: press s.\n")
+	b.WriteString("# Editable from the cockpit: press `,`.\n")
 	b.WriteString("roots = " + tomlStrings(c.Roots) + "\n\n")
 	// Top-level integration keys must precede the first [table] in TOML.
-	b.WriteString("# Integrations (optional; edit in-app with `s`). Matching env vars override.\n")
+	b.WriteString("# Integrations (optional; edit in-app with `,`). Matching env vars override.\n")
 	b.WriteString("# linear_api_key is the unscoped Linear key: the whole backlog when no\n")
 	b.WriteString("# product names one below, and what a product with no entry is read with.\n")
 	fmt.Fprintf(&b, "linear_api_key = %q\n", c.LinearAPIKey)
 	b.WriteString("# Azure Boards backlog (needs the az CLI logged in): the org URL and project.\n")
 	fmt.Fprintf(&b, "azure_org = %q\n", c.AzureOrg)
 	fmt.Fprintf(&b, "azure_project = %q\n", c.AzureProject)
-	b.WriteString("# Your subscription's weekly token budget (no API exposes it, so set it here).\n")
-	b.WriteString("# 0 = unknown → the usage lens shows raw tokens instead of a percentage.\n")
-	fmt.Fprintf(&b, "weekly_token_limit = %d\n", c.WeeklyTokenLimit)
 	b.WriteString("# The cockpit's colours: \"system\" follows your light/dark switch, live while\n")
 	b.WriteString("# the cockpit is open; \"light\" or \"dark\" holds one. Edit in-app with `,`.\n")
 	if c.Theme == "" {
-		b.WriteString("# theme = \"system\"\n\n")
+		b.WriteString("# theme = \"system\"\n")
 	} else {
-		fmt.Fprintf(&b, "theme = %q\n\n", c.Theme)
+		fmt.Fprintf(&b, "theme = %q\n", c.Theme)
+	}
+	b.WriteString("# The shell a dispatch pane drops to when claude exits. Unset asks tmux for\n")
+	b.WriteString("# the default-shell of the server the pane runs on, then falls back to\n")
+	b.WriteString("# $SHELL. Name one here to be sure — a tmux.conf that sets default-shell\n")
+	b.WriteString("# from a run-shell job has nothing in the file for us to read. A full path:\n")
+	b.WriteString("# a bare name is not looked up, and falls through to $SHELL.\n")
+	if c.Shell == "" {
+		b.WriteString("# shell = \"/usr/bin/fish\"\n")
+	} else {
+		fmt.Fprintf(&b, "shell = %q\n", c.Shell)
+	}
+	b.WriteString("# A file holding the word \"light\" or \"dark\" — your desktop's own\n")
+	b.WriteString("# light/dark switch, read before the freedesktop portal is asked. Name one\n")
+	b.WriteString("# when the portal reports \"no preference\" but your theme still changes,\n")
+	b.WriteString("# which is every setup whose switch is a script rather than a desktop.\n")
+	if c.AppearanceFile == "" {
+		b.WriteString("# appearance_file = \"~/path/to/your/mode-file\"\n")
+	} else {
+		fmt.Fprintf(&b, "appearance_file = %q\n", c.AppearanceFile)
+	}
+	b.WriteString("# Where a dispatch's own checkout is cut. \"state\" (the default) keeps it\n")
+	b.WriteString("# under ~/.local/state/claude-dispatcher/worktrees; \"project\" puts it beside\n")
+	b.WriteString("# the repo's other checkouts: <project>/<slug> for a <project>/.bare layout,\n")
+	b.WriteString("# app-<slug> for a clone whose worktrees sit beside it as app-<name>. A\n")
+	b.WriteString("# clone with no worktrees beside it stays in the state directory either way.\n")
+	if c.Worktrees == "" {
+		b.WriteString("# worktrees = \"project\"\n")
+	} else {
+		fmt.Fprintf(&b, "worktrees = %q\n", c.Worktrees)
+	}
+	b.WriteString("# What a dispatch's branch name starts with. Unset is \"feature/\"; an empty\n")
+	b.WriteString("# string is no prefix at all, so the branch is the feature's name and a\n")
+	b.WriteString("# checkout folder beside the project carries the same name as its branch.\n")
+	if c.BranchPrefix == nil {
+		b.WriteString("# branch_prefix = \"\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "branch_prefix = %q\n\n", *c.BranchPrefix)
 	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")
@@ -203,11 +374,69 @@ func Save(c *Config) error {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Accounts[k])
 	}
 	b.WriteString("\n")
-	b.WriteString("# Map product names to repo directory names for the portfolio roll-up.\n")
+	b.WriteString("# Map product names to repos for the portfolio roll-up. A repo is named as the\n")
+	b.WriteString("# cockpit shows it — from its origin remote, not always its folder's name.\n")
 	b.WriteString("# acme-shop = [\"shop-api\", \"shop-web\"]\n")
 	b.WriteString("[products]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Products)) {
 		b.WriteString(tomlKey(k) + " = " + tomlStrings(c.Products[k]) + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString("# Rebind any cockpit action: \"action id\" = \"key\". The README lists every id;\n")
+	b.WriteString("# ? in the cockpit shows what each does and its key now. A key already bound in the\n")
+	b.WriteString("# same place, an id that is not an action, or ctrl+c, is refused by name at\n")
+	b.WriteString("# startup — the cockpit says so rather than ignoring the line.\n")
+	b.WriteString("# \"products.new\" = \"N\"\n")
+	b.WriteString("# \"search.next\" = \"n\"\n")
+	b.WriteString("[keys]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Keys)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Keys[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# Which checkout (folder) a repo's row reads: its staleness, decisions and\n")
+	b.WriteString("# flake come from there. Unlisted repos choose automatically: the main\n")
+	b.WriteString("# worktree, else a checkout on main, else master. Pin one with enter in the\n")
+	b.WriteString("# assignment editor's fold (2, a, p), which also sets [root_branches] below.\n")
+	b.WriteString("# A path git does not list as a worktree is ignored.\n")
+	b.WriteString("# shop-api = \"/home/you/src/shop-api/dev\"\n")
+	b.WriteString("[checkouts]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Checkouts)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Checkouts[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# The branch a repo's new dispatches are cut from when the form names no\n")
+	b.WriteString("# ROOT, always origin's copy of it. Unlisted repos use origin's default.\n")
+	b.WriteString("# Why two entries for what looks like one thing: a checkout is a folder and\n")
+	b.WriteString("# holds whatever is checked out there today; this is a branch. Pinning sets\n")
+	b.WriteString("# both, and they part the day you switch the clone to work on something:\n")
+	b.WriteString("#   [checkouts]     shop-api = \"/home/you/src/shop-api\"  # on feature-x now\n")
+	b.WriteString("#   [root_branches] shop-api = \"dev\"                     # still cut from origin/dev\n")
+	b.WriteString("# shop-api = \"dev\"\n")
+	b.WriteString("[root_branches]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.RootBranches)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.RootBranches[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# The tmux server each repo's sessions live on, keyed by repo name. Unlisted\n")
+	b.WriteString("# repos use their own name, so each is its own server and its own PATH: a\n")
+	b.WriteString("# session inherits the environment of whatever asked for it, so one server per\n")
+	b.WriteString("# repo is what keeps a repo's toolchain in front of every pane you open in it.\n")
+	b.WriteString("# Name one here only to match servers you already start yourself, or press\n")
+	b.WriteString("# s on the repo in the assignment editor (2, then a), which writes it here.\n")
+	b.WriteString("# shop-api = \"shop\"\n")
+	b.WriteString("[sockets]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Sockets)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Sockets[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# What a repo's sessions are launched under, so they see that repo's own\n")
+	b.WriteString("# binaries. Unlisted repos are read rather than configured: a checkout with a\n")
+	b.WriteString("# flake.nix, on a machine with nix, runs under `nix develop`. Set one to \"\" to\n")
+	b.WriteString("# stop that for a repo whose flake has no devShell for nix develop to open.\n")
+	b.WriteString("# shop-api = \"\"\n")
+	b.WriteString("[session_env]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.SessionEnv)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.SessionEnv[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Per-repo deploy workflow override (\"done means live\" watches this workflow\n")

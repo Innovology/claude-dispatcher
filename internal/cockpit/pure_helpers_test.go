@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,10 +127,12 @@ func TestDcnStatus(t *testing.T) {
 		"Superseded": "superseded",
 		"deprecated": "superseded",
 		"rejected":   "superseded",
-		"Proposed":   "proposed",
-		"draft":      "proposed",
-		"Accepted":   "accepted",
-		"who knows":  "accepted",
+		"Withdrawn":  "superseded",
+		"Proposed":   "open",
+		"draft":      "open",
+		"pending":    "open",
+		"Accepted":   "decided",
+		"who knows":  "decided",
 	}
 	for in, want := range cases {
 		if got := dcnStatus(in); got != want {
@@ -138,30 +141,18 @@ func TestDcnStatus(t *testing.T) {
 	}
 }
 
+// A status line is read however it is dressed: plain, or bold in a quote with
+// the word in brackets, which is how player-app's decision points write it.
 func TestDcnInlineStatus(t *testing.T) {
-	text := "# Title\n\nsome text\nStatus: Proposed\nmore text"
-	if got := dcnInlineStatus(text); got != "proposed" {
-		t.Errorf("dcnInlineStatus = %q, want proposed", got)
+	lines := []string{"# Title", "", "some text", "Status: Proposed", "more text"}
+	if got := dcnInlineStatus(lines); got != "open" {
+		t.Errorf("dcnInlineStatus = %q, want open", got)
 	}
-	if got := dcnInlineStatus("no status line here"); got != "" {
+	if got := dcnInlineStatus([]string{"> **Status:** [PROPOSED] 2026-08-25 — a decision point"}); got != "open" {
+		t.Errorf("a quoted, bold status line = %q, want open", got)
+	}
+	if got := dcnInlineStatus([]string{"no status line here"}); got != "" {
 		t.Errorf("dcnInlineStatus with none = %q, want empty", got)
-	}
-}
-
-func TestDcnSections(t *testing.T) {
-	text := "# T\n## Status\naccepted\n## Context\nline one\nline two\n## Decision\nwe decided\n## Consequences\nit follows"
-	sec := dcnSections(text)
-	if sec["status"] != "accepted" {
-		t.Errorf("status section = %q", sec["status"])
-	}
-	if sec["context"] != "line one line two" {
-		t.Errorf("context section = %q", sec["context"])
-	}
-	if sec["decision"] != "we decided" {
-		t.Errorf("decision section = %q", sec["decision"])
-	}
-	if sec["consequences"] != "it follows" {
-		t.Errorf("consequences section = %q", sec["consequences"])
 	}
 }
 
@@ -181,68 +172,75 @@ func TestDcnAge(t *testing.T) {
 	}
 }
 
-func TestDcnFindAdrsAndParseFile(t *testing.T) {
-	dir := t.TempDir()
-	// No ADR dir at all.
-	if d, files := dcnFindAdrs(dir); d != "" || files != nil {
-		t.Errorf("empty repo: got dir=%q files=%v", d, files)
+// An ADR is one decision wherever it sits, read from its sections, with the
+// number adr-tools writes into its title taken off — "9. A dispatch that did
+// not happen" was listed under id 0009 with the 9 still in front of it.
+func TestAnADRIsOneDecisionWhereverItIs(t *testing.T) {
+	text := "# 9. Use Postgres\n\n## Status\nAccepted\n\n## Context\nWe need a database.\n\n## Decision\nUse Postgres.\n\n## Consequences\nOperational cost.\n"
+	got := dcnParse("docs/architecture/0009-use-postgres.md", text, time.Now())
+	if len(got) != 1 {
+		t.Fatalf("got %d decisions, want the one ADR: %+v", len(got), got)
 	}
+	d := got[0]
+	if d.id != "0009" || d.title != "Use Postgres" || d.status != "decided" {
+		t.Errorf("id/title/status = %q/%q/%q", d.id, d.title, d.status)
+	}
+	if d.context != "We need a database." || d.decision != "Use Postgres." || d.consequences != "Operational cost." {
+		t.Errorf("sections = %q / %q / %q", d.context, d.decision, d.consequences)
+	}
+	if got := dcnParse("x.md", "# T\n\n## Status\nSuperseded by 0012\n\n## Decision\nno\n", time.Now()); len(got) != 1 || got[0].status != "superseded" {
+		t.Errorf("a superseded ADR = %+v", got)
+	}
+}
 
-	adrDir := filepath.Join(dir, "doc", "adr")
-	if err := os.MkdirAll(adrDir, 0o755); err != nil {
+// Every markdown file is found, at any depth — player-app keeps its register
+// in _docs/spec — and none from where a decision is not the repo's own:
+// dependencies, build output, hidden folders (agent worktrees live under
+// .claude), and a nested checkout, which is another repo.
+func TestTheWalkFindsMarkdownAnywhereButWhereItIsNotTheRepos(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("# x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, rel := range []string{
+		"CLAUDE.md", "_docs/spec/stack-decisions.md", "docs/a/b/c/deep.MD", "notes.txt",
+		"node_modules/pkg/README.md", "dist/x.md", ".claude/worktrees/agent-1/CLAUDE.md",
+		"vendored/sub/.git", "vendored/sub/README.md",
+	} {
+		write(rel)
+	}
+	got := strings.Join(dcnMarkdown(root), ",")
+	if got != "CLAUDE.md,_docs/spec/stack-decisions.md,docs/a/b/c/deep.MD" {
+		t.Errorf("walk found %s", got)
+	}
+}
+
+// A file re-read only when it changes is still re-read when it does: the
+// cache is keyed on size and modification time, not on having seen the path.
+func TestAChangedFileIsReadAgain(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "DECISIONS.md")
+	if err := os.WriteFile(p, []byte("# Decisions\n\n- **One** first\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	content := "# Use Postgres\n\n## Status\nAccepted\n\n## Context\nWe need a database.\n\n## Decision\nUse Postgres.\n\n## Consequences\nOperational cost.\n"
-	path := filepath.Join(adrDir, "0001-use-postgres.md")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if n := len(dcnFileRecords(root, "DECISIONS.md")); n != 1 {
+		t.Fatalf("first read: %d decisions, want 1", n)
+	}
+	if err := os.WriteFile(p, []byte("# Decisions\n\n- **One** first\n- **Two** second\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// A non-markdown file in the same dir must be skipped.
-	if err := os.WriteFile(filepath.Join(adrDir, "notes.txt"), []byte("ignore me"), 0o644); err != nil {
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(p, later, later); err != nil {
 		t.Fatal(err)
 	}
-
-	gotDir, files := dcnFindAdrs(dir)
-	if gotDir != adrDir {
-		t.Errorf("dcnFindAdrs dir = %q, want %q", gotDir, adrDir)
-	}
-	if len(files) != 1 {
-		t.Fatalf("dcnFindAdrs files = %v, want 1", files)
-	}
-
-	d, ok := dcnParseFile(dir, files[0])
-	if !ok {
-		t.Fatal("dcnParseFile ok = false")
-	}
-	if d.id != "0001" {
-		t.Errorf("id = %q, want 0001", d.id)
-	}
-	if d.title != "Use Postgres" {
-		t.Errorf("title = %q", d.title)
-	}
-	if d.status != "accepted" {
-		t.Errorf("status = %q", d.status)
-	}
-	if d.context == "" || d.decision == "" || d.consequences == "" {
-		t.Errorf("sections not populated: %+v", d)
-	}
-
-	// A file with no leading digits and no "# " heading falls back to base name.
-	path2 := filepath.Join(adrDir, "no-heading.md")
-	if err := os.WriteFile(path2, []byte("no heading here"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	d2, ok := dcnParseFile(dir, path2)
-	if !ok {
-		t.Fatal("dcnParseFile(no-heading) ok = false")
-	}
-	if d2.id != "no-heading" || d2.title != "no-heading" {
-		t.Errorf("fallback id/title = %q/%q", d2.id, d2.title)
-	}
-
-	// A missing file returns ok=false.
-	if _, ok := dcnParseFile(dir, filepath.Join(adrDir, "missing.md")); ok {
-		t.Error("dcnParseFile(missing) ok = true, want false")
+	if n := len(dcnFileRecords(root, "DECISIONS.md")); n != 2 {
+		t.Errorf("after the edit: %d decisions, want 2", n)
 	}
 }
 

@@ -291,13 +291,13 @@ func runReply(args []string, out io.Writer) error {
 		}
 		return fmt.Errorf("%q is on %s — a menu, which typed text would answer; attach to it", d.Feature, menu)
 	}
-	if d.Finished() || !sessionAlive(d.TmuxSession) {
+	if d.Finished() || !sessionAlive(dispatch.SessionOf(d)) {
 		return fmt.Errorf("%q has no live session", d.Feature)
 	}
-	if idle, known := sessionIdle(d.TmuxSession); idle && known {
+	if idle, known := sessionIdle(dispatch.SessionOf(d)); idle && known {
 		return fmt.Errorf("claude has exited in %q's session", d.Feature)
 	}
-	if err := sendKeys(d.TmuxSession, text); err != nil {
+	if err := sendKeys(dispatch.SessionOf(d), text); err != nil {
 		return err
 	}
 	MarkAnswered(d.ID, text)

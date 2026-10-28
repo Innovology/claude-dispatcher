@@ -18,7 +18,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
 )
@@ -42,6 +44,9 @@ const (
 	// ResumeLive: the dispatcher's own session is still busy, so nothing was
 	// started — the thing to do with it is attach, not resume.
 	ResumeLive ResumeMode = "live"
+	// ResumeRelaunched: there was no conversation to resume (the launch died
+	// before claude ran), so the launch itself was run again.
+	ResumeRelaunched ResumeMode = "relaunched"
 )
 
 // Resume reopens d's Claude session in its own worktree, optionally with prompt
@@ -57,13 +62,19 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		return "", "", fmt.Errorf("no dispatch record")
 	}
 	sid := SessionIDOf(d)
-	if sid == "" {
-		return "", "", fmt.Errorf("%q never recorded a session id — there is nothing to resume", d.Feature)
+	// No conversation is a launch that never got as far as claude — the row ADR
+	// 0009 keeps, "did not start". There is nothing to resume, and ⏎ used to
+	// say exactly that and stop, leaving the human to type the whole dispatch
+	// again. What it can do is what was asked in the first place: launch it
+	// again, in the worktree it already cut, with the prompt it was sent with.
+	relaunch := sid == ""
+	if relaunch && strings.TrimSpace(d.Prompt) == "" {
+		return "", "", fmt.Errorf("%q never started, and recorded no prompt to start it with", d.Feature)
 	}
 	// The transcript is what --resume reads. An absent one is the honest end of
 	// this road: claude would open, fail to find the conversation and leave the
 	// human in a session that is not the one they asked for.
-	if d.TranscriptPath != "" {
+	if !relaunch && d.TranscriptPath != "" {
 		if _, err := os.Stat(d.TranscriptPath); err != nil {
 			return "", "", fmt.Errorf("the transcript for %q is gone (%s)", d.Feature, d.TranscriptPath)
 		}
@@ -93,16 +104,26 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// shell in (see tmux.SessionIdle): "idle" here kills the session, and a
 	// probe that called every live claude idle was killing the very dispatcher
 	// the human had just asked to reopen.
-	if d.TmuxSession != "" && sessionAlive(d.TmuxSession) {
-		idle, known := sessionIdle(d.TmuxSession)
+	//
+	// And why it must be the dispatcher's own session, not a younger one that
+	// has taken the name since: a human's wrapper names its sessions after the
+	// repo and branch, so an adopted record's name comes back every time they
+	// open one. Handed back as live, ⏎ on the old row attached them to some
+	// other conversation; read as idle, it killed their session. A younger one
+	// is left alone and a new name is taken below, as for an unknown answer.
+	if d.TmuxSession != "" && sessionAlive(SessionOf(d)) && holdsOwnSession(d) {
+		idle, known := sessionIdle(SessionOf(d))
 		switch {
 		case known && !idle:
 			return ResumeLive, d.TmuxSession, nil
-		case known && idle:
-			_ = killSession(d.TmuxSession)
+		case known && idle && d.AdoptedAt == nil:
+			_ = killSession(SessionOf(d))
 		}
 		// Unknown: leave it running and take a new name below. A backend that
-		// cannot see into a session must not have it killed on a guess.
+		// cannot see into a session must not have it killed on a guess. Nor is
+		// an adopted session's, idle or not: the human started it, it may hold
+		// other windows, and claude exiting in it does not make it ours to end
+		// — the same reason x releases one rather than killing it.
 	}
 
 	// The worktree may have been reclaimed when the dispatcher was killed
@@ -141,7 +162,23 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// the record of what it was originally sent.
 	promptPath := ""
 	prompt = strings.TrimRight(prompt, "\n")
-	if prompt != "" {
+	if relaunch {
+		// The original goes out as it was sent, under its own name; anything
+		// typed with the ⏎ follows it, in the -resume file, so the record of
+		// what the dispatch was first asked is never rewritten.
+		text, name := d.Prompt, d.ID
+		if prompt != "" {
+			text, name = d.Prompt+"\n\n"+prompt, d.ID+"-resume"
+		}
+		if len(text) > MaxPromptBytes {
+			return "", "", fmt.Errorf("the prompt is %d bytes and the limit is %d", len(text), MaxPromptBytes)
+		}
+		p, err := state.WritePrompt(name, text)
+		if err != nil {
+			return "", "", fmt.Errorf("could not write the prompt for %q: %w", d.Feature, err)
+		}
+		promptPath = p
+	} else if prompt != "" {
 		if len(prompt) > MaxPromptBytes {
 			return "", "", fmt.Errorf("the message is %d bytes and the limit is %d — say it in the session instead",
 				len(prompt), MaxPromptBytes)
@@ -153,20 +190,62 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		promptPath = p
 	}
 
-	name := uniqueName(base)
-	if err := newSession(name, dir, resumeCommand(d.ID, sid, promptPath, Mode(d.Mode), Model(d.Model), d.ConfigDir)); err != nil {
+	// The same server, environment, shell and account it went out in, every
+	// one read off the record rather than resolved again: config may have
+	// changed since, and a session reopened somewhere else — on another
+	// server, under another login — is a different session.
+	name := uniqueName(supervisor.Session{Name: base, Socket: d.TmuxSocket})
+	sess := supervisor.Session{Name: name, Socket: d.TmuxSocket}
+	cmd := resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model), d.ConfigDir)
+	if relaunch {
+		cmd = launchCommand(d.ID, promptPath, d.PaneShell, Mode(d.Mode).Normalize(), Model(d.Model).Normalize(), d.ConfigDir)
+	}
+	// The environment is the record's, made to work where the session now
+	// stands (repos.EnvIn): a record cut before that rule carries a bare
+	// `nix develop` that finds no flake in a worktree whose branch has none —
+	// which is the very launch a relaunch is retrying.
+	d.EnvCommand = repos.EnvIn(d.EnvCommand, d.RepoPath, dir)
+	if err := newSession(sess, dir, cmd, d.EnvCommand); err != nil {
+		if relaunch {
+			return "", "", failLaunch(d, err)
+		}
 		return "", "", err
 	}
 
+	started := time.Now()
 	d.TmuxSession = name
 	d.Status = state.StatusLaunching
 	d.StatusReason = "resuming its session"
+	mode := ResumeStarted
+	if relaunch {
+		d.StatusReason, mode = "starting again", ResumeRelaunched
+	}
+	d.SessionStartedAt = &started
 	d.WaitingOnTasks = false
 	if err := state.Save(d); err != nil {
-		return ResumeStarted, name, err
+		return mode, name, err
 	}
-	return ResumeStarted, name, nil
+	return mode, name, nil
 }
+
+// holdsOwnSession reports whether the session at d's address is the one d took
+// hold of. Only a listing that names it, created after the record's hold, says
+// otherwise: one that cannot say when it was made, or does not list it at all,
+// leaves the claim the name has always carried.
+func holdsOwnSession(d *state.Dispatch) bool {
+	for _, s := range sessionList(d.TmuxSocket) {
+		if s.Name == d.TmuxSession {
+			return d.HoldsSessionBorn(s.Created)
+		}
+	}
+	return true
+}
+
+// NeverStarted reports whether d has no conversation to resume: no session id
+// was bound and no transcript recorded, which is a launch that failed before
+// claude ran. Resume starts such a record again rather than resuming it, and
+// the row says so.
+func NeverStarted(d *state.Dispatch) bool { return d != nil && SessionIDOf(d) == "" }
 
 // SessionIDOf is the Claude Code session id to resume: the one the hook bound
 // to the record, or — for a record from before that binding, or one whose

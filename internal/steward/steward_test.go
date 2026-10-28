@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"claude-dispatcher/internal/supervisor"
 )
 
 type fakeSup struct {
@@ -21,18 +23,22 @@ type fakeSup struct {
 func withFakes(t *testing.T, f *fakeSup, exe string) {
 	t.Helper()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	ph, pn, pk, pt, pe, pi := hasSession, newSession, killSession, trustDir, executable, sessionIdle
+	pa, ph, pn, pk, pt, pe, pi := available, hasSession, newSession, killSession, trustDir, executable, sessionIdle
 	t.Cleanup(func() {
-		hasSession, newSession, killSession, trustDir, executable, sessionIdle = ph, pn, pk, pt, pe, pi
+		available, hasSession, newSession, killSession, trustDir, executable, sessionIdle = pa, ph, pn, pk, pt, pe, pi
 	})
-	sessionIdle = func(string) (bool, bool) { return f.idle, f.known }
-	hasSession = func(string) bool { return f.running }
-	newSession = func(name, dir, cmd string) error {
+	// The fakes are the supervisor, so it is there whether or not this machine
+	// has tmux: the nix build runs the suite in a sandbox without it.
+	available = func() bool { return true }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return f.idle, f.known }
+	hasSession = func(supervisor.Session) bool { return f.running }
+	newSession = func(s supervisor.Session, dir, cmd, env string) error {
+		name := s.Name
 		f.started = append(f.started, name+"|"+dir+"|"+cmd)
 		f.running = true
 		return nil
 	}
-	killSession = func(name string) error { f.killed = append(f.killed, name); f.running = false; return nil }
+	killSession = func(s supervisor.Session) error { f.killed = append(f.killed, s.Name); f.running = false; return nil }
 	trustDir = func(string) bool { return f.trusted }
 	executable = func() (string, error) { return exe, nil }
 }

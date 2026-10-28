@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // claudeConfigPath is Claude Code's own config, where project trust lives.
@@ -30,18 +31,14 @@ func claudeConfigPath() string {
 	return filepath.Join(home, ".claude.json")
 }
 
-// InheritTrust marks worktree as trusted when repo already is. It reports
+// InheritTrustFor marks worktree as trusted when repo already is, in the
+// config directory a session runs under ("" is the human's own). It reports
 // whether the worktree will start without a trust prompt, so the caller can say
 // so rather than leaving the user to wonder why a session is idle.
-func InheritTrust(repoPath, worktree string) bool {
-	return InheritTrustFor("", repoPath, worktree)
-}
-
-// InheritTrustFor is InheritTrust for a session running under another
-// account's config directory ("" is the human's own). Trust lives in that
-// directory's .claude.json, so a worktree trusted for the default login is a
-// stranger to every other one, and a second subscription's session would sit
-// on the trust dialog with nobody to answer it.
+//
+// Trust lives in that directory's .claude.json, so a worktree trusted for the
+// default login is a stranger to every other one, and a second subscription's
+// session would sit on the trust dialog with nobody to answer it.
 //
 // The repo's trust is read from the account's own file first and then from
 // the default one. Trusting a folder is the human's judgement about the code,
@@ -108,7 +105,7 @@ func InheritTrustFor(configDir, repoPath, worktree string) bool {
 // session started there does not stop on Claude Code's trust dialog before it
 // reads its first word. It is the one place trust is written rather than
 // inherited, and it is only for a directory under the dispatcher's own state
-// (the steward's): InheritTrust will not invent trust for a human's repo, and
+// (the steward's): InheritTrustFor will not invent trust for a human's repo, and
 // nothing should — but a folder we made, holding nothing but our own brief, has
 // no one else to ask.
 func TrustOwnDir(dir string) bool {
@@ -186,13 +183,23 @@ func readClaudeProjects(path string) (map[string]json.RawMessage, map[string]map
 	if path == "" {
 		return nil, nil, false
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, false
-	}
+	// Claude Code rewrites this file from every running session, and a read
+	// that lands mid-write does not parse. That failure is silent — trust is
+	// simply not inherited, and the session stops on its trust prompt — so a
+	// file that will not parse is read again before it is given up on.
 	var cfg map[string]json.RawMessage
-	if json.Unmarshal(raw, &cfg) != nil {
-		return nil, nil, false
+	for attempt := 0; ; attempt++ {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, false
+		}
+		if json.Unmarshal(raw, &cfg) == nil {
+			break
+		}
+		if attempt == 2 {
+			return nil, nil, false
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	var projects map[string]map[string]any
 	if p, ok := cfg["projects"]; ok {

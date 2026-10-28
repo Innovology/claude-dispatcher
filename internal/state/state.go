@@ -42,6 +42,19 @@ const (
 // side spells it out.
 const ReasonQuestion = "asked you a question — ⏎ to answer it in the session"
 
+// ReasonTurnComplete leads the StatusReason of a record whose turn ended with
+// something for the human. It is a lead rather than the whole reason: a turn
+// that ended on a question while background work was still running carries
+// both facts, and only one of them needs a human. The cockpit's cqKind matches
+// this prefix to classify the ask, which is the other half of why it is named.
+const ReasonTurnComplete = "turn complete — waiting on you"
+
+// ReasonUntrustedLaunch is a launching record's reason when its worktree could
+// not be marked trusted, so claude will stop on its trust prompt before it
+// reads the prompt. Named for the same reason as ReasonQuestion: dispatch
+// writes it and the cockpit's lead for a stalled launch matches it.
+const ReasonUntrustedLaunch = "starting session · not marked trusted, so claude will ask first"
+
 // Priority orders statuses by how urgently they need the human's attention.
 func (s Status) Priority() int {
 	switch s {
@@ -111,9 +124,28 @@ type Dispatch struct {
 	// removed from the config since must not send a resume to the wrong login
 	// looking for a conversation that is not there. Both empty on the default
 	// account and on records from before accounts existed — the same session.
-	Account        string `json:"account,omitempty"`
-	ConfigDir      string `json:"config_dir,omitempty"`
-	TmuxSession    string `json:"tmux_session"`
+	Account     string `json:"account,omitempty"`
+	ConfigDir   string `json:"config_dir,omitempty"`
+	TmuxSession string `json:"tmux_session"`
+	// TmuxSocket is the supervisor server the session lives on — a repo names
+	// one to keep its own toolchain (see repos.Repo.Socket). Empty is the
+	// default server, which is every dispatch made before this existed.
+	//
+	// It is on the record rather than worked out from the repo's config at the
+	// time of asking, for the reason Root and Mode are: config changes, and a
+	// session looked for on the wrong server answers "no such session" with
+	// complete confidence. Together with TmuxSession it is the whole address.
+	TmuxSocket string `json:"tmux_socket,omitempty"`
+	// EnvCommand is the command prefix the tmux client was run under, so that
+	// the session sees the repo's own binaries — repos.NixDevelop for a flake
+	// repo, the same naming the checkout's flake where the worktree has none
+	// (repos.EnvIn), a [session_env] entry as written, empty everywhere else.
+	//
+	// Recorded for the same reason: a dispatch launched before nix was on the
+	// machine, resumed after it arrived, would otherwise come back in a
+	// different world than it went out in — and the record is the only account
+	// of which world that was.
+	EnvCommand     string `json:"env_command,omitempty"`
 	SessionID      string `json:"session_id,omitempty"`
 	TranscriptPath string `json:"transcript_path,omitempty"`
 	// BaseSHA is the branch tip at launch; commits in BaseSHA..Branch were
@@ -153,6 +185,53 @@ type Dispatch struct {
 	// no background tasks is swept, because a subagent cannot outlive the turn
 	// unless it is one of those tasks.
 	Subagents []Subagent `json:"subagents,omitempty"`
+	// Menus are the dialogs the session has on screen for the human — a
+	// permission prompt or a question — and whose each one is. A record with
+	// one open is blocked, whatever else the session is doing; see Menu.
+	Menus []Menu `json:"menus,omitempty"`
+	// AdoptedAt is when the human handed this cockpit a session it did not
+	// start — an orchestrator they had been running for hours, with the
+	// context that makes it worth keeping. Everything after it is ordinary:
+	// the hooks report, the row waits, `r` replies, history remembers.
+	//
+	// Two things are NOT ordinary, and both are about the directory. An
+	// adopted dispatcher runs in the human's own checkout rather than a
+	// worktree we cut, so nothing may delete it — not the kill key's
+	// CleanupWorktree, not the disk reclaim — and `x` releases the record
+	// instead of killing a session this cockpit never started (ADR 0026).
+	// WorktreePath still names the directory, because every screen that shows
+	// where a dispatcher works reads it; the flag is what says we do not own
+	// it.
+	AdoptedAt *time.Time `json:"adopted_at,omitempty"`
+	// AdoptBriefAt is when an adopted session was handed the one convention a
+	// dispatched one is launched with — end your message on the question you
+	// need answered, because a turn that ends is the hook that says so. Nil on
+	// an adopted record still owed it, and on every record that was dispatched
+	// (those carry it in the prompt). Stamped before the keys are sent, so a
+	// brief is spent once however many loads race.
+	AdoptBriefAt *time.Time `json:"adopt_brief_at,omitempty"`
+	// ReleasedAt is the human giving an adopted session back: the record stops
+	// claiming it, so it returns to the sessions tab, and stays in history as
+	// the account of the time it was managed. Only ever set on an adopted
+	// record.
+	ReleasedAt *time.Time `json:"released_at,omitempty"`
+	// PaneShell is the interactive shell this dispatch's pane drops to when
+	// claude exits, as config named it at launch — "" for the sessions that
+	// work it out from their own tmux server. It is on the record for the
+	// reason TmuxSocket and EnvCommand are: a resumed dispatcher comes back the
+	// way it went out, not the way config has been edited since.
+	PaneShell string `json:"pane_shell,omitempty"`
+	// SessionStartedAt is the supervisor accepting the session: new-session
+	// returned, so at that instant the session existed. It is what makes a
+	// launching record's missing session evidence. Without it, a launching
+	// record is in the window where its session may not exist yet, and absence
+	// proves nothing; with it, the session was there and has gone before claude
+	// fired a single hook, which is a launch that died — a pane whose command
+	// could not run — and nothing else will ever report it. Stamped by Launch
+	// and Resume after the supervisor says yes, never before, and by Adopt at
+	// the adoption. It is also the record's hold on its address: a session
+	// created after it has only taken the name (HoldsSessionBorn).
+	SessionStartedAt *time.Time `json:"session_started_at,omitempty"`
 	// Failure is the API error that ended the session's last turn, as Claude
 	// Code's StopFailure hook reported it. That hook fires *instead of* Stop, so
 	// without it a turn killed by an overloaded API left the record saying
@@ -228,6 +307,57 @@ func (d *Dispatch) Finished() bool {
 // nobody has said they have seen it (DismissedAt).
 func (d *Dispatch) Held() bool {
 	return d.Finished() && d.FinishedAt != nil && d.DismissedAt == nil
+}
+
+// Adopted reports that this record was wrapped around a session the cockpit
+// did not start, and still claims it. Every caller that deletes a directory,
+// or offers to kill a session, asks this first.
+func (d *Dispatch) Adopted() bool {
+	return d != nil && d.AdoptedAt != nil && d.ReleasedAt == nil
+}
+
+// OwnsWorktree reports whether WorktreePath is a checkout this cockpit cut and
+// may therefore remove. An adopted dispatcher's directory is the human's own,
+// and was there before the record.
+func (d *Dispatch) OwnsWorktree() bool {
+	return d != nil && d.WorktreePath != "" && d.AdoptedAt == nil
+}
+
+// HoldsSessionBorn reports whether a session found at this record's address
+// (TmuxSocket, TmuxSession), created at born, is the session the record took
+// hold of — or a younger one that has the name now.
+//
+// An address is a slot, not a session. The name is free the moment its session
+// ends, and a per-project wrapper names every session it makes after the repo
+// and the branch, so `player-app__main` today is not the `player-app__main` a
+// record adopted two days ago. Reported as a session started that afternoon
+// missing from the sessions tab: a record adopted on another day, finished and
+// dismissed since, still claimed the name, and so the session under it.
+//
+// SessionStartedAt is the moment the record took hold: stamped after the
+// supervisor accepted the session at launch and at resume, and at adoption of a
+// session that already existed. Any session that is the record's was therefore
+// created no later than it. tmux keeps whole seconds, which rounds a creation
+// down and so never makes the record's own session look younger. A record with
+// no stamp, or a backend that cannot say when a session was made, keeps the
+// claim it always had on the name alone.
+func (d *Dispatch) HoldsSessionBorn(born time.Time) bool {
+	return d != nil && (born.IsZero() || d.SessionStartedAt == nil || !born.After(*d.SessionStartedAt))
+}
+
+// Release gives an adopted session back: the record stops claiming it, so the
+// sessions tab lists it again, and it is finished and read, so it goes to
+// history rather than sitting on the triage table asking to be dismissed.
+func (d *Dispatch) Release(now time.Time) {
+	d.ReleasedAt = &now
+	// The join key goes with it. The session keeps running and keeps firing
+	// hooks, and a record still answering to its id would be dragged back to
+	// "working" by the next turn of a session it no longer claims. The
+	// transcript path stays: history reads it, and it is a fact about what
+	// happened rather than a claim on what is happening.
+	d.SessionID = ""
+	d.Stop(StatusExited, "released — its session is yours again", now)
+	d.Dismiss(now)
 }
 
 // Stop moves a dispatcher into a finished status and stamps when it got there.
@@ -452,6 +582,100 @@ func (d *Dispatch) SubagentsDone() int {
 		}
 	}
 	return n
+}
+
+// Menu is one dialog waiting on the human, and whose it is.
+//
+// A blocked record used to be one fact, cleared by any tool completing, on the
+// reasoning that the tool returns once the human has picked. With a fan-out
+// that stopped being true: a session sat on a question while its background
+// agent ran 29 tools in five minutes, the first of which cleared the wait, and
+// the table read "0 want you" for the hour the question stood. Measured on
+// claude 2.1.296, every hook a subagent fires carries its agent_id — the
+// PermissionRequest that opens a dialog for it and the PostToolUse that closes
+// it — so a dialog can be closed by its own agent and by nobody else's. Two
+// can be open at once (a question on the session and a subagent's permission
+// prompt queued behind it), which is why this is a list.
+type Menu struct {
+	// Agent is the subagent the dialog is for, "" for the session itself.
+	Agent string `json:"agent,omitempty"`
+	// Tool is what it is about: "AskUserQuestion" for a question, the tool
+	// asking permission otherwise. "" is a dialog only a Notification told us
+	// of — that hook says neither whose nor what — which any tool completing
+	// closes, because that is all an install without PermissionRequest knows.
+	Tool string    `json:"tool,omitempty"`
+	At   time.Time `json:"at"`
+}
+
+// QuestionTool is the tool a session asks the human a question through.
+const QuestionTool = "AskUserQuestion"
+
+// OpenMenu records a dialog going up. The same agent's dialog for the same tool
+// is one dialog however many hooks report it — a question is announced by both
+// its PreToolUse and its PermissionRequest. It reports whether anything changed.
+func (d *Dispatch) OpenMenu(agent, tool string, at time.Time) bool {
+	for _, m := range d.Menus {
+		if m.Agent == agent && m.Tool == tool {
+			return false
+		}
+	}
+	d.Menus = append(d.Menus, Menu{Agent: agent, Tool: tool, At: at})
+	return true
+}
+
+// SettleMenus closes what a tool completing proves answered: the agent's dialog
+// for that tool, or — when it has none — every dialog that agent had, since it
+// has moved past them. That second half is how a refusal is ever seen: denying
+// a prompt fires no hook at all, and the agent simply goes on to its next tool.
+// A dialog nobody named closes on any tool. Another agent's tools close nothing.
+func (d *Dispatch) SettleMenus(agent, tool string) bool {
+	exact := false
+	for _, m := range d.Menus {
+		if m.Agent == agent && m.Tool == tool {
+			exact = true
+		}
+	}
+	kept := d.Menus[:0]
+	for _, m := range d.Menus {
+		mine := m.Agent == agent && (!exact || m.Tool == tool)
+		if !mine && m.Tool != "" {
+			kept = append(kept, m)
+		}
+	}
+	return d.keepMenus(kept)
+}
+
+// DropMenus closes every dialog an agent had: it ended (SubagentStop), or for
+// the session itself, its turn did. A dialog nobody named goes with the
+// session's, since the session is the one that cannot say whose it was.
+func (d *Dispatch) DropMenus(agent string) bool {
+	kept := d.Menus[:0]
+	for _, m := range d.Menus {
+		if m.Agent != agent && m.Tool != "" {
+			kept = append(kept, m)
+		}
+	}
+	return d.keepMenus(kept)
+}
+
+func (d *Dispatch) keepMenus(kept []Menu) bool {
+	changed := len(kept) != len(d.Menus)
+	d.Menus = kept
+	if len(d.Menus) == 0 {
+		d.Menus = nil
+	}
+	return changed
+}
+
+// MenuAsks reports whether one of the open dialogs is a question rather than
+// a permission prompt.
+func (d *Dispatch) MenuAsks() bool {
+	for _, m := range d.Menus {
+		if m.Tool == QuestionTool {
+			return true
+		}
+	}
+	return false
 }
 
 func Dir() string {

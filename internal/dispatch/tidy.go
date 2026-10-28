@@ -89,7 +89,11 @@ type ownerOf struct {
 func worktreeOwners(ds []*state.Dispatch) []*ownerOf {
 	var out []*ownerOf
 	for _, d := range ds {
-		if d.WorktreePath == "" {
+		// OwnsWorktree, not WorktreePath: an adopted dispatcher names the
+		// human's own checkout, which this cockpit did not cut and will not
+		// reclaim. Reclaiming disk must never be how somebody loses a working
+		// copy they had open.
+		if !d.OwnsWorktree() {
 			continue
 		}
 		info, err := os.Stat(d.WorktreePath)
@@ -183,7 +187,7 @@ func inUse(recs []*state.Dispatch, ready bool) string {
 			// Nothing to ask whether its session is still open, and an open one
 			// is somebody working in this folder: not knowing is not "no".
 			return "cannot ask the supervisor whether its session is open"
-		case sessionAlive(d.TmuxSession):
+		case sessionAlive(SessionOf(d)):
 			return "its session is still open"
 		}
 	}

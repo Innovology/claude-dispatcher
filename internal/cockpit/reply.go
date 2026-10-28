@@ -19,6 +19,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/fleetcmd"
 	"claude-dispatcher/internal/supervisor"
 )
@@ -97,13 +98,15 @@ func (m model) viewReply(w, h int) string {
 func replyCmd(id, text string) tea.Cmd {
 	return func() tea.Msg {
 		rec := recordByID(id)
-		if rec == nil || !supervisor.HasSession(rec.TmuxSession) {
+		// The whole address, not the name: a repo's sessions live on that
+		// repo's own server (ADR 0014), and a name alone asks the wrong one.
+		if rec == nil || !supervisor.HasSession(dispatchpkg.SessionOf(rec)) {
 			return actionMsg{notice: "no live session to reply to"}
 		}
-		if idle, known := supervisor.SessionIdle(rec.TmuxSession); idle && known {
+		if idle, known := supervisor.SessionIdle(dispatchpkg.SessionOf(rec)); idle && known {
 			return actionMsg{notice: "claude has exited in \"" + rec.Feature + "\" — ⏎ to resume it"}
 		}
-		if err := supervisor.SendKeys(rec.TmuxSession, text); err != nil {
+		if err := supervisor.SendKeys(dispatchpkg.SessionOf(rec), text); err != nil {
 			return actionMsg{notice: "reply to \"" + rec.Feature + "\" failed: " + firstLine(err.Error())}
 		}
 		// On the record at once, so a steward polling for open waits cannot

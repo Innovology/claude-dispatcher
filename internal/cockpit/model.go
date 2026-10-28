@@ -8,6 +8,7 @@ import (
 	"claude-dispatcher/internal/appearance"
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/keymap"
 	"claude-dispatcher/internal/version"
 )
 
@@ -28,10 +29,12 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship" | "tidy"
+	kind          string // "kill" | "ship" | "tidy" | "act"
 	feature, repo string
 	features      []string               // kill targets (marked set, or the one selected)
 	tidy          []dispatchpkg.TidyItem // the plan a tidy confirms
+	row           fleetRow               // the triage row an "act" was asked on
+	act           cqAct                  // and the act it runs once confirmed
 }
 
 // model is the whole cockpit. Every lens reads and writes these fields; each
@@ -135,16 +138,64 @@ type model struct {
 	clNaming  bool
 	clNewName string
 	clMap     map[string]string
+	// clExpanded is which repo rows have been unfolded with `p` to show where
+	// they live. Keyed by repo name, and it survives the cursor moving off the
+	// row: unfolding two repos to compare where they sit is the point of it.
+	clExpanded map[string]bool
+	// clFoldRow is the unfolded repo whose checkouts have the keyboard ("" when
+	// none), and clFoldIdx the checkout under the cursor inside it. The fold
+	// takes j/k/enter while it is focused, the way the naming prompt takes the
+	// letters: choosing which checkout a repo works in is a different question
+	// from which repo you are on, and one set of arrow keys cannot mean both.
+	clFoldRow string
+	clFoldIdx int
+
+	// keys is the resolved keymap: the defaults with `[keys]` applied. nil means
+	// the defaults, so every caller can use it without a guard.
+	keys *keymap.Map
+
+	// ---- `/` search ----------------------------------------------------------
+	// searchOpen is the query line having the keyboard; searchText survives it
+	// being committed, because the highlights and the jump keys stay live after
+	// you stop typing. searchAt is which hit the cursor is on, -1 before the
+	// first jump.
+	searchOpen bool
+	searchText string
+	searchAt   int
+	// sessionCursor is the Y tab: which session of the human's own is under
+	// the cursor.
+	sessionCursor int
+	// sessionMarked is which of the human's own sessions are ticked for
+	// adoption, keyed by socket/name — the whole address, because the same
+	// name on two servers is two sessions. adoptOpenInput/adoptText/adoptAt
+	// are the naming input a single adoption opens (see adopt.go).
+	sessionMarked  map[string]bool
+	adoptOpenInput bool
+	adoptText      string
+	adoptAt        *ownSession
 	// clKeying is the Linear token entry: which product it is for, and what has
 	// been typed. The product is held by name rather than by cursor index
 	// because the list can be re-sorted under it by a save.
 	clKeying  bool
 	clKeyFor  string
 	clKeyText string
+	// clSockOpen is the same for a repo's tmux server: which repo it is for,
+	// and what has been typed. Held by name rather than by cursor index for the
+	// same reason — a save re-sorts the list under it.
+	clSockOpen bool
+	clSockFor  string
+	clSockText string
 
-	decRepo      int
-	decCursor    int
-	pluginCursor int
+	decRepo   int
+	decCursor int
+	// The decisions lens's `/` search (decsearch.go). decQuery is the query, ""
+	// when none is up, and decTyping its line having the keyboard; decFound is
+	// what it found across every repo, best first, and decAt the hit the
+	// cursor is on.
+	decQuery  string
+	decTyping bool
+	decFound  *decFound
+	decAt     int
 
 	rightTab     string
 	reviewCursor int
@@ -221,6 +272,7 @@ type model struct {
 	dxWhat   string            // WHAT: the work — the prompt's body, wrapped as it is typed
 	dxGoal   string            // DONE WHEN: completion condition, optional
 	dxRoot   string            // ROOT: the branch to cut from; blank is the repo's default
+	dxPrefix *string           // PREFIX: this dispatch's override of the branch prefix; nil is settings' default
 	dxMode   dispatchpkg.Mode  // MODE: auto / manual / plan — the session's permission mode
 	dxModel  dispatchpkg.Model // MODEL: default, or a claude alias — what the session runs
 	dxFanOut bool              // FAN OUT: may the session spread across agents when the task splits
@@ -245,6 +297,12 @@ type model struct {
 	themeTerm    bool
 	themeNoOS    bool
 	themePolling bool
+	// themeFile is the file the human named as their switch (config's
+	// appearance_file, ~ already expanded), asked before the OS and instead of
+	// it when it answers. themeQuiet counts answers that were not answers in a
+	// row, which is what slows the poll down to themePollQuiet.
+	themeFile  string
+	themeQuiet int
 }
 
 func newModel() model {
@@ -257,8 +315,10 @@ func newModel() model {
 		clPane:         "repos",
 		clMarked:       map[string]bool{},
 		clMap:          map[string]string{},
+		clExpanded:     map[string]bool{},
 		cqSuppressed:   map[string]bool{},
 		fleetDismissed: map[string]bool{},
+		sessionMarked:  map[string]bool{},
 		// How this build was installed cannot change while it runs, so it is
 		// read once here rather than from the footer, which redraws on every
 		// frame. Holding it on the model is also what lets a test drive the
@@ -370,7 +430,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(boot, queued)
 		}
 		applySnapshot(snapshot(msg))
-		m = m.noteQuota()
+		m = m.noteQuota().decSearchRefresh()
 		// The fleet is rebuilt from the fresh records; fold the user's ordering
 		// and cleared set back onto it before anything renders, then re-key the
 		// cursor onto the row it was on — a rank that changed in this refresh
@@ -528,12 +588,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.settlePending(msg.feature)
 		}
 		mm, load := m.fleetSync().requestLoad(loadPlain)
+		if msg.failed {
+			return mm, load
+		}
+		// A session that never reports in writes nothing, so nothing would
+		// reload to show it stalled before the next poll, a minute away. One
+		// load just past the threshold is what turns its row (LaunchStalled).
+		stall := tea.Tick(dispatchpkg.LaunchStallAfter+2*time.Second, func(time.Time) tea.Msg { return launchStallCheckMsg{} })
+		return mm, tea.Batch(load, stall)
+
+	case launchStallCheckMsg:
+		mm, load := m.requestLoad(loadPlain)
 		return mm, load
 
 	case resumedMsg:
 		// The resumed session is the thing the human asked for, so they land in
 		// it — the same handover "jump in" does.
-		if mm, cmd := m.attachSession(msg.session); cmd != nil {
+		if mm, cmd := m.attachSession(msg.session, msg.env); cmd != nil {
 			mm.notice = msg.notice
 			return mm, cmd
 		}
@@ -553,6 +624,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tidyPlannedMsg:
 		mm, cmd := m.onTidyPlanned(msg)
+		return mm, cmd
+
+	case configEditedMsg:
+		mm, cmd := m.onConfigEdited(msg)
 		return mm, cmd
 
 	case attachReturnedMsg:
@@ -674,6 +749,11 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		// deletion already running would be the screen lying.
 		m.notice = "tidying…"
 		return m, tidyRunCmd(c.tidy)
+	case "act":
+		// A triage act that asked first runs exactly as it would have without
+		// asking: the flash, then the row leaves with ctrl+z able to bring it
+		// back.
+		return m.cqStartFlash(c.row, c.act)
 	}
 	return m, nil
 }

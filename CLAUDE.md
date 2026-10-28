@@ -10,14 +10,96 @@
 ## Agreed decisions (2026-08-06, worktrees added 2026-08-07)
 - **Multi-repo, multi-worktree, multi-product** — three independent axes:
   - *Repo* is the organising primitive; discovery via configured roots.
+    - **A repository is its common dir, and its name is not its folder.**
+      Discovery called any directory holding a `.git` a repo and named it for
+      that directory. A `.git` marks a *checkout*, and one repo has as many as
+      it has worktrees: measured on a worktree-heavy machine, **47 "repos" for
+      26 repositories** — `kolchurin.dev` thirteen times, `playerpulse` eight,
+      and three unrelated repositories all called `main`. Name is the identity
+      everywhere (`[products]`, `ProductFor`, `discByName`, the dispatch
+      worktree path), so three repos shared one key; and `gh` keys its search
+      results by the *GitHub* name, so six repos cloned into a folder that is
+      not their name (`ord-ai-n` → `ordain`, `prototype-player-app` →
+      `Player-App-2`) had every issue and PR landing nowhere. The bare layout
+      was invisible on top of that: `<project>/.bare` carries no `.git` of its
+      own, so the project dir fell through to the depth check and was cut with
+      all 69 checkouts inside it. So identity is the **git dir every checkout
+      shares** — `<clone>/.git`, `<project>/.bare` — read from files, never a
+      git process, since a discovery runs on every load; the **name comes from
+      the origin remote**, folder only for a repo with no remote; one checkout
+      is **canonical**, because twenty call sites stand *inside* `Repo.Path`
+      and a bare repo has no working tree of its own; and the worktree list
+      comes from **git's registry**, not the scan, which skips hidden dirs and
+      so would report nothing for the common `.worktrees/<name>` layout. A
+      repo-wide figure reads the whole repo, not the canonical checkout: the
+      stale list's "untouched" is the newest commit on any branch, because
+      claude-dispatcher read "49d untouched" off a `main` worktree nobody had
+      pulled while its branches had commits that hour. It is
+      an extension, not a replacement: the walk is unchanged, a plain clone
+      resolves to itself byte-for-byte as before, and unreadable metadata falls
+      back to being a repo of one named for its folder. Evidence of a repo buys
+      the one level that reaches its checkouts; the budget itself does not grow,
+      and a container below the limit still wants a nearer root. Nothing
+      rewrites the human's `[products]`: a rename can orphan an entry, and it
+      falls to "unassigned" where the editor reassigns it, because a migration
+      that guessed would be editing the file this tool calls the source of
+      truth. `p` on a row in the assignment editor is where the detail went —
+      the absolute path it acts in and every checkout git knows of, the acting
+      one marked. **And the automatic choice is a guess worth correcting**:
+      three spellings of a trunk is narrow, and a repo that merges into `dev`
+      matches none of them, so its row would be read from a branch nobody
+      ships. The fold therefore takes the keyboard (`j`/`k` move its checkouts,
+      `enter` pins one into `[checkouts]`, `esc` lets go without closing, `p`
+      folds); `enter` on the one already pinned clears it, because nothing else
+      removes a pin and "choose automatically again" has to be reachable; and a
+      pin naming a path git does not list as a worktree of that repo is ignored,
+      since a pin chooses between the checkouts that exist rather than inventing
+      one. A pinned checkout is **not** a root branch — it decides what the row
+      reads, while which branch a feature is cut from is the human's `Root`
+      on the form, else `[root_branches]`, else the remote's default (see the
+      root-branch decision below). **Pinning sets both**: it writes the
+      checkout's branch to `[root_branches]` as a snapshot, because picking
+      the dev folder is saying where the work lives and a dispatch then cut
+      from main read as the pin not working. They stay two entries because a
+      folder is not a branch — switch the clone to a feature and the pin
+      follows the folder while dispatches must still start from origin/dev —
+      so unpinning clears the root only if it is still the one the pin wrote.
+      Full record: `docs/adr/0017-a-repository-is-its-common-dir.md`.
   - *Worktree* is per-dispatch isolation: each dispatch gets its own git
-    worktree of its repo under
+    worktree of its repo, by default under
     `~/.local/state/claude-dispatcher/worktrees/<repo>/<slug>`, so concurrent
     dispatches — and the human — never fight over one checkout. `x` removes a
     clean worktree; a dirty one is kept for inspection. (Supersedes the
     original "multi-repo, not multi-worktree" call, reversed the next day
     after two sessions collided in one working copy and a commit landed on
     the wrong branch.)
+    - **Where it is cut is the human's layout, not ours.** The state directory
+      is the right default — a dispatch worktree is our bookkeeping, and `x`
+      deleting a folder on a keypress belongs in our own directory rather than
+      in somebody's project — and the wrong one on a machine that already keeps
+      a folder per branch beside a bare repo: there the dispatch checkout is
+      the only one somewhere else, so git lists a worktree of `player-app`
+      whose folder is not in `player-app`, invisible to every tool that reads
+      the project directory. Config `worktrees = "project"` cuts it beside the
+      repo's other checkouts instead (`<project>/<slug>`, no repo component —
+      the project folder *is* the repo). "Project" means somewhere the others
+      already are: the layout where the common git dir is not inside a working
+      tree (`<project>/.bare`), or a clone whose own registered worktrees sit
+      beside it named after it — playerpulse, twenty `playerpulse-<what>`
+      folders next to the clone, whose dispatches were still the one checkout
+      cut elsewhere — which gets `playerpulse-<slug>`, named the way those are.
+      A clone with no worktree there keeps the state directory, because
+      scattering checkouts through whatever directory a clone happens to sit in
+      is not joining a convention, it is inventing one. The path goes on the
+      record, so a dispatch made before the setting changed resumes where it
+      was cut. A branch keeps its `feature/` prefix unless config's
+      `branch_prefix` says otherwise, so on a layout whose folders are named
+      after their branches the two can be made to read the same. That is the
+      **default**, kept in settings; **PREFIX** on both forms opens on it and
+      changes it for one dispatch (dx: a field under ROOT; `+`: tab on the
+      feature step), and both previews read it — they printed `feature/`
+      whatever the config said. A prefix git would refuse
+      (`dispatch.PrefixProblem`) is refused where it is typed.
     - The feature branch is cut from the repo's **default branch as the
       remote sees it**, after a best-effort fetch — never from the repo's
       HEAD. Git's default would inherit whatever branch the human left
@@ -32,8 +114,8 @@
       checkout. Launch refuses it; re-dispatching a *finished* feature is
       still fine and reuses the worktree left behind. "Live" is three facts
       (`liveDispatch`), and none of them is the tmux session on its own: it
-      outlives its claude by design, because `launchCommand` ends
-      `; exec ${SHELL}`, and on a real machine the claude REPL outlives the
+      outlives its claude by design, because `launchCommand` ends by exec'ing
+      a shell (`exitShell`), and on a real machine the claude REPL outlives the
       work too, sitting at its prompt for days after the merge. The record's
       status is the hooks' account of whether the dispatcher is still going;
       the live session catches a record they could not correct (a SIGKILL, a
@@ -42,10 +124,12 @@
       neither, keeping the refusal rather than guessing.
   - *Product* is the grouping lens: the cockpit list and the dispatch form's
     repo picker group by the `[products]` config, most urgent group first;
-    unmapped repos fall under "other". No separate group concept.
+    unmapped repos fall under "unassigned". No separate group concept.
 - Sessions run as interactive `claude` inside per-dispatch tmux sessions
-  (`disp-<slug>`); tmux is a hard dependency and the process supervisor. The
-  cockpit is a stateless viewer — "jump in" hands the terminal to tmux.
+  (`disp-<slug>`) on their repo's own tmux server; tmux is a hard dependency
+  and the process supervisor. A session is addressed by the pair
+  (`supervisor.Session`: socket + name), never by name alone. The cockpit is a
+  stateless viewer — "jump in" hands the terminal to tmux.
 - Status truth comes from one global Claude Code hook in
   `~/.claude/settings.json` (hooks cannot be injected at launch time). The
   `CLAUDE_DISPATCHER_ID` env var is the join key from session to record.
@@ -54,9 +138,36 @@
   `SessionEnd` out (SIGKILL, an outside `tmux kill-session`, a tmux server
   that went down with the machine), so `dispatch.ReconcileSessions` sweeps
   working/needs-input/blocked records whose session is gone and marks them
-  exited. It never sweeps `launching`: no hook has fired for one, so its
-  session may simply not exist *yet* — absence is only evidence where a hook
-  proved the session once existed.
+  exited. It never sweeps a `launching` record on absence alone: no hook has
+  fired for one, so its session may simply not exist *yet* — absence is only
+  evidence where something proved the session once existed. A hook proves it,
+  and so does the supervisor: once new-session returns, Launch and Resume stamp
+  `SessionStartedAt`, and a launching record carrying it whose session is gone
+  is a launch that died before claude ran, swept with a reason that says so.
+- **A pane's command names its own shell.** The launch line is POSIX
+  (`VAR=… claude "$(cat …)"; exec ${SHELL}`), and tmux runs a one-argument
+  command through `default-shell`, which is the human's to set. A tmux.conf
+  that makes nu the default shell (NixOS box, 2026-09-18) handed nu that line;
+  nu refused to parse it, the pane died in milliseconds and the server went
+  with it — after new-session had returned 0, so the launch reported success
+  and the row said "starting session" for good. It never looked like a shell
+  problem: it looked like `nix develop` taking over a minute. `tmux.NewSession`
+  now passes `/bin/sh -c <line>` as separate arguments, which tmux 3.0+ execs
+  directly, and nu/xonsh/elvish count as idle shells for the `exec ${SHELL}`
+  that follows claude. **The shell the pane BECOMES is a different question**,
+  and it is layered rather than chosen: config's `shell`, else the pane's own
+  server asked for `default-shell` *from inside the pane* (the only time and
+  place a value a `run-shell` job computed can be read — there is nothing in
+  the file to parse, and at launch the server does not exist yet), else
+  `$SHELL`, else `/bin/sh`; `-x` on the last test so a shell named in config
+  and not installed falls through instead of killing the pane. It goes on the
+  record (`PaneShell`) so resume reopens the way it went out. And **a shell we
+  chose is one the idle check knows**: an unrecognised pane reads busy for
+  ever, which strands the session against reclaim and resume, so names are
+  learned as well as listed — the configured one at startup, a server's
+  `default-shell` the first time one of its panes shows a command we cannot
+  place, once per server per run. Full record:
+  `docs/adr/0025-a-panes-command-names-its-own-shell.md`.
 - **A ghost cannot clear itself, so every load looks.** That sweep ran in one
   place — `recheckCmd`, the reload after a jump-in — so a record whose session
   had been taken away claimed *working* for as long as the cockpit stayed open
@@ -115,6 +226,131 @@
   session probe alone would refuse every name that had ever completed, with no
   kill key on a history row to clear it. Full record:
   `docs/adr/0008-a-shell-in-the-pane-is-not-an-idle-session.md`.
+- **A dispatch runs in its repo's environment, not the cockpit's.** Two repos
+  in one product can need different versions of the same binary, and the
+  isolation this product had was git isolation: a worktree per dispatch stops
+  two sessions sharing a checkout and says nothing about what `go` or `psql`
+  resolve to inside it. What decides that is not what the client/server split
+  suggests — **a pane inherits the environment of the CLIENT that asked for
+  it**, not the server's and not the environment the server was born in
+  (measured on tmux 3.7b: a server started with `PATH=/plain-server-path`,
+  asked by a later client carrying `PATH=/nix/store/FAKE-flake-bin`, spawns the
+  pane with the client's). PATH is also the one variable that does not stick to
+  a session: everything else captured at creation persists, PATH is re-taken
+  from whichever client spawns each new window. So the cockpit — one process
+  spanning the whole portfolio — was deciding what every dispatcher could see,
+  and would go on deciding it for every pane the human opened after jumping in.
+  A repository brings its own now: its **server** (`Repo.Socket`, the `-L`
+  name, defaulting to the repo's own name — so each repo is its own server with
+  nothing configured; `[sockets]` names one for a human who already keeps
+  per-project servers, since a socket name is chosen outside the repository and
+  no reading of it finds one) and its **environment** (`Repo.Env`, the command
+  the client runs under — a checkout with a `flake.nix` *on a machine whose nix runs flakes*
+  is launched under `nix develop`, the second half no more optional than a
+  model alias we cannot vouch for — a nix binary is not enough, since flakes
+  are off by default in the installer most macOS and non-NixOS users have,
+  and there every dispatch of that repo would die). The prefix wraps the **client**, never the
+  session's command: both put the repo's binaries on PATH and only this one
+  leaves the pane running the plain `<shell> -c "… claude …"` that
+  `SessionIdle` reads, since a pane whose command is not a shell is taken at
+  its word as busy for ever — ADR 0008 with the sign flipped. The wrapped
+  client runs **from the session's directory** (the worktree at launch, tmux's
+  `session_path` at attach), because `nix develop` finds its flake where it
+  stands: run from the cockpit's cwd it failed from `~` and, worse, lent a
+  dispatch whichever flake repo the cockpit was opened in. **Where it stands
+  need not have one**: the flake was found in the *checkout*, and a worktree
+  cut from the remote's default carries that branch's files — playerpulse's
+  flake is on `dev`, not `main`, and a dispatch from `origin/main` died with
+  "does not contain a 'flake.nix'". So `repos.EnvIn` keeps the worktree's own
+  flake where it has one and otherwise names the checkout's outright (`nix
+  develop <checkout> …`), on the record, so resume and attach agree. It is applied to
+  the two calls that spawn a pane and nowhere else, because on the Server it
+  would put a nix evaluation behind every poll. The name alone stops being an
+  address: `supervisor.Session` carries `(socket, name)` and both go on the
+  record (`TmuxSocket`, `EnvCommand`) beside Mode and Root, so resume reopens
+  where it ran rather than where config now says. `AttachSwitches` becomes "is
+  this session on *my* server" — switch-client cannot cross servers, and the
+  nested attach that results exits on the way home, which is the shape the
+  caller already waits for. The sweep asks each server once rather than the
+  fleet once, and still probes any record its server did not name. And the
+  socket is **not** the grouping: a product is a lens over records, which carry
+  their product already, so a product's sessions list across as many servers as
+  it has repos. Full record:
+  `docs/adr/0014-a-dispatch-runs-in-its-repos-environment.md`.
+- **The sessions you started yourself.** A repo dispatches onto its own server
+  (above), and a human who works that way has servers of their own on the same
+  machine — one per project, started by hand long before any dispatcher. That is
+  real work in these repos and the cockpit could not name one of them: it only
+  asked about sockets it had a record for. Servers are found by looking where
+  **tmux** puts them (`${TMUX_TMPDIR:-/tmp}/tmux-$UID`), because the sockets in
+  question were made by somebody else's tmux and there is nowhere else to learn
+  of them. A socket *file* is not a server — it outlives its process, and a
+  reboot's leftovers sit on an ext4 `/tmp` for months — so every name found is a
+  candidate and only asking settles it; asking is safe because `list-sessions`
+  on a dead socket errors rather than starting one, which is what makes
+  enumeration possible at all. A record claims a session by its **whole
+  address** and at **any status** (a finished dispatcher's session outlives its
+  claude by design and is still its own) — but only **the session it took hold
+  of**. A wrapper that names its sessions `<repo>__<branch>` brings the name back
+  every time, and an adoption finished two days earlier was hiding the session
+  `ndt player-app` had started under it that afternoon, which could then not be
+  adopted. So a session created after the record's `SessionStartedAt` only has
+  its name (`HoldsSessionBorn`), and the ghost sweep and `Resume` ask the same
+  rule. What is left is attributed by the
+  socket when it names a repo — the launcher's own rule, so exact rather than
+  inferred — and otherwise by the directory it runs in, matched against the
+  repo's checkouts by path *segment* and longest-first, since `/src/app` must
+  not swallow `/src/app-2` and one repo here has seven worktrees named exactly
+  that way. The directory is the case that matters: a server a human named
+  themselves matches no repo, and nothing but the path says whose it is. They
+  are **not dispatchers and never shown as ones** — no feature, no status, no
+  effort figure exists for them, so the row is the three facts that do and
+  `enter` to jump in, with no kill key for something this cockpit did not start.
+  A session in no known repo is dropped; a repo in no product goes to the
+  `unassigned` bucket the portfolio already keeps, which is the difference
+  between using a bucket and inventing one — and dropping those instead made the
+  whole tab invisible on a machine with no products assigned, which is every
+  machine on its first run. Full record:
+  `docs/adr/0015-the-sessions-you-started-yourself.md`.
+- **A session you already trust can be adopted.** Listing those sessions says
+  where they are and never what they want, so moving onto this tool meant
+  leaving behind the orchestrators that hold the context — reported as "if
+  there's something for me to call on in those sessions i won't see it in the
+  tool". The cockpit is already told: the hook is machine-wide, and 2,732 of
+  the last 3,000 events in the reporting log came from sessions it never
+  started, every one dropped for matching no record. `space` marks in the
+  sessions tab and `A` adopts: a record is wrapped around the session and
+  **nothing else changes** — no branch, no worktree, no claude, no prompt.
+  The conversation is identified from the **process** — Claude Code's own
+  `sessions/<pid>.json` for the claude under the pane, checked against the
+  pid's start time; its open transcript second, since an idle claude holds
+  none — rather than from the log, which
+  only knows which conversation last reported from a *directory* and cannot
+  choose between two orchestrators in one checkout; the log is the fallback
+  and refuses rather than guesses. The record **does not own its directory**
+  (`AdoptedAt`, `OwnsWorktree()`): the kill key's cleanup and the disk reclaim
+  both ask first, because that directory is the human's checkout and was there
+  before us. `x` **releases** rather than kills — not ours to end — clearing
+  the session id so a released record stops answering hooks, and keeping its
+  place in history. It shipped written and unwired: `x` on an adopted row took
+  the kill path, ending the human's own session and its context, and only the
+  directory was spared. `killCmd` releases an adopted record now and the row
+  offers "release". `BaseSHA` is the commit at adoption, so provenance credits
+  what happens under management and not the feature it walked in with. **And
+  an adopted session is handed the convention a dispatched one is launched
+  with**: a dispatch carries the working contract in its prompt, whose load-
+  bearing sentence is *end your message on the one question you need
+  answered* — a turn that ends is the hook that says "your move" — and a
+  session somebody else started hours ago cannot be given it that way. So
+  `dispatch.AdoptBrief` is **sent as a message**, the way the human would send
+  one, and only into a session the poll has found at its prompt
+  (`DeliverBriefs`, RetryFailed's rules): never while **blocked**, because
+  typing at a menu picks one of its options; never mid-turn, because a brief
+  queued behind an hour of work arrives detached from the moment it explains;
+  never where claude has exited or cannot be asked, because that text lands in
+  the shell. Stamped (`AdoptBriefAt`) under the hook lock before the keys go,
+  so it is spent once however many polls race. Full record:
+  `docs/adr/0026-a-session-you-already-trust-can-be-adopted.md`.
 - **A colour is a role, and the switch is news.** The cockpit paints only
   foregrounds onto the terminal's own ground, and it painted the dark design's
   hexes whatever that ground was: on a light terminal (NixOS/niri, ghostty
@@ -142,7 +378,19 @@
   first frame is decided before the program starts (OS, else the terminal's
   background once), so boot never flashes the wrong theme. A third-party theme
   is one more table; which one `system` picks per side is one lookup
-  (`themeForAppearance`) waiting for a key. Full record:
+  (`themeForAppearance`) waiting for a key. **Two reporters were one short,
+  and the weak one was not free**: a NixOS/niri desktop answers the portal
+  `v u 0`, "no preference", while plainly in light mode — it publishes the
+  switch by writing the word to a file its own tmux.conf reads. "Nothing to
+  ask" stops the poll, but "asked, no preference" is not that, so the cockpit
+  spawned a `busctl` every 2s for the life of the session for an answer that
+  could not change. So config's **`appearance_file`** names that file
+  (`appearance.FromFile`), read *before* the OS and *instead of* it when it
+  answers — a read, not a subprocess — while a file that is missing or says
+  anything but light/dark falls through rather than pinning a theme; and a
+  poll whose last three answers were not answers drops to 30s
+  (`themePollQuiet`), any real answer restoring 2s, because a preference can
+  still be set later. Full record:
   `docs/adr/0016-a-colour-is-a-role-and-the-switch-is-news.md`.
 - **A dispatch that did not happen is a thing that happened.** Reported as
   "when the prompt is massive the dispatcher seems to just disappear", then
@@ -159,7 +407,9 @@
   verbatim — not lifecycle events, nothing derives status from them and
   `velDwellState` leaves them unbilled); **a failed launch keeps its row**,
   SIGNAL "did not start", the launch's own words in the detail lead, `x` to
-  dismiss, and no snapshot retires it because what it reports is that there is
+  dismiss, `⏎` to **start it again** (`dispatch.Resume` on a record with no
+  conversation reruns the launch in its worktree with its prompt — a resume
+  would only refuse), and no snapshot retires it because what it reports is that there is
   nothing for a snapshot to find; and **a session that would not start keeps
   its record**, carrying the supervisor's words instead of the "tmux launch
   failed" that stood for every cause there is. The long-prompt cause was the
@@ -209,7 +459,13 @@
   ref it *was* cut from goes on the record (`Root`, e.g. `origin/main`). Stale
   remote-tracking refs are deliberately **not** pruned: `--prune` edits the
   human's repo and can strand commits, so the form may offer a branch origin
-  retired and the launch refuses it by name. Full record:
+  retired and the launch refuses it by name. **A repo can name its own root**
+  (`[root_branches]`, repo → branch): a blank ROOT then cuts from that branch
+  instead of origin's default, both forms say which, and a ROOT typed on the
+  form still wins. It is consulted only to cut a new branch — re-dispatching a
+  feature reuses its branch as before — and a configured branch that has gone
+  is refused by name rather than swapped for main. Asked for on playerpulse,
+  whose work merges into `dev` while origin's HEAD says `main`. Full record:
   `docs/adr/0010-origin-head-is-a-cache-not-an-answer.md`.
 - **A dispatch that ends is not a dispatch that goes away — and history is
   ordered by work, not by our own writes.** Reported as "the history needs to
@@ -289,6 +545,25 @@
   `supervisor.AttachSwitches`), the recheck waits for the terminal focus
   event instead. Focus alone never triggers it: a full forge re-read on every
   alt-tab is how the gh quota gets burned.
+- **A load costs its slowest chain, not the sum of its calls.** Nearly all of
+  a load is waiting — on GitHub, 0.3s a round trip and over a second a
+  search, and on the week's transcripts — and measured on a 27-repo
+  portfolio the opening screen took about 28s cold, 19 of them on PRODUCTS
+  asking each repo for its deploy workflow one after another; every record
+  change paid a load again before the screen moved. So: the **collectors run
+  at once** (each writes only its own fields of the snapshot, and velocity,
+  the one reader across them, waits on the products and the effort figures);
+  inside a stage, **independent forge reads go together**
+  (`warmProductForge`, a PR's checks beside its review); **usage reads each
+  transcript once**, then only what was appended (transcripts are
+  append-only, and a line holding neither `"usage"` nor
+  `"isApiErrorMessage"` is skipped before decoding — escaped inside strings,
+  those appear literally only as keys); and **what SettledTTL holds survives
+  a restart** (`gh-settled.json` in the state dir, never longer than the TTL,
+  gone with `InvalidateCache`). Measured: 3.7s for a first launch, 0.22s for
+  every refresh after it. The floor is GitHub's own search time, about 1.2s;
+  going under it would mean painting the last launch's answers, which this
+  does not do.
 - **The forge bill counts repositories, not pull requests — and stops when
   GitHub says stop.** Measured, one idle cockpit spent 5,409 GraphQL requests
   an hour against a limit of 5,000: it exhausted the quota by itself and took
@@ -375,6 +650,38 @@
   means retyping one exactly, in another file, with a silent read under a
   product that groups nowhere as the failure. The full record is
   `docs/adr/0006-a-linear-token-is-the-scope.md`.
+- **A key sheet that can lie is worse than none, and `/` is fzf itself.**
+  Every key was a literal in a switch with `?` hand-written beside it — merely
+  duplicated while keys are fixed, and the central problem the moment they are
+  not, because `?` is where you go to find out what your keys are. `internal/
+  keymap` is now the one table: action id, scope, shipped key, and the sentence
+  `?` prints, with `[keys]` in config.toml rebinding any of them and the sheet
+  **generated** from the resolved map. A collision is refused at load with both
+  actions named — including across scopes, since a lens is asked before the
+  global keys are, so a lens binding that reuses `U` does not share it, it takes
+  it. An unknown id, a key bound to nothing and `ctrl+c` are refused the same
+  way; a bad `[keys]` keeps the defaults and says so, because the cockpit is how
+  you look the ids up. **Scope** is what lets one key mean two things: `n` makes
+  a product and steps to the next search match, never both at once. Resolution
+  hands the switches the action's DEFAULT key, so they still read `case "n":`
+  and a rebind changes which physical key arrives, not what the code is about —
+  and a key whose action was rebound away is swallowed, not passed through.
+  Resolving happens *after* each screen's text-entry guards: rebinding must not
+  change which letters you can type. **An action the user thinks of as one thing
+  must be one id** — "new product" shipped as two and rebinding moved half of
+  it, caught against the real binary. `/` searches the list that has the
+  keyboard (portfolio, the editor's repos, an unfolded row's checkouts) using
+  fzf's own matcher linked in process, so the ranking is the one in the human's
+  fingers and the match POSITIONS come back for an in-place highlight; the list
+  is **lit, not filtered**, because a row's neighbours are often the point of it
+  and a shrinking table makes the count at the top a different number from the
+  one you were reading. `n`/`ctrl+n` jump between hits. The table first missed
+  screens: the product panel's tabs and sessions keys, settings' `e`, and the
+  list lenses never asked it, so a rebind there changed `?` and not the key —
+  and space never marked a session, because Bubble Tea sends `" "`. Every screen
+  with bindings resolves them now. `?` shows actions, not ids, so the README
+  lists the ids and a test keeps it whole. Full record:
+  `docs/adr/0024-a-key-sheet-that-can-lie-is-worse-than-none.md`.
 - **`U` is the upgrade key and nothing else's; undo is ctrl+z.** Shift is not
   a namespace. `handleKey` resolves `U` globally, before any lens is asked, so
   a lens that wants its own capital U never sees the key — the assignment
@@ -428,7 +735,7 @@
   which matched exactly that tier plus the queue it duplicated, left with it.
   The full record is `docs/adr/0003-amber-is-a-claim-about-the-human.md`.
 - **Decisions are read where they were written, never invented.** The
-  DECISIONS lens has two sources: an adr-tools folder, and a heading that
+  DECISIONS lens first had two sources: an adr-tools folder, and a heading that
   names a set of decisions in the repo's own markdown (`CLAUDE.md`,
   `DECISIONS.md`, `ARCHITECTURE.md`, `README.md`) — this section is one, and
   the lens reads it. Nothing writes a record: not the cockpit, not a
@@ -436,6 +743,59 @@
   inventing records is worse than an empty pane. It shipped reading only
   `doc/adr/`, which no repo in the fleet keeps, so the lens was empty for
   every repo while decisions sat in plain sight one file away.
+  **And where they were written is anywhere.** The two sources were still a
+  fixed list of places, and on the machine it was reported from they found
+  one repo, this one, while the repos worked in daily kept hundreds:
+  player-app a numbered register (`_docs/spec/stack-decisions.md`, D1–D48)
+  and a record of rulings marked RATIFIED, playerpulse its open questions in
+  "Open decisions" sections and `[NEEDS DECISION]` markers through `docs/`.
+  So every `.md` in a checkout is read (not dependencies, build output,
+  hidden folders or a nested checkout), and a decision is known by its
+  **shape**: an ADR; a file titled as decisions, one per `##`; a file named
+  for one decision; a section named for decisions, decided or open, one per
+  bullet, sub-heading or table row; a heading marked RATIFIED, RULED,
+  WITHDRAWN or "Decision N"; a line marked `[NEEDS DECISION]`. The **status
+  is the repo's own word** — decided, open, superseded — taken from the
+  decision's own marker or status line, never from something its body
+  describes. Each is **grouped by the file it came from** (its folder beside
+  it), by the folder where the file's name says nothing, and the root's
+  generic files are the plain list. Measured on player-app: 116 files, 210
+  decisions, 53 open, read in 28ms cold; the walk is cached two minutes and
+  a file re-read only when it changes. The "plugins" box and the `a`/`s`/`e`
+  keys — leftovers of a design where the cockpit accepted decisions — are
+  gone; `o` opens the decision at its line in `$EDITOR`. Nobody was asked to
+  move their decisions into a format: adopting the tool's format would have
+  meant renumbering some 1,300 citations of "per D18" in player-app.
+- **A decision is found by its number or by what it says.** Reported as "the
+  decisions are great, but hard to navigate": hundreds a repo across a dozen
+  repos, reached by J/K and j/k. `/` on the lens is one query over every
+  repo's decisions, its hits best first where the repo's list was
+  (`decsearch.go`). The matcher is fzf's own, linked in (`internal/fuzzy`),
+  and so is the reading of a query: words apart must all match, each
+  smart-case. A word matches three ways. An **id** is compared as a number —
+  `4`, `0004`, `#4` and `adr-4` name ADR 0004, `d18` names D18 — and that
+  decision is first whatever else matches, because a number is the one query
+  that means one decision. The **title** matches as fzf matches a line
+  ("ghostclr" finds "A ghost cannot clear itself"). The **prose** matches
+  fuzzily **inside one word** only: fzf over a paragraph matches nearly
+  anything — measured on this file, "gate" was found in 46 of its 50
+  decisions, the second best "get a te" — and a word is a run of letters and
+  digits unless the query word has punctuation of its own, because split on
+  spaces `(README.md:163-181).` is one word, and "D18" matched it. The list
+  is **filtered**, not lit in place: a hit found in its prose cannot show why
+  on a row that carries only its title, so the line under it quotes the words
+  that matched, lit, and the body pane lights them where they sit. Typing owns
+  the keyboard (`q` and digits are the query's); enter keeps the hits for
+  j/k, `o` and →; esc on one lands on it in its repo's list, among its
+  neighbours. `/` is the products search's own action, `search.open`, bound
+  in the list lenses' scope too, so one `[keys]` rebind moves both, and the
+  footer and `?` name it from the keymap; the keys of a query being typed are
+  not the keymap's, because every letter is text. The prose is cut up **in
+  the load**, never on the keyboard's thread; a word is matched once however
+  often it is written; only the hits on screen are drawn and lit. Measured on
+  75 checkouts of one repo — 14,526 decisions, 2.9 million words — a
+  one-letter query went from 1.1s to 22ms and drawing its hits from 1.3s to
+  2ms, for 0.4s added to the load.
 - **Parking is an annotation, never a status.** A session reaches a point
   where it asks something the human cannot answer right now; `p` on that queue
   row shelves it under a required, human-typed reason
@@ -499,27 +859,97 @@
   blocked exists: a menu is not a sentence `r` can type an answer into — the
   keypress has to land in the pane, so the row must send the human in rather
   than offer a reply line, which is exactly what a blocked row already does.
-  Nothing new clears it: `PostToolUse` already does, because answering the
-  question *is* the tool returning, the same way an approved permission prompt
-  clears. A question also **outranks "done means live"**, beside the permission
+  `PostToolUse` clears it, because answering the question *is* the tool
+  returning — but **only its own agent's tool**. "Any tool completing" shipped
+  first and failed on the same record the same evening: the question went up at
+  21:10:26 while a background worker beside it ran 29 tools in five minutes,
+  the first of which put the row back to working for the hour the question
+  stood. So the record keeps the dialogs that are open and whose each is
+  (`state.Menu`): measured on claude 2.1.296, every hook a subagent fires
+  carries its `agent_id`, and `PermissionRequest` (installed by `init`) reports
+  every dialog, questions included, with the tool and the agent it is for. A
+  dialog closes on its own tool completing; on its agent completing a
+  different one or ending, because denying a prompt fires no hook at all and
+  that is how a refusal is seen; and on the session's own turn ending, for its
+  own. Two can be open at once — a question with a subagent's prompt queued
+  behind it — and the record stays blocked until both are answered, whatever
+  the session does meanwhile. `Notification:permission_prompt` says neither
+  whose nor what, and 2.1.296 sends one six seconds after every question, which
+  re-worded each of them as a permission prompt; it now counts only where
+  nothing else reported the dialog, and that dialog any tool closes, as every
+  block was before `PermissionRequest`. Existing installs re-run `init` for it;
+  without it a question is still exact, and a permission prompt is what it was.
+  A question also **outranks "done means live"**, beside the permission
   prompt it already let through (`reopensDone`): `track` flips a record to done
   the moment its PR merges and a dispatcher told to merge and keep working
   routinely merges mid-run, so letting one menu back onto the table and not the
   other would have frozen a questioning dispatcher at done — invisible, which
   is this same defect in the one state where marking it blocked is not enough.
-  **A menu is a menu, and the two kinds exist only to be worded apart.** Both
-  waits are `blocked`, so the status cannot tell them apart and the *reason*
-  does — `state.ReasonQuestion`, a constant because hookcmd writes it and the
-  cockpit matches it, and a drifting letter would not fail, it would file every
-  question under "approve a permission". What the human can *do* about either
-  is identical, because the answer to both is a keypress in the pane: `cqMenu`
-  is the one predicate every site asks (first rank, no `r`, no "mark shipped",
-  no quoting a mid-turn record's stale `Said`), tone needs no say in it at all
-  since it is taken from the blocked state both share, and a test pins the pair
-  to one key set and one rank while requiring the words to differ — the only
-  way to split them by accident is to edit that predicate. No ADR — one hook
-  entry and one case, and the numbering is contested between unmerged branches.
-  Existing installs re-run `init` to get the entry.
+  **A menu is a menu, and the kinds exist only to be worded apart.** These
+  waits are all `blocked`, so the status cannot tell them apart and the
+  *reason* does. `state.ReasonQuestion` is a constant because hookcmd writes
+  it and the cockpit matches it, and a drifting letter would not fail, it
+  would file every question under "approve a permission". What the human can
+  *do* about any of them is identical, because the answer is a keypress in the
+  pane. `cqMenu` is the one predicate every site asks (first rank, no `r`,
+  "mark shipped" only after asking, no quoting a mid-turn record's stale
+  `Said`). Tone needs no say in it at all, since it is taken from the blocked
+  state they share. Tests pin the kinds to one key set and one rank while
+  requiring the words to differ, so the only way to split them by accident
+  is to edit that predicate.
+  **The third menu is the one before the session starts.** A dispatch sat on
+  Claude Code's trust dialog while its row said "starting session" for good.
+  No hook fires before a session has started, so a session stopped on a
+  startup dialog (trust, login, onboarding) cannot report anything. The record
+  is evidence enough: the supervisor stamped `SessionStartedAt` and no hook
+  has given it a `SessionID` in the time a normal start takes.
+  `dispatch.LaunchStalled` (20s) makes it blocked, kind `startup` ("answer its
+  startup prompt"), and the cockpit reloads once just after the threshold so
+  the row turns when it does. A launch that could not copy the repo's trust
+  onto its worktree says so on the record (`state.ReasonUntrustedLaunch`), and
+  the lead then names the trust prompt rather than guessing.
+  **And the other half of it: an ask outranks background work.** Reported an
+  hour later from a live dispatcher that ended its turn on a prose question —
+  "One thing needs your confirmation … OK to keep that?" — and sat at an empty
+  prompt while the table read `2 in flight · 0 want you · 2 running clean`.
+  Its `Stop` carried background tasks (an adversarial review agent was still
+  going) and that branch was taken on the task count alone, so the ask was
+  never consulted: measured on the record (`d51bc11a5c5d`), status `working`,
+  reason "waiting on 2 background tasks". **This one is the tool's own
+  doing** — the auto contract this project composes at launch says in the same
+  breath to wait on something slow with a background task rather than ending
+  the turn, and to end the message on the one question that is the human's, so
+  a session obeying both lands exactly in the state the status machine read as
+  "not waiting on you". The rule that background work is no human wait is right
+  on its own and wrong the moment the message asks something, so at `Stop` the
+  ask wins (`ask.Of`, read off `Said` — the field and the function the
+  cockpit's `cqAsk` uses, so a wait claimed here is always a question the row
+  can quote) and the record is needs-input with **both** facts in its reason;
+  `WaitingOnTasks` stays set, because it is true and the trailing idle prompt
+  defers to it, it just no longer decides. `state.ReasonTurnComplete` is
+  therefore a **lead** rather than a whole reason, matched as a prefix by
+  `cqKind`, since a turn that ended on a question with an agent still running
+  is still a finished turn. `StopFailure` needs none of this — it is already
+  needs-input, so there is nothing for an ask to outrank, and the API error
+  stays the better account of why the turn ended. Nor does `reopensDone`: a
+  `Stop` is exactly what a shipped feature looks like, and `ask.Of` finds an
+  ask in 401 of 949 measured turn endings — mostly closers like "let me know
+  if…" — so admitting a Stop that asks would drag most of a day's finished work
+  back onto the table, which is the louder failure. A done dispatcher that
+  stops with an ask keeps its row anyway, under the `finished` divider, because
+  nothing retires a held row but `x`. Existing installs re-run `init` to get
+  the entry.
+  **And a watch is not background work.** An artifact the session published
+  or was asked to watch is listed in every later `Stop`'s `background_tasks`
+  for the rest of the session — measured on claude 2.1.299 as `type:
+  "monitor"` with no `command`, "live updates for artifact …" — and it never
+  ends: it wakes the session only when somebody comments or republishes,
+  which is a person's move like any prompt. Counted, it held the robustness
+  dispatcher at "waiting on 1 background task" for good after it said it was
+  done: a running row, so no "mark shipped", and a tracker that waits for the
+  turn to end before marking anything done. `pendingTasks` leaves that one
+  shape out. An entry it cannot read still counts, and so does the Monitor
+  tool, which lists as a shell with its command.
 - **A stop says what it needs, and only the human's stops reach the human.**
   Reported as "70% of the time I seem to just be pushing them along". Measured
   over 949 follow-up prompts in the transcripts: 28% of turns ended offering a
@@ -634,16 +1064,45 @@
   **dir**, because the transcript is there. Trust is inherited into the
   account's own `.claude.json`. Full record:
   `docs/adr/0022-a-subscription-is-a-config-directory.md`.
+  - **The usage lens shows those figures, and a reading only goes forward.**
+    The lens drew its bars from the transcript learner, while the forms already
+    had Claude Code's own numbers. Measured on one Max login, the lens said 77%
+    and 88% when claude.ai said 45% and 33%. The learner's denominator is the
+    largest window it has ever seen, and while it is "learning" that is not a
+    limit. Its header also named a reset day that was only ever today's weekday.
+    The bars are now the recorded reading for each account, with the window's
+    real reset and a pace (used share against elapsed share, unset for the
+    window's first tenth). The learner is the fallback only where no session
+    has reported, marked `≈` and given no reset day, since a trailing window
+    has none.
+    The reading itself flipped too. Every session draws its status line from
+    its own last response, so an idle one reports an older figure. One 5-hour
+    window logged 21%, 44%, 45% and 46% within five minutes, the file holding
+    whichever session redrew last. Within one `resets_at` usage only climbs, so
+    `mergeWindow` keeps the higher figure. A later `resets_at` starts the next
+    window. An earlier one is a stale session and changes nothing, not even
+    the reading's age.
 - Features are named at dispatch time (hybrid model): the name is the key;
-  branch `feature/<slug>`, commits, and PRs enrich it automatically. Every
+  branch `<branch_prefix><slug>` (`feature/` unless config or the form says
+  otherwise), commits, and PRs enrich it automatically. Every
   dispatch works on a feature branch, even in repos that ship from main
   (PR from branch onto main).
 - "Done means live": a feature stays open until deployed, unless explicitly
   stated otherwise. Deploys are always GitHub Actions; `internal/track`
   flips features to done when the deploy workflow succeeds after PR merge
-  (merge counts as live for repos with no deploy workflow). `d` in the
-  cockpit is the manual override. Auto-done only advances while a cockpit
-  is open (the tracker runs from the cockpit's poll loop).
+  (merge counts as live for repos with no deploy workflow). Auto-done only
+  advances while a cockpit is open (the tracker runs from the cockpit's poll
+  loop). **`y` is the manual override, and an override does not wait on the
+  session.** It was offered only where the turn had ended, which made it
+  unreachable exactly when it was needed: the robustness dispatcher sat at
+  "working" after saying it was done (an artifact watch, above), so `y` did
+  nothing, and the tracker, which waits for the turn to end, could not finish
+  it either. Every live row with commits offers it now (running, on a menu,
+  parked, waiting on you) — commits stay the condition, because shipping
+  nothing is a claim about the work, not the session. Where the session has
+  not ended its turn (working, blocked, launching) it asks first on the
+  confirm bar, since the session carries on after its row has gone; `y` or
+  `enter` there marks it, `n` or `esc` leaves it.
 - **The dispatch form's MODE is Claude Code's permission mode, not a
   sentence about one.** A dispatch is launched with `--permission-mode` —
   `auto` (takes its own edits and safe commands), `manual` (asks before each
@@ -691,6 +1150,17 @@
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
   with, under `~/.local/state/claude-dispatcher/` (override:
   `CLAUDE_DISPATCHER_STATE`).
+- `internal/keymap` — every action the cockpit has (id, scope, default key,
+  help line), `[keys]` overrides, and the collision rules. `?` is built from it.
+- `internal/fuzzy` — `/` search, wrapping fzf's own matcher in process; returns
+  match positions so a hit is highlighted where it sits.
+- `internal/repos` — repository discovery: the scan of the configured roots,
+  and the read of git's own metadata that turns the checkouts it finds into
+  repositories (common dir, name from origin, canonical checkout, the worktree
+  registry). No git process — every answer comes from files, because a
+  discovery runs on every load. `env.go` is the other half of what a repo
+  is for a dispatch: the tmux server its sessions live on and the command
+  they are launched under, both resolved rather than typed.
 - `internal/appearance` — whether the OS is set light or dark, asked (never
   subscribed to) through the platform's own command. The cockpit's
   `theme.go` polls it and pairs it with the terminal's 2031 reports.
@@ -717,9 +1187,38 @@
   `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
   `root.go` is where a feature branch starts: the remote's own default, the
   human's named `Root`, and the branch list the forms offer — and the reason
-  none of it trusts `origin/HEAD`.
+  none of it trusts `origin/HEAD`. `adopt.go` wraps a record around a session
+  the human started (ADR 0026) and `brief.go` is the convention it is then
+  sent; `stall.go` is when a silent launch counts as stopped on a startup
+  prompt; `trust.go` copies a repo's trust onto its worktree.
+- `internal/supervisor` — the session backend behind one interface: tmux on
+  Unix, a console window per session on Windows. A session is addressed by
+  `Session` (socket + name), never by name alone.
+- `internal/tmux` — the tmux CLI, per `-L` server: sessions, panes, send-keys,
+  and what a pane is running (ADRs 0008, 0014, 0025).
+- `internal/config` — `config.toml`: load, and `Save`, which writes the file
+  whole with its explanatory comments, so a table the cockpit edits keeps them.
+- `internal/gh` — the GitHub CLI for PR, check and deploy signals, every call
+  best-effort and memoised; settled answers persist across launches
+  (`gh-settled.json`).
+- `internal/track` — "done means live": links dispatches to PRs and flips them
+  done when the deploy workflow succeeds.
+- `internal/initcmd` — `claude-dispatcher init`: config, state dirs, and (with
+  consent) the hooks and status line in every account's `settings.json`.
+- `internal/linear`, `internal/azure` — backlog sources, best-effort.
+- `internal/transcript` — a best-effort activity preview from a session's
+  transcript; never status truth.
+- `internal/usage` — this machine's transcript tokens and a limit learned from
+  429s: the usage lens's fallback where no session has reported Claude Code's
+  own figures (internal/account).
+- `internal/accountcmd` — `claude-dispatcher account`: list, add and log in a
+  subscription.
 - `internal/cockpit` — Bubble Tea cockpit; responsive tiling breakpoints at 110
   and 170 columns (more panes on wide screens, never one ballooned view).
+  `collect_sessions.go` is the one collector that reads the machine rather than
+  the records: the sessions on it that no dispatch claims, and `adopt.go` is
+  the key that adopts one. `search.go` is `/`; `editconfig.go` opens
+  `config.toml` in the human's editor (`e` in settings, `:config`).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is
   a real stage and every figure is what it found — the list is a description of
@@ -731,7 +1230,8 @@
   windows around the cursor and counts what it hides rather than stopping mute.
   `prodDay` normalises to **local** before truncating: forge timestamps are UTC
   and the clock's are local, and a day compared across the two is never equal.
-- `internal/ship` — shipping stats (Claude-stamped = Co-Authored-By trailer).
+  `decsearch.go` is `/` on the decisions lens: every repo's decisions, cut up
+  for matching once per load.
 - `internal/effort` — the hand-coding equivalent: how long a senior developer
   would have taken to write a diff by hand. The ONLY figure in the product
   that is a model rather than a measurement, so every screen showing it says
@@ -743,7 +1243,7 @@
   map is one whose diff could not be read, which is NOT the same as one that
   wrote nothing: totals skip it and velocity says how many of its live features
   it could price. History rows take the figure from that map and never run a
-  diff of their own — `fleetPastRow` stays the cheapest row there is, so a
+  diff of their own — `fleetEndedRow` stays the cheapest row there is, so a
   machine with hundreds of finished dispatchers still polls in constant work.
 - `internal/version` — the build's version (stamped by goreleaser via
   `-X claude-dispatcher/internal/version.Version`), the cached, best-effort

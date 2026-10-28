@@ -98,8 +98,16 @@ func buildFloorRow(ctx *collectCtx, rec *state.Dispatch) floorRow {
 	var checks gh.Checks
 	var review gh.Review
 	if forge == "gh" && rec.PRNumber > 0 {
+		// Side by side: for a PR the repo's open list does not hold — merged or
+		// closed — each is a request of its own, and in series they were a
+		// second and a half on the opening screen's critical path.
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			review = gh.PRReviewFor(rec.RepoPath, rec.PRNumber)
+		}()
 		checks = gh.PRChecksFor(rec.RepoPath, rec.PRNumber)
-		review = gh.PRReviewFor(rec.RepoPath, rec.PRNumber)
+		<-done
 	}
 
 	// Transcript preview: one read reused for said/tail/activity.
@@ -199,7 +207,15 @@ func floorState(rec *state.Dispatch) string {
 			return "review"
 		}
 		return "needs"
-	case state.StatusWorking, state.StatusLaunching:
+	case state.StatusLaunching:
+		// A session that started and has said nothing since is waiting on a
+		// startup prompt no hook reports — its trust dialog, most often — and
+		// it is the human's to answer (dispatch.LaunchStalled).
+		if dispatchpkg.LaunchStalled(rec, time.Now()) {
+			return "blocked"
+		}
+		return "working"
+	case state.StatusWorking:
 		return "working"
 	case state.StatusDone:
 		return "live"

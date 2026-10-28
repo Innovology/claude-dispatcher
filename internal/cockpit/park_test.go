@@ -273,7 +273,8 @@ func TestParkKeyOnlyActsWhereItMeansSomething(t *testing.T) {
 // ---- the acts ---------------------------------------------------------------
 
 // Every act a parked row advertises reaches a real command, and which ⏎ it
-// offers follows the record: a live session attaches, a dead one resumes.
+// offers follows the record: a live session attaches, a dead one resumes. A
+// shelf is not a reason it cannot have shipped, so y is there either way.
 func TestParkedActsFollowTheRecord(t *testing.T) {
 	alive := testRec("five", 2)
 	alive.Status = state.StatusNeedsInput
@@ -281,7 +282,7 @@ func TestParkedActsFollowTheRecord(t *testing.T) {
 	for _, a := range cqActs(alive, "parked") {
 		keys = append(keys, a.k+" "+a.d)
 	}
-	if got := strings.Join(keys, " · "); got != "⏎ attach · p unpark · x kill" {
+	if got := strings.Join(keys, " · "); got != "⏎ attach · p unpark · y mark shipped · x kill" {
 		t.Errorf("parked acts = %q", got)
 	}
 
@@ -291,7 +292,7 @@ func TestParkedActsFollowTheRecord(t *testing.T) {
 	for _, a := range cqActs(dead, "parked") {
 		keys = append(keys, a.k+" "+a.d)
 	}
-	if got := strings.Join(keys, " · "); got != "⏎ resume · p unpark" {
+	if got := strings.Join(keys, " · "); got != "⏎ resume · p unpark · y mark shipped" {
 		t.Errorf("parked acts on a dead session = %q — there is no session to attach or kill", got)
 	}
 

@@ -90,17 +90,17 @@ func RetryFailed(ds []*state.Dispatch, now time.Time) (sent int) {
 		if due, _ := RetryDue(d, now); !due || d.TmuxSession == "" {
 			continue
 		}
-		if !sessionAlive(d.TmuxSession) {
+		if !sessionAlive(SessionOf(d)) {
 			continue
 		}
-		if idle, known := sessionIdle(d.TmuxSession); idle || !known {
+		if idle, known := sessionIdle(SessionOf(d)); idle || !known {
 			continue
 		}
 		rec, ok := claimRetry(d.ID, now)
 		if !ok {
 			continue
 		}
-		if sendKeys(rec.TmuxSession, RetryText) == nil {
+		if sendKeys(SessionOf(rec), RetryText) == nil {
 			sent++
 		}
 	}

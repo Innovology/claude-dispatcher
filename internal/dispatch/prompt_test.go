@@ -3,6 +3,7 @@
 package dispatch
 
 import (
+	"claude-dispatcher/internal/supervisor"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,9 +21,9 @@ func stubLaunch(t *testing.T) *string {
 	t.Helper()
 	var cmd string
 	prevNew, prevUniq, prevAlive := newSession, uniqueName, sessionAlive
-	newSession = func(_, _, c string) error { cmd = c; return nil }
-	uniqueName = func(base string) string { return base }
-	sessionAlive = func(string) bool { return false }
+	newSession = func(_ supervisor.Session, _, c, _ string) error { cmd = c; return nil }
+	uniqueName = func(s supervisor.Session) string { return s.Name }
+	sessionAlive = func(supervisor.Session) bool { return false }
 	t.Cleanup(func() { newSession, uniqueName, sessionAlive = prevNew, prevUniq, prevAlive })
 	return &cmd
 }
@@ -161,7 +162,7 @@ func TestAFailedSessionKeepsItsRecordAndTheReason(t *testing.T) {
 	repo := initRepo(t)
 	stubLaunch(t)
 	prev := newSession
-	newSession = func(string, string, string) error {
+	newSession = func(supervisor.Session, string, string, string) error {
 		return errFake("tmux new-session: command too long")
 	}
 	t.Cleanup(func() { newSession = prev })
@@ -209,6 +210,11 @@ func TestOccupiedWorktreeSaysWhatItIsOn(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not name %q: %v", want, err)
 		}
+	}
+	// Beside a clone the folder may be one of the human's own checkouts, named
+	// the way a dispatch's would be: the refusal must not tell them to delete it.
+	if strings.Contains(err.Error(), "remove") {
+		t.Errorf("the refusal suggests removing a checkout that may be the human's: %v", err)
 	}
 }
 

@@ -23,7 +23,6 @@
 package usage
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -224,86 +223,6 @@ type windows struct {
 	wkTotal, wkSessions int
 	wkByModel           map[string]int
 	limits              []time.Time
-}
-
-// scanWindows walks transcripts modified within the last ~8 days, summing
-// countable tokens (input + output + cache-creation; cache-read excluded) into
-// the trailing 5-hour and 7-day windows, and collecting 429 rate-limit
-// timestamps (529 overloads are ignored — they are not usage limits).
-func scanWindows(now time.Time) windows {
-	w := windows{fhByModel: map[string]int{}, wkByModel: map[string]int{}}
-	fhSess := map[string]bool{}
-	wkSess := map[string]bool{}
-	dir := claudeDir()
-	if dir == "" {
-		return w
-	}
-	projects := filepath.Join(dir, "projects")
-	fhCut := now.Add(-fiveHour)
-	wkCut := now.Add(-week)
-	fileCut := now.Add(-week - 24*time.Hour) // slack for file mtime vs line time
-
-	_ = filepath.WalkDir(projects, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil || info.ModTime().Before(fileCut) {
-			return nil
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		defer func() { _ = f.Close() }()
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
-		for sc.Scan() {
-			row := strings.TrimSpace(sc.Text())
-			if row == "" || row[0] != '{' {
-				continue
-			}
-			var l tLine
-			if json.Unmarshal([]byte(row), &l) != nil {
-				continue
-			}
-			ts, err := time.Parse(time.RFC3339, l.Timestamp)
-			if err != nil {
-				continue
-			}
-			ts = ts.Local()
-			// Limit hit: a real 429 rate limit (not a 529 overload).
-			if l.IsAPIError && l.APIErrorStatus == 429 && strings.Contains(l.Error, "rate_limit") {
-				w.limits = append(w.limits, ts)
-				continue
-			}
-			if l.Type != "assistant" || ts.Before(wkCut) {
-				continue
-			}
-			u := l.Message.Usage
-			tok := u.InputTokens + u.OutputTokens + u.CacheCreationInputTokens
-			if tok <= 0 {
-				continue
-			}
-			model := bucket(l.Message.Model)
-			w.wkTotal += tok
-			w.wkByModel[model] += tok
-			if l.SessionID != "" {
-				wkSess[l.SessionID] = true
-			}
-			if !ts.Before(fhCut) {
-				w.fhTotal += tok
-				w.fhByModel[model] += tok
-				if l.SessionID != "" {
-					fhSess[l.SessionID] = true
-				}
-			}
-		}
-		return nil
-	})
-	w.fhSessions = len(fhSess)
-	w.wkSessions = len(wkSess)
-	return w
 }
 
 // ---- persistence ------------------------------------------------------------

@@ -46,8 +46,7 @@ const (
 	// cSearchHit lights the characters a `/` search matched. It is amber's
 	// neighbour rather than amber itself: amber already means "this wants you"
 	// on every table in the cockpit, and a search hit is a fact about the query,
-	// not about the work. Nothing draws it yet — the search lands with other
-	// work — but it is a role now so every theme already answers for it.
+	// not about the work.
 	cSearchHit = "search-hit"
 
 	cTransparent = "" // no colour / default terminal background
