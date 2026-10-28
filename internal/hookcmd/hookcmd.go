@@ -446,6 +446,13 @@ func applyStatus(d *state.Dispatch, event string, in hookInput) bool {
 		pending := in.pendingTasks()
 		d.WaitingOnTasks = pending > 0
 		d.DropMenus("") // a turn that ended is past any dialog of its own
+		if pending == 0 {
+			// Nothing in flight, so no subagent is either: a dialog still
+			// open under one is a SubagentStop that never arrived — the case
+			// the subagent sweep exists for — and kept, it held the row at
+			// blocked until the session ended.
+			d.Menus = nil
+		}
 		// Background work is not a human wait — until the message asks
 		// something, and then both are true and only one of them needs a
 		// human. This branch used to be taken on the task count alone, so a

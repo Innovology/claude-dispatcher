@@ -271,6 +271,20 @@ func TestASubagentsDialogOutlastsTheSessionsTurn(t *testing.T) {
 	}
 }
 
+// A turn that ends with nothing in flight has no subagent in flight either, so
+// a subagent's dialog still open then is a SubagentStop that never came — and
+// it goes with the sweep that settles the subagent, instead of holding the
+// row at blocked until the session ends.
+func TestAStopWithNothingInFlightClosesAMissedSubagentsDialog(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	d := &state.Dispatch{ID: "a", Status: state.StatusWorking}
+	apply(d, "PermissionRequest", hookInput{AgentID: "x", ToolName: "Bash"})
+	apply(d, "Stop", hookInput{})
+	if d.Status == state.StatusBlocked || len(d.Menus) != 0 {
+		t.Errorf("status %s with %d dialogs, want the missed one gone", d.Status, len(d.Menus))
+	}
+}
+
 // An install that has not re-run init has no PermissionRequest hook, so a
 // permission prompt is only the notification, which says neither whose nor
 // what. That dialog is closed by any tool, as every block was before.
