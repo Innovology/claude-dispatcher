@@ -53,3 +53,30 @@ func TestSendKeysNoSession(t *testing.T) {
 		t.Fatal("a send to no session must say so")
 	}
 }
+
+// A session of several panes is typed into nowhere: the current pane is
+// whatever the human has in front of them, which in an adopted session need
+// not be claude's — and Enter in vim or a shell does something.
+func TestSendKeysRefusesASessionOfSeveralPanes(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("no tmux")
+	}
+	name := "disp-sendkeys-panes-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	sock := name
+	if err := exec.Command("tmux", "-L", sock, "-f", "/dev/null", "new-session", "-d", "-s", name, "-x", "80", "-y", "10", "cat").Run(); err != nil {
+		t.Skipf("tmux will not start a session here: %v", err)
+	}
+	defer func() { _ = exec.Command("tmux", "-L", sock, "kill-server").Run() }()
+	if err := exec.Command("tmux", "-L", sock, "new-window", "-d", "-t", "="+name+":", "cat").Run(); err != nil {
+		t.Fatalf("new-window: %v", err)
+	}
+
+	err := SendKeys(Session{Name: name, Socket: sock}, "merge it")
+	if err == nil || !strings.Contains(err.Error(), "2 panes") {
+		t.Fatalf("SendKeys into two panes: err = %v, want a refusal naming them", err)
+	}
+	out, _ := exec.Command("tmux", "-L", sock, "capture-pane", "-p", "-t", "="+name+":").Output()
+	if strings.Contains(string(out), "merge it") {
+		t.Errorf("text was typed anyway:\n%s", out)
+	}
+}

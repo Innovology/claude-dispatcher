@@ -513,7 +513,20 @@ func (s Server) sessionPath(name string) string {
 // argument up as a key name first, and a reply of "Enter", "Up" or "C-c" would
 // be pressed rather than typed, and one starting with "-" read as a flag.
 // Enter is its own call because it is the one argument that must be a key.
+//
+// Only into a session of one pane. "The current pane" is whatever the human
+// has in front of them, and an adopted session is theirs, with windows of its
+// own: with vim in front and claude waiting in another window, the text and
+// its Enter landed in vim — or in a shell, as a command. Which pane holds
+// claude is not something tmux says, so with more than one nothing is typed.
 func (s Server) SendKeys(name, text string) error {
+	out, err := s.cmd("list-panes", "-s", "-t", "="+name, "-F", "#{pane_id}").CombinedOutput()
+	if err != nil {
+		return sendErr(out, err)
+	}
+	if n := len(strings.Fields(string(out))); n != 1 {
+		return fmt.Errorf("%s has %d panes and nothing says which is claude's — answer it there", name, n)
+	}
 	target := "=" + name + ":"
 	if out, err := s.cmd("send-keys", "-t", target, "-l", "--", text).CombinedOutput(); err != nil {
 		return sendErr(out, err)
