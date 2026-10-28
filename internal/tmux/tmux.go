@@ -565,6 +565,12 @@ func SocketDir() string {
 // dead socket makes list-sessions error out, and it does NOT start a server.
 // Only new-session does that.
 //
+// The server a bare tmux reaches is the zero Server, spelled "" as every
+// record made without a socket spells it, not by its file's name ("default",
+// or $TMUX's): a session claimed at ("", name) listed at ("default", name)
+// matched no claim, and every dispatcher on that server read as one of the
+// human's own, offered for adoption a second time.
+//
 // Sorted, so what a load produces never depends on the order a directory
 // happened to be read in.
 func Servers() []Server {
@@ -572,9 +578,14 @@ func Servers() []Server {
 	if err != nil {
 		return nil
 	}
+	bare := Server{}.socketName()
 	var out []Server
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		if e.Name() == bare {
+			out = append(out, Server{})
 			continue
 		}
 		out = append(out, Server{Socket: e.Name()})

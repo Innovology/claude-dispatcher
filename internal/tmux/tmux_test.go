@@ -162,6 +162,28 @@ func TestServersFindsSocketsAndADeadOneAnswersNothing(t *testing.T) {
 	}
 }
 
+// The server a bare tmux reaches is listed as the zero Server, the way every
+// record without a socket names it — not as "default", which matched no claim
+// and put every dispatcher on it up for adoption again.
+func TestServersSpellTheBareServerAsRecordsDo(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("TMUX_TMPDIR", dir)
+	t.Setenv("TMUX", "")
+	sockets := filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()))
+	if err := os.MkdirAll(sockets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"default", "project"} {
+		if err := os.WriteFile(filepath.Join(sockets, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := Servers()
+	if len(got) != 2 || got[0].Socket != "" || got[1].Socket != "project" {
+		t.Fatalf("Servers() = %+v, want the bare server as \"\" and project by name", got)
+	}
+}
+
 // Asked of a real server, the listing says when the session was made, to the
 // second — between the moment before new-session and the moment it returned.
 func TestARealSessionListsWhenItWasMade(t *testing.T) {
