@@ -190,8 +190,11 @@ func dcnSkip(p, name string) bool {
 // from when, so a cached record does not go on saying "2m ago" for an hour.
 func dcnFileRecords(root, rel string) []decision {
 	abs := filepath.Join(root, filepath.FromSlash(rel))
+	// A regular file only: a .md that is a link to a FIFO or a device stats
+	// at size 0 and then blocks the read, or never ends it, and loads run one
+	// at a time, so one such file would hold up every load after it.
 	info, err := os.Stat(abs)
-	if err != nil || info.Size() > dcnMaxBytes {
+	if err != nil || !info.Mode().IsRegular() || info.Size() > dcnMaxBytes {
 		return nil
 	}
 	dcnCache.Lock()
