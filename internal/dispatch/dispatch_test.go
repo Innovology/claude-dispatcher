@@ -77,6 +77,22 @@ func TestEnsureWorktreeLeavesTheHumansOwnCheckoutAlone(t *testing.T) {
 	}
 }
 
+// Two clones that share a name share a worktrees folder, so one's checkout
+// can sit where the other's dispatch would cut. It is not reused for it.
+func TestEnsureWorktreeLeavesAnotherReposCheckoutAlone(t *testing.T) {
+	first, second := initRepo(t), initRepo(t)
+	wt := ourWorktreePath(t, "x")
+	if _, err := ensureWorktree(first, wt, "feature/x", DefaultRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureWorktree(second, wt, "feature/x", DefaultRoot); err == nil || !strings.Contains(err.Error(), "another repository") {
+		t.Fatalf("another repo's checkout was reused: err = %v", err)
+	}
+	if _, err := ensureWorktree(first, wt, "feature/x", DefaultRoot); err != nil {
+		t.Errorf("its own repo's re-dispatch was refused: %v", err)
+	}
+}
+
 func TestEnsureWorktree(t *testing.T) {
 	repo := initRepo(t)
 	wt := ourWorktreePath(t, "feat")

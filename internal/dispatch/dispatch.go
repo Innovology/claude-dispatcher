@@ -608,6 +608,20 @@ func cutByUs(path string) bool {
 	return false
 }
 
+// sameRepo reports whether two checkouts share one repository — one git
+// common dir, which every worktree of a clone points at.
+func sameRepo(a, b string) bool {
+	common := func(dir string) string {
+		out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+		if err != nil {
+			return ""
+		}
+		return resolved(strings.TrimSpace(string(out)))
+	}
+	ca := common(a)
+	return ca != "" && ca == common(b)
+}
+
 func within(dir, path string) bool {
 	rel, err := filepath.Rel(resolved(dir), resolved(path))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
@@ -637,6 +651,13 @@ func ensureWorktreeFrom(repoPath, path, branch string, root Root, repoRoot strin
 			// Only a checkout one of our records cut is ours to reuse.
 			if !cutByUs(path) {
 				return "", fmt.Errorf("%s is already a checkout on %s that no dispatch cut — it looks like one of your own; name the feature differently",
+					path, branch)
+			}
+			// Nor is a checkout of another repository, which two clones that
+			// share a name would otherwise hand each other: the session would
+			// work in one repo while its record named the other.
+			if !sameRepo(path, repoPath) {
+				return "", fmt.Errorf("%s is a checkout of another repository on %s — two repos share this one's name; name the feature differently",
 					path, branch)
 			}
 			return "", reusedRootErr(branch, root)
