@@ -81,6 +81,31 @@ func applyEdit(cur, k string, raw tea.KeyMsg) (next string, submit, cancel bool)
 	return cur, false, false
 }
 
+// editQuery applies one key to a `/` query being typed, for the searches that
+// filter a list (decisions, the backlog). backspace takes a rune back, ctrl+u
+// the whole query and ctrl+w its last word, and a key that types text adds it —
+// read from the key message, never the key's name, because a paste arrives as
+// one multi-rune message. ok is false for a key that is no edit, which the
+// search it belongs to decides about.
+func editQuery(q, k string, raw tea.KeyMsg) (string, bool) {
+	switch k {
+	case "backspace":
+		if r := []rune(q); len(r) > 0 {
+			return string(r[:len(r)-1]), true
+		}
+		return q, true
+	case "ctrl+u":
+		return "", true
+	case "ctrl+w":
+		q = strings.TrimRight(q, " ")
+		return q[:strings.LastIndex(q, " ")+1], true
+	}
+	if s, ok := typedTextFor(raw, k); ok {
+		return q + s, true
+	}
+	return q, false
+}
+
 // filteredCommands narrows the palette to what matches the typed query, name
 // matches first. Ranking matters: hints mention other lenses by name, so
 // without it typing "product" selected "usage" — whose hint happens to end

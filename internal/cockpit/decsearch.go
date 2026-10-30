@@ -169,33 +169,7 @@ func (f *decFound) rec(h textHit) decRec { return f.ix.recs[h.rec] }
 // every place in its id, title and prose that any of them matched.
 func (f *decFound) lit(h textHit) decLit {
 	var out decLit
-	light := func(set *map[int]bool, at int) {
-		if *set == nil {
-			*set = map[int]bool{}
-		}
-		(*set)[at] = true
-	}
-	rec := f.ix.recs[h.rec]
-	idLen := len([]rune(rec.d.id))
-	for _, t := range f.terms {
-		if t.byID[h.rec] {
-			for p := 0; p < idLen; p++ {
-				light(&out.id, p)
-			}
-		}
-		if k := t.heads[h.rec]; k > 0 {
-			for _, p := range t.headMt[k-1].Pos {
-				switch {
-				case rec.d.id == "":
-					light(&out.title, p)
-				case p < idLen:
-					light(&out.id, p)
-				case p > idLen:
-					light(&out.title, p-idLen-1)
-				}
-			}
-		}
-	}
+	out.id, out.title = litHead(f.terms, h.rec, len([]rune(f.ix.recs[h.rec].d.id)))
 	copy(out.prose[:], litProse(f.terms, h.rec, len(out.prose)))
 	return out
 }
@@ -313,23 +287,9 @@ func (m model) updateDecSearch(k string) (model, tea.Cmd, bool) {
 		case "down":
 			m.decAt = mini(m.decAt+1, last)
 			return m, nil, true
-		case "backspace":
-			if r := []rune(m.decQuery); len(r) > 0 {
-				m.decQuery = string(r[:len(r)-1])
-			}
-			return m.decSearchRun(), nil, true
-		case "ctrl+u":
-			m.decQuery = ""
-			return m.decSearchRun(), nil, true
-		case "ctrl+w":
-			q := strings.TrimRight(m.decQuery, " ")
-			m.decQuery = q[:strings.LastIndex(q, " ")+1]
-			return m.decSearchRun(), nil, true
 		}
-		// Text comes from the key message, never the key's name: a paste
-		// arrives as one multi-rune message.
-		if s, ok := typedTextFor(m.key, k); ok {
-			m.decQuery += s
+		if q, ok := editQuery(m.decQuery, k, m.key); ok {
+			m.decQuery = q
 			return m.decSearchRun(), nil, true
 		}
 		return m, nil, true

@@ -182,30 +182,7 @@ func (f *blFound) lit(i int) blLit {
 	if f == nil {
 		return out
 	}
-	light := func(set *map[int]bool, at int) {
-		if *set == nil {
-			*set = map[int]bool{}
-		}
-		(*set)[at] = true
-	}
-	idLen := len([]rune(f.ix.tickets[i].id))
-	for _, t := range f.terms {
-		if t.byID[i] {
-			for p := 0; p < idLen; p++ {
-				light(&out.id, p)
-			}
-		}
-		if k := t.heads[i]; k > 0 {
-			for _, p := range t.headMt[k-1].Pos {
-				switch {
-				case p < idLen:
-					light(&out.id, p)
-				case p > idLen:
-					light(&out.title, p-idLen-1)
-				}
-			}
-		}
-	}
+	out.id, out.title = litHead(f.terms, i, len([]rune(f.ix.tickets[i].id)))
 	copy(out.prose[:], litProse(f.terms, i, len(out.prose)))
 	return out
 }
@@ -309,23 +286,9 @@ func (m model) updateBlSearch(k string) (model, tea.Cmd) {
 		return m.blTo(m.backlogCursor - 1), nil
 	case "down":
 		return m.blTo(m.backlogCursor + 1), nil
-	case "backspace":
-		if r := []rune(m.blQuery); len(r) > 0 {
-			m.blQuery = string(r[:len(r)-1])
-		}
-		return m.blSearchRun(), nil
-	case "ctrl+u":
-		m.blQuery = ""
-		return m.blSearchRun(), nil
-	case "ctrl+w":
-		q := strings.TrimRight(m.blQuery, " ")
-		m.blQuery = q[:strings.LastIndex(q, " ")+1]
-		return m.blSearchRun(), nil
 	}
-	// Text comes from the key message, never the key's name: a paste arrives
-	// as one multi-rune message.
-	if s, ok := typedTextFor(m.key, k); ok {
-		m.blQuery += s
+	if q, ok := editQuery(m.blQuery, k, m.key); ok {
+		m.blQuery = q
 		return m.blSearchRun(), nil
 	}
 	return m, nil

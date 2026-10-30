@@ -387,3 +387,36 @@ func textSnippet(text string, at int, lit map[int]bool) (string, map[int]bool) {
 	}
 	return prefix + string(r[start:end]), out
 }
+
+// litHead is what the query's words lit in record r's head: its id, a space and
+// its title, or the title alone when idLen is 0. A word that named the record
+// by an id lights the whole id; a head match lights the letters fzf matched,
+// in the id or the title as they fall.
+func litHead(terms []textTerm, r, idLen int) (id, title map[int]bool) {
+	light := func(set *map[int]bool, at int) {
+		if *set == nil {
+			*set = map[int]bool{}
+		}
+		(*set)[at] = true
+	}
+	for _, t := range terms {
+		if t.byID[r] {
+			for p := 0; p < idLen; p++ {
+				light(&id, p)
+			}
+		}
+		if k := t.heads[r]; k > 0 {
+			for _, p := range t.headMt[k-1].Pos {
+				switch {
+				case idLen == 0:
+					light(&title, p)
+				case p < idLen:
+					light(&id, p)
+				case p > idLen:
+					light(&title, p-idLen-1)
+				}
+			}
+		}
+	}
+	return id, title
+}
