@@ -5,11 +5,12 @@ package cockpit
 // table (pick with space, dispatch with enter); the right pane is the selected
 // ticket's detail plus the "dispatch as" preview and the picked list.
 //
-// What the table holds — grouped by product, narrowed by source and product —
-// is backlog_order.go. This file draws it and handles its keys. The table is
-// windowed on the cursor, because a backlog is routinely longer than the
-// screen and a table that stopped at the bottom edge read as the whole of it,
-// with j walking the cursor off into rows nobody could see.
+// What the table holds and in what order — grouped by product, narrowed by
+// source and product, sorted with `o` — is backlog_order.go. This file draws
+// it and handles its keys. The table is windowed on the cursor, because a
+// backlog is routinely longer than the screen and a table that stopped at the
+// bottom edge read as the whole of it, with j walking the cursor off into rows
+// nobody could see.
 
 import (
 	"slices"
@@ -164,6 +165,7 @@ func (m model) blPage() int { return maxi(m.blTableHeight(m.bodyHeight())-1, 1) 
 // backlogLeft builds the ticket table pane.
 func (m model) backlogLeft(rows []blRow, pickedCount, leftW, h int) string {
 	innerW := leftW - 2*pad
+	o := m.blOrderNow()
 
 	// "12 of 340" while anything narrows the table, so a filter left on is
 	// never read as the size of the backlog.
@@ -182,7 +184,7 @@ func (m model) backlogLeft(rows []blRow, pickedCount, leftW, h int) string {
 		flexc("TITLE", cFaint),
 		c("REPO", 17, cFaint),
 		cr("SOURCE", 9, cFaint),
-		cr("IDLE", 12, cFaint),
+		cr(blColumn(o), 12, cFaint),
 	)+"  ")
 	lines = append(lines, m.blTable(rows, innerW, m.blTableHeight(h))...)
 
@@ -200,6 +202,7 @@ func (m model) backlogLeft(rows []blRow, pickedCount, leftW, h int) string {
 // shows. The footer under the whole screen names what to do with a ticket.
 func (m model) blPaneHelp() string {
 	return strings.Join([]string{
+		m.keyHint("backlog.order", "order"), m.keyHint("backlog.reverse", "reverse"),
 		m.keyHint("backlog.product", "product"), m.keyHint("backlog.source", "source"),
 		prettyKey(m.keys.KeyFor("backlog.first")) + "/" + prettyKey(m.keys.KeyFor("backlog.last")) + " ends",
 	}, " · ")
@@ -219,6 +222,7 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 	if len(rows) == 0 {
 		return []string{"  " + fg(cFaint, truncate(m.blEmpty(), w)) + "  "}
 	}
+	o := m.blOrderNow()
 	sel := clampCursor(m.backlogCursor, len(rows))
 	counts := map[string]int{}
 	for _, r := range rows {
@@ -248,7 +252,7 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 		case ln.div:
 			out = append(out, blDivider(w, r.group+" · "+itoa(counts[r.group])))
 		default:
-			out = append(out, m.blTicketLine(r, ln.row == sel, w))
+			out = append(out, m.blTicketLine(r, ln.row == sel, o, w))
 		}
 	}
 
@@ -291,9 +295,9 @@ func blDivider(w int, label string) string {
 }
 
 // blTicketLine is one ticket's row: what is picked or under the cursor, its
-// priority, id and title, its repo and source, and how long it has sat
-// untouched.
-func (m model) blTicketLine(r blRow, cursor bool, w int) string {
+// priority, id and title, its repo and source, and the figure the table is
+// ordered by.
+func (m model) blTicketLine(r blRow, cursor bool, o blOrder, w int) string {
 	t := r.t
 	pick := m.picked[t.id]
 	bg := ""
@@ -332,7 +336,7 @@ func (m model) blTicketLine(r blRow, cursor bool, w int) string {
 	if cursor {
 		idColor = cWhite
 	}
-	state, stateColor := blIdle(t), cDim
+	state, stateColor := blCell(t, o), cDim
 	if t.taken != "" {
 		state, stateColor = "dispatched", cGreen
 	}
@@ -467,8 +471,9 @@ func backlogFeature(t ticket) string {
 // The list keys are resolved first and the backlog's own after them — the two
 // scopes are layered, so the keymap refuses a key bound in both. Every key
 // that moves the cursor keys it to the ticket it lands on, and every key that
-// narrows the table finds that ticket again (blSync), because enter dispatches
-// what the cursor is on.
+// re-sorts or narrows the table finds that ticket again (blSync): enter
+// dispatches what the cursor is on, and a cursor held by index alone would
+// be on a different ticket after every `o`.
 func (m model) updateBacklog(k string) (model, tea.Cmd) {
 	if k = m.keys.Resolve(keymap.List, k); k == "" {
 		return m, nil
@@ -491,6 +496,13 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 		return m.blTo(m.backlogCursor + m.blPage()), nil
 	case "pgup":
 		return m.blTo(m.backlogCursor - m.blPage()), nil
+	case "o":
+		m.blOrder = blNextOrder(m.blOrderNow())
+		return m.blSync(), nil
+	case "O":
+		m.blOrder = m.blOrderNow()
+		m.blOrder.rev = !m.blOrder.rev
+		return m.blSync(), nil
 	case "p":
 		// A product that has since left the backlog is not in the list, so
 		// the next press starts it again from the first.

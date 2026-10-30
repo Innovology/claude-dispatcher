@@ -53,9 +53,9 @@ const (
 	Search Scope = "search"
 	// List is the remaining lenses: backlog, usage, decisions, velocity.
 	List Scope = "list"
-	// Backlog is the backlog lens's own keys — its filters, and moving through
-	// a table that can be hundreds of tickets long. It is resolved after List,
-	// on the same screen, so the two may not share a key.
+	// Backlog is the backlog lens's own keys — its order, its filters, and
+	// moving through a table that can be hundreds of tickets long. It is
+	// resolved after List, on the same screen, so the two may not share a key.
 	Backlog Scope = "backlog"
 )
 
@@ -174,6 +174,8 @@ var Defaults = []Binding{
 	{Action: "list.dispatch", Scope: List, Key: "ctrl+d", Help: "dispatch every picked ticket", Section: "the other lenses"},
 
 	// ---- the backlog --------------------------------------------------------
+	{Action: "backlog.order", Scope: Backlog, Key: "o", Help: "order: priority → newest filed → stalest → label → repo", Section: "the backlog · lens 3"},
+	{Action: "backlog.reverse", Scope: Backlog, Key: "O", Help: "turn the order round", Section: "the backlog · lens 3"},
 	{Action: "backlog.product", Scope: Backlog, Key: "p", Help: "one product at a time · every product again", Section: "the backlog · lens 3"},
 	{Action: "backlog.source", Scope: Backlog, Key: "s", Help: "one source at a time: github → linear → azure boards", Section: "the backlog · lens 3"},
 	{Action: "backlog.first", Scope: Backlog, Key: "g", Help: "first ticket · last ticket", Section: "the backlog · lens 3"},

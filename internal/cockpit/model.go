@@ -121,9 +121,11 @@ type model struct {
 	picked        map[string]bool
 	srcFilter     string
 	// The backlog's view (backlog_order.go): the product it is narrowed to (""
-	// for every product), and blSelID, the ticket the cursor is on — held by id
-	// so a filter or a load leaves the cursor where it was.
+	// for every product), the order it is read in, and blSelID, the ticket the
+	// cursor is on — held by id so a re-sort, a filter or a load leaves the
+	// cursor where it was.
 	blProduct string
+	blOrder   blOrder
 	blSelID   string
 
 	shipFx     *shipFxState

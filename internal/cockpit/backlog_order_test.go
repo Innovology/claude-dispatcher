@@ -66,6 +66,83 @@ func TestBacklogGroupsByProductInTheProductsLensOrder(t *testing.T) {
 	}
 }
 
+// Every order sorts inside each product group, says which end comes first, and
+// turns round with O. A ticket missing the order's figure — no filed date, no
+// labels, no repo — is last whichever way round, so reversing an order never
+// fills the top of the table with what it can say nothing about.
+func TestBacklogOrders(t *testing.T) {
+	backlogFixture(t, nil, []ticket{
+		{id: "r#1", pri: "low", repo: "web", filed: daysAgo(30), touched: daysAgo(1), tags: []string{"ui"}},
+		{id: "r#2", pri: "urgent", repo: "api", filed: daysAgo(2), touched: daysAgo(20), tags: []string{"bug", "api"}},
+		{id: "r#3", pri: "high", filed: daysAgo(10), touched: daysAgo(5)},
+		{id: "r#4", pri: "med", repo: "cli"},
+	})
+	cases := []struct {
+		by         string
+		label      string
+		want, back []string
+	}{
+		{blByPriority, "most urgent first", []string{"r#2", "r#3", "r#4", "r#1"}, []string{"r#1", "r#4", "r#3", "r#2"}},
+		{blByFiled, "newest filed first", []string{"r#2", "r#3", "r#1", "r#4"}, []string{"r#1", "r#3", "r#2", "r#4"}},
+		{blByStale, "stalest first", []string{"r#2", "r#3", "r#1", "r#4"}, []string{"r#1", "r#3", "r#2", "r#4"}},
+		{blByLabel, "by label, a → z", []string{"r#2", "r#1", "r#3", "r#4"}, []string{"r#1", "r#2", "r#3", "r#4"}},
+		{blByRepo, "by repo, a → z", []string{"r#2", "r#4", "r#1", "r#3"}, []string{"r#1", "r#4", "r#2", "r#3"}},
+	}
+	m := backlogModel(40)
+	for _, c := range cases {
+		m.blOrder = blOrder{by: c.by}
+		if got := ids(m.blRows()); !slices.Equal(got, c.want) {
+			t.Errorf("%s: rows = %v, want %v", c.by, got, c.want)
+		}
+		if got := m.blViewLabel(); !strings.HasPrefix(got, c.label) {
+			t.Errorf("%s: header says %q, want it to lead with %q", c.by, got, c.label)
+		}
+		m.blOrder.rev = true
+		if got := ids(m.blRows()); !slices.Equal(got, c.back) {
+			t.Errorf("%s reversed: rows = %v, want %v", c.by, got, c.back)
+		}
+	}
+}
+
+// o steps through the orders and O turns the current one round; the column at
+// the end of the table follows, so the order on screen can be checked against
+// the figure it sorts by.
+func TestBacklogOrderKeysAndTheColumnThatShowsThem(t *testing.T) {
+	backlogFixture(t, nil, []ticket{
+		{id: "r#1", title: "one", pri: "med", filed: daysAgo(30), touched: daysAgo(3), tags: []string{"bug"}},
+	})
+	m := backlogModel(40)
+	var seen []string
+	for range blOrders {
+		seen = append(seen, m.blOrderNow().by)
+		m = press(m, "o")
+	}
+	if !slices.Equal(seen, blOrders) {
+		t.Errorf("o visited %v, want %v", seen, blOrders)
+	}
+	if got := m.blOrderNow(); got.by != blByPriority || got.rev {
+		t.Errorf("a full turn of o is back at priority, got %+v", got)
+	}
+	if m = press(m, "O"); !m.blOrderNow().rev {
+		t.Error("O did not turn the order round")
+	}
+	if m = press(m, "o"); m.blOrderNow().rev {
+		t.Error("a new order starts the right way round")
+	}
+
+	for _, c := range []struct{ by, head, cell string }{
+		{blByFiled, "FILED", "30d"},
+		{blByLabel, "LABELS", "bug"},
+		{blByStale, "IDLE", "3d"},
+	} {
+		m.blOrder = blOrder{by: c.by}
+		out := stripAnsi(m.View())
+		if !strings.Contains(out, c.head) || !strings.Contains(out, c.cell) {
+			t.Errorf("%s: the column should read %s / %s:\n%s", c.by, c.head, c.cell, out)
+		}
+	}
+}
+
 // The table is windowed on the cursor. It used to draw every ticket from the
 // top and stop at the pane's edge, so a backlog longer than the screen read as
 // the whole of it and j walked the cursor off into rows nobody could see.
@@ -123,8 +200,9 @@ func TestBacklogScrollsWithTheCursor(t *testing.T) {
 	}
 }
 
-// The cursor is held by the ticket, not the row. A filter and a load both move
-// tickets about, and enter dispatches whatever the cursor is on.
+// The cursor is held by the ticket, not the row. A re-sort, a filter and a load
+// all move tickets about, and enter dispatches whatever the cursor is on: held
+// by index, `o` would put it on a different ticket every time.
 func TestBacklogCursorStaysOnItsTicket(t *testing.T) {
 	backlogFixture(t, []string{"alpha", "beta"}, []ticket{
 		{id: "a#1", product: "alpha", pri: "urgent", filed: daysAgo(1)},
@@ -135,6 +213,12 @@ func TestBacklogCursorStaysOnItsTicket(t *testing.T) {
 	m = press(m, "j") // a#2
 	if got := m.ticketSelected().id; got != "a#2" {
 		t.Fatalf("selected %q", got)
+	}
+	if m = press(m, "o"); m.ticketSelected().id != "a#2" {
+		t.Errorf("re-sorting moved the cursor to %q", m.ticketSelected().id)
+	}
+	if m = press(m, "O"); m.ticketSelected().id != "a#2" {
+		t.Errorf("reversing moved the cursor to %q", m.ticketSelected().id)
 	}
 
 	// A load that brings the tickets back in another order.
@@ -186,7 +270,7 @@ func TestBacklogProductAndSourceFilters(t *testing.T) {
 		t.Errorf("alpha on github = %v", got)
 	}
 	out := stripAnsi(m.View())
-	if !strings.Contains(out, "backlog · 1 of 4 open") || !strings.Contains(out, "alpha · github") {
+	if !strings.Contains(out, "backlog · 1 of 4 open") || !strings.Contains(out, "most urgent first · alpha · github") {
 		t.Errorf("filtered header:\n%s", out)
 	}
 
@@ -195,5 +279,30 @@ func TestBacklogProductAndSourceFilters(t *testing.T) {
 	m = press(m, "s") // boards
 	if out := stripAnsi(m.View()); !strings.Contains(out, "nothing for this product and source · p and s widen it") {
 		t.Errorf("an emptied table should say why:\n%s", out)
+	}
+}
+
+// Missing a figure is not the same as having the least of it.
+func TestBlCompareKeepsMissingFiguresLast(t *testing.T) {
+	have := blRow{t: ticket{filed: daysAgo(3), tags: []string{"a"}, repo: "x"}}
+	none := blRow{t: ticket{}}
+	for _, by := range []string{blByFiled, blByStale, blByLabel, blByRepo} {
+		if by == blByStale {
+			have.t.touched = daysAgo(3)
+		}
+		for _, rev := range []bool{false, true} {
+			if c := blCompare(by, none, have, rev); c <= 0 {
+				t.Errorf("%s rev=%v: a ticket without the figure sorted first", by, rev)
+			}
+			if c := blCompare(by, none, none, rev); c != 0 {
+				t.Errorf("%s rev=%v: two without it should tie, got %d", by, rev, c)
+			}
+		}
+	}
+	if blPriRank("urgent") >= blPriRank("high") || blPriRank("low") >= blPriRank("bogus") {
+		t.Error("priority bands out of order")
+	}
+	if blTagKey([]string{"UI", "bug"}) != blTagKey([]string{"bug", "ui"}) {
+		t.Error("labels sort the same whatever order the source listed them in")
 	}
 }
