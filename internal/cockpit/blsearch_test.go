@@ -371,3 +371,39 @@ func TestEverySearchStartsBestFirst(t *testing.T) {
 		t.Errorf("after the query was emptied: %q", m.blOrderNow().by)
 	}
 }
+
+// When the window's cut takes a ticket whose quote is the next line, the quote
+// goes too. It was left under the "↑ more" line, quoting a ticket that was not
+// on screen.
+func TestACutTakesATicketsQuoteWithIt(t *testing.T) {
+	var ts []ticket
+	for i := 0; i < 8; i++ {
+		ts = append(ts, ticket{id: "r#" + itoa(i), title: "ticket " + itoa(i), pri: "med",
+			filed: daysAgo(40 - i), body: "a zebra crossing number " + itoa(i)})
+	}
+	backlogFixture(t, nil, ts)
+	m := press(blType(backlogModel(40), "zebra"), "enter")
+	rows := m.blRows()
+	// Every hit is quoted: the divider, then a ticket and its quote each.
+	// Five lines centred on r#2 (line 5) start at r#1, whose quote follows.
+	m = m.blTo(2)
+	out := m.blTable(rows, 80, 5)
+	got := make([]string, len(out))
+	for i, l := range out {
+		got[i] = strings.TrimSpace(stripAnsi(l))
+	}
+	if !strings.HasPrefix(got[0], "── unassigned") || strings.Contains(got[0], "↑") {
+		t.Errorf("line 0 = %q, want the product's divider", got[0])
+	}
+	if got[1] != "↑ 2 more tickets above" {
+		t.Errorf("line 1 = %q, want the count where r#1's quote was", got[1])
+	}
+	if !strings.Contains(got[2], "r#2") || !strings.Contains(got[3], "zebra crossing number 2") {
+		t.Errorf("the cursor's ticket and its quote follow: %q", got)
+	}
+	for _, l := range got {
+		if strings.Contains(l, "number 1") {
+			t.Errorf("r#1's quote is still drawn: %q", got)
+		}
+	}
+}
