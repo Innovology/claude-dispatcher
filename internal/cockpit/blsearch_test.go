@@ -225,3 +225,86 @@ func TestBacklogSearchSurvivesALoad(t *testing.T) {
 		t.Errorf("the cursor is on a ticket the table holds, got %q", m.ticketSelected().id)
 	}
 }
+
+// A hit is lit where it matched: the whole id when a number named it, the
+// letters of the title fzf matched, and nothing quoted under a ticket whose
+// every word matched its id or title.
+func TestBacklogSearchLightsWhatMatched(t *testing.T) {
+	blSearchFixture(t)
+	at := func(id string) int {
+		return slices.IndexFunc(backlogTickets, func(tk ticket) bool { return tk.id == id })
+	}
+
+	m := blType(backlogModel(40), "#12")
+	lit := m.blFound.lit(at("alpha-api#12"))
+	if len(lit.id) != len("alpha-api#12") || len(lit.title) != 0 {
+		t.Errorf("#12 lights the whole id and no title: %+v", lit)
+	}
+	if _, _, ok := m.blFound.snippet(at("alpha-api#12")); ok {
+		t.Error("a hit named by its number has nothing to quote")
+	}
+
+	m = blType(backlogModel(40), "chkout")
+	lit = m.blFound.lit(at("alpha-api#12"))
+	// fzf lights the letters it matched: the C and h of "Checkout", never its e.
+	if !lit.title[0] || !lit.title[1] || lit.title[2] || len(lit.id) != 0 {
+		t.Errorf("chkout lit %v in the title, %v in the id", lit.title, lit.id)
+	}
+	if _, _, ok := m.blFound.snippet(at("alpha-api#12")); ok {
+		t.Error("a title hit is not quoted")
+	}
+	var none *blFound
+	if l := none.lit(0); l.id != nil || none.quotes(0) {
+		t.Error("no search lights nothing")
+	}
+}
+
+// The query line's own keys: the arrows move through the hits while typing,
+// ctrl+w takes a word back, a key that types nothing is ignored, and enter on
+// an empty query is the same as esc.
+func TestBacklogSearchEditingKeys(t *testing.T) {
+	blSearchFixture(t)
+	m := blType(backlogModel(40), "cart")
+	hits := ids(m.blRows())
+	if m = press(m, "down"); m.ticketSelected().id != hits[1] {
+		t.Errorf("down while typing: %q", m.ticketSelected().id)
+	}
+	if m = press(m, "up"); m.ticketSelected().id != hits[0] {
+		t.Errorf("up while typing: %q", m.ticketSelected().id)
+	}
+	m = press(m, "space")
+	for _, r := range "hangs" {
+		m = press(m, string(r))
+	}
+	if m = press(m, "ctrl+w"); m.blQuery != "cart " {
+		t.Errorf("ctrl+w: %q", m.blQuery)
+	}
+	if m = press(m, "tab"); m.blQuery != "cart " || !m.blTyping {
+		t.Errorf("a key that types nothing changed the query: %q", m.blQuery)
+	}
+	if out := m.footerView(); !strings.Contains(stripAnsi(out), "type to search") {
+		t.Errorf("the footer while typing: %q", stripAnsi(out))
+	}
+	m = press(m, "enter")
+	if out := stripAnsi(m.footerView()); !strings.Contains(out, "esc clears the search") {
+		t.Errorf("the footer with a search kept: %q", out)
+	}
+	m = press(m, "esc")
+	if m = press(m, "esc"); m.blSearchShown() || m.lens != "backlog" {
+		t.Error("esc with no search up does nothing")
+	}
+	m = press(m, "/")
+	if m = press(m, "enter"); m.blSearchShown() {
+		t.Error("enter on an empty query closes it")
+	}
+
+	// An empty backlog has nothing to search.
+	backlogFixture(t, nil, nil)
+	m = blType(backlogModel(40), "cart")
+	if m.blFound != nil || len(m.blRows()) != 0 {
+		t.Error("an empty backlog finds nothing")
+	}
+	if out := stripAnsi(m.View()); !strings.Contains(out, "nothing in the backlog") {
+		t.Errorf("an empty backlog says so, search or not:\n%s", out)
+	}
+}

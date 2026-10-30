@@ -272,6 +272,10 @@ func TestTheQueryTakesEveryLetter(t *testing.T) {
 	if m.decQuery != "q1?:,Uj" {
 		t.Errorf("query = %q", m.decQuery)
 	}
+	// A key that types nothing is still the query's, and changes nothing.
+	if m = press(m, "tab"); m.decQuery != "q1?:,Uj" || !m.decTyping {
+		t.Errorf("tab while typing: query %q, typing %v", m.decQuery, m.decTyping)
+	}
 	// A paste arrives as one message of many runes.
 	m.decQuery = ""
 	paste := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ghost")}

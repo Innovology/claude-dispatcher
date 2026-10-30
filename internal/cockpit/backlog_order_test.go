@@ -306,3 +306,49 @@ func TestBlCompareKeepsMissingFiguresLast(t *testing.T) {
 		t.Error("labels sort the same whatever order the source listed them in")
 	}
 }
+
+// Where the window's cut falls right above a product's divider, the line that
+// replaces it only counts what is above: the divider below it names the
+// product. And a table given no height draws nothing.
+func TestBacklogCutAboveADivider(t *testing.T) {
+	var ts []ticket
+	for i := 1; i <= 10; i++ {
+		ts = append(ts, ticket{id: "a#" + itoa(i), product: "alpha", pri: "med", filed: daysAgo(100 - i)})
+	}
+	for i := 1; i <= 10; i++ {
+		ts = append(ts, ticket{id: "b#" + itoa(i), product: "beta", pri: "med", filed: daysAgo(100 - i)})
+	}
+	backlogFixture(t, []string{"alpha", "beta"}, ts)
+	m := backlogModel(40)
+	rows := m.blRows()
+	// Lines: alpha's divider, its 10 tickets, beta's divider, beta's tickets.
+	// Seven lines centred on b#2 (line 13) start at line 10, so the line after
+	// the cut is beta's divider.
+	m.backlogCursor = 11
+	out := m.blTable(rows, 80, 7)
+	if got := stripAnsi(out[0]); strings.TrimSpace(got) != "↑ 10 more tickets above" {
+		t.Errorf("top line = %q", got)
+	}
+	if got := stripAnsi(out[1]); !strings.Contains(got, "── beta · 10") {
+		t.Errorf("the divider follows the cut: %q", got)
+	}
+	if got := m.blTable(rows, 80, 0); got != nil {
+		t.Errorf("no height, no lines: %q", got)
+	}
+}
+
+// A backlog key rebound away is swallowed, as every rebound key is.
+func TestBacklogKeysAreRebindable(t *testing.T) {
+	m := keymapFixture(t, map[string]string{"backlog.order": "S"})
+	backlogFixture(t, nil, []ticket{{id: "r#1", pri: "med"}})
+	m.lens = "backlog"
+	if m = press(m, "o"); m.blOrderNow().by != blByPriority {
+		t.Errorf("o still re-sorts after backlog.order left it: %q", m.blOrderNow().by)
+	}
+	if m = press(m, "S"); m.blOrderNow().by != blByFiled {
+		t.Errorf("the rebound key: %q", m.blOrderNow().by)
+	}
+	if got := blOrderLabel(blOrder{by: blByFiled, rev: true}); got != "oldest filed first" {
+		t.Errorf("reversed label = %q", got)
+	}
+}
