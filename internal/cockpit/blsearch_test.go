@@ -449,3 +449,19 @@ func TestAnEmptySearchSaysWhetherTheFilterHidIt(t *testing.T) {
 		t.Errorf("a query matching nothing anywhere says so:\n%s", out)
 	}
 }
+
+// The palette is a way out of the lens too, and leaves the search as a digit
+// does.
+func TestThePaletteLeavesTheSearchAsADigitDoes(t *testing.T) {
+	blSearchFixture(t)
+	m := press(blType(backlogModel(40), "cart"), "enter")
+	m.paletteOpen, m.paletteText = true, "usage"
+	m = press(m, "enter")
+	if m.lens != "usage" {
+		t.Fatalf("the palette went to %q", m.lens)
+	}
+	m.paletteOpen, m.paletteText = true, "backlog"
+	if m = press(m, "enter"); m.lens != "backlog" || m.blSearchShown() || len(m.blRows()) != len(backlogTickets) {
+		t.Errorf("back on the %s the old query still narrows it: %q", m.lens, m.blQuery)
+	}
+}

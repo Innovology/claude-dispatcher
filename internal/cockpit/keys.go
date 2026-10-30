@@ -186,6 +186,12 @@ func (m model) runCommand() (model, tea.Cmd) {
 	}
 	m.paletteOpen = false
 	m.paletteText = ""
+	// Leaving a lens leaves its search, as a digit does: a query kept here came
+	// back on the next visit, still narrowing the table, by one route and not
+	// the other.
+	if lens != m.lens {
+		m = m.decSearchClear().blSearchClear()
+	}
 	m.lens = lens
 	m.notice = ":" + c.name
 	return m, nil
