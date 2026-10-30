@@ -650,6 +650,42 @@
   means retyping one exactly, in another file, with a silent read under a
   product that groups nowhere as the failure. The full record is
   `docs/adr/0006-a-linear-token-is-the-scope.md`.
+- **A backlog is read by product and found by its number.** Reported as "the
+  backlog … doesn't scroll through the issues as the list outgrows the height
+  of the page. there's no filtering". The table was drawn from the top until
+  the pane ran out, so a long backlog read as the whole of it and `j` walked
+  the cursor off into rows nobody could see, with `enter` dispatching one of
+  them. Now it is **windowed on the cursor**. The top line of a cut table
+  counts what is above and names the product on screen once that product's
+  divider has scrolled away; the bottom line counts what is below. `g`/`G` and
+  `pgdown`/`pgup` move through it. Tickets are **grouped by product in the
+  products lens's order**, so lens 2 and lens 3 agree, with `unassigned` last.
+  `p` narrows to one product, and the header reads "12 of 340 open" while
+  anything narrows the table. **`o` orders each group** (priority, the default;
+  newest filed; stalest; label; repo) and `O` turns the order round. The header
+  names which end comes first, and the last column shows the figure being
+  sorted by (FILED, LABELS, otherwise IDLE). Ties go to the more urgent ticket,
+  then the one waiting longest. **A ticket missing an order's figure is last
+  whichever way round**, so reversing never fills the top with what the order
+  cannot place. The sources carry what that needs: `createdAt` in the same one
+  GitHub search, Linear's `createdAt` and labels, and Azure's created and
+  changed dates. A ticket's `tags` are kept apart from the labels line, which
+  for Linear leads with the state. **`/` filters**, using the decisions matcher
+  lifted into `textsearch.go` rather than copied. `#123`/`123` name GitHub issue
+  123, and `eng-124`/`124` name ENG-124. An exact number outranks everything,
+  and a number a ticket's begins with ranks next, because a query is typed a
+  digit at a time. **A word starting with `#` is a number and nothing else**
+  (`textIDs.only`), since the reader typed the sign that means "issue number".
+  Otherwise a word matches the id and title as fzf matches a line, and the body
+  and labels within one word. A hit found in its body quotes the matching words
+  on the line under it. Hits stay grouped, best first, and **the groups go by
+  their best hit**, so `#123` cannot put the 1230s of the first product above
+  the ticket it names. The search has an order of its own, so esc hands back the
+  browsing order. **The cursor is held by the ticket's id** through every
+  re-sort, filter, search and load, as triage's is. The backlog's keys are a
+  keymap scope **layered on `list`**, so the keymap refuses a key bound in both,
+  as it does for a global key. Full record:
+  `docs/adr/0027-a-backlog-is-read-by-product-and-found-by-number.md`.
 - **A key sheet that can lie is worse than none, and `/` is fzf itself.**
   Every key was a literal in a switch with `?` hand-written beside it — merely
   duplicated while keys are fixed, and the central problem the moment they are
@@ -1231,7 +1267,10 @@
   `prodDay` normalises to **local** before truncating: forge timestamps are UTC
   and the clock's are local, and a day compared across the two is never equal.
   `decsearch.go` is `/` on the decisions lens: every repo's decisions, cut up
-  for matching once per load.
+  for matching once per load. `textsearch.go` is the matcher it and the
+  backlog share (id, head, prose within a word); `blsearch.go` is `/` on the
+  backlog, and `backlog_order.go` is what the backlog's table holds — its
+  product groups, its order and its filters.
 - `internal/effort` — the hand-coding equivalent: how long a senior developer
   would have taken to write a diff by hand. The ONLY figure in the product
   that is a model rather than a measurement, so every screen showing it says
