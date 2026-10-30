@@ -284,7 +284,7 @@ func TestBacklogProductAndSourceFilters(t *testing.T) {
 
 // Missing a figure is not the same as having the least of it.
 func TestBlCompareKeepsMissingFiguresLast(t *testing.T) {
-	have := blRow{t: ticket{filed: daysAgo(3), tags: []string{"a"}, repo: "x"}}
+	have := blRow{t: ticket{filed: daysAgo(3), tags: []string{"a"}, repo: "x"}, tagKey: blTagKey([]string{"a"})}
 	none := blRow{t: ticket{}}
 	for _, by := range []string{blByFiled, blByStale, blByLabel, blByRepo} {
 		if by == blByStale {

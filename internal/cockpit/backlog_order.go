@@ -149,6 +149,9 @@ type blRow struct {
 	// hit is what the query found on it: its score, and how many of the
 	// query's words matched best in its id or title. Zero with no query.
 	hit textHit
+	// tagKey is its labels as the label order compares them (blTagKey), built
+	// once a row rather than twice a comparison.
+	tagKey string
 }
 
 // blRows is the table: the tickets the source, product and query leave, group
@@ -164,7 +167,7 @@ func (m model) blRows() []blRow {
 		if m.blProduct != "" && g != m.blProduct {
 			continue
 		}
-		r := blRow{t: t, at: i, group: g}
+		r := blRow{t: t, at: i, group: g, tagKey: blTagKey(t.tags)}
 		if found != nil {
 			h, hit := found.hits[i]
 			if !hit {
@@ -243,8 +246,8 @@ func blCompare(by string, a, b blRow, rev bool) int {
 		am, bm = a.t.touched.IsZero(), b.t.touched.IsZero()
 		c = a.t.touched.Compare(b.t.touched) // longest untouched first
 	case blByLabel:
-		am, bm = len(a.t.tags) == 0, len(b.t.tags) == 0
-		c = strings.Compare(blTagKey(a.t.tags), blTagKey(b.t.tags))
+		am, bm = a.tagKey == "", b.tagKey == ""
+		c = strings.Compare(a.tagKey, b.tagKey)
 	case blByRepo:
 		am, bm = a.t.repo == "", b.t.repo == ""
 		c = strings.Compare(strings.ToLower(a.t.repo), strings.ToLower(b.t.repo))
@@ -308,24 +311,18 @@ func (m model) blFoundNow() *blFound {
 	return currentBlIndex().search(m.blQuery)
 }
 
-// backlogList is the tickets on the table, in the order they are drawn.
-func (m model) backlogList() []ticket {
-	rows := m.blRows()
-	out := make([]ticket, len(rows))
-	for i, r := range rows {
-		out[i] = r.t
-	}
-	return out
-}
-
 // ticketSelected returns the ticket under the (clamped) backlog cursor, or a
 // placeholder when the table is empty.
-func (m model) ticketSelected() ticket {
-	l := m.backlogList()
-	if len(l) == 0 {
-		return ticket{title: "no open tickets", body: m.blEmpty(), pri: "med"}
+func (m model) ticketSelected() ticket { return m.blTicketIn(m.blRows()) }
+
+// blTicketIn is ticketSelected for rows already in hand, so a key or a frame
+// that has the table does not filter, group and sort it again to read one
+// ticket off it.
+func (m model) blTicketIn(rows []blRow) ticket {
+	if r, ok := blSelectedRow(rows, m.backlogCursor); ok {
+		return r.t
 	}
-	return l[clampCursor(m.backlogCursor, len(l))]
+	return ticket{title: "no open tickets", body: m.blEmpty(), pri: "med"}
 }
 
 // blEmpty says why the table is empty, which is a different sentence for each
@@ -344,8 +341,10 @@ func (m model) blEmpty() string {
 
 // blTo moves the cursor to row i and keys it to that ticket, so the next
 // re-sort, filter or load finds it again.
-func (m model) blTo(i int) model {
-	rows := m.blRows()
+func (m model) blTo(i int) model { return m.blToIn(m.blRows(), i) }
+
+// blToIn is blTo for rows already in hand.
+func (m model) blToIn(rows []blRow, i int) model {
 	if len(rows) == 0 {
 		m.backlogCursor, m.blSelID = 0, ""
 		return m
@@ -370,7 +369,7 @@ func (m model) blSync() model {
 			}
 		}
 	}
-	return m.blTo(m.backlogCursor)
+	return m.blToIn(rows, m.backlogCursor)
 }
 
 // blProducts is what `p` steps through: every product group the backlog has

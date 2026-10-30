@@ -435,10 +435,10 @@ func blDates(t ticket) string {
 
 // backlogRight builds the selected-ticket detail pane.
 func (m model) backlogRight(rows []blRow, pickedCount, rightW, h int) string {
-	t := m.ticketSelected()
+	t := m.blTicketIn(rows)
 	var lit blLit
 	if r, ok := blSelectedRow(rows, m.backlogCursor); ok {
-		t, lit = r.t, m.blFoundNow().lit(r.at)
+		lit = m.blFoundNow().lit(r.at)
 	}
 	innerW := rightW - 2*pad
 
@@ -537,20 +537,20 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 	rows := m.blRows()
-	t := m.ticketSelected()
+	t := m.blTicketIn(rows)
 	switch k {
 	case "j", "down":
-		return m.blTo(m.backlogCursor + 1), nil
+		return m.blToIn(rows, m.backlogCursor+1), nil
 	case "k", "up":
-		return m.blTo(m.backlogCursor - 1), nil
+		return m.blToIn(rows, m.backlogCursor-1), nil
 	case "g", "home":
-		return m.blTo(0), nil
+		return m.blToIn(rows, 0), nil
 	case "G", "end":
-		return m.blTo(len(rows) - 1), nil
+		return m.blToIn(rows, len(rows)-1), nil
 	case "pgdown":
-		return m.blTo(m.backlogCursor + m.blPage()), nil
+		return m.blToIn(rows, m.backlogCursor+m.blPage()), nil
 	case "pgup":
-		return m.blTo(m.backlogCursor - m.blPage()), nil
+		return m.blToIn(rows, m.backlogCursor-m.blPage()), nil
 	case "/":
 		// What was typed before is kept, so `/` on a search already up edits it.
 		m.blTyping = true
