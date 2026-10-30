@@ -541,7 +541,7 @@ func TestAPageSkipsNoTicket(t *testing.T) {
 	rows := m.blRows()
 	drawn := func(m model) map[string]bool {
 		seen := map[string]bool{}
-		for _, l := range m.blTable(rows, 100, m.blTableHeight(m.bodyHeight())) {
+		for _, l := range m.blTable(rows, 100, m.blTableHeight(rows, m.bodyHeight())) {
 			for _, r := range rows {
 				if strings.Contains(stripAnsi(l), r.t.id+" ") {
 					seen[r.t.id] = true

@@ -186,7 +186,7 @@ func TestBacklogScrollsWithTheCursor(t *testing.T) {
 	m = press(m, "pgdown")
 	// One product, no quotes: a ticket a line under its divider, so a page of
 	// lines, less three, lands on the ticket a table height less three down.
-	if want := m.blTableHeight(m.bodyHeight()) - 3; m.backlogCursor != want {
+	if want := m.blTableHeight(m.blRows(), m.bodyHeight()) - 3; m.backlogCursor != want {
 		t.Errorf("pgdown moved to %d, want %d", m.backlogCursor, want)
 	}
 	if out := stripAnsi(m.View()); !strings.Contains(out, "▸ · "+m.ticketSelected().id) {
@@ -458,5 +458,23 @@ func TestEveryShippedKeyLabelFitsTheSheet(t *testing.T) {
 				t.Errorf("%s: %q is %d wide, the key column %d", s.section, r.k, dispWidth(r.k), helpKeyCol)
 			}
 		}
+	}
+}
+
+// The view — the order, and what the table is narrowed to — is always on
+// screen. Beside the title it was dropped whenever the two did not fit, which
+// from 110 columns to about 140 was always: nothing said which order, product
+// or source was on.
+func TestTheViewIsAlwaysSaid(t *testing.T) {
+	backlogFixture(t, []string{"alpha"}, []ticket{{id: "a#1", product: "alpha", pri: "med"}})
+	for _, w := range []int{80, 110, 130, 190} {
+		m := backlogModel(30)
+		m.width = w
+		m = press(m, "p")
+		out := stripAnsi(m.View())
+		if !strings.Contains(out, "most urgent first · alpha · every source") {
+			t.Errorf("at %d columns the view is not on screen:\n%s", w, out)
+		}
+		renderClean(t, m, "backlog view @"+itoa(w))
 	}
 }

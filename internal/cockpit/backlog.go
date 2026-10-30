@@ -129,14 +129,12 @@ func (m model) viewBacklog(w, h int) string {
 	pickedCount := len(m.picked)
 	showDetail := m.fit().showDetail
 
-	leftW := w
-	rightW := 0
+	leftW, rightW := m.blLeftW(w), 0
 	if showDetail {
-		leftW = w * 58 / 100
 		rightW = w - leftW - 1 // 1 col for the vertical rule
 	}
 
-	left := m.backlogLeft(rows, pickedCount, leftW, h)
+	left := m.backlogLeft(rows, leftW, h)
 	if !showDetail {
 		return clampLines(left, h)
 	}
@@ -148,17 +146,20 @@ func (m model) viewBacklog(w, h int) string {
 // blFooterLines is how many lines the table pane's footer takes.
 const blFooterLines = 2
 
-// blHeadLines is how many lines sit above the table: the title, the query line
-// while a search is up, and the column heads.
-func (m model) blHeadLines() int {
-	if m.blSearchShown() {
-		return 3
+// blLeftW is the table pane's width on a screen w wide: all of it, or the
+// share the detail pane leaves.
+func (m model) blLeftW(w int) int {
+	if m.fit().showDetail {
+		return w * 58 / 100
 	}
-	return 2
+	return w
 }
 
-// blTableHeight is how many lines the table gets in a pane h tall.
-func (m model) blTableHeight(h int) int { return maxi(h-m.blHeadLines()-blFooterLines, 0) }
+// blTableHeight is how many lines the table gets in a pane h tall: what the
+// head (blHead) and the footer leave.
+func (m model) blTableHeight(rows []blRow, h int) int {
+	return maxi(h-len(m.blHead(rows, m.blLeftW(m.width)))-blFooterLines, 0)
+}
 
 // blLine is one line of the table: a ticket, the divider above one, or the
 // quote under one. row is the ticket it belongs to.
@@ -199,7 +200,7 @@ func (m model) blPaged(rows []blRow, dir int) int {
 	}
 	_, first := blLayout(rows, m.blFoundNow())
 	cur := clampCursor(m.backlogCursor, len(rows))
-	target := first[cur] + dir*maxi(m.blTableHeight(m.bodyHeight())-3, 1)
+	target := first[cur] + dir*maxi(m.blTableHeight(rows, m.bodyHeight())-3, 1)
 	i := cur
 	for i+dir >= 0 && i+dir < len(rows) && (first[i+dir]-target)*dir <= 0 {
 		i += dir
@@ -210,34 +211,44 @@ func (m model) blPaged(rows []blRow, dir int) int {
 	return i
 }
 
-// backlogLeft builds the ticket table pane.
-func (m model) backlogLeft(rows []blRow, pickedCount, leftW, h int) string {
-	innerW := leftW - 2*pad
-	o := m.blOrderNow()
-
+// blHead is the lines above the table: the title, the query line while a
+// search is up, and the column heads.
+//
+// The title carries the view — the order, and what the table is narrowed to —
+// on its right, and where the two do not fit on one line the view takes a line
+// of its own. Beside the title it was dropped, and from 110 columns to about
+// 140 nothing on screen said which order, product or source was on.
+func (m model) blHead(rows []blRow, leftW int) []string {
 	// "12 of 340" while anything narrows the table, so a filter left on is
 	// never read as the size of the backlog.
 	count := itoa(len(rows)) + " open"
 	if len(rows) != len(backlogTickets) {
 		count = itoa(len(rows)) + " of " + itoa(len(backlogTickets)) + " open"
 	}
-	lines := []string{backlogSpread(
-		fg(cDim, "backlog · "+count+" · "+itoa(pickedCount)+" picked"),
-		fg(cFaint, m.blViewLabel()),
-		leftW,
-	)}
+	title := fg(cDim, "backlog · "+count+" · "+itoa(len(m.picked))+" picked")
+	view := fg(cFaint, m.blViewLabel())
+	lines := []string{backlogSpread(title, view, leftW)}
+	if dispWidth(title)+1+dispWidth(view) > leftW-2*pad {
+		lines = []string{backlogSpread(title, "", leftW), backlogSpread(view, "", leftW)}
+	}
 	if m.blSearchShown() {
 		lines = append(lines, m.blQueryLine(rows, leftW))
 	}
-	lines = append(lines, "  "+row(innerW, "",
+	return append(lines, "  "+row(leftW-2*pad, "",
 		c("", 4, cFaint),
 		c("TICKET", 17, cFaint),
 		flexc("TITLE", cFaint),
 		c("REPO", 17, cFaint),
 		cr("SOURCE", 9, cFaint),
-		cr(blColumn(o), 12, cFaint),
+		cr(blColumn(m.blOrderNow()), 12, cFaint),
 	)+"  ")
-	lines = append(lines, m.blTable(rows, innerW, m.blTableHeight(h))...)
+}
+
+// backlogLeft builds the ticket table pane.
+func (m model) backlogLeft(rows []blRow, leftW, h int) string {
+	innerW := leftW - 2*pad
+	lines := m.blHead(rows, leftW)
+	lines = append(lines, m.blTable(rows, innerW, maxi(h-len(lines)-blFooterLines, 0))...)
 
 	footer := []string{
 		"  " + fg(cRule, strings.Repeat("─", innerW)) + "  ",
