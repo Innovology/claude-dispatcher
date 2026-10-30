@@ -496,3 +496,33 @@ func TestAConfirmThatLandsMidQueryWaits(t *testing.T) {
 		t.Errorf("decisions: confirm %v, query %q", m.confirm, m.decQuery)
 	}
 }
+
+// A hit's quote explains it: it comes from a word of the query the title did
+// not already show. The best-scoring prose match across every word used to win,
+// so a body that repeats the title's word was quoted for it, and the word only
+// the body holds — the reason the ticket is a hit — was not.
+func TestTheQuoteIsTheWordTheTitleDoesNotShow(t *testing.T) {
+	backlogFixture(t, nil, []ticket{{
+		id: "r#1", title: "Seat limits", pri: "med",
+		body: "Seats over the limit are kept for a grace period. Proration happens at the next renewal.",
+	}})
+	// "seat" scores 114 in "Seats" and "prtn" 85 in "Proration": the body's best
+	// match is the title's word.
+	m := blType(backlogModel(40), "seat prtn")
+	if len(m.blRows()) != 1 {
+		t.Fatalf("rows = %v", ids(m.blRows()))
+	}
+	text, lit, ok := m.blFound.snippet(0)
+	if !ok {
+		t.Fatal("a word only the body holds should be quoted")
+	}
+	var litText []rune
+	for i, r := range []rune(text) {
+		if lit[i] {
+			litText = append(litText, r)
+		}
+	}
+	if !strings.Contains(text, "Proration") || strings.ContainsAny(string(litText), "S") {
+		t.Errorf("quoted %q with %q lit, want the proration it was found by", text, string(litText))
+	}
+}

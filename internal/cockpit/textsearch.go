@@ -199,13 +199,17 @@ type textHit struct {
 	rec    int // into the index's records
 	score  int
 	inHead int // how many of the query's words matched best in the id or head
-	// snip is the prose word that matched best, for the line under the head:
-	// the field it is in and the rune offset of its first matched rune. ok is
-	// false when nothing in the prose matched.
-	snip struct {
-		field, at, score int
-		ok               bool
-	}
+	// snip is the prose word that matched best, for the line under the head,
+	// among the query's words that matched best in the prose: a word the head
+	// already shows explains nothing quoted. ok is false when no word did.
+	snip textSnip
+}
+
+// textSnip is a place in a record's prose a query word matched: the field it
+// is in, the rune offset of its first matched rune, and how well it matched.
+type textSnip struct {
+	field, at, score int
+	ok               bool
 }
 
 // textIDBonus is the score of a record a query names by its id: above any
@@ -247,6 +251,7 @@ func (ix *textIndex) search(query string, ids textIDs) (terms []textTerm, hits [
 		best := make([]int, n)
 		found := make([]bool, n)
 		inHead := make([]bool, n)
+		snip := make([]textSnip, n) // this word's best place in each record's prose
 		take := func(r, score int, head bool) {
 			if !found[r] || score > best[r] {
 				best[r], inHead[r] = score, head
@@ -268,7 +273,7 @@ func (ix *textIndex) search(query string, ids textIDs) (terms []textTerm, hits [
 		}
 		t.words = make([]int32, len(t.v.words))
 		if ids.only == nil || !ids.only(word) {
-			ix.matchText(word, &t, all, take)
+			ix.matchText(word, &t, snip, take)
 		}
 
 		for r := 0; r < n; r++ {
@@ -279,6 +284,8 @@ func (ix *textIndex) search(query string, ids textIDs) (terms []textTerm, hits [
 			all[r].score += best[r]
 			if inHead[r] {
 				all[r].inHead++
+			} else if s := snip[r]; s.ok && (!all[r].snip.ok || s.score > all[r].snip.score) {
+				all[r].snip = s
 			}
 		}
 		terms = append(terms, t)
@@ -301,9 +308,10 @@ func (ix *textIndex) search(query string, ids textIDs) (terms []textTerm, hits [
 
 // matchText matches one query word in every record's head, as fzf matches a
 // line, and inside one word of every record's prose, filling in what t matched
-// and handing each record's best to take. A prose match is also where its
-// record's snippet comes from, if it beats the one it has.
-func (ix *textIndex) matchText(word string, t *textTerm, all []textHit, take func(r, score int, head bool)) {
+// and handing each record's best to take. snip gets the word's best place in
+// each record's prose, which is where a quote comes from if the word matched
+// best there.
+func (ix *textIndex) matchText(word string, t *textTerm, snip []textSnip, take func(r, score int, head bool)) {
 	t.headMt = fuzzy.Rank(word, ix.heads)
 	for i, mt := range t.headMt {
 		t.heads[mt.Index] = int32(i + 1)
@@ -319,14 +327,14 @@ func (ix *textIndex) matchText(word string, t *textTerm, all []textHit, take fun
 	if len(t.wordMt) == 0 {
 		return
 	}
-	for r := range all {
+	for r := range snip {
 		for _, o := range t.v.of(r) {
 			k := t.words[o.word]
 			if k == 0 {
 				continue
 			}
 			mt := t.wordMt[k-1]
-			if s := &all[r].snip; !s.ok || mt.Score > s.score {
+			if s := &snip[r]; !s.ok || mt.Score > s.score {
 				s.field, s.score, s.ok = int(o.field), mt.Score, true
 				s.at = int(o.at)
 				if len(mt.Pos) > 0 {
