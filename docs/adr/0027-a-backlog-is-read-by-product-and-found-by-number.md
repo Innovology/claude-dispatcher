@@ -94,7 +94,9 @@ groups go by their best hit.** Otherwise `#123` would put the 1230s of the first
 product above the one ticket it names, in the third, and the cursor, which a
 search puts on the top row, would sit on a ticket that is not the answer. `o`
 re-sorts the hits under an order of the search's own, so esc hands back the
-order you were browsing in. While the query is typed it has the keyboard, as on
+order you were browsing in. That order ends with the search, and so does a query
+typed back to nothing: every search starts best first, or a re-sort left over
+from the last one would put the 1230s back on top. While the query is typed it has the keyboard, as on
 decisions. A load re-runs the query, because a hit names a ticket by its place in
 the backlog.
 
@@ -105,9 +107,14 @@ then on.
 
 **The backlog's keys are a keymap scope of their own, layered on the list
 scope.** `backlog.order`, `.reverse`, `.product`, `.source`, `.first`, `.last`,
-`.page.down` and `.page.up` resolve after the `list.*` keys on the same screen.
-The keymap therefore refuses a key bound in both scopes and names both actions,
-the same rule that already stops a lens key from reusing a global one. `s` was a
+`.page.down` and `.page.up` share the screen with the `list.*` keys.
+`keymap.ResolveLayered` asks both scopes about the key as it was pressed. A
+scope that binds the key decides; a key no scope binds may still be swallowed
+as the default of an action rebound away. Resolving one scope's answer again in
+the next would hand the second scope a key the human never pressed: with
+`list.down` on `x` and `backlog.product` on `j`, `x` became the product filter.
+The keymap refuses a key bound in both scopes and names both actions, the same
+rule that already stops a lens key from reusing a global one. `s` was a
 literal the keymap did not know, and is now `backlog.source`.
 
 ## Consequences

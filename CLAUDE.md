@@ -681,10 +681,13 @@
   on the line under it. Hits stay grouped, best first, and **the groups go by
   their best hit**, so `#123` cannot put the 1230s of the first product above
   the ticket it names. The search has an order of its own, so esc hands back the
-  browsing order. **The cursor is held by the ticket's id** through every
-  re-sort, filter, search and load, as triage's is. The backlog's keys are a
-  keymap scope **layered on `list`**, so the keymap refuses a key bound in both,
-  as it does for a global key. Full record:
+  browsing order, and that order ends with the search: every search starts
+  best first. **The cursor is held by the ticket's id** through every re-sort,
+  filter, search, load and lens switch, as triage's is. The backlog's keys are
+  a keymap scope **layered on `list`**. The keymap refuses a key bound in both,
+  as it does for a global key, and `keymap.ResolveLayered` asks both scopes
+  about the key as pressed, never one scope's answer again in the next.
+  Full record:
   `docs/adr/0027-a-backlog-is-read-by-product-and-found-by-number.md`.
 - **A key sheet that can lie is worse than none, and `/` is fzf itself.**
   Every key was a literal in a switch with `?` hand-written beside it — merely
