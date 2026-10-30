@@ -69,12 +69,15 @@ func WorkItems() ([]WorkItem, error) {
 	var rows []struct {
 		ID     int `json:"id"`
 		Fields struct {
-			Title    string    `json:"System.Title"`
-			State    string    `json:"System.State"`
-			Priority int       `json:"Microsoft.VSTS.Common.Priority"`
-			AreaPath string    `json:"System.AreaPath"`
-			Created  time.Time `json:"System.CreatedDate"`
-			Changed  time.Time `json:"System.ChangedDate"`
+			Title    string `json:"System.Title"`
+			State    string `json:"System.State"`
+			Priority int    `json:"Microsoft.VSTS.Common.Priority"`
+			AreaPath string `json:"System.AreaPath"`
+			// The dates are read as text and parsed here, not by the decoder: one
+			// date it refused would fail the whole response and take every work
+			// item with it, for a field that only orders the list.
+			Created string `json:"System.CreatedDate"`
+			Changed string `json:"System.ChangedDate"`
 		} `json:"fields"`
 	}
 	if err := json.Unmarshal(out, &rows); err != nil {
@@ -89,8 +92,8 @@ func WorkItems() ([]WorkItem, error) {
 			State:    r.Fields.State,
 			Priority: priorityLabel(r.Fields.Priority),
 			AreaPath: r.Fields.AreaPath,
-			Created:  r.Fields.Created,
-			Changed:  r.Fields.Changed,
+			Created:  parseDate(r.Fields.Created),
+			Changed:  parseDate(r.Fields.Changed),
 		})
 	}
 	return items, nil
@@ -108,4 +111,16 @@ func priorityLabel(p int) string {
 	default:
 		return "med"
 	}
+}
+
+// parseDate reads a work item's date as Azure DevOps writes it: RFC 3339 from
+// the service, and on Azure DevOps Server sometimes with no zone at all, which
+// is taken as UTC. Anything else is no date rather than no work item.
+func parseDate(s string) time.Time {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }

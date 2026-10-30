@@ -82,3 +82,21 @@ func TestWorkItemsUnconfiguredAsksNothing(t *testing.T) {
 		t.Errorf("WorkItems() = %v, %v; want nil, nil", items, err)
 	}
 }
+
+// A date the strict decoder would refuse costs that date, not the board. One
+// work item from Azure DevOps Server with no zone on its date used to fail the
+// whole response, and every Azure ticket left the backlog with it.
+func TestAnOddDateCostsTheDateNotTheBoard(t *testing.T) {
+	fakeAz(t, `[{"id":1,"fields":{"System.Title":"no zone","System.CreatedDate":"2024-05-01T10:20:30.12"}},
+ {"id":2,"fields":{"System.Title":"garbled","System.ChangedDate":"last tuesday"}}]`)
+	items, err := WorkItems()
+	if err != nil || len(items) != 2 {
+		t.Fatalf("WorkItems() = %v, %v; want both items", items, err)
+	}
+	if want := time.Date(2024, 5, 1, 10, 20, 30, 120e6, time.UTC); !items[0].Created.Equal(want) {
+		t.Errorf("a date with no zone is UTC: %v", items[0].Created)
+	}
+	if !items[1].Changed.IsZero() {
+		t.Errorf("an unreadable date is no date: %v", items[1].Changed)
+	}
+}
