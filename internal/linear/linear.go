@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -45,7 +46,13 @@ type Issue struct {
 	UpdatedAt time.Time
 }
 
-const query = `query { viewer { assignedIssues(first: 50, filter: { state: { type: { nin: ["completed","canceled"] } } }) {
+// Limit is as many assigned issues as one read asks for: the most Linear will
+// return on one page, so a token's backlog is still one request. It was 50,
+// which a busy team reaches. A read that comes back with Limit may have
+// stopped short, and the cockpit says so.
+const Limit = 250
+
+var query = `query { viewer { assignedIssues(first: ` + strconv.Itoa(Limit) + `, filter: { state: { type: { nin: ["completed","canceled"] } } }) {
     nodes { id identifier title description priority priorityLabel createdAt updatedAt
             state { name } team { key } labels { nodes { name } } } } } }`
 

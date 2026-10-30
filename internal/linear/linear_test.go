@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,6 +46,9 @@ func TestNewRequestCarriesTheKey(t *testing.T) {
 	}
 	if sent.Query == "" {
 		t.Error("request carries no query")
+	}
+	if !strings.Contains(sent.Query, "assignedIssues(first: 250,") {
+		t.Errorf("a read asks for a full page of %d: %s", Limit, sent.Query)
 	}
 }
 

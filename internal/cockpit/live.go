@@ -59,6 +59,9 @@ type snapshot struct {
 	productStats   map[string]productStat
 
 	backlogTickets []ticket
+	// backlogCut names the sources whose read came back full, so the backlog can
+	// say there may be more than it shows — "github stops at 1000".
+	backlogCut []string
 
 	// discovered is the scanned repo list, carried so the view layer can reach a
 	// repo's path without re-walking the disk.
@@ -477,7 +480,7 @@ func applySnapshot(s snapshot) {
 		productStats = s.productStats
 	}
 	if s.backlogTickets != nil {
-		backlogTickets = s.backlogTickets
+		backlogTickets, backlogCut = s.backlogTickets, s.backlogCut
 	}
 	if s.discovered != nil {
 		lastDiscovered = s.discovered

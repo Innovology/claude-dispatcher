@@ -226,6 +226,10 @@ func (m model) blHead(rows []blRow, leftW int) []string {
 		count = itoa(len(rows)) + " of " + itoa(len(backlogTickets)) + " open"
 	}
 	title := fg(cDim, "backlog · "+count+" · "+itoa(len(m.picked))+" picked")
+	// A source that came back full may hold more than the table does.
+	if len(backlogCut) > 0 {
+		title += fg(cFaint, " · "+strings.Join(backlogCut, " · "))
+	}
 	view := fg(cFaint, m.blViewLabel())
 	lines := []string{backlogSpread(title, view, leftW)}
 	if dispWidth(title)+1+dispWidth(view) > leftW-2*pad {

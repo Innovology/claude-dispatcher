@@ -30,7 +30,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	// main reason a refresh could exhaust the hourly API quota. Issues for
 	// repos the user has not checked out are ignored, keeping the backlog
 	// scoped to the configured scan roots exactly as before.
-	assigned, searched := gh.AssignedIssues()
+	assigned, searched, ghCut := gh.AssignedIssues()
 	for _, r := range ctx.repos {
 		if !searched {
 			break
@@ -108,6 +108,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	}
 
 	s.backlogTickets = tickets
+	s.backlogCut = blCut(ghCut, readIssues)
 }
 
 // linearTickets merges what the reads returned into backlog rows: readIssues[i]
@@ -356,4 +357,23 @@ func blkAge(t time.Time) string {
 	default:
 		return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 	}
+}
+
+// blCut names the sources whose read came back full: a search or a page that
+// returned as many as it asked for may have stopped short of the backlog, and
+// the lens says so rather than letting its count read as the whole of it. The
+// GitHub search stopped at 100 for months while 141 issues were open and
+// assigned, and nothing on screen could have told anyone.
+func blCut(ghCapped bool, linearReads [][]linear.Issue) []string {
+	var cut []string
+	if ghCapped {
+		cut = append(cut, "github stops at "+strconv.Itoa(gh.AssignedLimit))
+	}
+	for _, issues := range linearReads {
+		if len(issues) >= linear.Limit {
+			cut = append(cut, "linear stops at "+strconv.Itoa(linear.Limit)+" a token")
+			break
+		}
+	}
+	return cut
 }

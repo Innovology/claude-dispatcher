@@ -1,7 +1,10 @@
 package gh
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,9 +25,9 @@ EOF
   *) echo '[]' ;;
 esac`)
 
-	byRepo, ok := AssignedIssues()
-	if !ok {
-		t.Fatal("the search answered, so it succeeded")
+	byRepo, ok, capped := AssignedIssues()
+	if !ok || capped {
+		t.Fatalf("the search answered one issue: ok %v, capped %v", ok, capped)
 	}
 	got := byRepo["shop-api"]
 	if len(got) != 1 {
@@ -40,7 +43,32 @@ esac`)
 	if !is.UpdatedAt.Equal(time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)) {
 		t.Errorf("UpdatedAt = %v", is.UpdatedAt)
 	}
-	if c := calls(); len(c) != 1 || !strings.Contains(c[0], "createdAt") {
-		t.Errorf("one search asking for createdAt, got %q", c)
+	if c := calls(); len(c) != 1 || !strings.Contains(c[0], "createdAt") || !strings.Contains(c[0], "--limit 1000") {
+		t.Errorf("one search asking for createdAt, up to the search's own limit, got %q", c)
+	}
+}
+
+// A search that comes back full may have stopped short, and says so.
+func TestAssignedIssuesSaysWhenItStoppedAtTheLimit(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("[")
+	for i := 0; i < AssignedLimit; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"repository":{"name":"shop-api"},"number":` + strconv.Itoa(i+1) + `,"title":"t"}`)
+	}
+	b.WriteString("]")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "issues.json"), []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fakeGH(t, `case "$*" in
+  *"search issues"*) cat `+filepath.Join(dir, "issues.json")+` ;;
+  *) echo '[]' ;;
+esac`)
+	byRepo, ok, capped := AssignedIssues()
+	if !ok || !capped || len(byRepo["shop-api"]) != AssignedLimit {
+		t.Errorf("ok %v, capped %v, %d issues", ok, capped, len(byRepo["shop-api"]))
 	}
 }

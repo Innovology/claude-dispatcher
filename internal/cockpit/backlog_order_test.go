@@ -478,3 +478,19 @@ func TestTheViewIsAlwaysSaid(t *testing.T) {
 		renderClean(t, m, "backlog view @"+itoa(w))
 	}
 }
+
+// The header says when a source came back full, so the count is never read as
+// the whole backlog when it may not be.
+func TestTheHeaderSaysWhenASourceStoppedShort(t *testing.T) {
+	backlogFixture(t, nil, []ticket{{id: "r#1", pri: "med"}})
+	prev := backlogCut
+	t.Cleanup(func() { backlogCut = prev })
+	backlogCut = []string{"github stops at 1000"}
+	if out := stripAnsi(backlogModel(40).View()); !strings.Contains(out, "backlog · 1 open · 0 picked · github stops at 1000") {
+		t.Errorf("the header should say github stopped:\n%s", out)
+	}
+	backlogCut = nil
+	if out := stripAnsi(backlogModel(40).View()); strings.Contains(out, "stops at") {
+		t.Errorf("nothing cut, nothing said:\n%s", out)
+	}
+}

@@ -307,3 +307,16 @@ func TestLinearTicketsCarryDatesAndLabels(t *testing.T) {
 		t.Errorf("labels line = %q", tk.labels)
 	}
 }
+
+// A read that comes back full may have stopped short of the backlog, and the
+// lens is told which: the GitHub search stopped at 100 for months while 141
+// issues were open and assigned, and nothing on screen could have said so.
+func TestBlCutNamesTheSourcesThatCameBackFull(t *testing.T) {
+	if got := blCut(false, [][]linear.Issue{make([]linear.Issue, linear.Limit-1), nil}); got != nil {
+		t.Errorf("nothing full, nothing cut: %q", got)
+	}
+	got := blCut(true, [][]linear.Issue{nil, make([]linear.Issue, linear.Limit), make([]linear.Issue, linear.Limit)})
+	if !slices.Equal(got, []string{"github stops at 1000", "linear stops at 250 a token"}) {
+		t.Errorf("cut = %q", got)
+	}
+}
