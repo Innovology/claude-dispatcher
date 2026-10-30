@@ -105,7 +105,7 @@ then on.
 
 **The backlog's keys are a keymap scope of their own, layered on the list
 scope.** `backlog.order`, `.reverse`, `.product`, `.source`, `.first`, `.last`,
-`.pagedown` and `.pageup` resolve after the `list.*` keys on the same screen.
+`.page.down` and `.page.up` resolve after the `list.*` keys on the same screen.
 The keymap therefore refuses a key bound in both scopes and names both actions,
 the same rule that already stops a lens key from reusing a global one. `s` was a
 literal the keymap did not know, and is now `backlog.source`.

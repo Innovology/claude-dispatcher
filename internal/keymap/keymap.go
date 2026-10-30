@@ -180,8 +180,8 @@ var Defaults = []Binding{
 	{Action: "backlog.source", Scope: Backlog, Key: "s", Help: "one source at a time: github → linear → azure boards", Section: "the backlog · lens 3"},
 	{Action: "backlog.first", Scope: Backlog, Key: "g", Help: "first ticket · last ticket", Section: "the backlog · lens 3"},
 	{Action: "backlog.last", Scope: Backlog, Key: "G"},
-	{Action: "backlog.pagedown", Scope: Backlog, Key: "pgdown", Help: "a screen down · a screen up", Section: "the backlog · lens 3"},
-	{Action: "backlog.pageup", Scope: Backlog, Key: "pgup"},
+	{Action: "backlog.page.down", Scope: Backlog, Key: "pgdown", Help: "a screen down · a screen up", Section: "the backlog · lens 3"},
+	{Action: "backlog.page.up", Scope: Backlog, Key: "pgup"},
 }
 
 // Map is a resolved keymap: the defaults with the user's overrides applied.

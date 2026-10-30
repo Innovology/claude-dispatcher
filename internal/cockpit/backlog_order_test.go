@@ -369,3 +369,25 @@ func TestBacklogRebindsAcrossTheLayers(t *testing.T) {
 		t.Errorf("j is backlog.product: product %q, cursor %d", m.blProduct, m.backlogCursor)
 	}
 }
+
+// The sheet prints each pair of backlog keys on one row, as it does every
+// down/up and first/last pair. The page keys were named pagedown and pageup,
+// which the sheet does not pair, so `?` showed pgdown and never pgup — and a
+// rebound pgup was nowhere on the sheet that exists to say what the keys are.
+func TestTheSheetPairsTheBacklogKeys(t *testing.T) {
+	m := keymapFixture(t, map[string]string{"backlog.page.up": "ctrl+b"})
+	var got []string
+	for _, s := range m.helpSections() {
+		if s.section != "the backlog · lens 3" {
+			continue
+		}
+		for _, r := range s.keys {
+			got = append(got, r.k)
+		}
+	}
+	for _, want := range []string{"pgdown / ctrl+b", "g / G"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("the backlog's section has %q, want a row %q", got, want)
+		}
+	}
+}
