@@ -308,3 +308,32 @@ func TestBacklogSearchEditingKeys(t *testing.T) {
 		t.Errorf("an empty backlog says so, search or not:\n%s", out)
 	}
 }
+
+// Leaving the lens clears its search the way esc does, so the cursor comes back
+// on the ticket it was on. Clearing the fields alone left it on whatever row
+// held that index in the whole backlog, drawn there until the next load moved
+// it back to the ticket with no key pressed — and enter dispatched what was
+// drawn in between.
+func TestLeavingTheLensKeepsTheCursorOnItsTicket(t *testing.T) {
+	var ts []ticket
+	for i := 0; i < 20; i++ {
+		ts = append(ts, ticket{id: "r#" + itoa(i), title: "ticket " + itoa(i), pri: "med", filed: daysAgo(40 - i)})
+	}
+	ts[7].title = "needle in the backlog"
+	backlogFixture(t, nil, ts)
+	m := blType(backlogModel(40), "needle")
+	m = press(m, "enter")
+	if m.ticketSelected().id != "r#7" {
+		t.Fatalf("selected %q", m.ticketSelected().id)
+	}
+	m = press(press(m, "1"), "3")
+	if m.blSearchShown() {
+		t.Fatal("the search should be gone")
+	}
+	if got := m.ticketSelected().id; got != "r#7" {
+		t.Errorf("back on the backlog the cursor is on %q, want r#7", got)
+	}
+	if got := m.blSearchRefresh().ticketSelected().id; got != "r#7" {
+		t.Errorf("a load moved it to %q", got)
+	}
+}

@@ -348,7 +348,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clMarked = map[string]bool{}
 		m.clExpanded, m.clFoldRow = map[string]bool{}, ""
 		m = m.decSearchClear()
-		m.blQuery, m.blTyping, m.blFound = "", false, nil
+		m = m.blSearchClear()
 		return m, nil
 	}
 
