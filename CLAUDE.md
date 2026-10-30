@@ -658,10 +658,13 @@
   them. Now it is **windowed on the cursor**. The top line of a cut table
   counts what is above and names the product on screen once that product's
   divider has scrolled away; the bottom line counts what is below. `g`/`G` and
-  `pgdown`/`pgup` move through it. Tickets are **grouped by product in the
+  `pgdown`/`pgup` move through it, a page being a screen of drawn lines (less
+  the cut lines), never that many tickets, so a page skips nothing undrawn. Tickets are **grouped by product in the
   products lens's order**, so lens 2 and lens 3 agree, with `unassigned` last.
   `p` narrows to one product, and the header reads "12 of 340 open" while
-  anything narrows the table. **`o` orders each group** (priority, the default;
+  anything narrows the table. The view (order · product · source) takes a line
+  of its own where it does not fit beside the title, so no width hides it.
+  **`o` orders each group** (priority, the default;
   newest filed; stalest; label; repo) and `O` turns the order round. The header
   names which end comes first, and the last column shows the figure being
   sorted by (FILED, LABELS, otherwise IDLE). Ties go to the more urgent ticket,
@@ -669,7 +672,12 @@
   whichever way round**, so reversing never fills the top with what the order
   cannot place. The sources carry what that needs: `createdAt` in the same one
   GitHub search, Linear's `createdAt` and labels, and Azure's created and
-  changed dates. A ticket's `tags` are kept apart from the labels line, which
+  changed dates. **The sources read to their own ceilings**: the reported
+  backlog read "100 open" with 141 assigned, because the GitHub search asked
+  for `--limit 100`. It asks for 1000 (`gh.AssignedLimit`, the search API's
+  most; a request per hundred the account has), Linear for 250 a token (one
+  page), and a read that comes back full names its source in the header.
+  A ticket's `tags` are kept apart from the labels line, which
   for Linear leads with the state. **`/` filters**, using the decisions matcher
   lifted into `textsearch.go` rather than copied. `#123`/`123` name GitHub issue
   123, and `eng-124`/`124` name ENG-124. An exact number outranks everything,
@@ -687,7 +695,9 @@
   a keymap scope **layered on `list`**. The keymap refuses a key bound in both,
   as it does for a global key, and `keymap.ResolveLayered` asks both scopes
   about the key as pressed, never one scope's answer again in the next.
-  Full record:
+  A query being typed comes ahead of the confirm bar, as settings and the
+  dispatch form do: a confirm can land on its own (`:tidy` reads its plan in
+  the background) and took the "y" typed into a query. Full record:
   `docs/adr/0027-a-backlog-is-read-by-product-and-found-by-number.md`.
 - **A key sheet that can lie is worse than none, and `/` is fzf itself.**
   Every key was a literal in a switch with `?` hand-written beside it — merely

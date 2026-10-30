@@ -35,7 +35,10 @@ line is kept in the middle of the window, as the dispatch form's lists already
 do. The top line of a cut table counts the tickets above it, and the bottom line
 counts those below. The top line also names the product on screen whenever that
 product's divider has scrolled away. `g`/`G` go to either end, and `pgdown`/
-`pgup` move a screen.
+`pgup` move a screen of *lines*, less three — every divider and quote counted,
+and the two cut lines at the window's edges allowed for — so every ticket
+between two windows is drawn in one of them. Counted in tickets, a page of
+quoted search hits jumped twice as far as the screen showed.
 
 **Tickets are grouped by product, in the products lens's order.** A product is
 how this cockpit groups everything, so the backlog uses the same grouping, under
@@ -45,8 +48,11 @@ that lens does not list, such as one a Linear token names with no repos, and
 last comes `unassigned` for what no product claims, as everywhere else. `p`
 narrows the table to one product. The header reads "12 of 340 open" while
 anything narrows the table, so a filter left on is never mistaken for the size
-of the backlog. An empty table says what emptied it: an empty backlog, a filter,
-and a search that found nothing each get their own sentence.
+of the backlog. The view — the order and what it is narrowed to — sits beside
+the title, or on a line of its own where both do not fit, so it is on screen
+at every width. An empty table says what emptied it: an empty backlog, a
+filter, and a search that found nothing anywhere each get their own sentence,
+and a search whose matches a filter hid says so rather than blaming the query.
 
 **`o` orders each group, and the header names which end comes first.** The
 orders are priority (the default), newest filed, stalest, label and repo, and
@@ -96,8 +102,10 @@ search puts on the top row, would sit on a ticket that is not the answer. `o`
 re-sorts the hits under an order of the search's own, so esc hands back the
 order you were browsing in. That order ends with the search, and so does a query
 typed back to nothing: every search starts best first, or a re-sort left over
-from the last one would put the 1230s back on top. While the query is typed it has the keyboard, as on
-decisions. A load re-runs the query, because a hit names a ticket by its place in
+from the last one would put the 1230s back on top. While the query is typed it
+has the keyboard, as on decisions — ahead of the confirm bar too, as settings
+and the dispatch form are, because a confirm can land on its own (a tidy's plan
+is read in the background) and took the "y" of whatever was being typed. A load re-runs the query, because a hit names a ticket by its place in
 the backlog.
 
 **The cursor is held by the ticket's id**, as triage's is (`fleetSync`), through
@@ -119,10 +127,15 @@ literal the keymap did not know, and is now `backlog.source`.
 
 ## Consequences
 
-- The backlog still reads what its sources return: GitHub's search stops at
-  100 issues and Linear's read at 50 per token. A larger backlog is only partly
-  on the table, and nothing here says so. Raising those limits costs forge
-  quota (one GraphQL request per hundred issues), so it is a separate decision.
+- **The sources read to their own ceilings.** The backlog that prompted this
+  read "100 open" while 141 issues were open and assigned: the GitHub search
+  asked for `--limit 100`. It asks for 1000 now (`gh.AssignedLimit`), the most
+  GitHub's search returns for any query; gh pages it a hundred at a time, so
+  it costs a request per hundred issues the account has — two for 141 — once
+  per `SearchTTL`, against a search allowance of 30 a minute. Linear asks for
+  250 a token, the most one page returns, still one request. A read that comes
+  back full names its source in the header ("github stops at 1000"), because a
+  count that may be short must not read as the whole.
 - Two workspaces' identical identifiers still share one picked mark (ADR 0006),
   and now share one cursor key. The first is found, which is the same cost
   `space` already had.
