@@ -130,6 +130,14 @@ type command struct{ name, hint string }
 // tickets under a selected group header.
 type ticket struct {
 	id, src, title, product, repo, pri, age, labels, taken, body, prompt string
+	// filed is when the ticket was opened and touched when anything last
+	// happened on it, zero where the source does not say. The backlog sorts by
+	// either: how long a ticket has waited, and how long nobody has looked.
+	filed, touched time.Time
+	// tags are its labels alone. labels is the line the detail pane prints,
+	// which for Linear and Azure leads with the state — a state is not a label,
+	// and sorting by one would sort Linear by "In Progress".
+	tags []string
 }
 
 // diffFile and hunkLine are the shared shape for the diff and review overlays.

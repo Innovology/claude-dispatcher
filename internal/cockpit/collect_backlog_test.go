@@ -5,6 +5,7 @@ package cockpit
 // teams Linear granted it, so which token reads a product is what scopes it.
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -281,5 +282,28 @@ func TestLinearTicketsReportWhatIsAlreadyDispatched(t *testing.T) {
 	}
 	if got[0].taken != "eng-1" {
 		t.Errorf("taken = %q, want the dispatch working it", got[0].taken)
+	}
+}
+
+// A Linear ticket carries what the backlog sorts by: when it was filed, when it
+// last moved, and its labels — kept apart from its state, which the detail line
+// still leads with but which is not a label to sort by.
+func TestLinearTicketsCarryDatesAndLabels(t *testing.T) {
+	is := linIssue("uuid-1", "ENG-1", "dated")
+	is.CreatedAt = time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	is.Labels = []string{"bug", "ui"}
+	got := linearTickets([]linearRead{{product: "acme", key: "k1"}}, [][]linear.Issue{{is}}, nil)
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	tk := got[0]
+	if !tk.filed.Equal(is.CreatedAt) || !tk.touched.Equal(is.UpdatedAt) {
+		t.Errorf("filed/touched = %v/%v", tk.filed, tk.touched)
+	}
+	if !slices.Equal(tk.tags, []string{"bug", "ui"}) {
+		t.Errorf("tags = %q, want the labels alone", tk.tags)
+	}
+	if tk.labels != "Todo · bug · ui" {
+		t.Errorf("labels line = %q", tk.labels)
 	}
 }

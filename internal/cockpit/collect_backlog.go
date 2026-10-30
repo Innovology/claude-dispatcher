@@ -45,7 +45,10 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 				product: r.Product,
 				pri:     blkPriFromLabels(is.Labels),
 				age:     blkAge(is.UpdatedAt),
+				filed:   is.CreatedAt,
+				touched: is.UpdatedAt,
 				labels:  strings.Join(is.Labels, " · "),
+				tags:    is.Labels,
 				body:    is.Body,
 				prompt:  blkPrompt("GitHub issue", id, is.Title, is.Body),
 				taken:   blkTakenBy(ctx.records, id, is.Title),
@@ -90,14 +93,17 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 			for _, w := range items {
 				id := "AB#" + strconv.Itoa(w.ID)
 				tickets = append(tickets, ticket{
-					id:     id,
-					src:    "ado",
-					title:  w.Title,
-					pri:    blkNormalizePri(w.Priority),
-					labels: w.State,
-					body:   "",
-					prompt: blkPrompt("Azure Boards work item", id, w.Title, ""),
-					taken:  blkTakenBy(ctx.records, id, w.Title),
+					id:      id,
+					src:     "ado",
+					title:   w.Title,
+					pri:     blkNormalizePri(w.Priority),
+					age:     blkAge(w.Changed),
+					filed:   w.Created,
+					touched: w.Changed,
+					labels:  w.State,
+					body:    "",
+					prompt:  blkPrompt("Azure Boards work item", id, w.Title, ""),
+					taken:   blkTakenBy(ctx.records, id, w.Title),
 				})
 			}
 		}
@@ -138,7 +144,10 @@ func linearTickets(reads []linearRead, readIssues [][]linear.Issue, records []*s
 				product: r.product,
 				pri:     blkPriFromLinear(is.Priority),
 				age:     blkAge(is.UpdatedAt),
-				labels:  is.State,
+				filed:   is.CreatedAt,
+				touched: is.UpdatedAt,
+				labels:  strings.Join(append([]string{is.State}, is.Labels...), " · "),
+				tags:    is.Labels,
 				body:    is.Description,
 				prompt:  blkPrompt("Linear issue", is.Identifier, is.Title, is.Description),
 				taken:   blkTakenBy(records, is.Identifier, is.Title),
