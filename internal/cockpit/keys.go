@@ -213,6 +213,32 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateDispatchForm(k)
 		return mm, cmd
 	}
+	// Naming a product, or typing its Linear token, is text entry, so it belongs
+	// with the other modes that own the keyboard — settings, the dispatch form,
+	// the palette. Without this guard the global keys resolved first: `q` killed
+	// the cockpit mid-name and a digit switched lens, both discarding what had
+	// been typed, and the footer promised only "esc cancels". A token makes that
+	// worse, not better: `lin_api_1…` would switch lens on its first digit.
+	// A `/` query is the same: it was left out, so `q` quit mid-query.
+	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
+		mm, cmd := m.updateProducts(k)
+		return mm, cmd
+	}
+	// A decisions query is text entry for the same reason: "q" and "0004" are
+	// what someone searching decisions types.
+	if m.lens == "decisions" && m.decTyping {
+		mm, cmd := m.updateDecisions(k)
+		return mm, cmd
+	}
+	if m.lens == "backlog" && m.blTyping {
+		mm, cmd := m.updateBacklog(k)
+		return mm, cmd
+	}
+	// All of the above come before the confirm bar for the reason settings and
+	// the dispatch form do: whoever is typing has the keyboard. A confirm can
+	// land on its own — a tidy's plan is read in the background — and here it
+	// took the "y" or the enter of whatever was being typed, and acted on it.
+	// It waits, drawn, until the typing is done.
 	if m.confirm != nil {
 		switch k {
 		case "y", "enter":
@@ -289,27 +315,6 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 			return mm, cmd
 		}
 		m = mm
-	}
-	// Naming a product, or typing its Linear token, is text entry, so it belongs
-	// with the other modes that own the keyboard — settings, the dispatch form,
-	// the palette. Without this guard the global keys resolved first: `q` killed
-	// the cockpit mid-name and a digit switched lens, both discarding what had
-	// been typed, and the footer promised only "esc cancels". A token makes that
-	// worse, not better: `lin_api_1…` would switch lens on its first digit.
-	// A `/` query is the same: it was left out, so `q` quit mid-query.
-	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
-		mm, cmd := m.updateProducts(k)
-		return mm, cmd
-	}
-	// A decisions query is text entry for the same reason: "q" and "0004" are
-	// what someone searching decisions types.
-	if m.lens == "decisions" && m.decTyping {
-		mm, cmd := m.updateDecisions(k)
-		return mm, cmd
-	}
-	if m.lens == "backlog" && m.blTyping {
-		mm, cmd := m.updateBacklog(k)
-		return mm, cmd
 	}
 
 	// From here down the key is whatever the human bound it to. Resolving

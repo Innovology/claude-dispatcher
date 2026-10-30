@@ -465,3 +465,34 @@ func TestThePaletteLeavesTheSearchAsADigitDoes(t *testing.T) {
 		t.Errorf("back on the %s the old query still narrows it: %q", m.lens, m.blQuery)
 	}
 }
+
+// A confirm that lands on its own while a query is being typed waits for the
+// typing to finish. It used to take the query's "y" or enter and act — a tidy
+// plan read in the background would remove worktrees on a letter typed into a
+// search.
+func TestAConfirmThatLandsMidQueryWaits(t *testing.T) {
+	blSearchFixture(t)
+	m := blType(backlogModel(40), "ca")
+	m.confirm = &confirmState{kind: "tidy", label: "tidy: remove 3 finished worktrees"}
+	for _, k := range []string{"y", "enter"} {
+		next, cmd := m.handleKey(k)
+		m = next.(model)
+		if cmd != nil || m.confirm == nil {
+			t.Fatalf("%q acted on the confirm: cmd %v, confirm %v", k, cmd != nil, m.confirm)
+		}
+	}
+	if m.blQuery != "cay" || m.blTyping {
+		t.Errorf("y should be typed and enter should keep the hits: query %q, typing %v", m.blQuery, m.blTyping)
+	}
+	// With the typing done, the confirm has the keyboard.
+	if m = press(m, "n"); m.confirm != nil {
+		t.Error("n should now cancel the confirm")
+	}
+
+	// The decisions query is text entry too.
+	m = press(decSearchFixture(t), "/")
+	m.confirm = &confirmState{kind: "tidy", label: "tidy"}
+	if m = press(m, "y"); m.confirm == nil || m.decQuery != "y" {
+		t.Errorf("decisions: confirm %v, query %q", m.confirm, m.decQuery)
+	}
+}
