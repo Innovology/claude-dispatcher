@@ -426,3 +426,26 @@ func TestAnEmptyTablePicksAndDispatchesNothing(t *testing.T) {
 		t.Errorf("enter on an empty table: cmd %v, notice %q", cmd != nil, m.notice)
 	}
 }
+
+// An empty table names what emptied it. A query whose hits all sit outside the
+// product the table is narrowed to is not a query that matched nothing: esc
+// would clear the search and leave the filter that hid them.
+func TestAnEmptySearchSaysWhetherTheFilterHidIt(t *testing.T) {
+	blSearchFixture(t)
+	m := press(backlogModel(40), "p") // alpha
+	m = blType(m, "webhooks")         // only beta-svc#3
+	if len(m.blRows()) != 0 {
+		t.Fatalf("rows = %v", ids(m.blRows()))
+	}
+	out := stripAnsi(m.View())
+	if !strings.Contains(out, "nothing for this product and source") || strings.Contains(out, "no ticket matches") {
+		t.Errorf("the filter emptied it, not the query:\n%s", out)
+	}
+	if !strings.Contains(out, "1 match outside this product and source") {
+		t.Errorf("the query line should say where the hit is:\n%s", out)
+	}
+	m = blType(press(m, "esc"), "zzqx")
+	if out := stripAnsi(m.View()); !strings.Contains(out, "no ticket matches /zzqx") {
+		t.Errorf("a query matching nothing anywhere says so:\n%s", out)
+	}
+}

@@ -233,6 +233,9 @@ func (m model) blQueryLine(rows []blRow, w int) string {
 		right = countOf(len(rows), "match", "matches") + " in " + countOf(len(groups), "product", "products")
 		if len(rows) == 0 {
 			right = "no match"
+			if n := m.blHitsElsewhere(); n > 0 {
+				right = countOf(n, "match", "matches") + " outside this product and source"
+			}
 		}
 	}
 	return backlogSpread(fg(cSearchHit, q), fg(cFaint, right), w)

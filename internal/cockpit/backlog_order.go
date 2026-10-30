@@ -332,11 +332,23 @@ func (m model) blEmpty() string {
 	switch {
 	case len(backlogTickets) == 0:
 		return "nothing in the backlog · github issues, linear and azure boards assigned to you show here"
-	case m.blSearching():
+	case m.blSearching() && m.blHitsElsewhere() == 0:
 		return "no ticket matches /" + m.blQuery + " · esc clears the search"
 	}
+	// The query matches, or there is none: what emptied the table is the
+	// product and source it is narrowed to, and esc would clear the wrong thing.
 	return "nothing for this product and source · " + prettyKey(m.keys.KeyFor("backlog.product")) +
 		" and " + prettyKey(m.keys.KeyFor("backlog.source")) + " widen it"
+}
+
+// blHitsElsewhere is how many tickets the query matches across the whole
+// backlog, whatever product and source the table is narrowed to: what says
+// whether an empty table is the query's doing or the filters'.
+func (m model) blHitsElsewhere() int {
+	if f := m.blFoundNow(); f != nil {
+		return len(f.hits)
+	}
+	return 0
 }
 
 // blTo moves the cursor to row i and keys it to that ticket, so the next
