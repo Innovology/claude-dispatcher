@@ -421,3 +421,28 @@ func TestTheColumnMatchesTheOrder(t *testing.T) {
 		}
 	}
 }
+
+// Every line of the table is cut to the pane, the dividers and the lines that
+// say what the window cut off included. One wider line widens the whole pane
+// when the two panes are joined, and pushes the detail pane off the screen.
+func TestTheTableNeverOutgrowsItsPane(t *testing.T) {
+	long := strings.Repeat("a-very-long-product-name-", 4)
+	var ts []ticket
+	for i := 0; i < 30; i++ {
+		ts = append(ts, ticket{id: "r#" + itoa(i), product: long, pri: "med", filed: daysAgo(60 - i)})
+	}
+	backlogFixture(t, []string{long}, ts)
+	m := backlogModel(20)
+	m = m.blTo(15)
+	// A row's own columns need 59; the product name here is 100 long.
+	for _, w := range []int{60, 100} {
+		for i, l := range m.blTable(m.blRows(), w, 10) {
+			if got := dispWidth(l); got > w+4 {
+				t.Errorf("width %d, line %d is %d wide: %q", w, i, got, stripAnsi(l))
+			}
+		}
+	}
+	if got := dispWidth(blDivider(10, long)); got != 14 {
+		t.Errorf("a divider at 10 is %d wide", got)
+	}
+}

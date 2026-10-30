@@ -309,13 +309,13 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 			more := "↑ " + countOf(above, "more ticket", "more tickets") + " above"
 			switch next := lines[start+1]; {
 			case next.div:
-				out[0] = "  " + fg(cFaint, more)
+				out[0] = "  " + fg(cFaint, truncate(more, w))
 			case next.snip:
 				// The ticket the cut took is the one this quote is under, so the
 				// quote goes with it: the product's name, then the count in its
 				// place. A quote is never the cursor's line.
 				out[0] = blDivider(w, rows[next.row].group)
-				out[1] = "  " + fg(cFaint, more)
+				out[1] = "  " + fg(cFaint, truncate(more, w))
 			default:
 				out[0] = blDivider(w, rows[next.row].group+" · "+more)
 			}
@@ -327,7 +327,7 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 					below++
 				}
 			}
-			out[len(out)-1] = "  " + fg(cFaint, "↓ "+countOf(below, "more ticket", "more tickets")+" below")
+			out[len(out)-1] = "  " + fg(cFaint, truncate("↓ "+countOf(below, "more ticket", "more tickets")+" below", w))
 		}
 	}
 	return out
@@ -336,7 +336,8 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 // blDivider is the line above a product's tickets, set into a rule so it reads
 // as a boundary rather than as a row.
 func blDivider(w int, label string) string {
-	lead, text := "── ", label+" "
+	lead := "── "
+	text := truncate(label, maxi(w-dispWidth(lead)-1, 1)) + " "
 	rest := maxi(0, w-dispWidth(lead)-dispWidth(text))
 	return "  " + fg(cRule, lead) + fg(cFaint, text) + fg(cRule, strings.Repeat("─", rest)) + "  "
 }
