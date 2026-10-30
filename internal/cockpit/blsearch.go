@@ -259,19 +259,26 @@ func (m model) blSearching() bool { return strings.TrimSpace(m.blQuery) != "" }
 // it, before anything is typed, until esc takes it away.
 func (m model) blSearchShown() bool { return m.blTyping || m.blSearching() }
 
-// blSearchRun matches the query as it now reads, cursor on the best hit.
+// blSearchRun matches the query as it now reads, cursor on the best hit. A
+// query typed back to nothing is no search, and takes its order with it.
 func (m model) blSearchRun() model {
 	m.blFound = nil
 	if m.blSearching() {
 		m.blFound = currentBlIndex().search(m.blQuery)
+	} else {
+		m.blHitOrder = blOrder{}
 	}
 	return m.blTo(0)
 }
 
 // blSearchClear puts the whole backlog back, the cursor still on the ticket it
 // was on: you searched to get there.
+//
+// The order the hits were re-sorted in goes with the search. Every search
+// starts best first, because that is what puts the ticket a number names on
+// top; kept, a re-sort from an earlier search put "#123"'s 1230s above it.
 func (m model) blSearchClear() model {
-	m.blQuery, m.blTyping, m.blFound = "", false, nil
+	m.blQuery, m.blTyping, m.blFound, m.blHitOrder = "", false, nil, blOrder{}
 	return m.blSync()
 }
 

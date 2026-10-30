@@ -337,3 +337,37 @@ func TestLeavingTheLensKeepsTheCursorOnItsTicket(t *testing.T) {
 		t.Errorf("a load moved it to %q", got)
 	}
 }
+
+// Every search starts best first. The order a search's hits were re-sorted in
+// is that search's, and went on into the next one: re-sort "#123" by priority,
+// clear it, search "#123" again, and the urgent 1230 sat above the issue the
+// number names, with the cursor on it.
+func TestEverySearchStartsBestFirst(t *testing.T) {
+	backlogFixture(t, []string{"alpha", "beta"}, []ticket{
+		{id: "alpha#1230", product: "alpha", pri: "urgent"},
+		{id: "beta#123", product: "beta", pri: "low"},
+	})
+	m := blType(backlogModel(40), "#123")
+	if m.ticketSelected().id != "beta#123" {
+		t.Fatalf("the number's own ticket first, got %q", m.ticketSelected().id)
+	}
+	m = press(press(m, "enter"), "o")
+	if m.blOrderNow().by != blByPriority || m.ticketSelected().id != "beta#123" {
+		t.Fatalf("o re-sorts the hits: %q, cursor %q", m.blOrderNow().by, m.ticketSelected().id)
+	}
+	m = blType(press(m, "esc"), "#123")
+	if m.blOrderNow().by != blByMatch || m.ticketSelected().id != "beta#123" {
+		t.Errorf("a new search reads %q with the cursor on %q", m.blOrderNow().by, m.ticketSelected().id)
+	}
+
+	// Typed back to nothing, a query is no search and drops its order too.
+	m = press(press(m, "enter"), "o")
+	m = press(m, "/")
+	for range "#123" {
+		m = press(m, "backspace")
+	}
+	m = blType(press(m, "esc"), "#123")
+	if m.blOrderNow().by != blByMatch {
+		t.Errorf("after the query was emptied: %q", m.blOrderNow().by)
+	}
+}
