@@ -446,3 +446,15 @@ func TestTheTableNeverOutgrowsItsPane(t *testing.T) {
 		t.Errorf("a divider at 10 is %d wide", got)
 	}
 }
+
+// Every key the sheet prints with the shipped keymap fits its key column.
+func TestEveryShippedKeyLabelFitsTheSheet(t *testing.T) {
+	m := backlogModel(40)
+	for _, s := range m.helpSections() {
+		for _, r := range s.keys {
+			if dispWidth(r.k) > helpKeyCol {
+				t.Errorf("%s: %q is %d wide, the key column %d", s.section, r.k, dispWidth(r.k), helpKeyCol)
+			}
+		}
+	}
+}

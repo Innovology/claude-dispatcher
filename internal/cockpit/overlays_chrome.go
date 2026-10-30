@@ -152,8 +152,9 @@ func prettyKey(k string) string {
 
 const (
 	// helpKeyCol is the width of the sheet's key column. The widest label it
-	// has to hold is the product panel's tabs, "O R T S H Y".
-	helpKeyCol = 11
+	// has to hold is the backlog's page keys, "pgdown / pgup"; at 11, the
+	// product panel's tabs, it pushed that row's description two columns out.
+	helpKeyCol = 13
 	// helpMaxWidth caps the sheet so its prose stays readable — a sentence run
 	// across a 200-column terminal is one the eye loses its place in.
 	//
