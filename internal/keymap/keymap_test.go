@@ -187,3 +187,38 @@ func TestTheReadmeListsEveryActionID(t *testing.T) {
 		}
 	}
 }
+
+// A layered screen asks every scope about the key as it was pressed. Resolving
+// the list's answer again in the backlog's scope turned list.down on x into j,
+// and then into the product filter j had been rebound to. And binding beats
+// swallowing across the layers: the j that list.down left is swallowed in the
+// list scope, and backlog.first moved onto it must still run.
+func TestALayeredScreenResolvesThePressedKey(t *testing.T) {
+	m := mustNew(t, map[string]string{"list.down": "x", "backlog.product": "j"})
+	for pressed, want := range map[string]string{
+		"x": "j", // list.down
+		"j": "p", // backlog.product, not the list.down it used to be
+		"p": "",  // backlog.product's old key, swallowed
+		"o": "o", // backlog.order, untouched
+		"z": "z", // nobody's: passes through
+	} {
+		if got := m.ResolveLayered(pressed, List, Backlog); got != want {
+			t.Errorf("%q resolved to %q, want %q", pressed, got, want)
+		}
+	}
+
+	m = mustNew(t, map[string]string{"list.down": "x", "backlog.first": "j"})
+	if got := m.ResolveLayered("j", List, Backlog); got != "g" {
+		t.Errorf("j should reach backlog.first, got %q", got)
+	}
+	if got := m.ResolveLayered("g", Backlog, List); got != "" {
+		t.Errorf("g was backlog.first's and should be swallowed, got %q", got)
+	}
+	if got := m.ResolveLayered(" ", List, Backlog); got != "space" {
+		t.Errorf("the space bar is found by its name, got %q", got)
+	}
+	var none *Map
+	if got := none.ResolveLayered("o", List, Backlog); got != "o" {
+		t.Errorf("a nil map is the defaults, got %q", got)
+	}
+}

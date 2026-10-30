@@ -336,6 +336,40 @@ func (m *Map) Resolve(scope Scope, pressed string) string {
 	return pressed
 }
 
+// ResolveLayered is Resolve for a screen whose scopes are layered (see
+// layered): every scope is asked about the key as it was PRESSED, a scope that
+// binds it decides, and only a key none of them binds can be swallowed as the
+// default of an action rebound away.
+//
+// Resolving one scope's answer in the next instead hands the second a key the
+// human never pressed. With list.down on x and backlog.product on j, x became
+// j in the list scope and then the product filter in the backlog's. And
+// binding has to beat swallowing across the stack: with list.down on x, the j
+// it left is swallowed in the list scope, and backlog.first rebound onto that j
+// could otherwise never run. New refuses a key bound in two layered scopes, so
+// at most one of them binds any key and the order they are given in does not
+// matter.
+func (m *Map) ResolveLayered(pressed string, scopes ...Scope) string {
+	if m == nil {
+		m = defaultMap()
+	}
+	name := pressed
+	if pressed == " " {
+		name = "space"
+	}
+	for _, s := range scopes {
+		if canon, ok := m.byKey[s][name]; ok {
+			return canon
+		}
+	}
+	for _, s := range scopes {
+		if m.canonical[s][name] {
+			return ""
+		}
+	}
+	return pressed
+}
+
 // KeyFor is the key an action currently answers to, for the screens that print
 // their own hints.
 func (m *Map) KeyFor(action string) string {

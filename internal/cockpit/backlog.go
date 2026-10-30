@@ -517,22 +517,19 @@ func backlogFeature(t ticket) string {
 // updateBacklog mirrors handleKey('backlog'), with the dispatching keys wired
 // to real launches.
 //
-// The list keys are resolved first and the backlog's own after them — the two
-// scopes are layered, so the keymap refuses a key bound in both. Every key
-// that moves the cursor keys it to the ticket it lands on, and every key that
-// re-sorts or narrows the table finds that ticket again (blSync): enter
-// dispatches what the cursor is on, and a cursor held by index alone would
-// be on a different ticket after every `o`.
+// The list keys and the backlog's own are one layered screen: the pressed key
+// is asked of both (keymap.ResolveLayered), and the keymap refuses a key bound
+// in both. Every key that moves the cursor keys it to the ticket it lands on,
+// and every key that re-sorts or narrows the table finds that ticket again
+// (blSync): enter dispatches what the cursor is on, and a cursor held by index
+// alone would be on a different ticket after every `o`.
 func (m model) updateBacklog(k string) (model, tea.Cmd) {
 	// A query being typed takes the key as it was pressed: every letter is text,
 	// so none may be resolved into something else first.
 	if m.blTyping {
 		return m.updateBlSearch(k)
 	}
-	if k = m.keys.Resolve(keymap.List, k); k == "" {
-		return m, nil
-	}
-	if k = m.keys.Resolve(keymap.Backlog, k); k == "" {
+	if k = m.keys.ResolveLayered(k, keymap.List, keymap.Backlog); k == "" {
 		return m, nil
 	}
 	rows := m.blRows()

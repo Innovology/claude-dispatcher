@@ -352,3 +352,20 @@ func TestBacklogKeysAreRebindable(t *testing.T) {
 		t.Errorf("reversed label = %q", got)
 	}
 }
+
+// Rebinding a list key onto a backlog key's old letter, and a backlog key onto
+// a list key's, each lands where the human put it.
+func TestBacklogRebindsAcrossTheLayers(t *testing.T) {
+	m := keymapFixture(t, map[string]string{"list.down": "x", "backlog.product": "j"})
+	backlogFixture(t, []string{"alpha"}, []ticket{
+		{id: "a#1", product: "alpha", pri: "med"},
+		{id: "a#2", product: "alpha", pri: "med"},
+	})
+	m.lens = "backlog"
+	if m = press(m, "x"); m.backlogCursor != 1 || m.blProduct != "" {
+		t.Errorf("x is list.down: cursor %d, product %q", m.backlogCursor, m.blProduct)
+	}
+	if m = press(m, "j"); m.blProduct != "alpha" || m.backlogCursor != 1 {
+		t.Errorf("j is backlog.product: product %q, cursor %d", m.blProduct, m.backlogCursor)
+	}
+}
