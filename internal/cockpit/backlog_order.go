@@ -416,15 +416,26 @@ func blColumn(o blOrder) string {
 	return "IDLE"
 }
 
-// blCell is a ticket's value in that column.
+// blCell is a ticket's value in that column. Labels are printed in the order
+// the label order compares them (blTagKey), so a ticket labelled "ui, bug"
+// does not read as out of place among the "bug"s it sorts with.
 func blCell(t ticket, o blOrder) string {
 	switch o.by {
 	case blByFiled:
 		return blkAge(t.filed)
 	case blByLabel:
-		return strings.Join(t.tags, ", ")
+		tags := slices.Clone(t.tags)
+		slices.SortFunc(tags, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+		return strings.Join(tags, ", ")
 	}
 	return blIdle(t)
+}
+
+// blColumnSorts is whether the last column is the figure the order sorts by.
+// IDLE is that only for the stalest order; under priority, repo or best match
+// it is a figure beside the order.
+func blColumnSorts(o blOrder) bool {
+	return o.by == blByFiled || o.by == blByLabel || o.by == blByStale
 }
 
 // blIdle is how long a ticket has sat untouched, for the table's last column:

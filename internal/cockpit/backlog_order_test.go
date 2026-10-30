@@ -391,3 +391,33 @@ func TestTheSheetPairsTheBacklogKeys(t *testing.T) {
 		}
 	}
 }
+
+// The last column can be read against the order it shows. Labels are printed
+// in the order they are compared in, and a dispatched ticket keeps the figure
+// the table is sorted by — "dispatched" stands in only for a figure that is not.
+func TestTheColumnMatchesTheOrder(t *testing.T) {
+	tk := ticket{id: "r#1", tags: []string{"ui", "Bug"}, filed: daysAgo(30), touched: daysAgo(3), taken: "out"}
+	if got := blCell(tk, blOrder{by: blByLabel}); got != "Bug, ui" {
+		t.Errorf("labels = %q, want them in the order they sort in", got)
+	}
+	if !slices.Equal(tk.tags, []string{"ui", "Bug"}) {
+		t.Errorf("printing them must not reorder the ticket's own: %q", tk.tags)
+	}
+	backlogFixture(t, nil, []ticket{tk})
+	m := backlogModel(40)
+	for _, c := range []struct{ by, want string }{
+		{blByPriority, "dispatched"}, {blByFiled, "30d"}, {blByLabel, "Bug, ui"}, {blByStale, "3d"},
+	} {
+		m.blOrder = blOrder{by: c.by}
+		row := ""
+		for _, l := range strings.Split(stripAnsi(m.View()), "\n") {
+			if strings.Contains(l, "▸") && strings.Contains(l, "r#1") {
+				row, _, _ = strings.Cut(l, "│") // the table, not the detail beside it
+				break
+			}
+		}
+		if !strings.Contains(row, c.want) {
+			t.Errorf("%s: the row reads %q, want %q in it", c.by, row, c.want)
+		}
+	}
+}

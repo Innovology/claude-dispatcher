@@ -383,9 +383,15 @@ func (m model) blTicketLine(found *blFound, r blRow, cursor bool, o blOrder, w i
 	if cursor {
 		idColor = cWhite
 	}
+	// A ticket already out says so in green. The word takes the column only
+	// where its figure is not what the table is sorted by; where it is, the
+	// figure stays, in green, so the order can still be read down the column.
 	state, stateColor := blCell(t, o), cDim
 	if t.taken != "" {
-		state, stateColor = "dispatched", cGreen
+		stateColor = cGreen
+		if !blColumnSorts(o) {
+			state = "dispatched"
+		}
 	}
 	lit := found.lit(r.at)
 
