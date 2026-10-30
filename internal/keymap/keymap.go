@@ -53,7 +53,16 @@ const (
 	Search Scope = "search"
 	// List is the remaining lenses: backlog, usage, decisions, velocity.
 	List Scope = "list"
+	// Backlog is the backlog lens's own keys — its filters, and moving through
+	// a table that can be hundreds of tickets long. It is resolved after List,
+	// on the same screen, so the two may not share a key.
+	Backlog Scope = "backlog"
 )
+
+// layered says which scopes are resolved one after the other on one screen.
+// A key in both would be taken by whichever is asked first and never reach the
+// other, which is a collision even though the scopes differ.
+var layered = map[Scope]Scope{Backlog: List}
 
 // Binding is one action: what it is called, where it applies, the key it ships
 // with, and the sentence `?` prints for it.
@@ -163,6 +172,14 @@ var Defaults = []Binding{
 	{Action: "list.open", Scope: List, Key: "enter", Help: "open what is selected", Section: "the other lenses"},
 	{Action: "list.pick", Scope: List, Key: "space", Help: "pick a backlog ticket", Section: "the other lenses"},
 	{Action: "list.dispatch", Scope: List, Key: "ctrl+d", Help: "dispatch every picked ticket", Section: "the other lenses"},
+
+	// ---- the backlog --------------------------------------------------------
+	{Action: "backlog.product", Scope: Backlog, Key: "p", Help: "one product at a time · every product again", Section: "the backlog · lens 3"},
+	{Action: "backlog.source", Scope: Backlog, Key: "s", Help: "one source at a time: github → linear → azure boards", Section: "the backlog · lens 3"},
+	{Action: "backlog.first", Scope: Backlog, Key: "g", Help: "first ticket · last ticket", Section: "the backlog · lens 3"},
+	{Action: "backlog.last", Scope: Backlog, Key: "G"},
+	{Action: "backlog.pagedown", Scope: Backlog, Key: "pgdown", Help: "a screen down · a screen up", Section: "the backlog · lens 3"},
+	{Action: "backlog.pageup", Scope: Backlog, Key: "pgup"},
 }
 
 // Map is a resolved keymap: the defaults with the user's overrides applied.
@@ -243,6 +260,11 @@ func New(overrides map[string]string) (*Map, error) {
 		}
 		if owner, taken := taken[Global][b.Key]; taken {
 			clashes = append(clashes, fmt.Sprintf("%q is %q everywhere, so %q in %s could never run", b.Key, owner, b.Action, b.Scope))
+		}
+		if under, ok := layered[b.Scope]; ok {
+			if owner, taken := taken[under][b.Key]; taken {
+				clashes = append(clashes, fmt.Sprintf("%q is %q in %s, so %q in %s could never run", b.Key, owner, under, b.Action, b.Scope))
+			}
 		}
 	}
 	if len(clashes) > 0 {

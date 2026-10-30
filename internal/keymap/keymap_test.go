@@ -102,6 +102,26 @@ func TestCollisionIsRefusedAndNamesBothActions(t *testing.T) {
 	}
 }
 
+// The backlog resolves the list keys and then its own, so a key in both
+// scopes is a collision though the scopes differ: the list would take it and
+// the backlog's action could never run. Both are named, as for any clash.
+func TestALayeredScopeCannotReuseTheKeyUnderIt(t *testing.T) {
+	_, err := New(map[string]string{"backlog.product": "j"})
+	if err == nil {
+		t.Fatal("binding a backlog action to the list's j should be refused")
+	}
+	for _, want := range []string{"backlog.product", "list.down", "\"j\""} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %s, got: %v", want, err)
+		}
+	}
+	// And a key free in both is fine.
+	m := mustNew(t, map[string]string{"backlog.product": "P"})
+	if got := m.Resolve(Backlog, "P"); got != "p" {
+		t.Errorf("got %q, want the product filter's canonical key", got)
+	}
+}
+
 func TestUnknownActionAndFixedKeyAreRefused(t *testing.T) {
 	if _, err := New(map[string]string{"fleet.teleport": "t"}); err == nil {
 		t.Error("an unknown action should be refused, not dropped")

@@ -120,6 +120,11 @@ type model struct {
 	backlogCursor int
 	picked        map[string]bool
 	srcFilter     string
+	// The backlog's view (backlog_order.go): the product it is narrowed to (""
+	// for every product), and blSelID, the ticket the cursor is on — held by id
+	// so a filter or a load leaves the cursor where it was.
+	blProduct string
+	blSelID   string
 
 	shipFx     *shipFxState
 	justLanded string
@@ -430,7 +435,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(boot, queued)
 		}
 		applySnapshot(snapshot(msg))
-		m = m.noteQuota().decSearchRefresh()
+		m = m.noteQuota().decSearchRefresh().blSync()
 		// The fleet is rebuilt from the fresh records; fold the user's ordering
 		// and cleared set back onto it before anything renders, then re-key the
 		// cursor onto the row it was on — a rank that changed in this refresh

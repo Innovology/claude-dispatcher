@@ -70,7 +70,7 @@ func (m model) helpNotes() map[string][]helpRow {
 // must never be invisible because someone forgot a list.
 var helpOrder = []string{
 	"work the fleet", "what has finished", "products · lens 2",
-	"search", "the other lenses", "anywhere",
+	"search", "the backlog · lens 3", "the other lenses", "anywhere",
 }
 
 // helpSections is the key sheet, BUILT from the live keymap rather than written

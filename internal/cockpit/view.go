@@ -210,9 +210,11 @@ func (m model) footerFromKeys(lens string) (string, bool) {
 			m.keyHint("panel.history", "history"), m.keyHint("panel.sessions", "your sessions"),
 			"esc close", "1 triage"}
 	case "backlog":
+		// What to do with a ticket. The keys that change what the table shows
+		// are on the table pane's own line (blPaneHelp).
 		parts = []string{m.pairHint("list.down", "list.up", "move"), m.keyHint("list.pick", "pick"),
 			m.keyHint("list.open", "dispatch"), m.keyHint("list.dispatch", "dispatch picked"),
-			"s source", "1 triage"}
+			"1 triage"}
 	default:
 		return "", false
 	}

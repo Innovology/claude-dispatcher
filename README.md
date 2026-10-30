@@ -364,6 +364,7 @@ To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key alr
 | settings | `settings.edit` |
 | search | `search.next` `search.prev` `search.clear` |
 | backlog · decisions | `list.down` `list.up` `list.open` `list.pick` `list.dispatch` · on decisions, `search.open` too |
+| backlog | `backlog.product` `backlog.source` `backlog.first` `backlog.last` `backlog.pagedown` `backlog.pageup` |
 
 </details>
 
