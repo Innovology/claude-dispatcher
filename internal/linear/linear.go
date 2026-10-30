@@ -38,12 +38,16 @@ type Issue struct {
 	Priority    string // "Urgent"/"High"/"Medium"/"Low"/"No priority"
 	State       string
 	Team        string
-	UpdatedAt   time.Time
+	// Labels are the issue's own labels, which State is not: the backlog
+	// sorts and searches by them.
+	Labels    []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 const query = `query { viewer { assignedIssues(first: 50, filter: { state: { type: { nin: ["completed","canceled"] } } }) {
-    nodes { id identifier title description priority priorityLabel updatedAt
-            state { name } team { key } } } } }`
+    nodes { id identifier title description priority priorityLabel createdAt updatedAt
+            state { name } team { key } labels { nodes { name } } } } } }`
 
 // newRequest builds the assigned-issues request, read with key. The key is the
 // whole of the scope — which workspace, and which of its teams — because Linear
@@ -93,6 +97,7 @@ func Assigned(key string) ([]Issue, error) {
 						Title         string    `json:"title"`
 						Description   string    `json:"description"`
 						PriorityLabel string    `json:"priorityLabel"`
+						CreatedAt     time.Time `json:"createdAt"`
 						UpdatedAt     time.Time `json:"updatedAt"`
 						State         struct {
 							Name string `json:"name"`
@@ -100,6 +105,11 @@ func Assigned(key string) ([]Issue, error) {
 						Team struct {
 							Key string `json:"key"`
 						} `json:"team"`
+						Labels struct {
+							Nodes []struct {
+								Name string `json:"name"`
+							} `json:"nodes"`
+						} `json:"labels"`
 					} `json:"nodes"`
 				} `json:"assignedIssues"`
 			} `json:"viewer"`
@@ -118,6 +128,10 @@ func Assigned(key string) ([]Issue, error) {
 	nodes := payload.Data.Viewer.AssignedIssues.Nodes
 	issues := make([]Issue, 0, len(nodes))
 	for _, n := range nodes {
+		var labels []string
+		for _, l := range n.Labels.Nodes {
+			labels = append(labels, l.Name)
+		}
 		issues = append(issues, Issue{
 			ID:          n.ID,
 			Identifier:  n.Identifier,
@@ -126,6 +140,8 @@ func Assigned(key string) ([]Issue, error) {
 			Priority:    n.PriorityLabel,
 			State:       n.State.Name,
 			Team:        n.Team.Key,
+			Labels:      labels,
+			CreatedAt:   n.CreatedAt,
 			UpdatedAt:   n.UpdatedAt,
 		})
 	}

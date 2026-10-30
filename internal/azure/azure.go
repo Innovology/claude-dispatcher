@@ -32,9 +32,15 @@ type WorkItem struct {
 	Priority string
 	AreaPath string
 	Repo     string
+	// Created is when the item was filed and Changed when it was last edited.
+	// The backlog sorts by both; without them every Azure row had a blank age
+	// and sorted as if it had been filed at the epoch.
+	Created time.Time
+	Changed time.Time
 }
 
-const wiql = `SELECT [System.Id],[System.Title],[System.State],[Microsoft.VSTS.Common.Priority],[System.AreaPath] ` +
+const wiql = `SELECT [System.Id],[System.Title],[System.State],[Microsoft.VSTS.Common.Priority],[System.AreaPath],` +
+	`[System.CreatedDate],[System.ChangedDate] ` +
 	`FROM WorkItems WHERE [System.AssignedTo]=@Me AND [System.State] NOT IN ('Closed','Done','Removed') ` +
 	`ORDER BY [System.ChangedDate] DESC`
 
@@ -63,10 +69,12 @@ func WorkItems() ([]WorkItem, error) {
 	var rows []struct {
 		ID     int `json:"id"`
 		Fields struct {
-			Title    string `json:"System.Title"`
-			State    string `json:"System.State"`
-			Priority int    `json:"Microsoft.VSTS.Common.Priority"`
-			AreaPath string `json:"System.AreaPath"`
+			Title    string    `json:"System.Title"`
+			State    string    `json:"System.State"`
+			Priority int       `json:"Microsoft.VSTS.Common.Priority"`
+			AreaPath string    `json:"System.AreaPath"`
+			Created  time.Time `json:"System.CreatedDate"`
+			Changed  time.Time `json:"System.ChangedDate"`
 		} `json:"fields"`
 	}
 	if err := json.Unmarshal(out, &rows); err != nil {
@@ -81,6 +89,8 @@ func WorkItems() ([]WorkItem, error) {
 			State:    r.Fields.State,
 			Priority: priorityLabel(r.Fields.Priority),
 			AreaPath: r.Fields.AreaPath,
+			Created:  r.Fields.Created,
+			Changed:  r.Fields.Changed,
 		})
 	}
 	return items, nil

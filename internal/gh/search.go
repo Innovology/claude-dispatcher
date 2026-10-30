@@ -51,7 +51,7 @@ func AssignedIssues() (map[string][]Issue, bool) {
 		}
 		out, err := run(exec.Command("gh", "search", "issues",
 			"--assignee", "@me", "--state", "open", "--limit", "100",
-			"--json", "repository,number,title,url,body,state,labels,updatedAt"))
+			"--json", "repository,number,title,url,body,state,labels,createdAt,updatedAt"))
 		if err != nil {
 			return result{}
 		}
@@ -65,6 +65,7 @@ func AssignedIssues() (map[string][]Issue, bool) {
 			Labels     []struct {
 				Name string `json:"name"`
 			} `json:"labels"`
+			CreatedAt time.Time `json:"createdAt"`
 			UpdatedAt time.Time `json:"updatedAt"`
 		}
 		if json.Unmarshal(out, &rows) != nil {
@@ -84,6 +85,7 @@ func AssignedIssues() (map[string][]Issue, bool) {
 				Body:      row.Body,
 				State:     row.State,
 				Labels:    labels,
+				CreatedAt: row.CreatedAt,
 				UpdatedAt: row.UpdatedAt,
 			})
 		}
