@@ -577,6 +577,11 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 		}
 		return m.blSync(), nil
 	case " ", "space":
+		// An empty table has no ticket under the cursor, only the placeholder
+		// that says why it is empty — and a pick of that is a pick of "".
+		if len(rows) == 0 {
+			return m, nil
+		}
 		if m.picked == nil {
 			m.picked = map[string]bool{}
 		}
@@ -587,6 +592,8 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 		}
 	case "enter":
 		switch {
+		case len(rows) == 0:
+			return m, nil
 		case t.taken != "":
 			m.notice = t.id + " already has a dispatcher — \"" + t.taken + "\""
 		case t.repo == "":

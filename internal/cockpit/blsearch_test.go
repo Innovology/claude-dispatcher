@@ -407,3 +407,22 @@ func TestACutTakesATicketsQuoteWithIt(t *testing.T) {
 		}
 	}
 }
+
+// An empty table has nothing under the cursor to pick or dispatch: space used
+// to pick the placeholder that says why the table is empty, a ticket with no
+// id, and enter told the human that "" names no repo.
+func TestAnEmptyTablePicksAndDispatchesNothing(t *testing.T) {
+	blSearchFixture(t)
+	m := press(blType(backlogModel(40), "zzqx"), "enter")
+	if len(m.blRows()) != 0 {
+		t.Fatal("the search should leave nothing")
+	}
+	m = press(m, "space")
+	if len(m.picked) != 0 {
+		t.Errorf("space picked %v", m.picked)
+	}
+	next, cmd := m.handleKey("enter")
+	if m = next.(model); cmd != nil || m.notice != "" {
+		t.Errorf("enter on an empty table: cmd %v, notice %q", cmd != nil, m.notice)
+	}
+}
