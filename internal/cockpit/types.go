@@ -129,7 +129,7 @@ type command struct{ name, hint string }
 // backlogTickets, but the type lives here because the floor lens also renders
 // tickets under a selected group header.
 type ticket struct {
-	id, src, title, product, repo, pri, age, labels, taken, body, prompt string
+	id, src, title, product, repo, pri, labels, taken, body, prompt string
 	// filed is when the ticket was opened and touched when anything last
 	// happened on it, zero where the source does not say. The backlog sorts by
 	// either: how long a ticket has waited, and how long nobody has looked.

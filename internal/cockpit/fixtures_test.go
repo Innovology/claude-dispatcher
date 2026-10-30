@@ -1,6 +1,9 @@
 package cockpit
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // fixtures_test.go gives the interaction tests their own data.
 //
@@ -54,10 +57,10 @@ func installFixture(t *testing.T) {
 	// Index 3 is deliberately already taken — the backlog test asserts that
 	// dispatching a taken ticket is refused.
 	backlogTickets = []ticket{
-		{id: "T-1", src: "gh", title: "first", repo: "alpha-api", product: "alpha", pri: "high", age: "1d"},
-		{id: "T-2", src: "gh", title: "second", repo: "alpha-api", product: "alpha", pri: "med", age: "2d"},
-		{id: "T-3", src: "gh", title: "third", repo: "alpha-web", product: "alpha", pri: "low", age: "3d"},
-		{id: "T-4", src: "gh", title: "fourth", repo: "beta-svc", product: "beta", pri: "med", age: "4d", taken: "one"},
+		{id: "T-1", src: "gh", title: "first", repo: "alpha-api", product: "alpha", pri: "high", touched: time.Now().Add(-1 * 24 * time.Hour)},
+		{id: "T-2", src: "gh", title: "second", repo: "alpha-api", product: "alpha", pri: "med", touched: time.Now().Add(-2 * 24 * time.Hour)},
+		{id: "T-3", src: "gh", title: "third", repo: "alpha-web", product: "alpha", pri: "low", touched: time.Now().Add(-3 * 24 * time.Hour)},
+		{id: "T-4", src: "gh", title: "fourth", repo: "beta-svc", product: "beta", pri: "med", touched: time.Now().Add(-4 * 24 * time.Hour), taken: "one"},
 	}
 
 	// cursor 0 and 1 are the user's own PRs (not self-approvable); index 2 is

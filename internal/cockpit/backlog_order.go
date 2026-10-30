@@ -417,10 +417,6 @@ func blCell(t ticket, o blOrder) string {
 }
 
 // blIdle is how long a ticket has sat untouched, for the table's last column:
-// the time its source last saw anything happen on it.
-func blIdle(t ticket) string {
-	if !t.touched.IsZero() {
-		return blkAge(t.touched)
-	}
-	return t.age
-}
+// the time its source last saw anything happen on it, worked out when it is
+// drawn, or blank when the source did not say.
+func blIdle(t ticket) string { return blkAge(t.touched) }

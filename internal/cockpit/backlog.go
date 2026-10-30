@@ -124,9 +124,6 @@ func backlogWhere(t ticket) string {
 
 // viewBacklog renders the backlog table (left) and the selected-ticket detail
 // (right). Narrow terminals collapse to the table only.
-
-// viewBacklog renders the backlog table (left) and the selected-ticket detail
-// (right). Narrow terminals collapse to the table only.
 func (m model) viewBacklog(w, h int) string {
 	rows := m.blRows()
 	pickedCount := len(m.picked)
