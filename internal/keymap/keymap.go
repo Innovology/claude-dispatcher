@@ -53,7 +53,16 @@ const (
 	Search Scope = "search"
 	// List is the remaining lenses: backlog, usage, decisions, velocity.
 	List Scope = "list"
+	// Backlog is the backlog lens's own keys — its order, its filters, and
+	// moving through a table that can be hundreds of tickets long. It is
+	// resolved after List, on the same screen, so the two may not share a key.
+	Backlog Scope = "backlog"
 )
+
+// layered says which scopes are resolved one after the other on one screen.
+// A key in both would be taken by whichever is asked first and never reach the
+// other, which is a collision even though the scopes differ.
+var layered = map[Scope]Scope{Backlog: List}
 
 // Binding is one action: what it is called, where it applies, the key it ships
 // with, and the sentence `?` prints for it.
@@ -152,7 +161,7 @@ var Defaults = []Binding{
 	// ---- search -------------------------------------------------------------
 	{Action: "search.open", Scope: Products, Key: "/", Help: "search · fzf matching, live, in place", Section: "search"},
 	{Action: "search.open", Scope: Editor, Key: "/"},
-	{Action: "search.open", Scope: List, Key: "/", Help: "search every repo's decisions · by number, title or what they say", Section: "the other lenses"},
+	{Action: "search.open", Scope: List, Key: "/", Help: "search · decisions by number, title or what they say · the backlog by #number, title or body", Section: "the other lenses"},
 	{Action: "search.next", Scope: Search, Key: "n", Help: "jump to the next match", Section: "search"},
 	{Action: "search.prev", Scope: Search, Key: "ctrl+n", Help: "jump to the previous match", Section: "search"},
 	{Action: "search.clear", Scope: Search, Key: "esc", Help: "clear the search", Section: "search"},
@@ -163,6 +172,16 @@ var Defaults = []Binding{
 	{Action: "list.open", Scope: List, Key: "enter", Help: "open what is selected", Section: "the other lenses"},
 	{Action: "list.pick", Scope: List, Key: "space", Help: "pick a backlog ticket", Section: "the other lenses"},
 	{Action: "list.dispatch", Scope: List, Key: "ctrl+d", Help: "dispatch every picked ticket", Section: "the other lenses"},
+
+	// ---- the backlog --------------------------------------------------------
+	{Action: "backlog.order", Scope: Backlog, Key: "o", Help: "order: priority → newest filed → stalest → label → repo", Section: "the backlog · lens 3"},
+	{Action: "backlog.reverse", Scope: Backlog, Key: "O", Help: "turn the order round", Section: "the backlog · lens 3"},
+	{Action: "backlog.product", Scope: Backlog, Key: "p", Help: "one product at a time · every product again", Section: "the backlog · lens 3"},
+	{Action: "backlog.source", Scope: Backlog, Key: "s", Help: "one source at a time: github → linear → azure boards", Section: "the backlog · lens 3"},
+	{Action: "backlog.first", Scope: Backlog, Key: "g", Help: "first ticket · last ticket", Section: "the backlog · lens 3"},
+	{Action: "backlog.last", Scope: Backlog, Key: "G"},
+	{Action: "backlog.page.down", Scope: Backlog, Key: "pgdown", Help: "a screen down · a screen up", Section: "the backlog · lens 3"},
+	{Action: "backlog.page.up", Scope: Backlog, Key: "pgup"},
 }
 
 // Map is a resolved keymap: the defaults with the user's overrides applied.
@@ -244,6 +263,11 @@ func New(overrides map[string]string) (*Map, error) {
 		if owner, taken := taken[Global][b.Key]; taken {
 			clashes = append(clashes, fmt.Sprintf("%q is %q everywhere, so %q in %s could never run", b.Key, owner, b.Action, b.Scope))
 		}
+		if under, ok := layered[b.Scope]; ok {
+			if owner, taken := taken[under][b.Key]; taken {
+				clashes = append(clashes, fmt.Sprintf("%q is %q in %s, so %q in %s could never run", b.Key, owner, under, b.Action, b.Scope))
+			}
+		}
 	}
 	if len(clashes) > 0 {
 		sort.Strings(clashes)
@@ -308,6 +332,40 @@ func (m *Map) Resolve(scope Scope, pressed string) string {
 	}
 	if m.canonical[scope][name] {
 		return ""
+	}
+	return pressed
+}
+
+// ResolveLayered is Resolve for a screen whose scopes are layered (see
+// layered): every scope is asked about the key as it was PRESSED, a scope that
+// binds it decides, and only a key none of them binds can be swallowed as the
+// default of an action rebound away.
+//
+// Resolving one scope's answer in the next instead hands the second a key the
+// human never pressed. With list.down on x and backlog.product on j, x became
+// j in the list scope and then the product filter in the backlog's. And
+// binding has to beat swallowing across the stack: with list.down on x, the j
+// it left is swallowed in the list scope, and backlog.first rebound onto that j
+// could otherwise never run. New refuses a key bound in two layered scopes, so
+// at most one of them binds any key and the order they are given in does not
+// matter.
+func (m *Map) ResolveLayered(pressed string, scopes ...Scope) string {
+	if m == nil {
+		m = defaultMap()
+	}
+	name := pressed
+	if pressed == " " {
+		name = "space"
+	}
+	for _, s := range scopes {
+		if canon, ok := m.byKey[s][name]; ok {
+			return canon
+		}
+	}
+	for _, s := range scopes {
+		if m.canonical[s][name] {
+			return ""
+		}
 	}
 	return pressed
 }

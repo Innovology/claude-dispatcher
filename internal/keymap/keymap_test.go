@@ -102,6 +102,26 @@ func TestCollisionIsRefusedAndNamesBothActions(t *testing.T) {
 	}
 }
 
+// The backlog resolves the list keys and then its own, so a key in both
+// scopes is a collision though the scopes differ: the list would take it and
+// the backlog's action could never run. Both are named, as for any clash.
+func TestALayeredScopeCannotReuseTheKeyUnderIt(t *testing.T) {
+	_, err := New(map[string]string{"backlog.product": "j"})
+	if err == nil {
+		t.Fatal("binding a backlog action to the list's j should be refused")
+	}
+	for _, want := range []string{"backlog.product", "list.down", "\"j\""} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should name %s, got: %v", want, err)
+		}
+	}
+	// And a key free in both is fine.
+	m := mustNew(t, map[string]string{"backlog.product": "P"})
+	if got := m.Resolve(Backlog, "P"); got != "p" {
+		t.Errorf("got %q, want the product filter's canonical key", got)
+	}
+}
+
 func TestUnknownActionAndFixedKeyAreRefused(t *testing.T) {
 	if _, err := New(map[string]string{"fleet.teleport": "t"}); err == nil {
 		t.Error("an unknown action should be refused, not dropped")
@@ -165,5 +185,40 @@ func TestTheReadmeListsEveryActionID(t *testing.T) {
 		if !strings.Contains(readme, "`"+b.Action+"`") {
 			t.Errorf("README does not list the action id %q", b.Action)
 		}
+	}
+}
+
+// A layered screen asks every scope about the key as it was pressed. Resolving
+// the list's answer again in the backlog's scope turned list.down on x into j,
+// and then into the product filter j had been rebound to. And binding beats
+// swallowing across the layers: the j that list.down left is swallowed in the
+// list scope, and backlog.first moved onto it must still run.
+func TestALayeredScreenResolvesThePressedKey(t *testing.T) {
+	m := mustNew(t, map[string]string{"list.down": "x", "backlog.product": "j"})
+	for pressed, want := range map[string]string{
+		"x": "j", // list.down
+		"j": "p", // backlog.product, not the list.down it used to be
+		"p": "",  // backlog.product's old key, swallowed
+		"o": "o", // backlog.order, untouched
+		"z": "z", // nobody's: passes through
+	} {
+		if got := m.ResolveLayered(pressed, List, Backlog); got != want {
+			t.Errorf("%q resolved to %q, want %q", pressed, got, want)
+		}
+	}
+
+	m = mustNew(t, map[string]string{"list.down": "x", "backlog.first": "j"})
+	if got := m.ResolveLayered("j", List, Backlog); got != "g" {
+		t.Errorf("j should reach backlog.first, got %q", got)
+	}
+	if got := m.ResolveLayered("g", Backlog, List); got != "" {
+		t.Errorf("g was backlog.first's and should be swallowed, got %q", got)
+	}
+	if got := m.ResolveLayered(" ", List, Backlog); got != "space" {
+		t.Errorf("the space bar is found by its name, got %q", got)
+	}
+	var none *Map
+	if got := none.ResolveLayered("o", List, Backlog); got != "o" {
+		t.Errorf("a nil map is the defaults, got %q", got)
 	}
 }

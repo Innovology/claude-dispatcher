@@ -81,6 +81,31 @@ func applyEdit(cur, k string, raw tea.KeyMsg) (next string, submit, cancel bool)
 	return cur, false, false
 }
 
+// editQuery applies one key to a `/` query being typed, for the searches that
+// filter a list (decisions, the backlog). backspace takes a rune back, ctrl+u
+// the whole query and ctrl+w its last word, and a key that types text adds it —
+// read from the key message, never the key's name, because a paste arrives as
+// one multi-rune message. ok is false for a key that is no edit, which the
+// search it belongs to decides about.
+func editQuery(q, k string, raw tea.KeyMsg) (string, bool) {
+	switch k {
+	case "backspace":
+		if r := []rune(q); len(r) > 0 {
+			return string(r[:len(r)-1]), true
+		}
+		return q, true
+	case "ctrl+u":
+		return "", true
+	case "ctrl+w":
+		q = strings.TrimRight(q, " ")
+		return q[:strings.LastIndex(q, " ")+1], true
+	}
+	if s, ok := typedTextFor(raw, k); ok {
+		return q + s, true
+	}
+	return q, false
+}
+
 // filteredCommands narrows the palette to what matches the typed query, name
 // matches first. Ranking matters: hints mention other lenses by name, so
 // without it typing "product" selected "usage" — whose hint happens to end
@@ -161,6 +186,12 @@ func (m model) runCommand() (model, tea.Cmd) {
 	}
 	m.paletteOpen = false
 	m.paletteText = ""
+	// Leaving a lens leaves its search, as a digit does: a query kept here came
+	// back on the next visit, still narrowing the table, by one route and not
+	// the other.
+	if lens != m.lens {
+		m = m.decSearchClear().blSearchClear()
+	}
 	m.lens = lens
 	m.notice = ":" + c.name
 	return m, nil
@@ -182,6 +213,32 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateDispatchForm(k)
 		return mm, cmd
 	}
+	// Naming a product, or typing its Linear token, is text entry, so it belongs
+	// with the other modes that own the keyboard — settings, the dispatch form,
+	// the palette. Without this guard the global keys resolved first: `q` killed
+	// the cockpit mid-name and a digit switched lens, both discarding what had
+	// been typed, and the footer promised only "esc cancels". A token makes that
+	// worse, not better: `lin_api_1…` would switch lens on its first digit.
+	// A `/` query is the same: it was left out, so `q` quit mid-query.
+	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
+		mm, cmd := m.updateProducts(k)
+		return mm, cmd
+	}
+	// A decisions query is text entry for the same reason: "q" and "0004" are
+	// what someone searching decisions types.
+	if m.lens == "decisions" && m.decTyping {
+		mm, cmd := m.updateDecisions(k)
+		return mm, cmd
+	}
+	if m.lens == "backlog" && m.blTyping {
+		mm, cmd := m.updateBacklog(k)
+		return mm, cmd
+	}
+	// All of the above come before the confirm bar for the reason settings and
+	// the dispatch form do: whoever is typing has the keyboard. A confirm can
+	// land on its own — a tidy's plan is read in the background — and here it
+	// took the "y" or the enter of whatever was being typed, and acted on it.
+	// It waits, drawn, until the typing is done.
 	if m.confirm != nil {
 		switch k {
 		case "y", "enter":
@@ -259,23 +316,6 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		}
 		m = mm
 	}
-	// Naming a product, or typing its Linear token, is text entry, so it belongs
-	// with the other modes that own the keyboard — settings, the dispatch form,
-	// the palette. Without this guard the global keys resolved first: `q` killed
-	// the cockpit mid-name and a digit switched lens, both discarding what had
-	// been typed, and the footer promised only "esc cancels". A token makes that
-	// worse, not better: `lin_api_1…` would switch lens on its first digit.
-	// A `/` query is the same: it was left out, so `q` quit mid-query.
-	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
-		mm, cmd := m.updateProducts(k)
-		return mm, cmd
-	}
-	// A decisions query is text entry for the same reason: "q" and "0004" are
-	// what someone searching decisions types.
-	if m.lens == "decisions" && m.decTyping {
-		mm, cmd := m.updateDecisions(k)
-		return mm, cmd
-	}
 
 	// From here down the key is whatever the human bound it to. Resolving
 	// translates it back to the action's canonical spelling, which is what the
@@ -344,6 +384,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clMarked = map[string]bool{}
 		m.clExpanded, m.clFoldRow = map[string]bool{}, ""
 		m = m.decSearchClear()
+		m = m.blSearchClear()
 		return m, nil
 	}
 

@@ -60,9 +60,13 @@ It is the one figure in the cockpit that is a model rather than a measurement, s
 
 ![The velocity lens](docs/velocity.svg)
 
-**One backlog** across GitHub Issues, Linear and Azure Boards — pick, then dispatch:
+**One backlog** across GitHub Issues, Linear and Azure Boards — pick, then dispatch. It is grouped by product, in the order the products lens lists them, and scrolls with the cursor, saying how many tickets are above and below the screen. **`o`** orders each product by priority, newest filed, stalest, label or repo, and **`O`** turns the order round. **`p`** shows one product at a time and **`s`** one source:
 
 ![The backlog lens](docs/backlog.svg)
+
+**`/`** narrows it to what you are looking for. **`#123`** names issue 123 (a number alone, or Linear's **`eng-124`**, works too). Any other word matches the title the way fzf matches a line, or a word of the body or labels, quoted under the ticket it was found in:
+
+![Searching the backlog](docs/backlog-search.svg)
 
 ## Usage limits, as Claude Code reports them
 
@@ -344,6 +348,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `p` | park an ask with a reason · on a parked row, take it back up |
 | `d` · `ctrl+z` | dispatch · put back the last thing you cleared |
 | `/` | on decisions: search every repo's — `enter` keeps the matches, `esc` on one goes to it in its repo |
+| `/` · `o` `O` · `p` `s` | on the backlog: search by `#number`, title or body · order, and turn it round · one product, one source |
 | `,` · `:` · `?` | settings · command palette · all keys |
 | `U` | upgrade to the published build — runs behind the cockpit, then comes straight back on the new build |
 | `q` | quit |
@@ -363,7 +368,8 @@ To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key alr
 | product panel | `panel.overview` `panel.review` `panel.team` `panel.shipped` `panel.history` `panel.sessions` `sessions.mark` `sessions.adopt` |
 | settings | `settings.edit` |
 | search | `search.next` `search.prev` `search.clear` |
-| backlog · decisions | `list.down` `list.up` `list.open` `list.pick` `list.dispatch` · on decisions, `search.open` too |
+| backlog · decisions | `list.down` `list.up` `list.open` `list.pick` `list.dispatch` `search.open` |
+| backlog | `backlog.order` `backlog.reverse` `backlog.product` `backlog.source` `backlog.first` `backlog.last` `backlog.page.down` `backlog.page.up` |
 
 </details>
 
