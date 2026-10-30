@@ -218,7 +218,7 @@ func TestWhatMatchedIsLitWhereItSits(t *testing.T) {
 func TestASnippetStartsOnAWordBeforeTheMatch(t *testing.T) {
 	text := "one two three four five six seven eight nine ten eleven twelve"
 	at := strings.Index(text, "eleven")
-	got, lit := decSnippet(text, at, map[int]bool{at: true, at + 1: true})
+	got, lit := textSnippet(text, at, map[int]bool{at: true, at + 1: true})
 	if got != "…seven eight nine ten eleven twelve" {
 		t.Errorf("a snippet should start on a word a little before the match, got %q", got)
 	}
@@ -228,7 +228,7 @@ func TestASnippetStartsOnAWordBeforeTheMatch(t *testing.T) {
 			t.Errorf("lit offset %d is %q, not the match", p, r[p])
 		}
 	}
-	if got, _ := decSnippet(text, 4, nil); strings.HasPrefix(got, "…") {
+	if got, _ := textSnippet(text, 4, nil); strings.HasPrefix(got, "…") {
 		t.Errorf("a match near the start is quoted from the start, got %q", got)
 	}
 }
