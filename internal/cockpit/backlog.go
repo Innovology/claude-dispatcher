@@ -6,11 +6,11 @@ package cockpit
 // ticket's detail plus the "dispatch as" preview and the picked list.
 //
 // What the table holds and in what order — grouped by product, narrowed by
-// source and product, sorted with `o` — is backlog_order.go. This file draws
-// it and handles its keys. The table is windowed on the cursor, because a
-// backlog is routinely longer than the screen and a table that stopped at the
-// bottom edge read as the whole of it, with j walking the cursor off into rows
-// nobody could see.
+// source and product, sorted with `o` — is backlog_order.go, and `/` is
+// blsearch.go. This file draws it and handles its keys. The table is windowed
+// on the cursor, because a backlog is routinely longer than the screen and a
+// table that stopped at the bottom edge read as the whole of it, with j
+// walking the cursor off into rows nobody could see.
 
 import (
 	"slices"
@@ -151,12 +151,17 @@ func (m model) viewBacklog(w, h int) string {
 // blFooterLines is how many lines the table pane's footer takes.
 const blFooterLines = 2
 
-// blHeadLines is how many lines sit above the table: the title and the column
-// heads.
-const blHeadLines = 2
+// blHeadLines is how many lines sit above the table: the title, the query line
+// while a search is up, and the column heads.
+func (m model) blHeadLines() int {
+	if m.blSearchShown() {
+		return 3
+	}
+	return 2
+}
 
 // blTableHeight is how many lines the table gets in a pane h tall.
-func (m model) blTableHeight(h int) int { return maxi(h-blHeadLines-blFooterLines, 0) }
+func (m model) blTableHeight(h int) int { return maxi(h-m.blHeadLines()-blFooterLines, 0) }
 
 // blPage is how far pgdown and pgup move: a screen of the table, less a line,
 // so the ticket at the edge stays in sight to read on from.
@@ -178,6 +183,9 @@ func (m model) backlogLeft(rows []blRow, pickedCount, leftW, h int) string {
 		fg(cFaint, m.blViewLabel()),
 		leftW,
 	)}
+	if m.blSearchShown() {
+		lines = append(lines, m.blQueryLine(rows, leftW))
+	}
 	lines = append(lines, "  "+row(innerW, "",
 		c("", 4, cFaint),
 		c("TICKET", 17, cFaint),
@@ -201,17 +209,44 @@ func (m model) backlogLeft(rows []blRow, pickedCount, leftW, h int) string {
 // blPaneHelp is the table pane's own key line: how to change what the table
 // shows. The footer under the whole screen names what to do with a ticket.
 func (m model) blPaneHelp() string {
+	if m.blTyping {
+		return "#123 names a number · words match the title or body · enter keeps the matches"
+	}
 	return strings.Join([]string{
+		m.keyHint("search.open", "search"),
 		m.keyHint("backlog.order", "order"), m.keyHint("backlog.reverse", "reverse"),
 		m.keyHint("backlog.product", "product"), m.keyHint("backlog.source", "source"),
 		prettyKey(m.keys.KeyFor("backlog.first")) + "/" + prettyKey(m.keys.KeyFor("backlog.last")) + " ends",
 	}, " · ")
 }
 
+// blQueryLine is the query as it is drawn, with a cursor while it is typed and
+// what it found once there is anything to find.
+func (m model) blQueryLine(rows []blRow, w int) string {
+	q := "/" + m.blQuery
+	if m.blTyping {
+		q += "▏"
+	}
+	right := "#123 · a title · a word from the body"
+	if m.blSearching() {
+		groups := map[string]bool{}
+		for _, r := range rows {
+			groups[r.group] = true
+		}
+		right = countOf(len(rows), "match", "matches") + " in " + countOf(len(groups), "product", "products")
+		if len(rows) == 0 {
+			right = "no match"
+		}
+	}
+	return backlogSpread(fg(cSearchHit, q), fg(cFaint, right), w)
+}
+
 // blTable is the table's lines, product group by product group, windowed on
 // the cursor.
 //
-// A group starts with a divider naming it and counting its tickets. Where the window cuts the table, its top line says how many tickets are
+// A group starts with a divider naming it and counting its tickets, and a hit
+// found in its body or labels carries the words that matched on a line under
+// it. Where the window cuts the table, its top line says how many tickets are
 // above — and, when the divider naming the product on screen has scrolled
 // away, which product that is — and its bottom line how many are below. A
 // table that simply stopped at the bottom edge read as the whole backlog.
@@ -222,17 +257,17 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 	if len(rows) == 0 {
 		return []string{"  " + fg(cFaint, truncate(m.blEmpty(), w)) + "  "}
 	}
-	o := m.blOrderNow()
+	found, o := m.blFoundNow(), m.blOrderNow()
 	sel := clampCursor(m.backlogCursor, len(rows))
 	counts := map[string]int{}
 	for _, r := range rows {
 		counts[r.group]++
 	}
 
-	// Each line is a ticket or the divider above one.
+	// Each line is a ticket, the divider above one, or the quote under one.
 	type line struct {
-		row int
-		div bool
+		row       int
+		div, snip bool
 	}
 	var lines []line
 	first := make([]int, len(rows)) // the line each ticket is drawn on
@@ -242,6 +277,9 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 		}
 		first[i] = len(lines)
 		lines = append(lines, line{row: i})
+		if found.quotes(r.at) {
+			lines = append(lines, line{row: i, snip: true})
+		}
 	}
 
 	start, end := window(first[sel], len(lines), h)
@@ -251,8 +289,10 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 		switch {
 		case ln.div:
 			out = append(out, blDivider(w, r.group+" · "+itoa(counts[r.group])))
+		case ln.snip:
+			out = append(out, blSnipLine(found, r, w))
 		default:
-			out = append(out, m.blTicketLine(r, ln.row == sel, o, w))
+			out = append(out, m.blTicketLine(found, r, ln.row == sel, o, w))
 		}
 	}
 
@@ -295,9 +335,9 @@ func blDivider(w int, label string) string {
 }
 
 // blTicketLine is one ticket's row: what is picked or under the cursor, its
-// priority, id and title, its repo and source, and the figure the table is
-// ordered by.
-func (m model) blTicketLine(r blRow, cursor bool, o blOrder, w int) string {
+// priority, id and title — lit where a search matched them — its repo and
+// source, and the figure the table is ordered by.
+func (m model) blTicketLine(found *blFound, r blRow, cursor bool, o blOrder, w int) string {
 	t := r.t
 	pick := m.picked[t.id]
 	bg := ""
@@ -340,6 +380,7 @@ func (m model) blTicketLine(r blRow, cursor bool, o blOrder, w int) string {
 	if t.taken != "" {
 		state, stateColor = "dispatched", cGreen
 	}
+	lit := found.lit(r.at)
 
 	edgeCh := " "
 	if edge != "" {
@@ -349,14 +390,21 @@ func (m model) blTicketLine(r blRow, cursor bool, o blOrder, w int) string {
 	body := row(w, bg,
 		c(marker, 2, cMid),
 		c(priGlyph, 2, priColor[t.pri]),
-		c(t.id, 17, idColor),
-		flexc(t.title, titleColor),
+		c(t.id, 17, idColor).highlight(lit.id, cSearchHit),
+		flexc(t.title, titleColor).highlight(lit.title, cSearchHit),
 		c(t.repo, 17, cDim),
 		cr(sourceMeta[t.src].label, 9, sourceMeta[t.src].color),
 		cr(state, 12, stateColor),
 	)
 	rightGut := paint("", bg, "  ")
 	return leftGut + body + rightGut
+}
+
+// blSnipLine is the line under a hit found in its body or labels: the words
+// that matched, lit, under the title they explain.
+func blSnipLine(found *blFound, r blRow, w int) string {
+	text, lit, _ := found.snippet(r.at)
+	return "  " + row(w, "", c("", 4+17, ""), flexc(text, cMid).highlight(lit, cSearchHit)) + "  "
 }
 
 // blSelectedRow is the row under the (clamped) cursor; ok is false when the
@@ -384,8 +432,9 @@ func blDates(t ticket) string {
 // backlogRight builds the selected-ticket detail pane.
 func (m model) backlogRight(rows []blRow, pickedCount, rightW, h int) string {
 	t := m.ticketSelected()
+	var lit blLit
 	if r, ok := blSelectedRow(rows, m.backlogCursor); ok {
-		t = r.t
+		t, lit = r.t, m.blFoundNow().lit(r.at)
 	}
 	innerW := rightW - 2*pad
 
@@ -406,14 +455,14 @@ func (m model) backlogRight(rows []blRow, pickedCount, rightW, h int) string {
 		fg(priColor[t.pri], t.pri),
 		rightW,
 	))
-	top = append(top, wrapL(fg(cWhite, t.title)))
+	top = append(top, wrapL(paintRuns(cWhite, cSearchHit, "", t.title, lit.title)))
 	top = append(top, wrapL(fg(cDim, backlogWhere(t))))
 	if d := blDates(t); d != "" {
 		top = append(top, wrapL(fg(cFaint, d)))
 	}
 	top = append(top, blank)
-	for _, ln := range backlogWrap(t.body, innerW) {
-		top = append(top, wrapL(fg(cMid, ln)))
+	for _, ln := range decWrapLit(t.body, innerW, lit.prose[blProseBody], cMid) {
+		top = append(top, wrapL(ln))
 	}
 	top = append(top, blank)
 	top = append(top, wrapL(takenLine))
@@ -475,6 +524,11 @@ func backlogFeature(t ticket) string {
 // dispatches what the cursor is on, and a cursor held by index alone would
 // be on a different ticket after every `o`.
 func (m model) updateBacklog(k string) (model, tea.Cmd) {
+	// A query being typed takes the key as it was pressed: every letter is text,
+	// so none may be resolved into something else first.
+	if m.blTyping {
+		return m.updateBlSearch(k)
+	}
 	if k = m.keys.Resolve(keymap.List, k); k == "" {
 		return m, nil
 	}
@@ -496,13 +550,21 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 		return m.blTo(m.backlogCursor + m.blPage()), nil
 	case "pgup":
 		return m.blTo(m.backlogCursor - m.blPage()), nil
+	case "/":
+		// What was typed before is kept, so `/` on a search already up edits it.
+		m.blTyping = true
+		return m, nil
+	case "esc":
+		if m.blSearchShown() {
+			return m.blSearchClear(), nil
+		}
+		return m, nil
 	case "o":
-		m.blOrder = blNextOrder(m.blOrderNow())
-		return m.blSync(), nil
+		return m.blSetOrder(blNextOrder(m.blOrderNow(), m.blSearching())).blSync(), nil
 	case "O":
-		m.blOrder = m.blOrderNow()
-		m.blOrder.rev = !m.blOrder.rev
-		return m.blSync(), nil
+		o := m.blOrderNow()
+		o.rev = !o.rev
+		return m.blSetOrder(o).blSync(), nil
 	case "p":
 		// A product that has since left the backlog is not in the list, so
 		// the next press starts it again from the first.

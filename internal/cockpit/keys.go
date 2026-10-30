@@ -276,6 +276,10 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateDecisions(k)
 		return mm, cmd
 	}
+	if m.lens == "backlog" && m.blTyping {
+		mm, cmd := m.updateBacklog(k)
+		return mm, cmd
+	}
 
 	// From here down the key is whatever the human bound it to. Resolving
 	// translates it back to the action's canonical spelling, which is what the
@@ -344,6 +348,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clMarked = map[string]bool{}
 		m.clExpanded, m.clFoldRow = map[string]bool{}, ""
 		m = m.decSearchClear()
+		m.blQuery, m.blTyping, m.blFound = "", false, nil
 		return m, nil
 	}
 

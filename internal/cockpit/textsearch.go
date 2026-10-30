@@ -212,15 +212,25 @@ type textHit struct {
 // fuzzy score one word can reach, which stays in the hundreds.
 const textIDBonus = 1 << 20
 
+// textIDs is how a query word names a record by one of its ids.
+type textIDs struct {
+	// key spells a query word as an id, "" when it cannot be one.
+	key func(word string) string
+	// score is how well that spelling names one of a record's ids: 0 for not
+	// at all, textIDBonus for exactly.
+	score func(q, rec string) int
+	// only says the word names ids and nothing else, so it is not matched in
+	// any head or prose. nil for never.
+	only func(word string) bool
+}
+
 // search is the query's hits, best first: the highest score summed over its
 // words, then the more of them that matched in the head, then the order the
 // records were added in — so a redraw never reshuffles hits that tie. ok is
 // false when the query has no words or there is nothing to search.
 //
-// idKey spells a query word as an id ("" when it cannot be one), and idScore
-// says how well that spelling names one of a record's ids: 0 for not at all,
-// textIDBonus for exactly.
-func (ix *textIndex) search(query string, idKey func(string) string, idScore func(q, rec string) int) (terms []textTerm, hits []textHit, ok bool) {
+// ids says how a query word names a record by its id.
+func (ix *textIndex) search(query string, ids textIDs) (terms []textTerm, hits []textHit, ok bool) {
 	words := strings.Fields(query)
 	n := len(ix.heads)
 	if len(words) == 0 || n == 0 {
@@ -230,7 +240,7 @@ func (ix *textIndex) search(query string, idKey func(string) string, idScore fun
 	matched := make([]int, n)
 
 	for _, word := range words {
-		t := textTerm{key: idKey(word), byID: make([]bool, n), heads: make([]int32, n), v: &ix.words}
+		t := textTerm{key: ids.key(word), byID: make([]bool, n), heads: make([]int32, n), v: &ix.words}
 		if isAlnum(word) {
 			t.v = &ix.runs
 		}
@@ -248,7 +258,7 @@ func (ix *textIndex) search(query string, idKey func(string) string, idScore fun
 			for r, keys := range ix.keys {
 				top := 0
 				for _, k := range keys {
-					top = maxi(top, idScore(t.key, k))
+					top = maxi(top, ids.score(t.key, k))
 				}
 				if top > 0 {
 					t.byID[r] = true
@@ -256,37 +266,9 @@ func (ix *textIndex) search(query string, idKey func(string) string, idScore fun
 				}
 			}
 		}
-		t.headMt = fuzzy.Rank(word, ix.heads)
-		for i, mt := range t.headMt {
-			t.heads[mt.Index] = int32(i + 1)
-			take(mt.Index, mt.Score, true)
-		}
-
-		cands, back := t.v.candidates(word)
-		t.wordMt = fuzzy.Rank(word, cands)
 		t.words = make([]int32, len(t.v.words))
-		for i := range t.wordMt {
-			t.wordMt[i].Index = int(back[t.wordMt[i].Index])
-			t.words[t.wordMt[i].Index] = int32(i + 1)
-		}
-		if len(t.wordMt) > 0 {
-			for r := 0; r < n; r++ {
-				for _, o := range t.v.of(r) {
-					k := t.words[o.word]
-					if k == 0 {
-						continue
-					}
-					mt := t.wordMt[k-1]
-					if s := &all[r].snip; !s.ok || mt.Score > s.score {
-						s.field, s.score, s.ok = int(o.field), mt.Score, true
-						s.at = int(o.at)
-						if len(mt.Pos) > 0 {
-							s.at += mt.Pos[0]
-						}
-					}
-					take(r, mt.Score, false)
-				}
-			}
+		if ids.only == nil || !ids.only(word) {
+			ix.matchText(word, &t, all, take)
 		}
 
 		for r := 0; r < n; r++ {
@@ -315,6 +297,45 @@ func (ix *textIndex) search(query string, idKey func(string) string, idScore fun
 		return hits[a].inHead > hits[b].inHead
 	})
 	return terms, hits, true
+}
+
+// matchText matches one query word in every record's head, as fzf matches a
+// line, and inside one word of every record's prose, filling in what t matched
+// and handing each record's best to take. A prose match is also where its
+// record's snippet comes from, if it beats the one it has.
+func (ix *textIndex) matchText(word string, t *textTerm, all []textHit, take func(r, score int, head bool)) {
+	t.headMt = fuzzy.Rank(word, ix.heads)
+	for i, mt := range t.headMt {
+		t.heads[mt.Index] = int32(i + 1)
+		take(mt.Index, mt.Score, true)
+	}
+
+	cands, back := t.v.candidates(word)
+	t.wordMt = fuzzy.Rank(word, cands)
+	for i := range t.wordMt {
+		t.wordMt[i].Index = int(back[t.wordMt[i].Index])
+		t.words[t.wordMt[i].Index] = int32(i + 1)
+	}
+	if len(t.wordMt) == 0 {
+		return
+	}
+	for r := range all {
+		for _, o := range t.v.of(r) {
+			k := t.words[o.word]
+			if k == 0 {
+				continue
+			}
+			mt := t.wordMt[k-1]
+			if s := &all[r].snip; !s.ok || mt.Score > s.score {
+				s.field, s.score, s.ok = int(o.field), mt.Score, true
+				s.at = int(o.at)
+				if len(mt.Pos) > 0 {
+					s.at += mt.Pos[0]
+				}
+			}
+			take(r, mt.Score, false)
+		}
+	}
 }
 
 // litProse is what the query's words matched in record r's prose, as rune

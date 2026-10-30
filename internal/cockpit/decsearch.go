@@ -155,7 +155,7 @@ func (ix *decIndex) search(query string) *decFound {
 	if ix == nil {
 		return nil
 	}
-	terms, hits, ok := ix.textIndex.search(query, decIDKey, decIDScore)
+	terms, hits, ok := ix.textIndex.search(query, textIDs{key: decIDKey, score: decIDScore})
 	if !ok {
 		return nil
 	}

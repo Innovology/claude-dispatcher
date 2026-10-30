@@ -161,7 +161,7 @@ var Defaults = []Binding{
 	// ---- search -------------------------------------------------------------
 	{Action: "search.open", Scope: Products, Key: "/", Help: "search · fzf matching, live, in place", Section: "search"},
 	{Action: "search.open", Scope: Editor, Key: "/"},
-	{Action: "search.open", Scope: List, Key: "/", Help: "search every repo's decisions · by number, title or what they say", Section: "the other lenses"},
+	{Action: "search.open", Scope: List, Key: "/", Help: "search · decisions by number, title or what they say · the backlog by #number, title or body", Section: "the other lenses"},
 	{Action: "search.next", Scope: Search, Key: "n", Help: "jump to the next match", Section: "search"},
 	{Action: "search.prev", Scope: Search, Key: "ctrl+n", Help: "jump to the previous match", Section: "search"},
 	{Action: "search.clear", Scope: Search, Key: "esc", Help: "clear the search", Section: "search"},

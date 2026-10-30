@@ -8,12 +8,12 @@ import (
 )
 
 // backlogFixture installs ts as the backlog and order as the products lens's
-// product order, restoring both after.
+// product order, restoring both (and the search index cut from them) after.
 func backlogFixture(t *testing.T, order []string, ts []ticket) {
 	t.Helper()
-	prevTickets, prevOrder := backlogTickets, productOrder
-	t.Cleanup(func() { backlogTickets, productOrder = prevTickets, prevOrder })
-	backlogTickets, productOrder = ts, order
+	prevTickets, prevOrder, prevIndex := backlogTickets, productOrder, backlogIndex
+	t.Cleanup(func() { backlogTickets, productOrder, backlogIndex = prevTickets, prevOrder, prevIndex })
+	backlogTickets, productOrder, backlogIndex = ts, order, nil
 }
 
 // backlogModel is a cockpit on the backlog lens, sized to show the detail pane.
@@ -113,12 +113,12 @@ func TestBacklogOrderKeysAndTheColumnThatShowsThem(t *testing.T) {
 	})
 	m := backlogModel(40)
 	var seen []string
-	for range blOrders {
+	for range blOrders(false) {
 		seen = append(seen, m.blOrderNow().by)
 		m = press(m, "o")
 	}
-	if !slices.Equal(seen, blOrders) {
-		t.Errorf("o visited %v, want %v", seen, blOrders)
+	if !slices.Equal(seen, blOrders(false)) {
+		t.Errorf("o visited %v, want %v", seen, blOrders(false))
 	}
 	if got := m.blOrderNow(); got.by != blByPriority || got.rev {
 		t.Errorf("a full turn of o is back at priority, got %+v", got)
@@ -223,7 +223,7 @@ func TestBacklogCursorStaysOnItsTicket(t *testing.T) {
 
 	// A load that brings the tickets back in another order.
 	backlogTickets = []ticket{backlogTickets[2], backlogTickets[1], backlogTickets[0]}
-	if m = m.blSync(); m.ticketSelected().id != "a#2" {
+	if m = m.blSearchRefresh(); m.ticketSelected().id != "a#2" {
 		t.Errorf("a load moved the cursor to %q", m.ticketSelected().id)
 	}
 

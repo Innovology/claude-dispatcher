@@ -59,6 +59,10 @@ func (m model) helpNotes() map[string][]helpRow {
 		"products · lens 2": {
 			{"esc", "close the panel · again closes the assignment editor"},
 		},
+		"the backlog · lens 3": {
+			{prettyKey(m.keys.KeyFor("search.open")), "search it · #123 is a number, words match the title or body"},
+			{"", "the matches stay grouped by product, best first · esc puts the rest back"},
+		},
 		"the other lenses": {
 			{"", "enter keeps the matches · esc on one goes to it in its repo"},
 		},

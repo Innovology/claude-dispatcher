@@ -1,8 +1,9 @@
 package cockpit
 
 // backlog_order.go is what the BACKLOG's table holds, and in what order:
-// every open ticket, narrowed by source (`s`) and product (`p`), grouped by
-// the product it belongs to, and each group read in the order `o` chose.
+// every open ticket, narrowed by source (`s`), product (`p`) and the `/`
+// query, grouped by the product it belongs to, and each group read in the
+// order `o` chose.
 //
 // The groups are products because a product is how this cockpit groups
 // everything — the products lens, triage's product column, the dispatch
@@ -13,6 +14,7 @@ package cockpit
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -30,14 +32,33 @@ const (
 	blByStale    = "stale"
 	blByLabel    = "label"
 	blByRepo     = "repo"
+	blByMatch    = "match"
 )
 
-// blOrders is what `o` steps through.
-var blOrders = []string{blByPriority, blByFiled, blByStale, blByLabel, blByRepo}
+// blOrders is what `o` steps through. Best match leads while a query is up and
+// is not offered otherwise: with nothing searched, there is nothing to match.
+func blOrders(searching bool) []string {
+	orders := []string{blByPriority, blByFiled, blByStale, blByLabel, blByRepo}
+	if searching {
+		return append([]string{blByMatch}, orders...)
+	}
+	return orders
+}
 
-// blOrderNow is the order the table is drawn in: priority until `o` says
-// otherwise.
+// blOrderNow is the order the table is drawn in.
+//
+// There are two, one for browsing and one for a search, because a search reads
+// best first and esc should hand back the order you left rather than whatever
+// you sorted the hits by. Each defaults on its own: priority while browsing,
+// best match while searching.
 func (m model) blOrderNow() blOrder {
+	if m.blSearching() {
+		o := m.blHitOrder
+		if o.by == "" {
+			o.by = blByMatch
+		}
+		return o
+	}
 	o := m.blOrder
 	if o.by == "" {
 		o.by = blByPriority
@@ -45,10 +66,22 @@ func (m model) blOrderNow() blOrder {
 	return o
 }
 
+// blSetOrder is blOrderNow's setter: the search's order while one is up, the
+// browsing order otherwise.
+func (m model) blSetOrder(o blOrder) model {
+	if m.blSearching() {
+		m.blHitOrder = o
+	} else {
+		m.blOrder = o
+	}
+	return m
+}
+
 // blNextOrder is the order after o in blOrders, the right way round.
-func blNextOrder(o blOrder) blOrder {
-	i := slices.Index(blOrders, o.by)
-	return blOrder{by: blOrders[(i+1)%len(blOrders)]}
+func blNextOrder(o blOrder, searching bool) blOrder {
+	orders := blOrders(searching)
+	i := slices.Index(orders, o.by)
+	return blOrder{by: orders[(i+1)%len(orders)]}
 }
 
 // blOrderLabel is how the header names an order. Each says which end comes
@@ -60,6 +93,7 @@ func blOrderLabel(o blOrder) string {
 		blByStale:    {"stalest first", "freshest first"},
 		blByLabel:    {"by label, a → z", "by label, z → a"},
 		blByRepo:     {"by repo, a → z", "by repo, z → a"},
+		blByMatch:    {"best match first", "weakest match first"},
 	}[o.by]
 	if o.rev {
 		return words[1]
@@ -110,13 +144,17 @@ func blGroups(ts []ticket) []string {
 // blRow is one ticket on the table.
 type blRow struct {
 	t     ticket
-	at    int // its index in backlogTickets
+	at    int // its index in backlogTickets, which is what a search hit names
 	group string
+	// hit is what the query found on it: its score, and how many of the
+	// query's words matched best in its id or title. Zero with no query.
+	hit textHit
 }
 
-// blRows is the table: the tickets the source and product filters leave,
-// group by group, each group in the order chosen.
+// blRows is the table: the tickets the source, product and query leave, group
+// by group, each group in the order chosen.
 func (m model) blRows() []blRow {
+	found := m.blFoundNow()
 	var rows []blRow
 	for i, t := range backlogTickets {
 		if m.srcFilter != "" && m.srcFilter != "all" && t.src != m.srcFilter {
@@ -126,13 +164,43 @@ func (m model) blRows() []blRow {
 		if m.blProduct != "" && g != m.blProduct {
 			continue
 		}
-		rows = append(rows, blRow{t: t, at: i, group: g})
+		r := blRow{t: t, at: i, group: g}
+		if found != nil {
+			h, hit := found.hits[i]
+			if !hit {
+				continue
+			}
+			r.hit = h
+		}
+		rows = append(rows, r)
 	}
 
 	o := m.blOrderNow()
 	groupAt := map[string]int{}
 	for i, g := range blGroups(backlogTickets) {
 		groupAt[g] = i
+	}
+	// Read best first, the groups go by their best hit too. Otherwise "#123"
+	// would put the 1230s of the first product above the one ticket it names,
+	// in the third — and the cursor, which a search puts on the top row, on a
+	// ticket that is not the answer.
+	if o.by == blByMatch && !o.rev {
+		best := map[string]blRow{}
+		for _, r := range rows {
+			if b, ok := best[r.group]; !ok || blCompare(blByMatch, r, b, false) < 0 {
+				best[r.group] = r
+			}
+		}
+		groups := slices.Collect(maps.Keys(best))
+		slices.SortStableFunc(groups, func(a, b string) int {
+			if c := blCompare(blByMatch, best[a], best[b], false); c != 0 {
+				return c
+			}
+			return cmp.Compare(groupAt[a], groupAt[b])
+		})
+		for i, g := range groups {
+			groupAt[g] = i
+		}
 	}
 	slices.SortStableFunc(rows, func(a, b blRow) int {
 		if c := cmp.Compare(groupAt[a.group], groupAt[b.group]); c != 0 {
@@ -180,6 +248,11 @@ func blCompare(by string, a, b blRow, rev bool) int {
 	case blByRepo:
 		am, bm = a.t.repo == "", b.t.repo == ""
 		c = strings.Compare(strings.ToLower(a.t.repo), strings.ToLower(b.t.repo))
+	case blByMatch:
+		// Best first: the higher score, then the more of the query in the title.
+		if c = cmp.Compare(b.hit.score, a.hit.score); c == 0 {
+			c = cmp.Compare(b.hit.inHead, a.hit.inHead)
+		}
 	}
 	switch {
 	case am && bm:
@@ -222,6 +295,19 @@ func blTagKey(tags []string) string {
 	return strings.Join(low, "\x00")
 }
 
+// blFoundNow is what the query found, for the backlog on screen: the search
+// the last keystroke ran, or — where a load has since replaced the backlog it
+// ran over — the same query run again, so a hit can never name the wrong row.
+func (m model) blFoundNow() *blFound {
+	if !m.blSearching() {
+		return nil
+	}
+	if f := m.blFound; f != nil && f.ix == currentBlIndex() {
+		return f
+	}
+	return currentBlIndex().search(m.blQuery)
+}
+
 // backlogList is the tickets on the table, in the order they are drawn.
 func (m model) backlogList() []ticket {
 	rows := m.blRows()
@@ -246,8 +332,11 @@ func (m model) ticketSelected() ticket {
 // thing that can empty it: a backlog with nothing in it is not a filter that
 // matched nothing.
 func (m model) blEmpty() string {
-	if len(backlogTickets) == 0 {
+	switch {
+	case len(backlogTickets) == 0:
 		return "nothing in the backlog · github issues, linear and azure boards assigned to you show here"
+	case m.blSearching():
+		return "no ticket matches /" + m.blQuery + " · esc clears the search"
 	}
 	return "nothing for this product and source · " + prettyKey(m.keys.KeyFor("backlog.product")) +
 		" and " + prettyKey(m.keys.KeyFor("backlog.source")) + " widen it"

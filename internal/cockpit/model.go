@@ -121,12 +121,18 @@ type model struct {
 	picked        map[string]bool
 	srcFilter     string
 	// The backlog's view (backlog_order.go): the product it is narrowed to (""
-	// for every product), the order it is read in, and blSelID, the ticket the
-	// cursor is on — held by id so a re-sort, a filter or a load leaves the
-	// cursor where it was.
-	blProduct string
-	blOrder   blOrder
-	blSelID   string
+	// for every product), the order it is read in while browsing and while a
+	// search is up, and blSelID, the ticket the cursor is on — held by id so a
+	// re-sort, a filter or a load leaves the cursor where it was.
+	blProduct  string
+	blOrder    blOrder
+	blHitOrder blOrder
+	blSelID    string
+	// The backlog's `/` search (blsearch.go): the query, "" when none is up,
+	// its line having the keyboard, and what it found.
+	blQuery  string
+	blTyping bool
+	blFound  *blFound
 
 	shipFx     *shipFxState
 	justLanded string
@@ -437,7 +443,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(boot, queued)
 		}
 		applySnapshot(snapshot(msg))
-		m = m.noteQuota().decSearchRefresh().blSync()
+		m = m.noteQuota().decSearchRefresh().blSearchRefresh()
 		// The fleet is rebuilt from the fresh records; fold the user's ordering
 		// and cleared set back onto it before anything renders, then re-key the
 		// cursor onto the row it was on — a rank that changed in this refresh

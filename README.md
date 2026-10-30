@@ -363,7 +363,7 @@ To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key alr
 | product panel | `panel.overview` `panel.review` `panel.team` `panel.shipped` `panel.history` `panel.sessions` `sessions.mark` `sessions.adopt` |
 | settings | `settings.edit` |
 | search | `search.next` `search.prev` `search.clear` |
-| backlog · decisions | `list.down` `list.up` `list.open` `list.pick` `list.dispatch` · on decisions, `search.open` too |
+| backlog · decisions | `list.down` `list.up` `list.open` `list.pick` `list.dispatch` `search.open` |
 | backlog | `backlog.order` `backlog.reverse` `backlog.product` `backlog.source` `backlog.first` `backlog.last` `backlog.pagedown` `backlog.pageup` |
 
 </details>
