@@ -526,3 +526,47 @@ func TestTheQuoteIsTheWordTheTitleDoesNotShow(t *testing.T) {
 		t.Errorf("quoted %q with %q lit, want the proration it was found by", text, string(litText))
 	}
 }
+
+// A page is a screen of lines, not of tickets. A quoted hit takes two lines and
+// a product's divider one, so paging by tickets jumped past tickets that were
+// in neither the window before the jump nor the one after it.
+func TestAPageSkipsNoTicket(t *testing.T) {
+	var ts []ticket
+	for i := 0; i < 60; i++ {
+		ts = append(ts, ticket{id: "r#" + itoa(i), title: "ticket " + itoa(i), product: []string{"alpha", "beta"}[i/30],
+			pri: "med", filed: daysAgo(100 - i), body: "a zebra crossing number " + itoa(i)})
+	}
+	backlogFixture(t, []string{"alpha", "beta"}, ts)
+	m := press(blType(backlogModel(24), "zebra"), "enter")
+	rows := m.blRows()
+	drawn := func(m model) map[string]bool {
+		seen := map[string]bool{}
+		for _, l := range m.blTable(rows, 100, m.blTableHeight(m.bodyHeight())) {
+			for _, r := range rows {
+				if strings.Contains(stripAnsi(l), r.t.id+" ") {
+					seen[r.t.id] = true
+				}
+			}
+		}
+		return seen
+	}
+	for step := 0; step < 6; step++ {
+		before, from := drawn(m), m.backlogCursor
+		m = press(m, "pgdown")
+		after, to := drawn(m), m.backlogCursor
+		if to <= from && from < len(rows)-1 {
+			t.Fatalf("pgdown did not move: %d → %d", from, to)
+		}
+		for i := from; i <= to; i++ {
+			if id := rows[i].t.id; !before[id] && !after[id] {
+				t.Errorf("pgdown %d → %d skipped %s, drawn in neither window", from, to, id)
+			}
+		}
+	}
+	for m.backlogCursor > 0 {
+		from := m.backlogCursor
+		if m = press(m, "pgup"); m.backlogCursor >= from {
+			t.Fatalf("pgup did not move from %d", from)
+		}
+	}
+}

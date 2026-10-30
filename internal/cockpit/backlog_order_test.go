@@ -184,8 +184,10 @@ func TestBacklogScrollsWithTheCursor(t *testing.T) {
 		t.Errorf("g selected %q", got)
 	}
 	m = press(m, "pgdown")
-	if m.backlogCursor != m.blPage() {
-		t.Errorf("pgdown moved to %d, want a page (%d)", m.backlogCursor, m.blPage())
+	// One product, no quotes: a ticket a line under its divider, so a page of
+	// lines, less three, lands on the ticket a table height less three down.
+	if want := m.blTableHeight(m.bodyHeight()) - 3; m.backlogCursor != want {
+		t.Errorf("pgdown moved to %d, want %d", m.backlogCursor, want)
 	}
 	if out := stripAnsi(m.View()); !strings.Contains(out, "▸ · "+m.ticketSelected().id) {
 		t.Errorf("the cursor's ticket must be on screen after pgdown:\n%s", out)

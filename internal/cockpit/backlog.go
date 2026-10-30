@@ -160,9 +160,55 @@ func (m model) blHeadLines() int {
 // blTableHeight is how many lines the table gets in a pane h tall.
 func (m model) blTableHeight(h int) int { return maxi(h-m.blHeadLines()-blFooterLines, 0) }
 
-// blPage is how far pgdown and pgup move: a screen of the table, less a line,
-// so the ticket at the edge stays in sight to read on from.
-func (m model) blPage() int { return maxi(m.blTableHeight(m.bodyHeight())-1, 1) }
+// blLine is one line of the table: a ticket, the divider above one, or the
+// quote under one. row is the ticket it belongs to.
+type blLine struct {
+	row       int
+	div, snip bool
+}
+
+// blLayout is the table's lines in the order they are drawn, and the line each
+// row's ticket is drawn on. It is the one place that says how many lines a
+// ticket costs, for drawing the window and for paging through it.
+func blLayout(rows []blRow, found *blFound) (lines []blLine, first []int) {
+	first = make([]int, len(rows))
+	for i, r := range rows {
+		if i == 0 || rows[i-1].group != r.group {
+			lines = append(lines, blLine{row: i, div: true})
+		}
+		first[i] = len(lines)
+		lines = append(lines, blLine{row: i})
+		if found.quotes(r.at) {
+			lines = append(lines, blLine{row: i, snip: true})
+		}
+	}
+	return lines, first
+}
+
+// blPaged is the row pgdown (dir 1) or pgup (dir -1) lands on from the cursor:
+// a table's height of LINES on, less three, not that many tickets. The window
+// is centred on the cursor, and the lines at its two edges can be the ones
+// that say what was cut off — two at the top, where a cut ticket's quote goes
+// with it — so three short of a screen is what leaves every ticket between
+// the old window and the new one drawn in one or the other. Counted in tickets, a page of quoted search hits jumped twice as
+// far as the screen showed and skipped tickets that were never drawn. It
+// always moves at least one ticket while there is one to move to.
+func (m model) blPaged(rows []blRow, dir int) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	_, first := blLayout(rows, m.blFoundNow())
+	cur := clampCursor(m.backlogCursor, len(rows))
+	target := first[cur] + dir*maxi(m.blTableHeight(m.bodyHeight())-3, 1)
+	i := cur
+	for i+dir >= 0 && i+dir < len(rows) && (first[i+dir]-target)*dir <= 0 {
+		i += dir
+	}
+	if i == cur {
+		i = clampCursor(cur+dir, len(rows))
+	}
+	return i
+}
 
 // backlogLeft builds the ticket table pane.
 func (m model) backlogLeft(rows []blRow, pickedCount, leftW, h int) string {
@@ -264,23 +310,7 @@ func (m model) blTable(rows []blRow, w, h int) []string {
 		counts[r.group]++
 	}
 
-	// Each line is a ticket, the divider above one, or the quote under one.
-	type line struct {
-		row       int
-		div, snip bool
-	}
-	var lines []line
-	first := make([]int, len(rows)) // the line each ticket is drawn on
-	for i, r := range rows {
-		if i == 0 || rows[i-1].group != r.group {
-			lines = append(lines, line{row: i, div: true})
-		}
-		first[i] = len(lines)
-		lines = append(lines, line{row: i})
-		if found.quotes(r.at) {
-			lines = append(lines, line{row: i, snip: true})
-		}
-	}
+	lines, first := blLayout(rows, found)
 
 	start, end := window(first[sel], len(lines), h)
 	out := make([]string, 0, end-start)
@@ -558,9 +588,9 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 	case "G", "end":
 		return m.blToIn(rows, len(rows)-1), nil
 	case "pgdown":
-		return m.blToIn(rows, m.backlogCursor+m.blPage()), nil
+		return m.blToIn(rows, m.blPaged(rows, 1)), nil
 	case "pgup":
-		return m.blToIn(rows, m.backlogCursor-m.blPage()), nil
+		return m.blToIn(rows, m.blPaged(rows, -1)), nil
 	case "/":
 		// What was typed before is kept, so `/` on a search already up edits it.
 		m.blTyping = true
