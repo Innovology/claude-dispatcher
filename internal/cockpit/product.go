@@ -717,6 +717,14 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 				m.notice = "resuming \"" + t.feature + "\"…"
 				return m, resumeCmd(t.id, text)
 			}
+			// A branchless record is a conversation, and a fresh dispatch
+			// would cut a branch for it — or, about a whole product, fail on a
+			// repo it never had. Resume starts one that never ran again from
+			// its own prompt, in its own folder, with this line after it.
+			if rec := recordByID(t.id); rec != nil && rec.Branchless {
+				m.notice = "starting \"" + t.feature + "\" again…"
+				return m, resumeCmd(t.id, text)
+			}
 			if text == "" {
 				m.notice = "nothing to dispatch — type what to change"
 				return m, nil

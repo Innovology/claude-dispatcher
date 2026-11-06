@@ -89,3 +89,29 @@ func TestABranchlessRowSaysNoBranchAndWhatItSpans(t *testing.T) {
 		t.Errorf("ref with a PR = %q", got)
 	}
 }
+
+// The product panel's resume overlay falls back to a fresh dispatch when a
+// record has no conversation to reopen. For a branchless record that fallback
+// would cut a branch named after it — or, about a whole product, fail on a repo
+// it never had — when what it asked for was a conversation. Resume already
+// starts a never-started record again from its own prompt and in its own
+// folder (dispatch.Resume's relaunch), so that is where a branchless one goes.
+func TestTheProductPanelStartsABranchlessRecordAgainRatherThanCuttingABranch(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	rec := &state.Dispatch{ID: "bl-1", Feature: "pp roadmap", Product: "pp", Branchless: true, Prompt: "where is pp going?"}
+	liveByID = map[string]*state.Dispatch{rec.ID: rec}
+
+	m := newModel()
+	m.resumeOpen, m.resumeText = true, "and the calendar?"
+	m.resumeAt = &resumeTarget{id: rec.ID, feature: rec.Feature}
+	m, cmd := m.updateProduct("enter")
+	if cmd == nil || strings.HasPrefix(m.notice, "dispatching") {
+		t.Fatalf("notice %q: a branchless record was dispatched afresh", m.notice)
+	}
+	// The panel calls the launch directly rather than through a seam, so what
+	// it handed back is the evidence: a launch reports as a launch.
+	if msg, isLaunch := cmd().(launchedMsg); isLaunch {
+		t.Errorf("the overlay launched a new dispatch: %+v", msg)
+	}
+}

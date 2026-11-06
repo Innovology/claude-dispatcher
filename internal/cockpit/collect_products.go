@@ -221,7 +221,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 					it: historyItem{
 						id:      rec.ID,
 						feature: rec.Feature,
-						repo:    rec.RepoName,
+						repo:    cqRepoOf(rec),
 						pr:      pr,
 						at:      prodAge(acted) + " ago",
 						ended:   cqEnded(rec),
@@ -282,7 +282,7 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 				it: shippedItem{
 					id:       rec.ID,
 					feature:  rec.Feature,
-					repo:     rec.RepoName,
+					repo:     cqRepoOf(rec),
 					pr:       pr,
 					at:       prodAge(la) + " ago",
 					session:  rec.SessionID,
