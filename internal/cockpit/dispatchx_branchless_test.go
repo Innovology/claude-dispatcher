@@ -6,8 +6,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/state"
 )
 
 // branchlessCall is the last conversation a form handed off, and how many.
@@ -220,5 +222,38 @@ func TestLaunchingAConversationWithNowhereToGoSaysSo(t *testing.T) {
 	msg, _ := launchBranchlessCmd(cfg, "", "gone", "x", "y", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, false, "")().(launchedMsg)
 	if !msg.failed || !strings.Contains(msg.reason, "gone") {
 		t.Errorf("a repo that is not there: %+v", msg)
+	}
+}
+
+// An account removed between the form and the launch is a launch that says so.
+func TestLaunchingAConversationOnAnAccountThatIsGoneSaysSo(t *testing.T) {
+	cfg := &config.Config{Roots: []string{seedRepoRoot(t, "player-app")}}
+	msg, _ := launchBranchlessCmd(cfg, "", "player-app", "x", "y", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, false, "work9")().(launchedMsg)
+	if !msg.failed || !strings.Contains(msg.reason, "work9") {
+		t.Errorf("a missing account: %+v", msg)
+	}
+}
+
+// A conversation that launched says where it went, in the words its row uses:
+// the repo it starts on, or all of the product.
+func TestALaunchedConversationSaysWhereItWent(t *testing.T) {
+	prev := launchConversation
+	t.Cleanup(func() { launchConversation = prev })
+	var asked dispatchpkg.Scope
+	launchConversation = func(s dispatchpkg.Scope, feature, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ bool, _ account.Account) (*state.Dispatch, error) {
+		asked = s
+		return &state.Dispatch{Feature: feature, RepoName: s.Focus, Product: s.Product, Branchless: true}, nil
+	}
+	cfg := &config.Config{
+		Roots:    []string{seedRepoRoot(t, "player-app", "playerpulse")},
+		Products: map[string][]string{"pp": {"player-app", "playerpulse"}},
+	}
+	msg, _ := launchBranchlessCmd(cfg, "pp", "", "pp roadmap", "y", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, false, "")().(launchedMsg)
+	if msg.failed || msg.notice != `dispatched "pp roadmap" → all of pp · no branch` || len(asked.Repos) != 2 {
+		t.Errorf("whole product: %+v, scope %+v", msg, asked)
+	}
+	msg, _ = launchBranchlessCmd(cfg, "", "playerpulse", "sync", "y", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, false, "")().(launchedMsg)
+	if msg.notice != `dispatched "sync" → playerpulse · no branch` || asked.Focus != "playerpulse" {
+		t.Errorf("from a repo: %+v, scope %+v", msg, asked)
 	}
 }

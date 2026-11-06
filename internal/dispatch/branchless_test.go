@@ -265,3 +265,19 @@ func TestResumingABranchlessDispatcherGivesItsReposAgain(t *testing.T) {
 		t.Errorf("--add-dir comes before the message, which it would swallow:\n%s", got.cmd)
 	}
 }
+
+// A folder that cannot be put back is said, not resumed into: claude would
+// open nowhere, and the human would be handed a session that is not theirs.
+func TestResumingABranchlessDispatcherWhoseFolderCannotBeMadeSaysSo(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	stubStart(t)
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &state.Dispatch{ID: state.NewID(), Feature: "sitrep", Slug: "sitrep", Branchless: true,
+		WorktreePath: filepath.Join(file, "sitrep"), SessionID: "sess-1", Status: state.StatusExited}
+	if _, _, err := Resume(d, ""); err == nil || !strings.Contains(err.Error(), "recreate") {
+		t.Errorf("Resume = %v, want it to say the folder could not be recreated", err)
+	}
+}

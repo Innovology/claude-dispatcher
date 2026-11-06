@@ -37,3 +37,21 @@ func TestABranchlessContractAsksForAnAnswerNotAPullRequest(t *testing.T) {
 		t.Error("a branch dispatch was told it has no branch")
 	}
 }
+
+// Anything but "none" cuts a branch, so a caller that chose nothing and a
+// record from before the choice existed both launch as they always did.
+func TestBranchingNormalizesOntoTheDefault(t *testing.T) {
+	for in, want := range map[Branching]Branching{
+		"": BranchNew, "new": BranchNew, "none": BranchNone, " none ": BranchNone, "nope": BranchNew,
+	} {
+		if got := in.Normalize(); got != want {
+			t.Errorf("Branching(%q).Normalize() = %q, want %q", in, got, want)
+		}
+	}
+	if got := Branchings(); len(got) != 2 || got[0] != DefaultBranching || !got[1].None() {
+		t.Errorf("Branchings() = %v, want the default first, then none", got)
+	}
+	if BranchNew.Hint() == BranchNone.Hint() || !strings.Contains(BranchNone.Hint(), "no branch") {
+		t.Errorf("hints do not tell the two apart: %q / %q", BranchNew.Hint(), BranchNone.Hint())
+	}
+}

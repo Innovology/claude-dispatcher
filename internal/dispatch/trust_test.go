@@ -186,3 +186,21 @@ func TestInheritTrustForAnotherAccount(t *testing.T) {
 		t.Error("trusted a repo nobody vouched for")
 	}
 }
+
+// A branchless dispatch's folder can run on any account, and trust lives in
+// the config directory the session runs under: trusted only for the human's
+// own login, a second subscription's session would stop on the dialog.
+func TestTrustOwnDirForAnotherAccount(t *testing.T) {
+	home := writeClaudeConfig(t, nil)
+	acct := t.TempDir()
+	_ = os.WriteFile(filepath.Join(acct, ".claude.json"), []byte(`{"hasCompletedOnboarding":true}`), 0o600)
+	if !TrustOwnDirFor(acct, "/state/branchless/sitrep") {
+		t.Fatal("TrustOwnDirFor reported failure")
+	}
+	if p := readProjects(t, acct); p["/state/branchless/sitrep"]["hasTrustDialogAccepted"] != true {
+		t.Errorf("not trusted in the account's own file: %v", p)
+	}
+	if p := readProjects(t, home); p["/state/branchless/sitrep"] != nil {
+		t.Errorf("written to the human's own file instead: %v", p)
+	}
+}

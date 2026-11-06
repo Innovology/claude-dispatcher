@@ -357,7 +357,7 @@ func launchBranchlessCmd(cfg *config.Config, product, repoName, feature, prompt 
 		if err != nil {
 			return launchFailed(feature, err.Error())
 		}
-		d, err := dispatchpkg.LaunchBranchless(scope, feature, prompt, mode, mdl, fanOut, acct)
+		d, err := launchConversation(scope, feature, prompt, mode, mdl, fanOut, acct)
 		if err != nil {
 			return launchFailed(feature, err.Error())
 		}
@@ -372,6 +372,10 @@ func launchBranchlessCmd(cfg *config.Config, product, repoName, feature, prompt 
 // launchBranchless is the seam both forms hand a branchless dispatch through,
 // for the reason launchDispatch is one.
 var launchBranchless = launchBranchlessCmd
+
+// launchConversation is the dispatch package's launch, as a seam, so a test
+// can read what the command reports without starting a session.
+var launchConversation = dispatchpkg.LaunchBranchless
 
 // launchDispatch is the seam both dispatch forms hand off through, named as a
 // variable so a test can read what a form actually passes without starting a

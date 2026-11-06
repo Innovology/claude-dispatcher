@@ -404,3 +404,26 @@ func TestNewIDsAreDistinct(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// A branchless dispatcher's folder holds its brief and keys its transcript; it
+// is not a checkout, so nothing that removes a worktree may treat it as one. A
+// conversation about a whole product names no repo, and says so.
+func TestABranchlessRecordOwnsNoWorktree(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	d := &Dispatch{Branchless: true, Product: "pp", WorktreePath: filepath.Join(BranchlessDir(), "sitrep")}
+	if d.OwnsWorktree() {
+		t.Error("a branchless record claims its folder as a worktree")
+	}
+	if !d.WholeProduct() {
+		t.Error("a branchless record with no repo is not about its whole product")
+	}
+	if d.RepoName = "player-app"; d.WholeProduct() {
+		t.Error("a conversation that starts on a repo counts as the whole product")
+	}
+	if (&Dispatch{WorktreePath: "/wt"}).WholeProduct() || !(&Dispatch{WorktreePath: "/wt"}).OwnsWorktree() {
+		t.Error("an ordinary record changed")
+	}
+	if !strings.HasPrefix(BranchlessDir(), Dir()) {
+		t.Errorf("BranchlessDir %q is outside the state dir %q", BranchlessDir(), Dir())
+	}
+}
