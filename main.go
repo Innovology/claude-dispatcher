@@ -35,6 +35,8 @@ Usage:
                                the steward's reading of a dispatcher's wait
   claude-dispatcher tidy       list the worktrees finished dispatchers left on disk
                                · tidy --yes removes them (: tidy in the cockpit)
+  claude-dispatcher worktree --repo <repo> <branch|name>
+                               from a branchless conversation: take a branch for its work
   claude-dispatcher steward    switch the fleet's steward on · steward stop switches it off
                                (t on the triage table does the same)
   claude-dispatcher account    the Claude subscriptions a dispatch can run under, and what
@@ -67,9 +69,10 @@ func main() {
 		}
 	case "steward":
 		os.Exit(runSteward(args[1:]))
-	case "status", "reply", "park", "unpark", "note", "tidy":
+	case "status", "reply", "park", "unpark", "note", "tidy", "worktree":
 		// The triage table's reading and its three hands, for a session
-		// stewarding the fleet — see internal/fleetcmd.
+		// stewarding the fleet, and the verb a branchless conversation takes a
+		// branch for its work with — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
 	case "account", "accounts":
 		os.Exit(accountcmd.Run(args[1:], os.Stdout, os.Stderr))

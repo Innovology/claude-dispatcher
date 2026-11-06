@@ -104,6 +104,15 @@ type Dispatch struct {
 	// again — they are a property of the session, not of its transcript — and
 	// because config may have moved a repo since.
 	AddDirs []string `json:"add_dirs,omitempty"`
+	// Checkout is the worktree a branchless dispatcher's conversation moved
+	// into when it turned into work (dispatch.TakeBranch), and CheckoutCut says
+	// this cockpit cut it, so kill and tidy may remove it as they would any
+	// dispatch's. A branch that already had a worktree — somebody's PR branch
+	// checked out beside the repo — is entered, not cut, and is never removed.
+	// WorktreePath stays the conversation's own folder: the transcript is keyed
+	// by where the session started, and that is where Resume reopens it.
+	Checkout    string `json:"checkout,omitempty"`
+	CheckoutCut bool   `json:"checkout_cut,omitempty"`
 	// WorktreePath is the dispatch's own checkout of Branch (a git worktree
 	// under WorktreesDir); the claude session runs there so concurrent
 	// dispatches never fight over the repo's working copy. RepoPath stays the
@@ -342,9 +351,30 @@ func (d *Dispatch) OwnsWorktree() bool {
 	return d != nil && d.WorktreePath != "" && d.AdoptedAt == nil && !d.Branchless
 }
 
+// RemovableCheckout is the checkout kill and tidy may remove for this record,
+// or "": a dispatch's own worktree, or the one a branchless conversation cut
+// when it turned into work. Never a folder that is not a checkout, and never
+// one somebody else made.
+func (d *Dispatch) RemovableCheckout() string {
+	switch {
+	case d == nil:
+		return ""
+	case d.Branchless && d.CheckoutCut:
+		return d.Checkout
+	case d.OwnsWorktree():
+		return d.WorktreePath
+	}
+	return ""
+}
+
 // WholeProduct reports a branchless dispatcher about its product as a whole,
 // rather than one that started on a repo in it.
 func (d *Dispatch) WholeProduct() bool { return d != nil && d.Branchless && d.RepoName == "" }
+
+// Conversation reports a dispatcher that started with no branch and is still
+// only talking: it has not taken one (dispatch.TakeBranch). Once it has, it is
+// a worker like any other — tracked by its branch, shipped by its PR.
+func (d *Dispatch) Conversation() bool { return d != nil && d.Branchless && d.Branch == "" }
 
 // HoldsSessionBorn reports whether a session found at this record's address
 // (TmuxSocket, TmuxSession), created at born, is the session the record took

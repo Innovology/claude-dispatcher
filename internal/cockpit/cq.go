@@ -356,7 +356,7 @@ func cqClashNote(rec *state.Dispatch, clash *cqClash) string {
 // over, in a word that claims nothing went live.
 func cqShipAct(rec *state.Dispatch) cqAct {
 	word := "shipped"
-	if rec.Branchless {
+	if rec.Conversation() {
 		word = "done"
 	}
 	a := cqAct{k: "y", d: "mark " + word, ok: "\"" + rec.Feature + "\" marked " + word}
@@ -375,7 +375,7 @@ func cqShipAct(rec *state.Dispatch) cqAct {
 // nothing cannot honestly be marked shipped — "done means live", and there is
 // nothing to be live — but one that cut no branch was never going to write
 // anything, and saying it is done is the only ending it has.
-func cqCanMarkDone(rec *state.Dispatch) bool { return len(rec.Commits) > 0 || rec.Branchless }
+func cqCanMarkDone(rec *state.Dispatch) bool { return len(rec.Commits) > 0 || rec.Conversation() }
 
 // cqKillAct is x on a live row: kill for a dispatcher this cockpit started,
 // release for a session it adopted, which was the human's before the record

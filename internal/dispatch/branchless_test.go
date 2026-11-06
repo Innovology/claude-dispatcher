@@ -129,9 +129,16 @@ func TestABranchlessDispatchSpansItsProductAndCutsNothing(t *testing.T) {
 	if d.RepoName != "player-app" || d.Product != "pp" || d.WholeProduct() {
 		t.Errorf("record names %q in %q, want the repo it starts on, in its product", d.RepoName, d.Product)
 	}
-	want := []string{all[1].Path, all[2].Path, all[0].Path}
+	// Each repo's checkout, to read, and the folder its worktrees are cut in,
+	// so a branch the conversation takes is one it can work in — made now,
+	// since nothing has been dispatched into these repos yet.
+	wtHome := func(r repos.Repo) string { return filepath.Join(state.WorktreesDir(), r.Name) }
+	want := []string{all[1].Path, wtHome(all[1]), all[2].Path, wtHome(all[2]), all[0].Path, wtHome(all[0])}
 	if strings.Join(d.AddDirs, "\n") != strings.Join(want, "\n") {
 		t.Errorf("add dirs = %v, want %v", d.AddDirs, want)
+	}
+	if _, err := os.Stat(wtHome(all[0])); err != nil {
+		t.Errorf("a worktree folder the session was given does not exist: %v", err)
 	}
 	// The flag is variadic, so it must come after the prompt or it would take
 	// the prompt for one more directory.
@@ -200,8 +207,8 @@ func TestAWholeProductConversationBorrowsNoRepo(t *testing.T) {
 	if d.TmuxSocket != "pp" {
 		t.Errorf("server = %q, want one named for the product", d.TmuxSocket)
 	}
-	if len(d.AddDirs) != 3 {
-		t.Errorf("add dirs = %v, want all three of pp", d.AddDirs)
+	if len(d.AddDirs) != 6 {
+		t.Errorf("add dirs = %v, want all three of pp, each with its worktree folder", d.AddDirs)
 	}
 	brief, _ := os.ReadFile(filepath.Join(d.WorktreePath, "CLAUDE.md"))
 	if !strings.Contains(string(brief), "about the product as a whole") || !strings.Contains(string(brief), "the product **pp**") {

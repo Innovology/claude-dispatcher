@@ -110,18 +110,46 @@ func (s Scope) label() string {
 	return s.Product
 }
 
-// dirs are the checkouts the session is given, each once.
+// dirs are what the session is given: each repo's canonical checkout, to read,
+// and the folder its dispatch worktrees are cut in (worktreeHome), so that a
+// checkout the conversation cuts when it turns into work (TakeBranch) is one it
+// can work in without stopping to ask. A directory inside another one given is
+// left out — on a project layout the repo's folder holds its canonical checkout
+// — and so is a repeat, the focus first and the rest in scope order.
 func (s Scope) dirs() []string {
-	seen := map[string]bool{}
-	var out []string
+	var cand []string
 	for _, r := range s.Repos {
-		if r.Path == "" || seen[r.Path] {
-			continue
+		if r.Path != "" {
+			cand = append(cand, r.Path)
 		}
-		seen[r.Path] = true
-		out = append(out, r.Path)
+		if r.Name != "" {
+			cand = append(cand, worktreeHome(r))
+		}
+	}
+	var out []string
+	for i, c := range cand {
+		covered := false
+		for j, o := range cand {
+			if i != j && within(o, c) && (!samePath(o, c) || j < i) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			out = append(out, c)
+		}
 	}
 	return out
+}
+
+// worktreeHome is the folder a repo's dispatch worktrees are cut in: beside the
+// repo's own checkouts where its layout has a place for them, else this tool's
+// own worktrees/<repo> (see worktreePath).
+func worktreeHome(r repos.Repo) string {
+	if r.WorktreeRoot != "" {
+		return r.WorktreeRoot
+	}
+	return filepath.Join(state.WorktreesDir(), r.Name)
 }
 
 // LaunchBranchless starts a session over s: no branch, no worktree, a folder of
@@ -159,6 +187,15 @@ func LaunchBranchless(s Scope, feature, prompt string, mode Mode, model Model, f
 	dirs := s.dirs()
 	if len(dirs) == 0 {
 		return nil, fmt.Errorf("%s has no checkout to read", s.label())
+	}
+	// Our own worktrees folder may not exist yet for a repo nothing has been
+	// dispatched into, and claude is given it all the same.
+	for _, dir := range dirs {
+		if within(state.WorktreesDir(), dir) {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, err
+			}
+		}
 	}
 	// The folder is the record's own: the slug for the human reading the
 	// directory, the id so that two conversations whose names share their first

@@ -113,6 +113,8 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runUnpark(args, out)
 	case "tidy":
 		err = runTidy(args, out)
+	case "worktree":
+		err = runWorktree(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}

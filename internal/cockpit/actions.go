@@ -140,7 +140,7 @@ func killCmd(features []string) tea.Cmd {
 			// An adopted dispatcher's directory is the human's own checkout,
 			// which existed before the record and outlives it. OwnsWorktree is
 			// the only thing standing between `x` and somebody's working copy.
-			if rec.OwnsWorktree() && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
+			if p := rec.RemovableCheckout(); p != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, p) {
 				kept++
 			}
 			n++
@@ -201,7 +201,7 @@ func markDoneCmd(feature string) tea.Cmd {
 		now := time.Now()
 		// A branchless dispatcher shipped nothing, and its record says so.
 		word := "marked shipped"
-		if rec.Branchless {
+		if rec.Conversation() {
 			word = "marked done"
 		}
 		rec.Stop(state.StatusDone, word, now)

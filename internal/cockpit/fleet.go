@@ -685,7 +685,7 @@ func cqEnded(rec *state.Dispatch) string {
 		return "deployed"
 	case rec.PRState == "MERGED":
 		return "merged"
-	case rec.Status == state.StatusDone && rec.Branchless:
+	case rec.Status == state.StatusDone && rec.Conversation():
 		return "marked done"
 	case rec.Status == state.StatusDone:
 		return "marked shipped"

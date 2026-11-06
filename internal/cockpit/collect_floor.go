@@ -220,7 +220,7 @@ func floorState(rec *state.Dispatch) string {
 	case state.StatusDone:
 		// A conversation that is over shipped nothing, and has no place on a
 		// floor of work in production.
-		if rec.Branchless {
+		if rec.Conversation() {
 			return ""
 		}
 		return "live"

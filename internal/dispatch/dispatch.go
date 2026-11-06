@@ -620,7 +620,7 @@ func cutByUs(path string) bool {
 		return true
 	}
 	for _, d := range state.LoadAll() {
-		if d.OwnsWorktree() && samePath(d.WorktreePath, path) {
+		if p := d.RemovableCheckout(); p != "" && samePath(p, path) {
 			return true
 		}
 	}

@@ -92,7 +92,7 @@ func velLiveTime(r *state.Dispatch) (time.Time, bool) {
 	if r.DeployedAt != nil {
 		return *r.DeployedAt, true
 	}
-	if r.Branchless {
+	if r.Conversation() {
 		return time.Time{}, false
 	}
 	if r.Status == state.StatusDone {

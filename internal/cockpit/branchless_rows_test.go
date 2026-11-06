@@ -1,6 +1,9 @@
 package cockpit
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -160,6 +163,84 @@ func TestAWholeProductConversationIsNamedInSentences(t *testing.T) {
 			if a.k == "⏎" && a.ok != "attaching to all of pp session…" {
 				t.Errorf("%s: ⏎ says %q", kind, a.ok)
 			}
+		}
+	}
+}
+
+// A conversation that took a branch is a worker from then on: its row shows
+// the branch, y is "mark shipped" once it has commits and not before, and a
+// done one counts as the ship it is. Only a dispatcher still talking is the
+// conversation "mark done" was made for.
+func TestAConversationThatTookABranchIsAWorker(t *testing.T) {
+	rec := branchlessRec("sync")
+	rec.Branch, rec.RepoName, rec.Checkout, rec.CheckoutCut = "feature/sync", "playerpulse", "/wt/sync", true
+	if got := cqRef("gh", rec); got != "feature/sync" {
+		t.Errorf("ref = %q, want its branch", got)
+	}
+	rec.Status = state.StatusNeedsInput
+	for _, a := range cqActs(rec, "turn-done") {
+		if a.k == "y" {
+			t.Errorf("y offered with no commits on its branch: %q", a.d)
+		}
+	}
+	rec.Commits = []string{"sha"}
+	var y string
+	for _, a := range cqActs(rec, "turn-done") {
+		if a.k == "y" {
+			y = a.d
+		}
+	}
+	if y != "mark shipped" {
+		t.Errorf("y = %q, want mark shipped", y)
+	}
+	rec.Status, rec.PRState = state.StatusDone, ""
+	if cqEnded(rec) != "marked shipped" || floorState(rec) != "live" {
+		t.Errorf("a shipped worker reads %q / %q", cqEnded(rec), floorState(rec))
+	}
+	if _, live := velLiveTime(rec); !live {
+		t.Error("a shipped worker is not counted live")
+	}
+}
+
+// Killing a conversation that cut a worktree for its work removes that
+// worktree, as a kill removes any dispatch's clean one — and never its own
+// folder, and never a worktree it only went into.
+func TestKillingAWorkerConversationRemovesTheWorktreeItCut(t *testing.T) {
+	saved := captureVars()
+	defer restoreVars(saved)
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := t.TempDir()
+	git := func(dir string, args ...string) {
+		full := append([]string{"-C", dir, "-c", "user.email=t@t", "-c", "user.name=t"}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+	git(repo, "init", "-q", "-b", "main")
+	git(repo, "commit", "-q", "--allow-empty", "-m", "base")
+	cut := filepath.Join(t.TempDir(), "sync")
+	git(repo, "worktree", "add", "-q", "-b", "feature/sync", cut)
+	entered := filepath.Join(t.TempDir(), "theirs")
+	git(repo, "worktree", "add", "-q", "-b", "umberto/x", entered)
+	home := t.TempDir()
+
+	for _, c := range []struct {
+		feature, path string
+		cutByUs       bool
+	}{{"cut", cut, true}, {"entered", entered, false}} {
+		rec := &state.Dispatch{ID: "k-" + c.feature, Feature: c.feature, Branchless: true, RepoPath: repo,
+			WorktreePath: home, Branch: "b", Checkout: c.path, CheckoutCut: c.cutByUs, Status: state.StatusWorking}
+		if err := state.Save(rec); err != nil {
+			t.Fatal(err)
+		}
+		liveRecords = map[string]*state.Dispatch{c.feature: rec}
+		killCmd([]string{c.feature})()
+		_, err := os.Stat(c.path)
+		if gone := os.IsNotExist(err); gone != c.cutByUs {
+			t.Errorf("%s: worktree gone = %v, want %v", c.feature, gone, c.cutByUs)
+		}
+		if _, err := os.Stat(home); err != nil {
+			t.Errorf("%s: the conversation's own folder went with it", c.feature)
 		}
 	}
 }

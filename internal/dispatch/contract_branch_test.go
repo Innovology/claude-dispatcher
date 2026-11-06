@@ -1,8 +1,12 @@
 package dispatch
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"claude-dispatcher/internal/repos"
+	"claude-dispatcher/internal/state"
 )
 
 // A dispatch that cut no branch has no pull request to open, so the auto
@@ -75,5 +79,22 @@ func TestABranchlessContractInvitesNoChangeInAnyMode(t *testing.T) {
 	// Manual still ends on its question, which is what the row quotes.
 	if m := withContract("x", ModeManual, BranchNone); !strings.Contains(m, "End your message on the one question") {
 		t.Errorf("manual lost its closing question:\n%s", m)
+	}
+}
+
+// A repo whose worktrees are cut in a folder that holds its checkout — the
+// project layout, <project>/.bare beside <project>/main — is given that folder
+// once, not the checkout inside it as well.
+func TestAProjectFolderCoversTheCheckoutInIt(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	project := t.TempDir()
+	s := Scope{Repos: []repos.Repo{
+		{Name: "app", Path: filepath.Join(project, "main"), WorktreeRoot: project},
+		{Name: "lib", Path: "/src/lib"},
+	}}
+	got := s.dirs()
+	want := []string{project, "/src/lib", filepath.Join(state.WorktreesDir(), "lib")}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("dirs = %v, want %v", got, want)
 	}
 }
