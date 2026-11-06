@@ -338,6 +338,41 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 	}
 }
 
+// launchBranchlessCmd dispatches a conversation with no branch: about the
+// whole of product when repoName is empty, else starting on repoName and
+// reaching the rest of its product (dispatch.ScopeOf). The scope is resolved
+// here, against a fresh discovery, for the reason launchCmd resolves its repo
+// here: a repo that has moved or gone since the form was drawn is a launch that
+// says so.
+func launchBranchlessCmd(cfg *config.Config, product, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, fanOut bool, acctName string) tea.Cmd {
+	return func() tea.Msg {
+		if cfg == nil {
+			return launchFailed(feature, "no config — cannot dispatch")
+		}
+		acct, ok := account.Find(cfg, acctName)
+		if !ok {
+			return launchFailed(feature, "no account named "+acctName+" — claude-dispatcher account")
+		}
+		scope, err := dispatchpkg.ScopeOf(repos.Discover(cfg), product, repoName)
+		if err != nil {
+			return launchFailed(feature, err.Error())
+		}
+		d, err := dispatchpkg.LaunchBranchless(scope, feature, prompt, mode, mdl, fanOut, acct)
+		if err != nil {
+			return launchFailed(feature, err.Error())
+		}
+		where := d.RepoName
+		if where == "" {
+			where = "all of " + d.Product
+		}
+		return launchedMsg{feature: feature, notice: "dispatched \"" + d.Feature + "\" → " + where + " · no branch"}
+	}
+}
+
+// launchBranchless is the seam both forms hand a branchless dispatch through,
+// for the reason launchDispatch is one.
+var launchBranchless = launchBranchlessCmd
+
 // launchDispatch is the seam both dispatch forms hand off through, named as a
 // variable so a test can read what a form actually passes without starting a
 // real dispatcher.

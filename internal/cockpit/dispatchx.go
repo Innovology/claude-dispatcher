@@ -11,6 +11,7 @@ package cockpit
 //	TITLE      what it is called: the feature name, and the branch
 //	WHAT       the work itself, wrapped over as many rows as it takes
 //	DONE WHEN  the completion condition, optional
+//	BRANCH     its own branch, or none — a conversation across the product
 //	ROOT       the branch it is cut from — blank for the repo's default
 //	PREFIX     what the branch name starts with — settings' default, editable
 //	MODE       auto, manual or plan — what it may do without asking
@@ -61,6 +62,15 @@ package cockpit
 // flag, so on it becomes one closing sentence (dispatch/fanout.go) and off it
 // changes nothing.
 //
+// BRANCH is the one switch that changes what a dispatch IS. Its own branch is
+// the default and everything above describes it. None is a conversation: no
+// branch, no worktree, a session that reads every repo in the picked repo's
+// product and starts on the picked one (dispatch/branchless.go). The product
+// as a whole is picked on WHERE, on a row of its own that leads each product's
+// repos, and is branchless by construction — a product has no one repo to cut
+// a branch in. With no branch, ROOT and PREFIX shape nothing, so the field walk
+// passes over them and their hints say why.
+//
 // DONE WHEN is still honest about its reach in the other direction: no
 // supervisor watches it, so it is a sentence in the prompt and the copy
 // promises nothing more (see dxPrompt).
@@ -93,6 +103,7 @@ const (
 	dxTitleF
 	dxWhatF
 	dxGoalF
+	dxBranchF
 	dxRootF
 	dxPrefixF
 	dxModeF
@@ -104,9 +115,14 @@ const (
 
 // dxRepoRow is one candidate repo: what it belongs to, how much is already in
 // flight there, and how long since anyone touched it.
+//
+// A whole row is the product itself rather than a repo in it: repo is empty,
+// and repos says how many it spans.
 type dxRepoRow struct {
 	repo, product, last string
 	out                 int
+	whole               bool
+	repos               int
 }
 
 // dxUnassigned is what a repo in no product is called *in this form*. It is a
@@ -129,6 +145,7 @@ func (m model) dxReset() model {
 	m.dxMode = dispatchpkg.DefaultMode
 	m.dxModel, m.dxFanOut = dispatchpkg.DefaultModel, false
 	m.dxAccount = account.Default
+	m.dxBranching = dispatchpkg.DefaultBranching
 	return m
 }
 
@@ -190,8 +207,33 @@ func (m model) dxAllRepos() []dxRepoRow {
 			out = append(out, dxRepoRow{repo: r.Name, product: dxProduct(r.Product), last: "—"})
 		}
 	}
+	out = dxWithProducts(out)
 	dxSort(out)
 	return out
+}
+
+// dxWithProducts adds a row for each product that spans more than one repo:
+// the product as a whole, for a conversation about all of it. A product of one
+// repo is that repo, and the repos in no product have no product to talk about.
+func dxWithProducts(rows []dxRepoRow) []dxRepoRow {
+	count, out := map[string]int{}, map[string]int{}
+	var order []string
+	for _, r := range rows {
+		if r.product == dxUnassigned {
+			continue
+		}
+		if count[r.product] == 0 {
+			order = append(order, r.product)
+		}
+		count[r.product]++
+		out[r.product] += r.out
+	}
+	for _, p := range order {
+		if count[p] > 1 {
+			rows = append(rows, dxRepoRow{product: p, whole: true, repos: count[p], out: out[p]})
+		}
+	}
+	return rows
 }
 
 // dxProduct is the product a row is filed and filtered under.
@@ -214,6 +256,9 @@ func dxSort(rows []dxRepoRow) {
 		}
 		if rows[i].product != rows[j].product {
 			return rows[i].product < rows[j].product
+		}
+		if rows[i].whole != rows[j].whole {
+			return rows[i].whole // the product leads its own repos
 		}
 		return rows[i].repo < rows[j].repo
 	})
@@ -280,7 +325,13 @@ func dxSlugWords(s string, max int) string {
 
 // dxBranch is the branch TITLE will produce. "untitled" is display-only: submit
 // refuses a title that slugs to nothing long before Launch could see it.
+//
+// With no branch it says so: the slug still names the session and the
+// conversation's folder, but no branch is ever made of it.
 func (m model) dxBranch() string {
+	if m.dxNoBranch() {
+		return "no branch"
+	}
 	slug := dxSlugWords(m.dxTitle, dxBranchWords)
 	if slug == "" {
 		slug = "untitled"
@@ -390,18 +441,18 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m.dxSubmit()
 
 	case "tab":
-		m.dxField = (field + 1) % dxFieldCount
+		m.dxField = m.dxMove(field, 1, true)
 		return m, nil
 
 	case "shift+tab":
-		m.dxField = (field + dxFieldCount - 1) % dxFieldCount
+		m.dxField = m.dxMove(field, -1, true)
 		return m, nil
 
 	case "enter":
 		if field == dxFanoutF {
 			return m.dxSubmit()
 		}
-		m.dxField = field + 1
+		m.dxField = m.dxMove(field, 1, false)
 		return m, nil
 
 	case "down":
@@ -409,7 +460,7 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxRepo = mini(m.dxRepo+1, maxi(len(rows)-1, 0))
 			return m, nil
 		}
-		m.dxField = mini2(field+1, dxFanoutF)
+		m.dxField = m.dxMove(field, 1, false)
 		return m, nil
 
 	case "up":
@@ -417,7 +468,7 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxRepo = maxi(m.dxRepo-1, 0)
 			return m, nil
 		}
-		m.dxField = maxi2(field-1, dxWhereF)
+		m.dxField = m.dxMove(field, -1, false)
 		return m, nil
 	}
 
@@ -467,6 +518,23 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		case " ", "space", "left", "right":
 			// Two positions: every direction is the other one.
 			m.dxFanOut = !m.dxFanOut
+		}
+		return m, nil
+	}
+	if field == dxBranchF {
+		switch k {
+		case " ", "space", "left", "right":
+			if row, ok := m.dxPicked(); ok && row.whole {
+				// Not a refusal of the switch so much as a fact about the row:
+				// there is no one repo here to cut a branch in.
+				m.notice = "a whole product has no one repo to cut a branch in — pick a repo for that"
+				return m, nil
+			}
+			if m.dxBranching.None() {
+				m.dxBranching = dispatchpkg.BranchNew
+			} else {
+				m.dxBranching = dispatchpkg.BranchNone
+			}
 		}
 		return m, nil
 	}
@@ -522,19 +590,41 @@ func dxChop(s string) string {
 	return string(r[:len(r)-1])
 }
 
-// mini2/maxi2 are mini/maxi for the field id, which is its own type.
-func mini2(a, b dxFieldID) dxFieldID {
-	if a < b {
-		return a
-	}
-	return b
+// dxSkips reports whether a field has nothing to say for this dispatch. With
+// no branch, ROOT and PREFIX shape nothing, and a walk that stopped on them
+// would be two keypresses spent on lines that do nothing.
+func (m model) dxSkips(f dxFieldID) bool {
+	return m.dxNoBranch() && (f == dxRootF || f == dxPrefixF)
 }
 
-func maxi2(a, b dxFieldID) dxFieldID {
-	if a > b {
-		return a
+// dxMove is the field walk: delta fields on from f, passing over any field
+// with nothing to say. wrap is tab's walk, round the end; otherwise it stops at
+// WHERE and FAN OUT, as enter and the arrows always have.
+func (m model) dxMove(f dxFieldID, delta int, wrap bool) dxFieldID {
+	at := f
+	for i := 0; i < int(dxFieldCount); i++ {
+		n := int(at) + delta
+		switch {
+		case wrap:
+			n = (n + int(dxFieldCount)) % int(dxFieldCount)
+		case n < int(dxWhereF) || n > int(dxFanoutF):
+			return f
+		}
+		at = dxFieldID(n)
+		if !m.dxSkips(at) {
+			return at
+		}
 	}
-	return b
+	return f
+}
+
+// dxNoBranch reports whether this dispatch cuts no branch: BRANCH says none,
+// or the row picked is a whole product, which has no one repo to cut one in.
+func (m model) dxNoBranch() bool {
+	if row, ok := m.dxPicked(); ok && row.whole {
+		return true
+	}
+	return m.dxBranching.None()
 }
 
 // dxSubmit validates and hands off. It never closes the form on a failure: what
@@ -564,6 +654,9 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		m.dxField = dxWhatF
 		m.notice = "say what it should do — the title alone is not a brief"
 		return m, nil
+	}
+	if m.dxNoBranch() {
+		return m.dxSubmitBranchless(row, feature, prompt, goal, mode, mdl, fanOut, acct)
 	}
 	// Caught here rather than at the launch: a root that is not a branch is a
 	// typo nine times in ten, and the launch would refuse it after this form —
@@ -619,6 +712,50 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 	return m, dxLaunch(m.cfg, row.repo, feature, prompt, mode, mdl, root, &prefix, fanOut, acct)
 }
 
+// dxSubmitBranchless hands off a dispatch that cuts no branch: a conversation
+// that starts on row's repo, or one about row's whole product. ROOT and PREFIX
+// are not read — they shape a branch, and there is none — so a root that would
+// be refused for a branch dispatch does not stop this one.
+func (m model) dxSubmitBranchless(row dxRepoRow, feature, prompt, goal string, mode dispatchpkg.Mode,
+	mdl dispatchpkg.Model, fanOut bool, acct string) (model, tea.Cmd) {
+	product, repo := "", row.repo
+	if row.whole {
+		product, repo = row.product, ""
+	}
+	m = m.dxReset()
+	notice := "dispatching · " + dxScopeLabel(row) + " · no branch"
+	if goal != "" {
+		notice += " · runs until: " + goal
+	} else {
+		notice += " · answers in the conversation"
+	}
+	notice += " · " + string(mode)
+	if mdl != dispatchpkg.DefaultModel {
+		notice += " · " + string(mdl)
+	}
+	if acct != account.Default {
+		notice += " · on " + acct
+	}
+	if fanOut {
+		notice += " · fans out"
+	}
+	m.notice = notice
+	m = m.markPending(m.pendingBranchless(row.product, repo, feature, prompt)).fleetSync()
+	return m, launchBranchless(m.cfg, product, repo, feature, prompt, mode, mdl, fanOut, acct)
+}
+
+// dxScopeLabel is what a branchless dispatch spans, as the form says it: the
+// repo it starts on and the product it reaches, or all of a product.
+func dxScopeLabel(row dxRepoRow) string {
+	switch {
+	case row.whole:
+		return "all of " + row.product
+	case row.product == dxUnassigned:
+		return row.repo
+	}
+	return row.repo + " across " + row.product
+}
+
 // dxLaunch is the launch dxSubmit hands off to — see launchDispatch, which the
 // `+` overlay hands off to as well.
 var dxLaunch = launchDispatch
@@ -627,8 +764,19 @@ var dxLaunch = launchDispatch
 
 // dxRepoCount sits at the right of the WHERE line: how much of the portfolio
 // the filter is showing.
+//
+// It counts repos: a whole-product row is a way to dispatch, not one more repo.
 func (m model) dxRepoCount() string {
-	n, all := len(m.dxRows()), len(m.dxAllRepos())
+	repoRows := func(rows []dxRepoRow) int {
+		n := 0
+		for _, r := range rows {
+			if !r.whole {
+				n++
+			}
+		}
+		return n
+	}
+	n, all := repoRows(m.dxRows()), repoRows(m.dxAllRepos())
 	if n == all {
 		return itoa(n) + " repos · type to filter"
 	}
@@ -647,6 +795,9 @@ func (m model) dxRepoNone() string {
 // dxTitleHint turns into the branch preview as soon as there is something to
 // preview — the one place the human sees the name their history is filed under.
 func (m model) dxTitleHint() string {
+	if m.dxNoBranch() {
+		return "no branch · a few words name the conversation and its session"
+	}
 	if strings.TrimSpace(m.dxTitle) != "" {
 		return "branch " + m.dxBranch()
 	}
@@ -684,6 +835,9 @@ func (m model) dxGoalHint() string {
 	if strings.TrimSpace(m.dxGoal) != "" {
 		return "it keeps working until this is true"
 	}
+	if m.dxNoBranch() {
+		return "optional · leave empty and it answers in the conversation, then waits for you"
+	}
 	if m.dxMode.Normalize() == dispatchpkg.ModeAuto {
 		return "optional · leave empty and it works to an open PR, stopping only for your call"
 	}
@@ -694,6 +848,9 @@ func (m model) dxGoalHint() string {
 // answer for nearly every dispatch, so the hint names the default rather than
 // asking for a branch.
 func (m model) dxRootHint() string {
+	if m.dxNoBranch() {
+		return "no branch, so nothing is cut — it reads each repo's own checkout as it is"
+	}
 	root := dispatchpkg.Root(m.dxRoot).Normalize()
 	if !root.IsDefault() {
 		return "cut from " + string(root) + " instead of the default branch"
@@ -718,6 +875,9 @@ func (m model) dxRepoRoot() string {
 // change for this one dispatch, and what git would refuse in it. The branch it
 // makes is TITLE's hint and the summary's, so it is not repeated here.
 func (m model) dxPrefixNote() string {
+	if m.dxNoBranch() {
+		return "no branch, so no prefix"
+	}
 	p, def := strings.TrimSpace(m.dxPrefixText()), m.cfg.EffectiveBranchPrefix()
 	if bad := dispatchpkg.PrefixProblem(p); bad != "" {
 		return bad
@@ -950,6 +1110,31 @@ func (m model) dxAccountHint() string {
 	return m.acctDetail(m.acctNormalize(m.dxAccount), time.Now()) + " · space cycles"
 }
 
+// dxBranchOptions are BRANCH's two positions, in dispatch.Branchings' order.
+func dxBranchOptions() []string { return []string{"own branch", "no branch"} }
+
+func (m model) dxBranchSel() int {
+	if m.dxNoBranch() {
+		return 1
+	}
+	return 0
+}
+
+// dxBranchHint says what the chosen position makes of this dispatch: its own
+// branch, or a conversation, and for a conversation what it can reach.
+func (m model) dxBranchHint() string {
+	row, ok := m.dxPicked()
+	switch {
+	case ok && row.whole:
+		return "a conversation across all " + itoa(row.repos) + " repos of " + row.product + " · no branch to cut"
+	case !m.dxNoBranch():
+		return "cuts its own branch, for work that ends in a pull request · space flips"
+	case ok && row.product != dxUnassigned:
+		return "a conversation that starts on " + row.repo + " and reaches all of " + row.product + " · space flips"
+	}
+	return "a conversation about this repo, with no branch · space flips"
+}
+
 // dxFanoutWords are FAN OUT's two positions. "solo" rather than "off" because
 // the switch is about who does the work, and the off state is a working state,
 // not an absence.
@@ -985,10 +1170,14 @@ func (m model) dxSummary() string {
 		return "pick a repo to dispatch into"
 	}
 	s := row.repo + " · " + m.dxBranch() + " · " + m.dxMode.Summary()
-	if root := dispatchpkg.Root(m.dxRoot).Normalize(); !root.IsDefault() {
+	switch root := dispatchpkg.Root(m.dxRoot).Normalize(); {
+	case m.dxNoBranch():
+		// Where it reaches, in place of where it is cut from.
+		s = dxScopeLabel(row) + " · no branch · " + m.dxMode.Summary()
+	case !root.IsDefault():
 		s += " · from " + string(root)
-	} else if rb := m.dxRepoRoot(); rb != "" {
-		s += " · from " + rb
+	case m.dxRepoRoot() != "":
+		s += " · from " + m.dxRepoRoot()
 	}
 	if mdl := m.dxModel.Normalize(); mdl != dispatchpkg.DefaultModel {
 		s += " · " + string(mdl)
@@ -1067,9 +1256,10 @@ func (m model) dxView(w, h int) string {
 		cqFixed(m.dxFieldRow(inner, "DONE WHEN", m.dxGoal, m.dxField == dxGoalF, "")),
 		cqFixed(dxHintRow(inner, m.dxGoalHint())),
 		cqGap(8),
-		cqFixed(m.dxFieldRow(inner, "ROOT", m.dxRoot, m.dxField == dxRootF, "")),
+		cqFixed(dxSwitchRow(inner, m.dxField == dxBranchF, "BRANCH", dxBranchOptions(), m.dxBranchSel(), m.dxBranchHint())),
+		cqFixed(m.dxFieldRow(inner, "ROOT", m.dxShaping(m.dxRoot), m.dxField == dxRootF, "")),
 		cqFixed(dxHintRow(inner, m.dxRootHint())),
-		cqFixed(m.dxFieldRow(inner, "PREFIX", m.dxPrefixText(), m.dxField == dxPrefixF, m.dxPrefixNote())),
+		cqFixed(m.dxFieldRow(inner, "PREFIX", m.dxShaping(m.dxPrefixText()), m.dxField == dxPrefixF, m.dxPrefixNote())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModeF, "MODE", dxModeWords(), m.dxModeSel(), m.dxModeHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModelF, "MODEL", dxModelWords(), m.dxModelSel(), m.dxModelHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxAccountF, "ACCOUNT", m.dxAccountWords(), m.dxAccountSel(), m.dxAccountHint())),
@@ -1351,7 +1541,12 @@ func dxRepoLine(inner int, r dxRepoRow, on bool) string {
 	if width >= 44 {
 		segs = append(segs, c(truncate(r.product, 14), 14, cFaint), c("", dxGapW, ""))
 	}
-	segs = append(segs, flexc(r.repo, nameHex))
+	name := r.repo
+	if r.whole {
+		// The product as a whole, said as what it spans and what it is not.
+		name = "all " + itoa(r.repos) + " repos · no branch"
+	}
+	segs = append(segs, flexc(name, nameHex))
 	if width >= 40 {
 		segs = append(segs, c("", dxGapW, ""), cr(out, 9, cFaint))
 	}
@@ -1378,4 +1573,15 @@ func dxFeatureName(title string) string {
 		return ""
 	}
 	return title
+}
+
+// dxShaping is a value that shapes a branch — ROOT's or PREFIX's — as its line
+// shows it: blank with no branch, since a prefix printed beside "no branch, so
+// no prefix" reads as one that will be used. What was typed is kept, and comes
+// back if BRANCH goes back to its own branch.
+func (m model) dxShaping(v string) string {
+	if m.dxNoBranch() {
+		return ""
+	}
+	return v
 }
