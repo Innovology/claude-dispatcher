@@ -167,6 +167,11 @@ type collectCtx struct {
 // up empty while work was in flight. A collector must derive from its ctx, not
 // from the state a later collector will produce.
 func (c *collectCtx) productFor(rec *state.Dispatch) string {
+	// A conversation about a whole product has no repo for the config to map,
+	// and is filed under the product it was dispatched over.
+	if rec.WholeProduct() && rec.Product != "" {
+		return rec.Product
+	}
 	if c.cfg == nil {
 		if rec.Product == "" {
 			return "unassigned"

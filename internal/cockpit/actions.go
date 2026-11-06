@@ -199,10 +199,15 @@ func markDoneCmd(feature string) tea.Cmd {
 			return actionMsg{notice: "\"" + feature + "\" has no record to mark"}
 		}
 		now := time.Now()
-		rec.Stop(state.StatusDone, "marked shipped", now)
+		// A branchless dispatcher shipped nothing, and its record says so.
+		word := "marked shipped"
+		if rec.Branchless {
+			word = "marked done"
+		}
+		rec.Stop(state.StatusDone, word, now)
 		rec.Dismiss(now) // the human's own ending, and so already read
 		_ = state.Save(rec)
-		return actionMsg{notice: "\"" + feature + "\" marked shipped"}
+		return actionMsg{notice: "\"" + feature + "\" " + word}
 	}
 }
 

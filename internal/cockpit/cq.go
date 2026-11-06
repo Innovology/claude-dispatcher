@@ -202,12 +202,26 @@ func cqWant(kind string) string {
 }
 
 // cqRef names the thing you would look at: the PR when there is one, else the
-// branch it is working on.
+// branch it is working on — or, for a dispatcher that cut none, that it has
+// none, since an empty cell reads as a launch that died before branching.
 func cqRef(forge string, rec *state.Dispatch) string {
 	if rec.PRNumber > 0 {
 		return prID(forge, rec.PRNumber)
 	}
+	if rec.Branch == "" && rec.Branchless {
+		return "no branch"
+	}
 	return rec.Branch
+}
+
+// cqRepoOf is a row's repo cell: the repo the dispatcher works in, or for a
+// conversation about a whole product, which names no repo, what it spans. The
+// product cell beside it already says which product.
+func cqRepoOf(rec *state.Dispatch) string {
+	if rec.WholeProduct() {
+		return "all repos"
+	}
+	return rec.RepoName
 }
 
 // cqToneOf picks the row's tone from real signals only. Age is deliberately not
@@ -326,18 +340,32 @@ func cqClashNote(rec *state.Dispatch, clash *cqClash) string {
 // was done — could not be marked, and the tracker, which waits for the turn to
 // end, could not mark it either. Where the session has not ended its turn the
 // key asks first, because the session carries on after its row has gone.
+//
+// A branchless dispatcher has nothing to ship — its answer is the conversation
+// — so the same key is "mark done": the human's word that the conversation is
+// over, in a word that claims nothing went live.
 func cqShipAct(rec *state.Dispatch) cqAct {
-	a := cqAct{k: "y", d: "mark shipped", ok: "\"" + rec.Feature + "\" marked shipped"}
+	word := "shipped"
+	if rec.Branchless {
+		word = "done"
+	}
+	a := cqAct{k: "y", d: "mark " + word, ok: "\"" + rec.Feature + "\" marked " + word}
 	switch rec.Status {
 	case state.StatusWorking:
-		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session is still working?"
+		a.confirm = "mark \"" + rec.Feature + "\" " + word + " while its session is still working?"
 	case state.StatusBlocked:
-		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session waits on a prompt?"
+		a.confirm = "mark \"" + rec.Feature + "\" " + word + " while its session waits on a prompt?"
 	case state.StatusLaunching:
-		a.confirm = "mark \"" + rec.Feature + "\" shipped while its session is still starting?"
+		a.confirm = "mark \"" + rec.Feature + "\" " + word + " while its session is still starting?"
 	}
 	return a
 }
+
+// cqCanMarkDone reports whether y is offered at all. A dispatcher that wrote
+// nothing cannot honestly be marked shipped — "done means live", and there is
+// nothing to be live — but one that cut no branch was never going to write
+// anything, and saying it is done is the only ending it has.
+func cqCanMarkDone(rec *state.Dispatch) bool { return len(rec.Commits) > 0 || rec.Branchless }
 
 // cqKillAct is x on a live row: kill for a dispatcher this cockpit started,
 // release for a session it adopted, which was the human's before the record
@@ -411,7 +439,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		}
 		acts = append(acts, cqAct{k: "p", d: "unpark",
 			ok: "\"" + rec.Feature + "\" back on the fleet", keep: true})
-		if len(rec.Commits) > 0 {
+		if cqCanMarkDone(rec) {
 			acts = append(acts, cqShipAct(rec))
 		}
 		if rec.Status != state.StatusExited {
@@ -426,7 +454,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 	// answer and nothing to skip past: it can be watched, stopped, or declared
 	// shipped by the human who knows it is.
 	if kind == "running" {
-		if len(rec.Commits) > 0 {
+		if cqCanMarkDone(rec) {
 			acts = append(acts, cqShipAct(rec))
 		}
 		return append(acts, cqKillAct(rec))
@@ -441,7 +469,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		// real (shipCmd) rather than just marking the record done.
 		acts = append(acts, cqAct{k: "y", d: "approve merge",
 			ok: "merging #" + itoa(rec.PRNumber) + " into " + rec.RepoName})
-	case len(rec.Commits) > 0:
+	case cqCanMarkDone(rec):
 		acts = append(acts, cqShipAct(rec))
 	}
 	acts = append(acts,
