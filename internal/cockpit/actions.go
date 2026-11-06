@@ -272,13 +272,13 @@ func resumeCmd(id, prompt string) tea.Cmd {
 		}
 		if mode == dispatchpkg.ResumeRelaunched {
 			return resumedMsg{
-				notice:  "started \"" + rec.Feature + "\" again in " + rec.RepoName + " · it never ran, so there was nothing to resume",
+				notice:  "started \"" + rec.Feature + "\" again in " + cqPlaceOf(rec) + " · it never ran, so there was nothing to resume",
 				session: resumedAt(rec, session),
 				env:     rec.EnvCommand,
 			}
 		}
 		return resumedMsg{
-			notice:  "resumed \"" + rec.Feature + "\" in " + rec.RepoName,
+			notice:  "resumed \"" + rec.Feature + "\" in " + cqPlaceOf(rec),
 			session: resumedAt(rec, session),
 			env:     rec.EnvCommand,
 		}

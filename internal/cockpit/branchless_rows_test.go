@@ -143,3 +143,23 @@ func TestADoneConversationIsNotAShip(t *testing.T) {
 		t.Error("a shipped feature stopped counting as live")
 	}
 }
+
+// Sentences that name where a dispatcher is ("attaching to X session…",
+// "resumed … in X") read off the repo, and a whole-product conversation names
+// none: they said "attaching to  session…". They name the product instead.
+func TestAWholeProductConversationIsNamedInSentences(t *testing.T) {
+	whole := &state.Dispatch{Feature: "pp roadmap", Product: "pp", Branchless: true, Status: state.StatusWorking}
+	if got := cqPlaceOf(whole); got != "all of pp" {
+		t.Errorf("place = %q, want all of pp", got)
+	}
+	if got := cqPlaceOf(branchlessRec("x")); got != "player-app" {
+		t.Errorf("a conversation on a repo is named %q, want the repo", got)
+	}
+	for _, kind := range []string{"running", "parked"} {
+		for _, a := range cqActs(whole, kind) {
+			if a.k == "⏎" && a.ok != "attaching to all of pp session…" {
+				t.Errorf("%s: ⏎ says %q", kind, a.ok)
+			}
+		}
+	}
+}

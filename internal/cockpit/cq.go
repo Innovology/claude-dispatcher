@@ -224,6 +224,16 @@ func cqRepoOf(rec *state.Dispatch) string {
 	return rec.RepoName
 }
 
+// cqPlaceOf is where a dispatcher is, for a sentence: the repo, or for a
+// conversation about a whole product, which names none, "all of <product>" —
+// the notices that read the repo said "attaching to  session…" for one.
+func cqPlaceOf(rec *state.Dispatch) string {
+	if rec.WholeProduct() {
+		return "all of " + rec.Product
+	}
+	return rec.RepoName
+}
+
 // cqToneOf picks the row's tone from real signals only. Age is deliberately not
 // an input: there is no evidence a thirty-minute wait is worse than a
 // five-minute one, and any threshold would be invented.
@@ -435,7 +445,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 				cqAct{k: "⏎", d: "resume", ok: "resuming \"" + rec.Feature + "\"…", keep: true})
 		} else {
 			acts = append(acts,
-				cqAct{k: "⏎", d: "attach", ok: "attaching to " + rec.RepoName + " session…", keep: true})
+				cqAct{k: "⏎", d: "attach", ok: "attaching to " + cqPlaceOf(rec) + " session…", keep: true})
 		}
 		acts = append(acts, cqAct{k: "p", d: "unpark",
 			ok: "\"" + rec.Feature + "\" back on the fleet", keep: true})
@@ -448,7 +458,7 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		return acts
 	}
 	acts := []cqAct{
-		{k: "⏎", d: "attach", ok: "attaching to " + rec.RepoName + " session…", keep: true},
+		{k: "⏎", d: "attach", ok: "attaching to " + cqPlaceOf(rec) + " session…", keep: true},
 	}
 	// A running dispatcher is not asking for anything, so there is nothing to
 	// answer and nothing to skip past: it can be watched, stopped, or declared

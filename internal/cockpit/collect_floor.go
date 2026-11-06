@@ -290,7 +290,7 @@ func floorAsk(rec *state.Dispatch, st string, commits int, age string) *askBlock
 	}
 	return &askBlock{
 		kicker:   strings.ToUpper(stateMetaBy[st].label),
-		headline: rec.RepoName + " · " + rec.StatusReason,
+		headline: cqPlaceOf(rec) + " · " + rec.StatusReason,
 		evidence: strconv.Itoa(commits) + " commits · " + age,
 		actions:  []action{{"y", "approve"}, {"n", "deny"}, {"r", "reply"}, {"enter", "attach"}},
 	}
