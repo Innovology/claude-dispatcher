@@ -174,8 +174,13 @@ func TestABranchlessDispatchSpansItsProductAndCutsNothing(t *testing.T) {
 }
 
 // About the product as a whole there is no repo to start on, and so none to
-// borrow a server, an environment or a shell from: the session runs on the
-// default server in the plain environment, and the record names no repo.
+// borrow an environment or a shell from: the session runs in the plain
+// environment, and the record names no repo. It still gets a server of its own,
+// named for the product the way a repo's sessions are named for the repo. No
+// name at all means no -L, and tmux then answers on whichever server $TMUX
+// points at — measured running the cockpit inside a tmux of its own, the
+// conversation landed on the cockpit's server — so where the session lived
+// would depend on where the cockpit was started.
 func TestAWholeProductConversationBorrowsNoRepo(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 	all := portfolio(t)
@@ -189,8 +194,11 @@ func TestAWholeProductConversationBorrowsNoRepo(t *testing.T) {
 	if !d.WholeProduct() || d.RepoName != "" || d.RepoPath != "" || d.Product != "pp" {
 		t.Errorf("record = repo %q at %q in %q; want the product and no repo", d.RepoName, d.RepoPath, d.Product)
 	}
-	if d.TmuxSocket != "" || d.EnvCommand != "" || got.env != "" || d.PaneShell != "" {
-		t.Errorf("borrowed a repo's server %q, env %q, shell %q", d.TmuxSocket, d.EnvCommand, d.PaneShell)
+	if d.EnvCommand != "" || got.env != "" || d.PaneShell != "" {
+		t.Errorf("borrowed a repo's env %q, shell %q", d.EnvCommand, d.PaneShell)
+	}
+	if d.TmuxSocket != "pp" {
+		t.Errorf("server = %q, want one named for the product", d.TmuxSocket)
 	}
 	if len(d.AddDirs) != 3 {
 		t.Errorf("add dirs = %v, want all three of pp", d.AddDirs)

@@ -133,8 +133,12 @@ func (s Scope) dirs() []string {
 // The session's server, environment and shell are the focus repo's, so a
 // conversation that starts on a repo runs with that repo's toolchain on PATH
 // (repos.EnvIn names the checkout's flake, since the folder has none). A
-// conversation about the product as a whole has no repo to borrow them from and
-// runs on the default server, in the plain environment.
+// conversation about the product as a whole has no repo to borrow them from: it
+// runs in the plain environment, on a server named for the product, the way a
+// repo's sessions are on one named for the repo. Not on "no server": with no -L
+// tmux answers on whichever server $TMUX points at, so a session given none
+// lands on the cockpit's own server when the cockpit runs inside tmux, and is
+// looked for on the default one by a cockpit started anywhere else.
 func LaunchBranchless(s Scope, feature, prompt string, mode Mode, model Model, fanOut bool, acct account.Account) (d *state.Dispatch, err error) {
 	audit(state.Event{Event: state.EventDispatchAsked, Feature: feature, Repo: s.label()})
 	defer func() {
@@ -171,7 +175,8 @@ func LaunchBranchless(s Scope, feature, prompt string, mode Mode, model Model, f
 	mode, model = mode.Normalize(), model.Normalize()
 	prompt = strings.TrimRight(withFanOut(withContract(prompt, mode, BranchNone), fanOut), "\n")
 
-	var socket, env, shell, repoName, repoPath string
+	socket := s.Product
+	var env, shell, repoName, repoPath string
 	if r := s.focusRepo(); r != nil {
 		socket, shell, repoName, repoPath = r.Socket, r.Shell, r.Name, r.Path
 		env = repos.EnvIn(r.Env, r.Path, home)
