@@ -63,9 +63,13 @@ func dxCursorTo(t *testing.T, m model, match func(dxRepoRow) bool) model {
 }
 
 // A conversation about a whole product is picked where everything else is,
-// on WHERE: one row per product with more than one repo, leading its group.
-// A product of one repo needs no such row — its repo is the whole of it — and
-// the repos in no product have no product to speak of.
+// on WHERE: one row per product with more than one repo, after its repos.
+// After, because an untouched form's cursor sits on the first row: leading the
+// group, the product row was what a form opened on, and pressing through it
+// sent a conversation where the form had always cut a branch — found running
+// the real binary, not by a test. A product of one repo needs no such row —
+// its repo is the whole of it — and the repos in no product have no product to
+// speak of.
 func TestDXOffersAWholeProductOnItsOwnRow(t *testing.T) {
 	m := dxProductModel(t)
 	rows := m.dxRows()
@@ -77,16 +81,20 @@ func TestDXOffersAWholeProductOnItsOwnRow(t *testing.T) {
 		}
 		order = append(order, name)
 	}
-	if got, want := strings.Join(order, " "), "ALL:pp player-app playerpulse scratch"; got != want {
+	if got, want := strings.Join(order, " "), "player-app playerpulse ALL:pp scratch"; got != want {
 		t.Errorf("WHERE = %s, want %s", got, want)
 	}
 	// It is a way to dispatch, not a repo, and the count says how many repos.
 	if got := m.dxRepoCount(); !strings.HasPrefix(got, "3 repos") {
 		t.Errorf("count = %q, want 3 repos", got)
 	}
+	// And so the form opens on a repo, cutting a branch, as it always did.
+	if m.dxNoBranch() {
+		t.Error("an untouched form opens on a dispatch with no branch")
+	}
 	// Typing the product finds it, as it finds the product's repos.
 	m.dxFilter = "pp"
-	if rows := m.dxRows(); len(rows) == 0 || !rows[0].whole {
+	if rows := m.dxRows(); len(rows) == 0 || !rows[len(rows)-1].whole {
 		t.Errorf("filtering on the product does not find its row: %+v", rows)
 	}
 }

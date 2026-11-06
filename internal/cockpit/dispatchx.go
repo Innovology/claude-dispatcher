@@ -66,7 +66,7 @@ package cockpit
 // the default and everything above describes it. None is a conversation: no
 // branch, no worktree, a session that reads every repo in the picked repo's
 // product and starts on the picked one (dispatch/branchless.go). The product
-// as a whole is picked on WHERE, on a row of its own that leads each product's
+// as a whole is picked on WHERE, on a row of its own that follows each product's
 // repos, and is branchless by construction — a product has no one repo to cut
 // a branch in. With no branch, ROOT and PREFIX shape nothing, so the field walk
 // passes over them and their hints say why.
@@ -258,7 +258,9 @@ func dxSort(rows []dxRepoRow) {
 			return rows[i].product < rows[j].product
 		}
 		if rows[i].whole != rows[j].whole {
-			return rows[i].whole // the product leads its own repos
+			// The product follows its own repos: an untouched form sits on the
+			// first row, and that must stay a repo, cutting a branch.
+			return rows[j].whole
 		}
 		return rows[i].repo < rows[j].repo
 	})
