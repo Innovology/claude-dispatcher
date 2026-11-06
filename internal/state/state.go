@@ -113,6 +113,10 @@ type Dispatch struct {
 	// by where the session started, and that is where Resume reopens it.
 	Checkout    string `json:"checkout,omitempty"`
 	CheckoutCut bool   `json:"checkout_cut,omitempty"`
+	// DispatchedBy is the record id of the dispatcher that sent this one — a
+	// conversation turned orchestrator, sending out workers with
+	// `claude-dispatcher dispatch`. Empty for everything a human dispatched.
+	DispatchedBy string `json:"dispatched_by,omitempty"`
 	// WorktreePath is the dispatch's own checkout of Branch (a git worktree
 	// under WorktreesDir); the claude session runs there so concurrent
 	// dispatches never fight over the repo's working copy. RepoPath stays the

@@ -49,6 +49,9 @@ type Entry struct {
 	// Repo is empty when it is about the whole product.
 	Branchless bool     `json:"branchless,omitempty"`
 	Dirs       []string `json:"dirs,omitempty"`
+	// DispatchedBy is the id of the dispatcher that sent this one out — a
+	// conversation turned orchestrator — so it can find its own workers.
+	DispatchedBy string `json:"dispatched_by,omitempty"`
 	// RepoPath is the repo on disk — where gh and git read its PR and history.
 	RepoPath string `json:"repo_path,omitempty"`
 	// Prompt is the brief it was dispatched with — what "inside the brief"
@@ -115,6 +118,8 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runTidy(args, out)
 	case "worktree":
 		err = runWorktree(args, out)
+	case "dispatch":
+		err = runDispatch(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}
@@ -233,7 +238,7 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 		}
 		e := Entry{
 			ID: d.ID, Feature: d.Feature, Repo: d.RepoName, Product: d.Product,
-			Branch: d.Branch, Branchless: d.Branchless, Dirs: d.AddDirs, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
+			Branch: d.Branch, Branchless: d.Branchless, Dirs: d.AddDirs, DispatchedBy: d.DispatchedBy, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
 			Failure: d.Failure, Retrying: dispatch.RetryPending(d, now),
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
 			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),

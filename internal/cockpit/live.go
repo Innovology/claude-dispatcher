@@ -184,6 +184,21 @@ func (c *collectCtx) productFor(rec *state.Dispatch) string {
 	return "unassigned"
 }
 
+// senderOf is the name of the dispatcher that sent rec out — a conversation
+// turned orchestrator — or its id when that record is no longer on the store,
+// or "" for a dispatch a human made.
+func (c *collectCtx) senderOf(rec *state.Dispatch) string {
+	if rec.DispatchedBy == "" {
+		return ""
+	}
+	for _, d := range c.records {
+		if d.ID == rec.DispatchedBy {
+			return d.Feature
+		}
+	}
+	return rec.DispatchedBy
+}
+
 // forge reports the forge a repo path belongs to: "ado" for Azure DevOps
 // remotes, else "gh". Detection is by the origin remote URL, and the answer is
 // memoised per load (see collectCtx.forges).
