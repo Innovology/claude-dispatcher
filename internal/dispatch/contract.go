@@ -51,8 +51,9 @@ var contractSentences = map[Mode][]string{
 // BranchlessInstruction leads the contract of a dispatch that cut no branch
 // (branching.go), in every mode.
 //
-// It replaces auto's first sentence, which asks for commits and a pull
-// request, and says where the work goes instead: into the conversation, which
+// It replaces each mode's sentence about the change — auto's commits and pull
+// request, manual's check-in before committing, plan's plan put up for approval
+// — and says where the work goes instead: into the conversation, which
 // is the whole of what a review, a status report or a question is for. And it
 // says why the checkouts are not to be touched, because the session is in the
 // human's own: the canonical checkout of every repo in the product, shared
@@ -61,13 +62,20 @@ var contractSentences = map[Mode][]string{
 // feature and a feature gets a branch — a dispatch of its own.
 const BranchlessInstruction = "This dispatch has no branch and no checkout of its own: the repositories CLAUDE.md lists are the human's own working copies, so read them freely and answer in the conversation, but do not edit, commit, or switch branches in them — if the conversation calls for a change, say what it is, and it gets a dispatch of its own."
 
-// autoShipSentence is the one sentence of auto's contract that assumes a
-// branch of its own to commit to and a pull request to open from it.
-var autoShipSentence = contractSentences[ModeAuto][0]
+// changeSentences are the sentences of each mode's contract that assume a
+// change will be made: auto's commit-and-PR, manual's check-in before
+// committing, plan's plan put up for approval. A plan approved in a branchless
+// session is a session editing the human's own checkouts, on whatever branch
+// they left there, so none of these go to one.
+var changeSentences = map[string]bool{
+	contractSentences[ModeAuto][0]:   true,
+	contractSentences[ModeManual][0]: true,
+	contractSentences[ModePlan][0]:   true,
+}
 
 // contractFor is the contract a dispatch closes with: the mode's, and for a
-// dispatch with no branch, the branchless sentence in place of the one that
-// asks for a pull request.
+// dispatch with no branch, the branchless sentence in place of every one that
+// asks for a change — leaving how to wait and when to stop.
 func contractFor(mode Mode, b Branching) []string {
 	sentences := contractSentences[mode.Normalize()]
 	if !b.None() {
@@ -75,7 +83,7 @@ func contractFor(mode Mode, b Branching) []string {
 	}
 	out := []string{BranchlessInstruction}
 	for _, s := range sentences {
-		if s != autoShipSentence {
+		if !changeSentences[s] {
 			out = append(out, s)
 		}
 	}

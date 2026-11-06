@@ -55,3 +55,25 @@ func TestBranchingNormalizesOntoTheDefault(t *testing.T) {
 		t.Errorf("hints do not tell the two apart: %q / %q", BranchNew.Hint(), BranchNone.Hint())
 	}
 }
+
+// Every mode's own contract assumes a change will be made: auto commits and
+// opens a PR, manual checks in "before committing, pushing or opening a PR",
+// plan puts up a plan "for approval before changing anything" — and once it is
+// approved, edits the human's own checkouts. A branchless dispatch reads those
+// checkouts and changes nothing in them, so none of that survives; what does is
+// how to wait and when to stop. The first version of this test looked for "open
+// the PR" alone, and manual's "opening a PR" walked past it.
+func TestABranchlessContractInvitesNoChangeInAnyMode(t *testing.T) {
+	for _, mode := range Modes() {
+		rest := strings.Replace(withContract("x", mode, BranchNone), BranchlessInstruction, "", 1)
+		for _, change := range []string{"PR", "commit", "push", "approval", "changing anything"} {
+			if strings.Contains(rest, change) {
+				t.Errorf("%s: the branchless contract still mentions %q:\n%s", mode, change, rest)
+			}
+		}
+	}
+	// Manual still ends on its question, which is what the row quotes.
+	if m := withContract("x", ModeManual, BranchNone); !strings.Contains(m, "End your message on the one question") {
+		t.Errorf("manual lost its closing question:\n%s", m)
+	}
+}
