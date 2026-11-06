@@ -17,6 +17,12 @@ and, while it was being built:
 > entire project or a specific repo in it, the agent would be able to navigate
 > the conversation easily
 
+and, once a read-only version was up for review:
+
+> a conversation might end up going into a worktree/branch or creating one.
+> the point of the feature is to allow us to start a conversation about the
+> project but then evolve into either a worker or an orchestrator.
+
 Every dispatch cut `<prefix><slug>` in a worktree of its own, because every
 dispatch was assumed to end in a pull request, and the auto contract said so:
 "Commit as you go, open the PR". Plenty of work does not end in one. Read off
@@ -70,15 +76,31 @@ unchanged) or `no branch`. With none:
   by the slug, the second rewrote a finished first one's brief. The launch keeps
   a copy of the brief beside its prompt, and Resume puts it back if the folder
   has gone.
-- **The contract leads with where it is.** Each mode's sentence about the
-  change goes: auto's "commit as you go, open the PR", manual's check-in
-  "before committing, pushing or opening a PR", and plan's plan "for approval
-  before changing anything", which once approved would edit the human's
-  checkouts. In their place: these are the human's own working copies, so
-  read them and answer in the conversation, and do not edit, commit or switch
-  branches. What stays is how to wait and when to stop. A change the conversation turns up gets a
-  dispatch of its own, with a branch. The isolation decision stands: any
-  change still happens in a worktree, and this session only reads.
+- **It starts as a conversation and can turn into work.** The contract says
+  where it is: in the human's own checkouts, which it reads and never changes.
+  When the talk turns into work, it goes onto a branch of its own or is sent
+  out, and its CLAUDE.md names the two verbs, with the command that reaches
+  this build:
+  - **A worker:** `claude-dispatcher worktree --repo <repo> <name>`
+    (`dispatch.TakeBranch`). Given an existing branch, it goes into that
+    branch's worktree, or cuts one for it. Given anything else, it cuts the
+    repo's prefix and the name's slug from the root, where the repo's layout
+    puts a dispatch's worktree. The record becomes a worker's: branch, repo and
+    base set, so the PR, provenance and done-means-live all come back, while
+    its folder stays where the transcript is keyed. One branch per
+    conversation, and never the canonical checkout's own.
+  - **An orchestrator:** `claude-dispatcher dispatch --repo <repo> --title …`.
+    Each worker is an ordinary dispatcher, on the conversation's subscription,
+    recorded as sent by it (`DispatchedBy`), steered with `status` and `reply`.
+
+  Both run from the conversation's own shell and find its record by the
+  `CLAUDE_DISPATCHER_ID` its launch line set. A session cannot move its own
+  launch directory, and claude's `EnterWorktree` only enters worktrees of the
+  repository it was launched in, which a conversation's folder is not. Auto's
+  "commit as you go, open the PR" leaves the opening contract, since there is
+  no branch to commit to yet; the brief says it for when there is. The
+  isolation decision stands: work happens in a worktree, never in the shared
+  checkout.
 - **It borrows from its focus.** One that starts on a repo takes that repo's
   tmux server, shell and toolchain (`repos.EnvIn` names the checkout's flake,
   since the folder has none). One about the whole product runs in the plain
@@ -98,8 +120,9 @@ with a space in its path, and a directory not given was denied.
   which Resume passes again. `RepoName` is the focus, or empty for the whole
   product (`WholeProduct`). It is filed under the product on its record,
   because the config can only map a repo to a product.
-- There is no provenance: no base SHA, no commits, no diff, no effort figure,
-  no pull request. An empty branch asks the forge nothing. `gh` reads an empty
+- While it is still a conversation (`Conversation()`: branchless, no branch
+  taken) there is no provenance: no base SHA, no commits, no diff, no effort
+  figure, no pull request. An empty branch asks the forge nothing. `gh` reads an empty
   `--head` as no filter, so before that guard the tracker would have linked
   the repo's newest merge to the record and marked it done.
 - The triage row says `no branch` where the branch would be, and `all repos`
@@ -115,8 +138,17 @@ with a space in its path, and a directory not given was denied.
   `status --next` never wakes it for one, and its brief says so.
 - The product panel's resume overlay starts a never-run conversation again
   through Resume rather than dispatching it afresh with a branch.
-- A session that ignores its contract and commits in a shared checkout is not
-  stopped. The checkouts are writable through `--add-dir`, and this is a
-  convention, as the rest of the contract is. Locking them down would also
-  stop the human asking for a one-line fix in the conversation, which is
-  theirs to ask for.
+- Each repo's worktree folder is given with `--add-dir` beside its checkout, so
+  a worktree the conversation cuts can be worked in without asking. A folder
+  inside another one given is left out, as on a project layout. The checkouts
+  are writable too, and "change nothing in them" is a convention, as the rest
+  of the contract is.
+- Kill and tidy remove the worktree a conversation cut (`RemovableCheckout`),
+  never one it only went into, and never its folder.
+- A worker sent from inside a session is launched with nothing of that
+  session in its environment (`ScrubSessionEnv`). A pane takes its environment
+  from the client that asks for it, and Claude Code puts its session id,
+  messaging socket and token, `CLAUDECODE` and the dispatcher id in its tools'
+  environment. Checked end to end: the worker's claude carried only its own id.
+- A conversation that took a branch is a worker. Its row shows the branch, `y`
+  is "mark shipped" once it has commits, and a done one is the ship it is.
