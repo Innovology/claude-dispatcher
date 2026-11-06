@@ -130,7 +130,18 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// (CleanupWorktree removes a clean one). Put it back at the same path —
 	// which is what makes the transcript findable again — reusing the feature
 	// branch when it still exists.
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
+	//
+	// A branchless dispatcher has no worktree to rebuild: its folder holds the
+	// brief and is where the transcript is keyed, so it is put back where it was
+	// and trusted again. Nothing removes it, so it is missing only when somebody
+	// deleted it, and then the brief goes with it — the conversation itself still
+	// carries what it was about.
+	if d.Branchless {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", "", fmt.Errorf("recreate %s: %w", dir, err)
+		}
+		trustOwnDir(d.ConfigDir, dir)
+	} else if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if d.RepoPath == "" || d.Branch == "" {
 			return "", "", fmt.Errorf("%s is gone and there is not enough on the record to rebuild it", dir)
 		}
@@ -196,9 +207,12 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// server, under another login — is a different session.
 	name := uniqueName(supervisor.Session{Name: base, Socket: d.TmuxSocket})
 	sess := supervisor.Session{Name: name, Socket: d.TmuxSocket}
-	cmd := resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model), d.ConfigDir)
+	// The directories a branchless session reads go again too: they are a
+	// property of the session, and a resumed one without them would be a
+	// conversation about repositories it can no longer open.
+	cmd := resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model), d.ConfigDir, d.AddDirs...)
 	if relaunch {
-		cmd = launchCommand(d.ID, promptPath, d.PaneShell, Mode(d.Mode).Normalize(), Model(d.Model).Normalize(), d.ConfigDir)
+		cmd = launchCommand(d.ID, promptPath, d.PaneShell, Mode(d.Mode).Normalize(), Model(d.Model).Normalize(), d.ConfigDir, d.AddDirs...)
 	}
 	// The environment is the record's, made to work where the session now
 	// stands (repos.EnvIn): a record cut before that rule carries a bare

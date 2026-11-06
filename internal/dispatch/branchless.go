@@ -1,0 +1,252 @@
+package dispatch
+
+// branchless.go launches a dispatch that cuts no branch: a conversation about a
+// product, or about one repo in it, that can follow the talk to any of the
+// product's other repos (see branching.go for why).
+//
+// Nothing is cut. There is no branch and no worktree; the session reads the
+// checkouts the human already has — each repo's canonical one, the checkout its
+// row on the products lens reads — and they are handed to claude with
+// --add-dir, which is what lets a session reach a directory that is not its
+// own without stopping to ask. The session itself runs in a folder of ours,
+// under the state dir, for three reasons. Its CLAUDE.md is the brief, and
+// claude loads it itself and keeps it through compaction, which a first
+// message does not survive: a long conversation still knows, an hour in, that
+// "the calendar sync" is in pp-calendar-sync and where that is. A conversation
+// about a product has no one checkout it belongs in. And the transcript is
+// keyed by the folder a session runs in, so a folder of its own is what lets
+// Resume find this conversation again rather than whichever one last ran in a
+// shared checkout.
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/repos"
+	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
+)
+
+// Scope is what a branchless dispatch spans.
+type Scope struct {
+	// Product is the product the session spans. "" for a repo the config files
+	// under no product, whose scope is then that repo alone.
+	Product string
+	// Repos are the repositories the session may reach, each through its
+	// canonical checkout, the focus first.
+	Repos []repos.Repo
+	// Focus is the repo the conversation starts on, or "" for the product as a
+	// whole.
+	Focus string
+}
+
+// ScopeOf is the scope for a product, or for one repo in it: every repo the
+// portfolio files under that product, the focus first and the rest by name.
+// focus names a repo and decides the product; with no focus, product does.
+func ScopeOf(all []repos.Repo, product, focus string) (Scope, error) {
+	var at *repos.Repo
+	if focus != "" {
+		for i := range all {
+			if all[i].Name == focus {
+				at = &all[i]
+				break
+			}
+		}
+		if at == nil {
+			return Scope{}, fmt.Errorf("repo not found: %s", focus)
+		}
+		product = at.Product
+	}
+	if product == "" {
+		if at == nil {
+			return Scope{}, fmt.Errorf("no product or repo to talk about")
+		}
+		return Scope{Repos: []repos.Repo{*at}, Focus: at.Name}, nil
+	}
+	s := Scope{Product: product, Focus: focus}
+	var rest []repos.Repo
+	for _, r := range all {
+		switch {
+		case r.Product != product:
+		case at != nil && r.Name == at.Name:
+			s.Repos = append(s.Repos, r)
+		default:
+			rest = append(rest, r)
+		}
+	}
+	sort.Slice(rest, func(i, j int) bool { return rest[i].Name < rest[j].Name })
+	s.Repos = append(s.Repos, rest...)
+	if len(s.Repos) == 0 {
+		return Scope{}, fmt.Errorf("no repo in %s has been found under the scan roots", product)
+	}
+	return s, nil
+}
+
+// focusRepo is the repo the conversation starts on, or nil for the product as
+// a whole.
+func (s Scope) focusRepo() *repos.Repo {
+	if s.Focus == "" {
+		return nil
+	}
+	for i := range s.Repos {
+		if s.Repos[i].Name == s.Focus {
+			return &s.Repos[i]
+		}
+	}
+	return nil
+}
+
+// label is what the audit and the refusals call the scope: the repo it starts
+// on, else the product.
+func (s Scope) label() string {
+	if s.Focus != "" {
+		return s.Focus
+	}
+	return s.Product
+}
+
+// dirs are the checkouts the session is given, each once.
+func (s Scope) dirs() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range s.Repos {
+		if r.Path == "" || seen[r.Path] {
+			continue
+		}
+		seen[r.Path] = true
+		out = append(out, r.Path)
+	}
+	return out
+}
+
+// LaunchBranchless starts a session over s: no branch, no worktree, a folder of
+// its own under the state dir holding the brief (BranchlessBrief), and every
+// repo's checkout given with --add-dir. Everything Launch refuses, it refuses
+// too — a name already live, an account that would leave the session sitting
+// there, a prompt past the ceiling — and for the same reasons.
+//
+// The session's server, environment and shell are the focus repo's, so a
+// conversation that starts on a repo runs with that repo's toolchain on PATH
+// (repos.EnvIn names the checkout's flake, since the folder has none). A
+// conversation about the product as a whole has no repo to borrow them from and
+// runs on the default server, in the plain environment.
+func LaunchBranchless(s Scope, feature, prompt string, mode Mode, model Model, fanOut bool, acct account.Account) (d *state.Dispatch, err error) {
+	audit(state.Event{Event: state.EventDispatchAsked, Feature: feature, Repo: s.label()})
+	defer func() {
+		switch {
+		case err != nil:
+			audit(state.Event{Event: state.EventDispatchFailed, Feature: feature, Repo: s.label(),
+				Reason: err.Error(), DispatcherID: idOf(d)})
+		case d != nil:
+			audit(state.Event{Event: state.EventDispatchLaunched, Feature: feature, Repo: s.label(),
+				DispatcherID: d.ID, Cwd: d.WorktreePath})
+		}
+	}()
+
+	slug, err := preflight(feature, prompt, acct)
+	if err != nil {
+		return nil, err
+	}
+	dirs := s.dirs()
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("%s has no checkout to read", s.label())
+	}
+	home := filepath.Join(state.BranchlessDir(), slug)
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(home, "CLAUDE.md"), []byte(BranchlessBrief(s, feature)), 0o644); err != nil {
+		return nil, fmt.Errorf("could not write the brief: %w", err)
+	}
+	// A folder we made and wrote, which nobody else has to vouch for (see
+	// TrustOwnDir) — and in the account the session runs under, since trust is
+	// per config directory.
+	trusted := trustOwnDir(acct.Env(), home)
+
+	mode, model = mode.Normalize(), model.Normalize()
+	prompt = strings.TrimRight(withFanOut(withContract(prompt, mode, BranchNone), fanOut), "\n")
+
+	var socket, env, shell, repoName, repoPath string
+	if r := s.focusRepo(); r != nil {
+		socket, shell, repoName, repoPath = r.Socket, r.Shell, r.Name, r.Path
+		env = repos.EnvIn(r.Env, r.Path, home)
+	}
+	d = &state.Dispatch{
+		ID:           state.NewID(),
+		Feature:      feature,
+		Slug:         slug,
+		RepoPath:     repoPath,
+		RepoName:     repoName,
+		Product:      s.Product,
+		Branchless:   true,
+		AddDirs:      dirs,
+		WorktreePath: home,
+		Prompt:       prompt,
+		Mode:         string(mode),
+		Model:        string(model),
+		FanOut:       fanOut,
+		TmuxSocket:   socket,
+		EnvCommand:   env,
+		PaneShell:    shell,
+		Account:      accountName(acct),
+		ConfigDir:    acct.Env(),
+		TmuxSession:  uniqueName(supervisor.Session{Name: "disp-" + slug, Socket: socket}),
+		Status:       state.StatusLaunching,
+		StatusReason: launchReason(trusted),
+		CreatedAt:    time.Now(),
+	}
+	if err := state.Save(d); err != nil {
+		return nil, err
+	}
+	return d, start(d, prompt, home, mode, model)
+}
+
+// BranchlessBrief is the CLAUDE.md a branchless session runs under: what it
+// spans, where each repo lives and what its work merges into, where it starts,
+// and how to treat the checkouts it was given. It is the brief rather than the
+// prompt because it has to last the whole conversation, and a conversation
+// that moves between repos is exactly the one that needs to look this up again.
+func BranchlessBrief(s Scope, feature string) string {
+	var b strings.Builder
+	what := "the product **" + s.Product + "**"
+	if s.Product == "" {
+		what = "the repository **" + s.Focus + "**"
+	}
+	fmt.Fprintf(&b, "# %s — a conversation with no branch\n\n", feature)
+	fmt.Fprintf(&b, "claude-dispatcher started this session with no branch and no checkout of its own. "+
+		"It spans %s: every repository below, each through the human's own checkout, "+
+		"which this session was given with --add-dir.\n\n", what)
+	switch {
+	case s.Focus != "" && len(s.Repos) > 1:
+		fmt.Fprintf(&b, "The conversation starts on **%s**, and may go to any of the others.\n\n", s.Focus)
+	case s.Focus == "":
+		b.WriteString("The conversation is about the product as a whole.\n\n")
+	}
+	b.WriteString("| repository | checkout | work merges into |\n| --- | --- | --- |\n")
+	for _, r := range s.Repos {
+		into := r.RootBranch
+		if into == "" {
+			into = "origin's default branch"
+		}
+		fmt.Fprintf(&b, "| %s | `%s` | %s |\n", r.Name, r.Path, into)
+	}
+	b.WriteString("\n" +
+		"- Each repository keeps its own conventions in its CLAUDE.md and README. Read a repository's " +
+		"before answering about it, and again when the conversation moves to another one.\n" +
+		"- `git` and `gh` answer from inside a checkout (`git -C <checkout> …`, or `cd` there for `gh`) " +
+		"and see every branch and pull request, so nothing needs checking out to be read.\n" +
+		"- These checkouts are shared with the human and with any session they run there. Read them; " +
+		"do not edit, commit, or switch branches in them. A change the conversation turns up is described " +
+		"here, and gets a dispatch of its own, with a branch.\n")
+	return b.String()
+}
+
+// trustOwnDir is the seam a branchless launch marks its folder trusted
+// through. Unlike InheritTrustFor it always writes — there is no repo whose
+// trust it waits on — so a test must not reach the human's own .claude.json.
+var trustOwnDir = TrustOwnDirFor

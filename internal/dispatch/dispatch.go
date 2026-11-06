@@ -1,6 +1,7 @@
 // Package dispatch launches a dispatcher: a feature branch materialised in a
 // dedicated git worktree, plus an interactive claude session inside a
-// dedicated tmux session.
+// dedicated tmux session — or, for a dispatch that cuts no branch, a session
+// over a product's own checkouts, in a folder of its own (branchless.go).
 package dispatch
 
 import (
@@ -132,7 +133,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	model = model.Normalize()
 	// The working contract for the mode, then FAN OUT's sentence: how far to
 	// take it, then how widely. See contract.go.
-	prompt = withFanOut(withContract(prompt, mode), fanOut)
+	prompt = withFanOut(withContract(prompt, mode, BranchNew), fanOut)
 	// Trailing newlines are dropped here rather than by the shell, so the two
 	// platforms send the same bytes and the record says exactly what the
 	// session was given: `$(cat …)` strips them and PowerShell's ReadAllText
@@ -189,8 +190,12 @@ func preflight(feature, prompt string, acct account.Account) (string, error) {
 		return "", fmt.Errorf("the %s account cannot run a dispatch: %s", acct.Name, strings.Join(problems, "; "))
 	}
 	if live := liveDispatch(slug); live != nil {
+		where := live.RepoName
+		if where == "" {
+			where = live.Product
+		}
 		return "", fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
-			live.Feature, live.RepoName, live.TmuxSession)
+			live.Feature, where, live.TmuxSession)
 	}
 	return slug, nil
 }
@@ -207,7 +212,7 @@ func start(d *state.Dispatch, prompt, dir string, mode Mode, model Model) error 
 	// launchCommand is OS-specific (/bin/sh on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir)
+	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir, d.AddDirs...)
 	if err := newSession(SessionOf(d), dir, cmd, d.EnvCommand); err != nil {
 		return failLaunch(d, err)
 	}
