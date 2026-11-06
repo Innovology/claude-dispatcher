@@ -677,13 +677,16 @@ func fleetEndedRow(ctx *collectCtx, s *snapshot, passes map[string]int,
 // cqEnded is how a finished dispatcher finished, in the SIGNAL cell's width. It
 // reports the furthest point its work actually reached — deployed over merged
 // over marked — and "stopped" for a session that ended with none of them, which
-// is the honest word for both a kill and a plain exit.
+// is the honest word for both a kill and a plain exit. A branchless
+// dispatcher marked done shipped nothing, and says "marked done".
 func cqEnded(rec *state.Dispatch) string {
 	switch {
 	case rec.DeployedAt != nil:
 		return "deployed"
 	case rec.PRState == "MERGED":
 		return "merged"
+	case rec.Status == state.StatusDone && rec.Branchless:
+		return "marked done"
 	case rec.Status == state.StatusDone:
 		return "marked shipped"
 	}

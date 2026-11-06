@@ -84,9 +84,16 @@ func velMedianDur(ds []time.Duration) time.Duration {
 // velLiveTime reports when a record went live, if it did: the deploy time, or —
 // for a done record with no deploy — the PR merge (a merge counts as live in a
 // repo with no deploy workflow), falling back to the record's UpdatedAt.
+//
+// A branchless dispatcher never went live, whatever its status: it is a
+// conversation, and "done" on it means the conversation is over. Counted, each
+// one was a deploy in this week's figures with no diff to price.
 func velLiveTime(r *state.Dispatch) (time.Time, bool) {
 	if r.DeployedAt != nil {
 		return *r.DeployedAt, true
+	}
+	if r.Branchless {
+		return time.Time{}, false
 	}
 	if r.Status == state.StatusDone {
 		if r.PRMergedAt != nil {

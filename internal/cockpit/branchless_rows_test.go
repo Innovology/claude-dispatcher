@@ -115,3 +115,31 @@ func TestTheProductPanelStartsABranchlessRecordAgainRatherThanCuttingABranch(t *
 		t.Errorf("the overlay launched a new dispatch: %+v", msg)
 	}
 }
+
+// "mark done" exists so a conversation's ending claims nothing went live, and
+// the record says so — but every screen that reads an ending off the status
+// alone read it as a ship. History said "marked shipped", velocity counted a
+// deploy and priced nothing for it, the floor called it live. A conversation
+// that is over is over, and none of those.
+func TestADoneConversationIsNotAShip(t *testing.T) {
+	rec := branchlessRec("byga sitrep")
+	rec.Status, rec.StatusReason = state.StatusDone, "marked done"
+	if got := cqEnded(rec); got != "marked done" {
+		t.Errorf("history says %q, want marked done", got)
+	}
+	if _, live := velLiveTime(rec); live {
+		t.Error("velocity counts a conversation as a feature that went live")
+	}
+	if got := floorState(rec); got == "live" {
+		t.Error("the floor calls a conversation live")
+	}
+	// A branch dispatch marked by hand is still the ship it always was.
+	shipped := testRec("billing", 3)
+	shipped.Status = state.StatusDone
+	if cqEnded(shipped) != "marked shipped" || floorState(shipped) != "live" {
+		t.Errorf("a shipped feature changed: %q / %q", cqEnded(shipped), floorState(shipped))
+	}
+	if _, live := velLiveTime(shipped); !live {
+		t.Error("a shipped feature stopped counting as live")
+	}
+}
