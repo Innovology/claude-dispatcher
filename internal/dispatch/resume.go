@@ -133,13 +133,13 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	//
 	// A branchless dispatcher has no worktree to rebuild: its folder holds the
 	// brief and is where the transcript is keyed, so it is put back where it was
-	// and trusted again. Nothing removes it, so it is missing only when somebody
-	// deleted it, and then the brief goes with it — the conversation itself still
-	// carries what it was about.
+	// and trusted again, with its brief: nothing removes it, so it is missing only
+	// when somebody deleted it, and the launch kept a copy for that.
 	if d.Branchless {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", "", fmt.Errorf("recreate %s: %w", dir, err)
 		}
+		restoreBrief(d.ID, dir)
 		trustOwnDir(d.ConfigDir, dir)
 	} else if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if d.RepoPath == "" || d.Branch == "" {

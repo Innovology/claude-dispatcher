@@ -714,7 +714,7 @@ func DispatchesDir() string { return filepath.Join(Dir(), "dispatches") }
 // WorktreesDir holds per-dispatch git worktrees, worktrees/<repo>/<slug>.
 func WorktreesDir() string { return filepath.Join(Dir(), "worktrees") }
 
-// BranchlessDir holds a folder per branchless dispatch, branchless/<slug>: the
+// BranchlessDir holds a folder per branchless dispatch, branchless/<slug>-<id>: the
 // directory its session runs in, with nothing in it but its brief. It is not
 // a checkout — the session reads the product's own (see dispatch.Scope).
 func BranchlessDir() string { return filepath.Join(Dir(), "branchless") }

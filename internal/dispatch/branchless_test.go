@@ -116,7 +116,7 @@ func TestABranchlessDispatchSpansItsProductAndCutsNothing(t *testing.T) {
 		}
 	}
 
-	home := filepath.Join(state.BranchlessDir(), "review-163")
+	home := filepath.Join(state.BranchlessDir(), "review-163-"+d.ID)
 	if d.WorktreePath != home || got.dir != home {
 		t.Errorf("session runs in %q (record %q), want its own folder %q", got.dir, d.WorktreePath, home)
 	}
@@ -279,5 +279,64 @@ func TestResumingABranchlessDispatcherWhoseFolderCannotBeMadeSaysSo(t *testing.T
 		WorktreePath: filepath.Join(file, "sitrep"), SessionID: "sess-1", Status: state.StatusExited}
 	if _, _, err := Resume(d, ""); err == nil || !strings.Contains(err.Error(), "recreate") {
 		t.Errorf("Resume = %v, want it to say the folder could not be recreated", err)
+	}
+}
+
+// Slugs keep five words, and a conversation is often named as a question, so
+// two finished ones collide easily: "what is the status of byga" and "what is
+// the status of auth" are both what-is-the-status-of. Keyed by the slug, the
+// second rewrote the first's brief, and resuming the first reopened it with
+// one product's checkouts and another product's CLAUDE.md. A folder is the
+// record's own.
+func TestTwoConversationsOfOneSlugKeepTheirOwnBriefs(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	all := portfolio(t)
+	stubStart(t)
+
+	pp, _ := ScopeOf(all, "pp", "")
+	first, err := LaunchBranchless(pp, "what is the status of byga", "?", ModeAuto, DefaultModel, false, ownAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Stop(state.StatusExited, "session ended", first.CreatedAt)
+	_ = state.Save(first)
+
+	cz, _ := ScopeOf(all, "", "cz-bot")
+	second, err := LaunchBranchless(cz, "what is the status of auth", "?", ModeAuto, DefaultModel, false, ownAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.WorktreePath == second.WorktreePath {
+		t.Fatalf("two conversations share %s", first.WorktreePath)
+	}
+	brief, _ := os.ReadFile(filepath.Join(first.WorktreePath, "CLAUDE.md"))
+	if !strings.Contains(string(brief), "the product **pp**") || strings.Contains(string(brief), "cz-bot") {
+		t.Errorf("the first conversation's brief was rewritten:\n%s", brief)
+	}
+}
+
+// A folder somebody removed comes back with its brief, not empty: the contract
+// tells the session "the repositories CLAUDE.md lists", and an empty folder
+// lists none. The launch keeps a copy beside the prompt for exactly this.
+func TestResumingABranchlessDispatcherPutsItsBriefBack(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	all := portfolio(t)
+	got := stubStart(t)
+	s, _ := ScopeOf(all, "", "player-app")
+	d, err := LaunchBranchless(s, "sitrep", "?", ModeAuto, DefaultModel, false, ownAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := os.ReadFile(filepath.Join(d.WorktreePath, "CLAUDE.md"))
+	if err := os.RemoveAll(d.WorktreePath); err != nil {
+		t.Fatal(err)
+	}
+	d.SessionID, d.Status = "sess-1", state.StatusExited
+	if _, _, err := Resume(d, ""); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	brief, err := os.ReadFile(filepath.Join(d.WorktreePath, "CLAUDE.md"))
+	if err != nil || string(brief) != string(want) || got.dir != d.WorktreePath {
+		t.Errorf("resumed in %q with brief %q (%v), want the brief it was launched with", got.dir, brief, err)
 	}
 }

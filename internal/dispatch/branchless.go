@@ -160,12 +160,25 @@ func LaunchBranchless(s Scope, feature, prompt string, mode Mode, model Model, f
 	if len(dirs) == 0 {
 		return nil, fmt.Errorf("%s has no checkout to read", s.label())
 	}
-	home := filepath.Join(state.BranchlessDir(), slug)
+	// The folder is the record's own: the slug for the human reading the
+	// directory, the id so that two conversations whose names share their first
+	// five words never share a brief or a transcript key. A worktree is reused
+	// by a re-dispatch on purpose — it may hold the work — and a folder holding
+	// only a brief has nothing to carry over, so a new conversation gets a new
+	// one.
+	id := state.NewID()
+	home := filepath.Join(state.BranchlessDir(), slug+"-"+id)
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(home, "CLAUDE.md"), []byte(BranchlessBrief(s, feature)), 0o644); err != nil {
+	brief := BranchlessBrief(s, feature)
+	if err := os.WriteFile(filepath.Join(home, BriefFile), []byte(brief), 0o644); err != nil {
 		return nil, fmt.Errorf("could not write the brief: %w", err)
+	}
+	// And a copy beside the prompt, which nothing removes, for Resume to put
+	// back if the folder goes (restoreBrief).
+	if _, err := state.WritePrompt(briefName(id), brief); err != nil {
+		return nil, fmt.Errorf("could not keep a copy of the brief: %w", err)
 	}
 	// A folder we made and wrote, which nobody else has to vouch for (see
 	// TrustOwnDir) — and in the account the session runs under, since trust is
@@ -182,7 +195,7 @@ func LaunchBranchless(s Scope, feature, prompt string, mode Mode, model Model, f
 		env = repos.EnvIn(r.Env, r.Path, home)
 	}
 	d = &state.Dispatch{
-		ID:           state.NewID(),
+		ID:           id,
 		Feature:      feature,
 		Slug:         slug,
 		RepoPath:     repoPath,
@@ -249,6 +262,28 @@ func BranchlessBrief(s Scope, feature string) string {
 		"do not edit, commit, or switch branches in them. A change the conversation turns up is described " +
 		"here, and gets a dispatch of its own, with a branch.\n")
 	return b.String()
+}
+
+// BriefFile is the brief's name in a branchless dispatch's folder: claude's own
+// project memory file, which it loads on start and reloads after compaction.
+const BriefFile = "CLAUDE.md"
+
+// briefName is the prompts-dir name the copy of a record's brief is kept under.
+func briefName(id string) string { return id + "-brief" }
+
+// restoreBrief puts a branchless dispatcher's brief back in dir when it is not
+// there, from the copy its launch kept. The contract it was launched with points
+// at "the repositories CLAUDE.md lists", and a folder with no CLAUDE.md lists
+// none. A record from before the copy was kept has none to restore, and resumes
+// as it is.
+func restoreBrief(id, dir string) {
+	path := filepath.Join(dir, BriefFile)
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	if brief, err := os.ReadFile(state.PromptPath(briefName(id))); err == nil {
+		_ = os.WriteFile(path, brief, 0o644)
+	}
 }
 
 // trustOwnDir is the seam a branchless launch marks its folder trusted
