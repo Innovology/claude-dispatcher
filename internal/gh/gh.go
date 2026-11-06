@@ -39,7 +39,16 @@ type PR struct {
 // is still worth finding, and it is not worth asking about every minute for the
 // rest of the week — which is what a state dir full of finished features had
 // the cockpit doing, one request per dead session per poll, for ever.
+//
+// An empty branch has no pull request, and is not asked about: gh reads an
+// empty --head as no filter at all and answers with every PR in the repo, the
+// newest merged one first in our preference — which the tracker then took as
+// this record's merge. A record carries no branch when it was adopted in a
+// directory on a detached HEAD, or in one that is not a checkout.
 func PRForBranch(repoPath, branch string, settled bool) *PR {
+	if branch == "" {
+		return nil
+	}
 	ttl := PRTTL
 	if settled {
 		ttl = SettledTTL

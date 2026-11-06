@@ -245,8 +245,13 @@ type Run struct {
 	CreatedAt  time.Time
 }
 
-// RunsForBranch returns up to 10 recent workflow runs for the branch.
+// RunsForBranch returns up to 10 recent workflow runs for the branch, and none
+// for no branch: an empty --branch is every branch to gh, and a red run on main
+// would be reported as this record's failure (see PRForBranch).
 func RunsForBranch(repoPath, branch string) []Run {
+	if branch == "" {
+		return nil
+	}
 	return memo("runs:"+repoPath+":"+branch, RepoTTL, func() []Run {
 		return runsForBranchUncached(repoPath, branch)
 	})

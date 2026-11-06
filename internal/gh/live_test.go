@@ -126,6 +126,33 @@ func TestPRForBranchIsCached(t *testing.T) {
 	}
 }
 
+// A record with no branch — an adoption in a directory on a detached HEAD, or
+// one that is not a checkout at all — must not be handed every pull request in
+// the repo. gh reads an empty --head or --branch as no filter, so the question
+// "which PR is this branch's" came back answered with the repo's newest merged
+// one, and the tracker marked the record done on a merge it had nothing to do
+// with. An empty branch is no question, and nothing is asked.
+func TestAnEmptyBranchNamesNoPullRequestAndNoRuns(t *testing.T) {
+	calls := fakeGH(t, `case "$*" in
+  *"pr list"*) echo '[{"number":82,"state":"MERGED","url":"u","mergedAt":"2026-11-01T10:00:00Z"}]' ;;
+  *"run list"*) echo '[{"workflowName":"CI","status":"completed","conclusion":"failure","createdAt":"2026-11-01T10:00:00Z"}]' ;;
+esac`)
+
+	repo := t.TempDir()
+	if pr := PRForBranch(repo, "", false); pr != nil {
+		t.Errorf("PRForBranch(\"\") = #%d, want none: an empty branch is every PR's head to gh", pr.Number)
+	}
+	if pr := PRForBranch(repo, "", true); pr != nil {
+		t.Errorf("PRForBranch(\"\", settled) = #%d, want none", pr.Number)
+	}
+	if runs := RunsForBranch(repo, ""); len(runs) != 0 {
+		t.Errorf("RunsForBranch(\"\") = %d runs, want none: they are every branch's", len(runs))
+	}
+	if got := calls(); len(got) != 0 {
+		t.Errorf("asked the forge about no branch: %v", got)
+	}
+}
+
 // The tracker and the product lens both want the deploy workflow's runs on the
 // same poll. Two reads of one list is a wasted request and the only way the two
 // could ever disagree about whether a feature went live.
