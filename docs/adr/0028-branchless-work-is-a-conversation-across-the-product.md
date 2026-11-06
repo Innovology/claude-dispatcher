@@ -56,19 +56,27 @@ unchanged) or `no branch`. With none:
   the focus first). The product as a whole is its own row on WHERE, after its
   repos, and is branchless by construction. A product of one repo has no such
   row, and a repo in no product is a scope of one.
-- **It runs in a folder of its own,** `branchless/<slug>` under the state
-  dir. That folder's `CLAUDE.md` is the brief: every repo, its checkout, what
+- **It runs in a folder of its own,** `branchless/<slug>-<id>` under the
+  state dir. That folder's `CLAUDE.md` is the brief: every repo, its checkout, what
   its work merges into, and where the conversation starts. It is a brief and
   not a first message because claude reloads CLAUDE.md itself and keeps it
   through compaction, and a conversation that moves between repos is exactly
   the one that needs to look this up an hour in. The transcript is keyed by
   the folder, so Resume finds this conversation and not whichever one last
   ran in a shared checkout. The folder is trusted the way the steward's is
-  (`TrustOwnDirFor`, in the account it runs under).
-- **The contract leads with where it is.** Auto's "commit as you go, open the
-  PR" is replaced, in every mode, by: these are the human's own working
-  copies, so read them and answer in the conversation, and do not edit,
-  commit or switch branches. A change the conversation turns up gets a
+  (`TrustOwnDirFor`, in the account it runs under). The folder is the
+  record's own, not the slug's. A slug keeps five words, and two
+  conversations named as questions ("what is the status of …") share one: keyed
+  by the slug, the second rewrote a finished first one's brief. The launch keeps
+  a copy of the brief beside its prompt, and Resume puts it back if the folder
+  has gone.
+- **The contract leads with where it is.** Each mode's sentence about the
+  change goes: auto's "commit as you go, open the PR", manual's check-in
+  "before committing, pushing or opening a PR", and plan's plan "for approval
+  before changing anything", which once approved would edit the human's
+  checkouts. In their place: these are the human's own working copies, so
+  read them and answer in the conversation, and do not edit, commit or switch
+  branches. What stays is how to wait and when to stop. A change the conversation turns up gets a
   dispatch of its own, with a branch. The isolation decision stands: any
   change still happens in a worktree, and this session only reads.
 - **It borrows from its focus.** One that starts on a repo takes that repo's
@@ -97,7 +105,10 @@ with a space in its path, and a directory not given was denied.
 - The triage row says `no branch` where the branch would be, and `all repos`
   where a whole-product record names no repo. `y` is offered as `mark done`
   with nothing shipped, because a conversation was never going to ship, and
-  "marked shipped" would claim something went live.
+  "marked shipped" would claim something went live. For the same reason, a
+  conversation marked done is not a ship anywhere else: history says
+  "marked done", velocity does not count it as live, and the floor leaves it
+  off.
 - Kill and tidy leave the folder alone: it is not a checkout
   (`OwnsWorktree` is false), and resuming needs it.
 - The steward leaves these alone. Every stop is the human's turn to talk, so

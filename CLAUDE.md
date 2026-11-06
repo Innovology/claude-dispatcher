@@ -367,12 +367,15 @@
   its own on WHERE, **after** its repos, because an untouched form's cursor is
   on the first row; leading the group, that row made the form open on a
   conversation, found running the real binary. A product of one repo has no
-  such row. It runs in **a folder of its own**, `branchless/<slug>` under the
-  state dir, whose CLAUDE.md is the brief (repos, checkouts, what each merges
+  such row. It runs in **a folder of its own**, `branchless/<slug>-<id>` (the
+  record's, since five-word slugs collide and one rewrote another's brief) under
+  the state dir, whose CLAUDE.md is the brief (repos, checkouts, what each merges
   into, where it starts), so the brief survives compaction and the transcript
   has a key of its own. It is trusted like the steward's folder, in its
-  account (`TrustOwnDirFor`). The contract replaces "open the PR" in every mode
-  with: these are the human's own working copies, read and answer, do not edit,
+  account (`TrustOwnDirFor`); the launch keeps a copy of the brief that Resume
+  restores. The contract drops every mode's change sentence (auto's PR,
+  manual's check-in before committing, plan's plan for approval, which once
+  approved edits the checkouts) for: these are the human's own working copies, read and answer, do not edit,
   commit or switch branches, and a change gets a dispatch of its own. It
   borrows server, shell and toolchain from its focus repo. A whole-product one
   gets a server **named for the product**, because no `-L` follows `$TMUX` and it
@@ -380,7 +383,8 @@
   variadic, and measured on 2.1.317 it read a following prompt as a directory.
   The record carries `Branchless`, `AddDirs` and the product; `OwnsWorktree` is false,
   so kill and tidy leave the folder; the row says `no branch` / `all repos`, and
-  `y` is **mark done** with nothing shipped. The steward never wakes for one
+  `y` is **mark done** with nothing shipped, and nothing counts a done one as a
+  ship (history, velocity, the floor). The steward never wakes for one
   (`status --next` skips it), because every stop is the human's turn to talk. An
   empty branch asks the forge nothing, since `gh` reads an empty `--head` as every
   PR. Full record:
@@ -1183,8 +1187,8 @@
   and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit), `prompts/<id>.txt`, the prompt each dispatch is launched
-  with, and `branchless/<slug>/`, a branchless dispatch's folder, under `~/.local/state/claude-dispatcher/` (override:
-  `CLAUDE_DISPATCHER_STATE`).
+  with, and `branchless/<slug>-<id>/`, a branchless dispatch's folder, under
+  `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
 - `internal/keymap` — every action the cockpit has (id, scope, default key,
   help line), `[keys]` overrides, and the collision rules. `?` is built from it.
 - `internal/fuzzy` — `/` search, wrapping fzf's own matcher in process; returns
