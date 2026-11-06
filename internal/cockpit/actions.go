@@ -157,7 +157,7 @@ func killCmd(features []string) tea.Cmd {
 		}
 		notice := strings.Join(parts, " · ")
 		if kept > 0 {
-			notice += fmt.Sprintf(" · %d worktree(s) kept (uncommitted changes)", kept)
+			notice += fmt.Sprintf(" · %d worktree(s) kept (holding work no branch has)", kept)
 		}
 		return actionMsg{notice: notice}
 	}

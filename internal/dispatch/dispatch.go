@@ -727,6 +727,12 @@ func reusedRootErr(branch string, root Root) error {
 // modified or untracked files); a dirty worktree is kept for inspection so
 // killing a dispatcher never discards unshipped work.
 //
+// Clean is not the whole of safe. A detached HEAD holding commits no branch,
+// tag or remote-tracking ref contains is the only copy of them, and `git
+// worktree remove` does not ask about that: it takes the HEAD with the folder.
+// So that worktree is kept too, by the rule the disk reclaim already applies
+// (unreachableHead) — a branch outlives its worktree, a detached HEAD does not.
+//
 // It reports whether the worktree is gone, not whether this call removed it:
 // an absent path (never had a worktree, or already cleaned up) is "gone", so
 // callers can report "kept" on false without special-casing.
@@ -736,6 +742,9 @@ func CleanupWorktree(repoPath, worktreePath string) bool {
 	}
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		return true
+	}
+	if unreachableHead(worktreePath) != "" {
+		return false
 	}
 	_ = exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
 	_, err := os.Stat(worktreePath)

@@ -641,7 +641,7 @@ func TestKillKeepsADirtyWorktreeAndSaysSo(t *testing.T) {
 	}
 
 	am, _ := killCmd([]string{"clean", "dirty"})().(actionMsg)
-	if !strings.Contains(am.notice, "killed 2 dispatchers") || !strings.HasSuffix(am.notice, " · 1 worktree(s) kept (uncommitted changes)") {
+	if !strings.Contains(am.notice, "killed 2 dispatchers") || !strings.HasSuffix(am.notice, " · 1 worktree(s) kept (holding work no branch has)") {
 		t.Errorf("notice = %q", am.notice)
 	}
 	if _, err := os.Stat(clean); !os.IsNotExist(err) {
