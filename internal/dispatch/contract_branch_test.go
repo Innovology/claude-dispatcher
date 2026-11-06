@@ -60,25 +60,47 @@ func TestBranchingNormalizesOntoTheDefault(t *testing.T) {
 	}
 }
 
-// Every mode's own contract assumes a change will be made: auto commits and
-// opens a PR, manual checks in "before committing, pushing or opening a PR",
-// plan puts up a plan "for approval before changing anything" — and once it is
-// approved, edits the human's own checkouts. A branchless dispatch reads those
-// checkouts and changes nothing in them, so none of that survives; what does is
-// how to wait and when to stop. The first version of this test looked for "open
-// the PR" alone, and manual's "opening a PR" walked past it.
-func TestABranchlessContractInvitesNoChangeInAnyMode(t *testing.T) {
+// A conversation starts as one and may become a worker or an orchestrator, so
+// its contract does not forbid work: it forbids changing the human's own
+// checkouts, and sends work onto a branch first, by the verbs its CLAUDE.md
+// names. Auto's "commit as you go, open the PR" is how to carry work through
+// once there is a branch, so the brief says it for then; the opening contract
+// would otherwise ask a conversation for a PR before it has a branch to open
+// one from. Manual's check-in before committing and plan's plan put up for
+// approval stay — both stop for the human before any change, which is what a
+// conversation turning into work in those modes should do.
+func TestABranchlessContractSendsWorkOntoABranchFirst(t *testing.T) {
 	for _, mode := range Modes() {
-		rest := strings.Replace(withContract("x", mode, BranchNone), BranchlessInstruction, "", 1)
-		for _, change := range []string{"PR", "commit", "push", "approval", "changing anything"} {
-			if strings.Contains(rest, change) {
-				t.Errorf("%s: the branchless contract still mentions %q:\n%s", mode, change, rest)
+		c := withContract("x", mode, BranchNone)
+		for _, want := range []string{"change nothing in them", "onto a branch of its own or send it out", "CLAUDE.md"} {
+			if !strings.Contains(c, want) {
+				t.Errorf("%s: the branchless contract lacks %q:\n%s", mode, want, c)
 			}
 		}
 	}
-	// Manual still ends on its question, which is what the row quotes.
-	if m := withContract("x", ModeManual, BranchNone); !strings.Contains(m, "End your message on the one question") {
-		t.Errorf("manual lost its closing question:\n%s", m)
+	if strings.Contains(withContract("x", ModeAuto, BranchNone), "Commit as you go") {
+		t.Error("auto asks a conversation to commit before it has a branch")
+	}
+	if m := withContract("x", ModeManual, BranchNone); !strings.Contains(m, "check in before committing") {
+		t.Errorf("manual lost its check-in:\n%s", m)
+	}
+	if p := withContract("x", ModePlan, BranchNone); !strings.Contains(p, "put the plan up for approval") {
+		t.Errorf("plan lost its plan:\n%s", p)
+	}
+}
+
+// The brief is where the two ways into work are written down, with the very
+// command that reaches this build.
+func TestTheBriefNamesBothWaysIntoWork(t *testing.T) {
+	prev := selfCommand
+	selfCommand = func() string { return "/opt/cd" }
+	t.Cleanup(func() { selfCommand = prev })
+	b := BranchlessBrief(Scope{Product: "pp", Repos: []repos.Repo{{Name: "app", Path: "/src/app"}}}, "talk")
+	for _, want := range []string{"`/opt/cd worktree --repo <repo> <name>`", "`/opt/cd dispatch --repo <repo>",
+		"commit as you go, open the PR", "`dispatched_by`", "do not edit, commit, or switch branches in them"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("brief lacks %q:\n%s", want, b)
+		}
 	}
 }
 

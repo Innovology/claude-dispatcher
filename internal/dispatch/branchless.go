@@ -21,6 +21,7 @@ package dispatch
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -290,15 +291,52 @@ func BranchlessBrief(s Scope, feature string) string {
 		}
 		fmt.Fprintf(&b, "| %s | `%s` | %s |\n", r.Name, r.Path, into)
 	}
+	cmd := selfCommand()
 	b.WriteString("\n" +
 		"- Each repository keeps its own conventions in its CLAUDE.md and README. Read a repository's " +
 		"before answering about it, and again when the conversation moves to another one.\n" +
 		"- `git` and `gh` answer from inside a checkout (`git -C <checkout> …`, or `cd` there for `gh`) " +
 		"and see every branch and pull request, so nothing needs checking out to be read.\n" +
 		"- These checkouts are shared with the human and with any session they run there. Read them; " +
-		"do not edit, commit, or switch branches in them. A change the conversation turns up is described " +
-		"here, and gets a dispatch of its own, with a branch.\n")
+		"do not edit, commit, or switch branches in them.\n")
+	fmt.Fprintf(&b, "\n## When the conversation turns into work\n\n"+
+		"It can, and work goes on a branch of its own, one of two ways.\n\n"+
+		"- **Do it here.** `%[1]s worktree --repo <repo> <name>` moves this conversation onto a branch: "+
+		"a new one cut for `<name>` the way every dispatch's is (`--root <branch>` to cut it from another "+
+		"branch), or `<name>` itself when that branch already exists. It prints the checkout: `cd` there "+
+		"and carry the work through as any dispatch would — commit as you go, open the PR, fix your own CI "+
+		"failures. The cockpit tracks the branch as this conversation's from then on; a conversation takes one branch, and sends any further work out.\n"+
+		"- **Send it out.** `%[1]s dispatch --repo <repo> --title \"<a few words>\" \"<the brief>\"` starts a "+
+		"worker of its own, in its own worktree, on the human's table. Send one per independent piece. "+
+		"`%[1]s status --json` shows them (their `dispatched_by` is this conversation), and "+
+		"`%[1]s reply <id> \"<one line>\"` answers one that is waiting.\n\n"+
+		"The folders a repo's worktrees are cut in are among the directories this session was given, so a "+
+		"checkout cut with `worktree` can be worked in without asking.\n", cmd)
 	return b.String()
+}
+
+// selfCommand is how a session started by this build should call it back: the
+// plain name when PATH's claude-dispatcher is this very binary — the durable
+// name, which survives an upgrade — and this binary's own path otherwise, since
+// a second, older copy on PATH would be driving another build.
+var selfCommand = func() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "claude-dispatcher"
+	}
+	if r, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = r
+	}
+	if found, err := exec.LookPath("claude-dispatcher"); err == nil {
+		if r, err := filepath.EvalSymlinks(found); err == nil {
+			// The Nix package's makeWrapper script sits in front of the binary,
+			// which it moves to .claude-dispatcher-wrapped beside itself.
+			if r == exe || (filepath.Dir(r) == filepath.Dir(exe) && filepath.Base(exe) == "."+filepath.Base(r)+"-wrapped") {
+				return "claude-dispatcher"
+			}
+		}
+	}
+	return exe
 }
 
 // BriefFile is the brief's name in a branchless dispatch's folder: claude's own

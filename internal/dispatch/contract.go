@@ -51,31 +51,26 @@ var contractSentences = map[Mode][]string{
 // BranchlessInstruction leads the contract of a dispatch that cut no branch
 // (branching.go), in every mode.
 //
-// It replaces each mode's sentence about the change — auto's commits and pull
-// request, manual's check-in before committing, plan's plan put up for approval
-// — and says where the work goes instead: into the conversation, which
-// is the whole of what a review, a status report or a question is for. And it
-// says why the checkouts are not to be touched, because the session is in the
-// human's own: the canonical checkout of every repo in the product, shared
-// with them and with any session they started there. A change the
-// conversation turns up is described rather than made, since a change is a
-// feature and a feature gets a branch — a dispatch of its own.
-const BranchlessInstruction = "This dispatch has no branch and no checkout of its own: the repositories CLAUDE.md lists are the human's own working copies, so read them freely and answer in the conversation, but do not edit, commit, or switch branches in them — if the conversation calls for a change, say what it is, and it gets a dispatch of its own."
+// A conversation is where it starts, not where it has to stay: the point is to
+// talk about a product and then, when the talk arrives somewhere, become a
+// worker on a branch of its own or an orchestrator sending work out. So the
+// sentence says where it is — in the human's own checkouts, shared with them and
+// with any session they started there, which it reads and never changes — and
+// that work goes onto a branch first, by the two verbs its CLAUDE.md names
+// (work.go). It replaces auto's "commit as you go, open the PR", which is how to
+// carry work through once there is a branch, and the brief says that there.
+const BranchlessInstruction = "This dispatch starts as a conversation, with no branch: the repositories CLAUDE.md lists are the human's own working copies, so read them freely and answer here, but change nothing in them — when the conversation turns into work, take it onto a branch of its own or send it out, as CLAUDE.md describes, and carry it through from there."
 
-// changeSentences are the sentences of each mode's contract that assume a
-// change will be made: auto's commit-and-PR, manual's check-in before
-// committing, plan's plan put up for approval. A plan approved in a branchless
-// session is a session editing the human's own checkouts, on whatever branch
-// they left there, so none of these go to one.
-var changeSentences = map[string]bool{
-	contractSentences[ModeAuto][0]:   true,
-	contractSentences[ModeManual][0]: true,
-	contractSentences[ModePlan][0]:   true,
-}
+// autoShipSentence is auto's "commit as you go, open the PR": how to carry work
+// through on a branch, which a conversation does not have yet. Its brief says
+// it for when it does. Manual's check-in before committing and plan's plan put
+// up for approval stay: both stop for the human before any change, which is
+// what a conversation turning into work should do in those modes.
+var autoShipSentence = contractSentences[ModeAuto][0]
 
 // contractFor is the contract a dispatch closes with: the mode's, and for a
-// dispatch with no branch, the branchless sentence in place of every one that
-// asks for a change — leaving how to wait and when to stop.
+// dispatch with no branch, the branchless sentence leading it in place of
+// auto's commit-and-PR.
 func contractFor(mode Mode, b Branching) []string {
 	sentences := contractSentences[mode.Normalize()]
 	if !b.None() {
@@ -83,7 +78,7 @@ func contractFor(mode Mode, b Branching) []string {
 	}
 	out := []string{BranchlessInstruction}
 	for _, s := range sentences {
-		if !changeSentences[s] {
+		if s != autoShipSentence {
 			out = append(out, s)
 		}
 	}

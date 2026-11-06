@@ -64,7 +64,7 @@ func (b Branching) None() bool { return b.Normalize() == BranchNone }
 // no keys, because the two forms bind different ones.
 func (b Branching) Hint() string {
 	if b.None() {
-		return "no branch — a conversation across the product's repos, for a review, a question or a look"
+		return "no branch — starts as a conversation across the product's repos, and can take a branch or send work out from there"
 	}
 	return "cuts its own branch in a checkout of its own, for work that ends in a pull request"
 }
