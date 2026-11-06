@@ -107,24 +107,9 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		}
 	}()
 
-	slug := Slugify(feature)
-	if slug == "" {
-		return nil, fmt.Errorf("feature name %q produces an empty slug", feature)
-	}
-	if n := len(prompt); n > MaxPromptBytes {
-		// Refused up front and by name, because the alternative is a session
-		// that starts and never gets its prompt: the shell would fail the exec
-		// with E2BIG, no hook would ever fire for it, and the record would sit
-		// at launching until a sweep retired it hours later.
-		return nil, fmt.Errorf("the prompt is %d bytes and the limit is %d — put the detail in a file in the repo and point the prompt at it",
-			n, MaxPromptBytes)
-	}
-	if problems := account.Problems(acct, probeAccount(acct)); len(problems) > 0 {
-		return nil, fmt.Errorf("the %s account cannot run a dispatch: %s", acct.Name, strings.Join(problems, "; "))
-	}
-	if live := liveDispatch(slug); live != nil {
-		return nil, fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
-			live.Feature, live.RepoName, live.TmuxSession)
+	slug, err := preflight(feature, prompt, acct)
+	if err != nil {
+		return nil, err
 	}
 	branch := branchFor(r, slug)
 	worktree := worktreePath(r, slug)
@@ -181,24 +166,53 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	if err := state.Save(d); err != nil {
 		return nil, err
 	}
+	return d, start(d, prompt, worktree, mode, model)
+}
 
-	// The prompt goes to disk and the session reads it there. It is written
-	// before the session starts and never removed: it is the transport, and it
-	// is also the only copy the session itself can be pointed back at.
+// preflight is what every launch refuses before anything is created, and the
+// slug the feature's name produces: an empty slug, a prompt past the ceiling,
+// an account that would leave the session sitting there, a name already live.
+func preflight(feature, prompt string, acct account.Account) (string, error) {
+	slug := Slugify(feature)
+	if slug == "" {
+		return "", fmt.Errorf("feature name %q produces an empty slug", feature)
+	}
+	if n := len(prompt); n > MaxPromptBytes {
+		// Refused up front and by name, because the alternative is a session
+		// that starts and never gets its prompt: the shell would fail the exec
+		// with E2BIG, no hook would ever fire for it, and the record would sit
+		// at launching until a sweep retired it hours later.
+		return "", fmt.Errorf("the prompt is %d bytes and the limit is %d — put the detail in a file in the repo and point the prompt at it",
+			n, MaxPromptBytes)
+	}
+	if problems := account.Problems(acct, probeAccount(acct)); len(problems) > 0 {
+		return "", fmt.Errorf("the %s account cannot run a dispatch: %s", acct.Name, strings.Join(problems, "; "))
+	}
+	if live := liveDispatch(slug); live != nil {
+		return "", fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
+			live.Feature, live.RepoName, live.TmuxSession)
+	}
+	return slug, nil
+}
+
+// start writes the prompt and starts the session for a record already saved,
+// in dir. The prompt goes to disk and the session reads it there: it is the
+// transport, and it is also the only copy the session itself can be pointed
+// back at. A failure is recorded on the record (failLaunch), never lost.
+func start(d *state.Dispatch, prompt, dir string, mode Mode, model Model) error {
 	promptPath, err := state.WritePrompt(d.ID, prompt)
 	if err != nil {
-		return d, failLaunch(d, fmt.Errorf("could not write the prompt file: %w", err))
+		return failLaunch(d, fmt.Errorf("could not write the prompt file: %w", err))
 	}
-
 	// launchCommand is OS-specific (/bin/sh on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
 	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir)
-	if err := newSession(SessionOf(d), worktree, cmd, d.EnvCommand); err != nil {
-		return d, failLaunch(d, err)
+	if err := newSession(SessionOf(d), dir, cmd, d.EnvCommand); err != nil {
+		return failLaunch(d, err)
 	}
 	markSessionStarted(d, time.Now())
-	return d, nil
+	return nil
 }
 
 // markSessionStarted stamps SessionStartedAt on the record as it stands on disk,
