@@ -266,6 +266,7 @@ Everything else is in the file itself, and **`e`** on the settings screen (or `:
 | `[sockets]` | the tmux server a repo's sessions run on — by default the repo's own name, so each repo is its own server |
 | `[session_env]` | the command a repo's sessions start under; a repo with a `flake.nix` on a machine whose nix runs flakes gets `nix develop` without asking, and `repo = ""` turns that off |
 | `[gates]` | the one CI check that is a repo's verdict, e.g. an `All gates green` aggregator, instead of every check at once |
+| `[colors]` | the prompt-bar colour a repo's (or a product's) dispatches open in — Claude Code's `/color`: `red`, `blue`, `green`, `yellow`, `purple`, `orange`, `pink` or `cyan`; a repo's own entry wins over its product's |
 | `[deploy_workflows]` | the workflow that means "deployed", when its name does not say so |
 | `[linear]` | a Linear token per product (below) |
 | `[accounts]` | extra Claude subscriptions (`claude-dispatcher account add`) |

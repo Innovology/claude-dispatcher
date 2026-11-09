@@ -837,6 +837,21 @@
   OUT switch itself shows as config beside the mode. Existing installs
   re-run `init` to get the two new hook entries. Full record:
   `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
+- **A project's colour is typed in, because there is no flag for it.**
+  `[colors]` (repo name, else product name) gives a dispatch's session that
+  prompt-bar colour so sessions from different projects tell apart at a
+  glance. Claude Code 2.1.281 sets it only with the `/color` slash command,
+  which writes an `agent-color` entry into the transcript that `--resume`
+  restores (so resume and an account swap keep it); the hidden
+  `--agent-color` flag is a teammate's colour and leaves a session's bar
+  grey, measured. `/color` is an immediate command — measured to apply
+  mid-turn without touching the turn — so `dispatch.DeliverColors` types it
+  as soon as a load sees the session's id (SessionStart: the REPL is up), on
+  the load that the hook's write triggers, with the poll behind it. Never on a
+  menu, into a pane claude has left or cannot be seen into, into a finished
+  session or an adopted one; stamped (`ColorAt`) under the hook lock before
+  the keys go, so it is sent once. A value `/color` would refuse is no colour.
+  Full record: `docs/adr/0028-a-projects-colour-is-typed-in.md`.
 - **A question is a wait, and it is the one wait no hook reported.** A
   dispatcher sat on a Claude Code question menu — four options, asking before
   it wrote to another repo — while the table read `1 in flight · 0 want you ·
@@ -1194,7 +1209,8 @@
   in its own worktree (rebuilt if it was reclaimed). A session ending never
   loses a dispatcher — triage's `h` and the product panel's `H` tab list every
   finished one and resume it. `contract.go` is the working contract every
-  launch closes with; `retry.go` is the `continue` a transient API error gets.
+  launch closes with; `retry.go` is the `continue` a transient API error gets. `color.go` types a
+  project's `/color` into its sessions (ADR 0028).
   `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
   `root.go` is where a feature branch starts: the remote's own default, the
   human's named `Root`, and the branch list the forms offer — and the reason
