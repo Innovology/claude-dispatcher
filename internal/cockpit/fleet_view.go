@@ -677,6 +677,9 @@ func (m model) cqFooterHelp() string {
 	if m.replyOpen {
 		return "type the answer · enter sends it · esc cancels"
 	}
+	if m.swapOpen {
+		return "j/k choose an account · enter moves it there · esc cancels"
+	}
 	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}
@@ -684,6 +687,9 @@ func (m model) cqFooterHelp() string {
 	if r, ok := m.fleetSel(); ok {
 		for _, a := range r.acts {
 			parts = append(parts, a.k+" "+a.d)
+		}
+		if r.swap && len(m.accountNames()) > 1 {
+			parts = append(parts, "a switch account")
 		}
 	}
 	if m.fleetFilter() == fleetHistory {

@@ -83,6 +83,14 @@ claude-dispatcher account                   # who each one is, and what each has
 
 Both dispatch forms then offer **ACCOUNT**, and beside each one the share of its **5-hour and weekly limits still left** — `default 59%  work 92%`, with both windows and the age of the reading on the selected one. The figures are Claude Code's own: it hands them to its status line, so `init` installs a status line in every account that records them (wrapping yours, if you have one, so it still draws what it drew). An account no session has drawn a status line for yet says so rather than guess. A dispatch on an account that is not logged in, has no hooks, or has never been opened is refused at launch, and its row names the command that fixes it: those sessions would otherwise start and sit there unattended. Resume reopens a dispatcher under the account it ran on, because that is where its transcript lives.
 
+Ran out partway through? Press `a` on the dispatcher's row and pick another account — each listed with what it has left — or from a shell:
+
+```sh
+claude-dispatcher swap <id|feature> work
+```
+
+Its conversation is copied into that account's directory (the old one keeps its copy) and resumed there under the same session id; if the last turn was ended by an API error — which is how running out arrives — it is told `continue`. It is offered only once the turn is over, since the old claude is ended to make way: a dispatcher mid-turn or on a menu says so instead. An adopted session is yours, so it is never restarted; `/login` in it instead.
+
 ## Actions are real
 
 Every act the table offers is wired to the live session — the key hints show only what the selected dispatcher can actually do:
@@ -340,6 +348,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `O` `R` `T` `S` `H` `Y` | in a product's panel: overview · review · team · shipped · history · your own sessions |
 | `space` · `A` | in your sessions: mark one · adopt it (or every marked one) as a dispatcher; it keeps running |
 | `r` | reply — type one line into a waiting dispatcher's session, without attaching |
+| `a` | switch account — move a stopped or finished dispatcher to another subscription and resume the same conversation there |
 | `t` | steward on/off — it answers what each brief settles and notes the rest on your rows |
 | `p` | park an ask with a reason · on a parked row, take it back up |
 | `d` · `ctrl+z` | dispatch · put back the last thing you cleared |
@@ -356,7 +365,7 @@ To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key alr
 | screen | ids |
 |---|---|
 | anywhere | `quit` `help` `palette` `settings` `dispatch.new` `upgrade` `undo` `redraw` (`quit.now`, ctrl+c, is fixed) |
-| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` |
+| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.account` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` |
 | products | `products.down` `products.up` `products.open` `products.assign` `products.new` `search.open` |
 | assignment editor | `editor.down` `editor.up` `editor.close` `editor.pane` `editor.mark` `editor.move` `editor.linear` `editor.unassign` `editor.reset` `editor.where` `editor.server` |
 | an unfolded row | `fold.down` `fold.up` `fold.pick` `fold.leave` |

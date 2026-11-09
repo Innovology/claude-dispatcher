@@ -847,6 +847,11 @@ const (
 	// (dispatch.Tidy), with what was taken as the reason. Not a lifecycle
 	// event: the dispatcher had already ended.
 	EventTidied = "Tidied"
+	// EventAccountSwapped is a dispatcher's conversation moved onto another
+	// Claude subscription and resumed there (dispatch.SwapAccount), "from →
+	// to" as the reason. Not a lifecycle event: the resumed session's
+	// SessionStart is what says it is running again.
+	EventAccountSwapped = "AccountSwapped"
 )
 
 // AppendEvent appends one line to events.jsonl; failures are swallowed because
