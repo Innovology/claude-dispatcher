@@ -210,6 +210,13 @@ type Dispatch struct {
 	// (those carry it in the prompt). Stamped before the keys are sent, so a
 	// brief is spent once however many loads race.
 	AdoptBriefAt *time.Time `json:"adopt_brief_at,omitempty"`
+	// Color is the prompt-bar colour the session is given with Claude Code's
+	// own /color (config's [colors]), "" for none; ColorAt is when it was
+	// typed in, stamped before the keys go so it is sent once. Claude Code
+	// keeps the colour in the transcript, so a resumed session — and one moved
+	// to another account — comes back in it without being told again.
+	Color   string     `json:"color,omitempty"`
+	ColorAt *time.Time `json:"color_at,omitempty"`
 	// ReleasedAt is the human giving an adopted session back: the record stops
 	// claiming it, so it returns to the sessions tab, and stays in history as
 	// the account of the time it was managed. Only ever set on an adopted

@@ -440,7 +440,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cursor over to the row that replaced it, and fleetSync is what acts on
 		// that. They are judged against when this load read the records, not
 		// against when it landed. See prunePending.
-		return m.prunePending(msg.recordsAt).cqReconcile().fleetSync(), tea.Batch(boot, queued)
+		return m.prunePending(msg.recordsAt).cqReconcile().fleetSync(), tea.Batch(boot, queued, colorCmd())
 
 	case bootProgressMsg:
 		// Re-arming only while the screen is up is what stops a skipped boot

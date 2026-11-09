@@ -176,6 +176,7 @@ func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 		// one is launched with. It waits for the session to be at its prompt,
 		// which is a moment only the poll is watching for (dispatch.DeliverBriefs).
 		dispatchpkg.DeliverBriefs(state.LoadAll(), time.Now())
+		dispatchpkg.DeliverColors(state.LoadAll(), time.Now())
 		// A switched-on steward whose session was taken away — a reboot, claude
 		// exiting in it — comes back here, at startup and on every poll, so
 		// the switch is the whole of the human's involvement (steward.Ensure).
@@ -202,4 +203,24 @@ func refreshTick() tea.Cmd {
 
 func ageTick() tea.Cmd {
 	return tea.Tick(ageEvery, func(time.Time) tea.Msg { return ageTickMsg{} })
+}
+
+// colorCmd types a session's project colour in as soon as a load has seen it
+// report in (dispatch.DeliverColors). The load follows the SessionStart write,
+// so this is seconds after a launch rather than a poll later; the check is the
+// records the load already holds, and nothing is spawned unless one is owed.
+func colorCmd() tea.Cmd {
+	var owed []*state.Dispatch
+	for _, d := range liveByID {
+		if dispatchpkg.ColorPending(d) {
+			owed = append(owed, d)
+		}
+	}
+	if len(owed) == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		dispatchpkg.DeliverColors(owed, time.Now())
+		return nil
+	}
 }

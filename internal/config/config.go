@@ -95,6 +95,11 @@ type Config struct {
 	// every check at once, so this changes nothing for a repo that does not
 	// name a gate.
 	Gates map[string]string `toml:"gates,omitempty"`
+	// Colors is the prompt-bar colour a dispatch's session is given — Claude
+	// Code's own /color — keyed by repo name or product name, the repo's entry
+	// winning. One of red, blue, green, yellow, purple, orange, pink or cyan;
+	// anything else is ignored. Unlisted repos keep Claude Code's default.
+	Colors map[string]string `toml:"colors,omitempty"`
 	// Accounts maps a name to a Claude Code config directory: each directory
 	// is its own login (Claude Code keys its credentials — the macOS keychain
 	// entry included — to CLAUDE_CONFIG_DIR), so each is one subscription a
@@ -181,6 +186,33 @@ type Config struct {
 // otherwise: every dispatch works on a feature branch, including in repos that
 // ship from main.
 const DefaultBranchPrefix = "feature/"
+
+// SessionColors is every colour Claude Code's /color takes, as 2.1.281's own
+// argument hint lists them ("default" aside, which is the absence of one).
+var SessionColors = []string{"red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan"}
+
+// ColorFor is the prompt-bar colour repo's dispatches are given: the repo's own
+// [colors] entry, else its product's, else "". A value /color would refuse is
+// no colour at all, rather than a session told something it answers with an
+// error.
+func (c *Config) ColorFor(repo, product string) string {
+	if c == nil {
+		return ""
+	}
+	for _, k := range []string{repo, product} {
+		if k == "" {
+			continue
+		}
+		if v, ok := c.Colors[k]; ok {
+			v = strings.ToLower(strings.TrimSpace(v))
+			if slices.Contains(SessionColors, v) {
+				return v
+			}
+			return ""
+		}
+	}
+	return ""
+}
 
 // RootBranchFor is the branch repo's dispatches are cut from when the form
 // names none, or "" for the remote's default.
@@ -363,6 +395,15 @@ func Save(c *Config) error {
 	b.WriteString("[gates]\n")
 	for _, k := range slices.Sorted(maps.Keys(c.Gates)) {
 		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Gates[k])
+	}
+	b.WriteString("\n")
+	b.WriteString("# The prompt-bar colour a dispatch's session is given (Claude Code's /color),\n")
+	b.WriteString("# keyed by repo name or product name; a repo's own entry wins over its product's.\n")
+	b.WriteString("# red, blue, green, yellow, purple, orange, pink or cyan.\n")
+	b.WriteString("# shop-api = \"orange\"\n")
+	b.WriteString("[colors]\n")
+	for _, k := range slices.Sorted(maps.Keys(c.Colors)) {
+		fmt.Fprintf(&b, "%s = %q\n", tomlKey(k), c.Colors[k])
 	}
 	b.WriteString("\n")
 	b.WriteString("# Further Claude subscriptions a dispatch can run under: a name, and the\n")
