@@ -81,7 +81,9 @@ claude-dispatcher account add work          # makes ~/.claude-work, installs the
 claude-dispatcher account                   # who each one is, and what each has left
 ```
 
-Both dispatch forms then offer **ACCOUNT**, and beside each one the share of its **5-hour and weekly limits still left** — `default 59%  work 92%`, with both windows and the age of the reading on the selected one. The figures are Claude Code's own: it hands them to its status line, so `init` installs a status line in every account that records them (wrapping yours, if you have one, so it still draws what it drew). An account no session has drawn a status line for yet says so rather than guess. A dispatch on an account that is not logged in, has no hooks, or has never been opened is refused at launch, and its row names the command that fixes it: those sessions would otherwise start and sit there unattended. Resume reopens a dispatcher under the account it ran on, because that is where its transcript lives. With more than one account configured, the triage table gains an **ACCOUNT** column naming the subscription each dispatcher spends — `default` for your own login.
+With more than one account configured, the triage table gains an **ACCOUNT** column naming the subscription each dispatcher spends — `default` for your own login.
+
+Both dispatch forms then offer **ACCOUNT**, and beside each one the share of its **5-hour and weekly limits still left** — `default 59%  work 92%`, with both windows and the age of the reading on the selected one. The figures are Claude Code's own: it hands them to its status line, so `init` installs a status line in every account that records them (wrapping yours, if you have one, so it still draws what it drew). An account no session has drawn a status line for yet says so rather than guess. A dispatch on an account that is not logged in, has no hooks, or has never been opened is refused at launch, and its row names the command that fixes it: those sessions would otherwise start and sit there unattended. Resume reopens a dispatcher under the account it ran on, because that is where its transcript lives.
 
 ## Actions are real
 
