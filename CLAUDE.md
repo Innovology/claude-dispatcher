@@ -1064,6 +1064,11 @@
   **dir**, because the transcript is there. Trust is inherited into the
   account's own `.claude.json`. Full record:
   `docs/adr/0022-a-subscription-is-a-config-directory.md`.
+  - **The table says which subscription each row spends** — an ACCOUNT
+    column, `default` named too, shown only when more than one account is
+    configured (one would put the same word on every row) and only where the
+    feature cell can spare it; the detail line's `on <name>` stays for the
+    rest.
   - **The usage lens shows those figures, and a reading only goes forward.**
     The lens drew its bars from the transcript learner, while the forms already
     had Claude Code's own numbers. Measured on one Max login, the lens said 77%
