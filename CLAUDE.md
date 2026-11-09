@@ -1198,15 +1198,15 @@
   in its own worktree (rebuilt if it was reclaimed). A session ending never
   loses a dispatcher — triage's `h` and the product panel's `H` tab list every
   finished one and resume it. `contract.go` is the working contract every
-  launch closes with; `retry.go` is the `continue` a transient API error gets.
+  launch closes with; `retry.go` is the `continue` a transient API error gets. `color.go` types a
+  project's `/color` into its sessions (ADR 0028).
   `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
   `root.go` is where a feature branch starts: the remote's own default, the
   human's named `Root`, and the branch list the forms offer — and the reason
   none of it trusts `origin/HEAD`. `adopt.go` wraps a record around a session
   the human started (ADR 0026) and `brief.go` is the convention it is then
   sent; `stall.go` is when a silent launch counts as stopped on a startup
-  prompt; `trust.go` copies a repo's trust onto its worktree. `color.go`
-  types a project's `/color` into its sessions (ADR 0028).
+  prompt; `trust.go` copies a repo's trust onto its worktree.
 - `internal/supervisor` — the session backend behind one interface: tmux on
   Unix, a console window per session on Windows. A session is addressed by
   `Session` (socket + name), never by name alone.
