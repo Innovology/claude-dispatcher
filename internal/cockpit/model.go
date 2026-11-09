@@ -116,6 +116,11 @@ type model struct {
 	replyOpen bool
 	replyText string
 	replyAt   *replyTarget
+	// The account picker over the triage lens (swap.go): move a dispatcher
+	// onto another subscription and resume its conversation there.
+	swapOpen   bool
+	swapAt     *swapTarget
+	swapCursor int
 
 	backlogCursor int
 	picked        map[string]bool

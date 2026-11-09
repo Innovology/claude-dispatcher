@@ -1082,6 +1082,17 @@
     `mergeWindow` keeps the higher figure. A later `resets_at` starts the next
     window. An earlier one is a stale session and changes nothing, not even
     the reading's age.
+  - **A conversation can change subscription.** Running out stranded a
+    dispatcher on its account for the rest of the window, because `--resume`
+    under another config dir answers "No conversation found" (measured on
+    2.1.281). Copied into that dir's `projects/<folder>/` — beside its
+    subagent folder and `file-history/<id>` — the same session id resumes
+    there. So `a` on a row whose turn is over (and `swap <id> <account>`)
+    copies, never moves, ends the old claude, re-points the record and
+    resumes, opening with `continue` only if an API error ended the last turn.
+    Mid-turn, on a menu, adopted, same account, or an account that would stall
+    are refused by name. Full record:
+    `docs/adr/0027-a-conversation-can-change-subscription.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `<branch_prefix><slug>` (`feature/` unless config or the form says
   otherwise), commits, and PRs enrich it automatically. Every
@@ -1143,7 +1154,7 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
-  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy` (`internal/fleetcmd`)
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap` (`internal/fleetcmd`)
   and `steward [stop]` (`internal/steward`), `account` (`internal/accountcmd`)
   and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
@@ -1189,7 +1200,8 @@
   human's named `Root`, and the branch list the forms offer — and the reason
   none of it trusts `origin/HEAD`. `adopt.go` wraps a record around a session
   the human started (ADR 0026) and `brief.go` is the convention it is then
-  sent; `stall.go` is when a silent launch counts as stopped on a startup
+  sent; `swap.go` moves a conversation to another
+  account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup
   prompt; `trust.go` copies a repo's trust onto its worktree.
 - `internal/supervisor` — the session backend behind one interface: tmux on
   Unix, a console window per session on Windows. A session is addressed by
@@ -1217,7 +1229,8 @@
   and 170 columns (more panes on wide screens, never one ballooned view).
   `collect_sessions.go` is the one collector that reads the machine rather than
   the records: the sessions on it that no dispatch claims, and `adopt.go` is
-  the key that adopts one. `search.go` is `/`; `editconfig.go` opens
+  the key that adopts one. `swap.go` is `a`, the account picker (ADR 0027).
+  `search.go` is `/`; `editconfig.go` opens
   `config.toml` in the human's editor (`e` in settings, `:config`).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is

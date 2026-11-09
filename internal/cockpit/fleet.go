@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/transcript"
@@ -127,6 +128,9 @@ type fleetRow struct {
 	subDone []string
 
 	acts []cqAct
+	// swap is whether `a` may move it to another account: its turn is over,
+	// and it is ours to restart (dispatch.SwapOffered).
+	swap bool
 
 	// moved is the freshest of the transcript's mtime and the record's
 	// UpdatedAt: when this dispatcher was last seen doing anything. It is the
@@ -411,6 +415,7 @@ func fleetQueueRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, ask),
+		swap:       dispatchpkg.SwapOffered(rec),
 		moved:      fleetMoved(rec),
 		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
@@ -491,6 +496,7 @@ func fleetRunRow(ctx *collectCtx, s *snapshot, floorBy map[string]dispatch,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, "running"),
+		swap:       dispatchpkg.SwapOffered(rec),
 		moved:      moved,
 		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,
@@ -607,6 +613,7 @@ func fleetParkedRow(ctx *collectCtx, s *snapshot, passes map[string]int, rec *st
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, "parked"),
+		swap:       dispatchpkg.SwapOffered(rec),
 		parked:     at,
 		moved:      fleetMoved(rec),
 		started:    rec.CreatedAt,
@@ -668,6 +675,7 @@ func fleetEndedRow(ctx *collectCtx, s *snapshot, passes map[string]int,
 		subLive:    subLive,
 		subDone:    subDone,
 		acts:       cqActs(rec, kind),
+		swap:       dispatchpkg.SwapOffered(rec),
 		moved:      fleetActed(rec),
 		started:    rec.CreatedAt,
 		waited:     rec.UpdatedAt,

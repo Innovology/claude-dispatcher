@@ -3,10 +3,14 @@ package fleetcmd
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
 )
@@ -243,5 +247,38 @@ func TestReplyMarksTheWaitAnswered(t *testing.T) {
 	_ = json.Unmarshal(out.Bytes(), &n)
 	if len(n.Waiting) != 0 {
 		t.Fatalf("an answered wait woke the steward again: %s", out.String())
+	}
+}
+
+// swap names the account from the config and the dispatcher by id — a
+// finished one included, since running out is often why it finished.
+func TestSwap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".config", "claude-dispatcher"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "claude-dispatcher", "config.toml"),
+		[]byte("[accounts]\nwork = \"~/.claude-work\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withStore(t, &state.Dispatch{ID: "d1", Feature: "pay", Status: state.StatusExited, SessionID: "s"})
+	var got account.Account
+	prev := swapAccount
+	t.Cleanup(func() { swapAccount = prev })
+	swapAccount = func(d *state.Dispatch, to account.Account, msg string) (dispatch.ResumeMode, string, error) {
+		got = to
+		return dispatch.ResumeStarted, "disp-pay", nil
+	}
+
+	var out bytes.Buffer
+	if err := runSwap([]string{"d1", "work"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "work" || !strings.Contains(out.String(), `"pay" resumed on work`) {
+		t.Errorf("swapped to %+v, said %q", got, out.String())
+	}
+	if err := runSwap([]string{"d1", "nobody"}, &out); err == nil || !strings.Contains(err.Error(), `no account "nobody"`) {
+		t.Errorf("unknown account: %v", err)
 	}
 }
