@@ -837,6 +837,21 @@
   OUT switch itself shows as config beside the mode. Existing installs
   re-run `init` to get the two new hook entries. Full record:
   `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
+- **A project's colour is typed in, because there is no flag for it.**
+  `[colors]` (repo name, else product name) gives a dispatch's session that
+  prompt-bar colour so sessions from different projects tell apart at a
+  glance. Claude Code 2.1.281 sets it only with the `/color` slash command,
+  which writes an `agent-color` entry into the transcript that `--resume`
+  restores (so resume and an account swap keep it); the hidden
+  `--agent-color` flag is a teammate's colour and leaves a session's bar
+  grey, measured. `/color` is an immediate command — measured to apply
+  mid-turn without touching the turn — so `dispatch.DeliverColors` types it
+  as soon as a load sees the session's id (SessionStart: the REPL is up), on
+  the load that the hook's write triggers, with the poll behind it. Never on a
+  menu, into a pane claude has left or cannot be seen into, into a finished
+  session or an adopted one; stamped (`ColorAt`) under the hook lock before
+  the keys go, so it is sent once. A value `/color` would refuse is no colour.
+  Full record: `docs/adr/0028-a-projects-colour-is-typed-in.md`.
 - **A question is a wait, and it is the one wait no hook reported.** A
   dispatcher sat on a Claude Code question menu — four options, asking before
   it wrote to another repo — while the table read `1 in flight · 0 want you ·
@@ -1082,21 +1097,6 @@
     `mergeWindow` keeps the higher figure. A later `resets_at` starts the next
     window. An earlier one is a stale session and changes nothing, not even
     the reading's age.
-- **A project's colour is typed in, because there is no flag for it.**
-  `[colors]` (repo name, else product name) gives a dispatch's session that
-  prompt-bar colour so sessions from different projects tell apart at a
-  glance. Claude Code 2.1.281 sets it only with the `/color` slash command,
-  which writes an `agent-color` entry into the transcript that `--resume`
-  restores (so resume and an account swap keep it); the hidden
-  `--agent-color` flag is a teammate's colour and leaves a session's bar
-  grey, measured. `/color` is an immediate command — measured to apply
-  mid-turn without touching the turn — so `dispatch.DeliverColors` types it
-  as soon as a load sees the session's id (SessionStart: the REPL is up), on
-  the load that the hook's write triggers, with the poll behind it. Never on a
-  menu, into a pane claude has left or cannot be seen into, into a finished
-  session or an adopted one; stamped (`ColorAt`) under the hook lock before
-  the keys go, so it is sent once. A value `/color` would refuse is no colour.
-  Full record: `docs/adr/0028-a-projects-colour-is-typed-in.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `<branch_prefix><slug>` (`feature/` unless config or the form says
   otherwise), commits, and PRs enrich it automatically. Every
@@ -1204,9 +1204,9 @@
   human's named `Root`, and the branch list the forms offer — and the reason
   none of it trusts `origin/HEAD`. `adopt.go` wraps a record around a session
   the human started (ADR 0026) and `brief.go` is the convention it is then
-  sent; `color.go` types a project's `/color` in
-  (ADR 0028); `stall.go` is when a silent launch counts as stopped on a startup
-  prompt; `trust.go` copies a repo's trust onto its worktree.
+  sent; `stall.go` is when a silent launch counts as stopped on a startup
+  prompt; `trust.go` copies a repo's trust onto its worktree. `color.go`
+  types a project's `/color` into its sessions (ADR 0028).
 - `internal/supervisor` — the session backend behind one interface: tmux on
   Unix, a console window per session on Windows. A session is addressed by
   `Session` (socket + name), never by name alone.
