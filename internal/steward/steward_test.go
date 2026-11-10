@@ -416,3 +416,39 @@ func TestUnknownProductRefused(t *testing.T) {
 		t.Fatal("no config cannot say no")
 	}
 }
+
+// A product named like the start of another product's steward id ends its
+// own steward, not that one (found in review).
+func TestEndPrefersTheProductToAnIDPrefix(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	loadConfig = func() (*config.Config, error) {
+		return &config.Config{Products: map[string][]string{"player": nil, "a": nil}}, nil
+	}
+	other, _ := Start("player")
+	mine, _ := Start("a")
+	// The other product's id starts with this product's name; this one's does
+	// not, so nothing but the lookup order decides which is ended.
+	rename := func(s *Steward, id string) {
+		from := s.Dir()
+		s.ID = id
+		if err := os.Rename(from, s.Dir()); err != nil {
+			t.Fatal(err)
+		}
+		if err := save(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rename(other, "a1b2c3d4e5f6")
+	rename(mine, "b1b2c3d4e5f6")
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"end", "a"}, &out, &errOut); code != 0 {
+		t.Fatalf("end: %q", errOut.String())
+	}
+	if s, _ := Find(mine.ID); s.EndedAt == nil {
+		t.Fatal("the product's own steward was not ended")
+	}
+	if s, _ := Find(other.ID); s.EndedAt != nil {
+		t.Fatal("another product's steward was ended for an id prefix")
+	}
+}

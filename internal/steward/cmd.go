@@ -58,9 +58,19 @@ func run(args []string, out io.Writer) error {
 	return fmt.Errorf("unknown argument %q (list | new | open | end)", args[0])
 }
 
-// endByName ends a steward named by id, else the current steward of a product
-// with that name.
+// endByName ends the steward a name means: one whose id it is, else the
+// current steward of a product by that name, else one whose id it begins. In
+// that order because a product name can look like an id's start — "cafe",
+// "2026" — and ending another product's steward for it is the wrong answer.
 func endByName(name string) (*Steward, error) {
+	for _, s := range All() {
+		if s.ID == name {
+			return End(s.ID)
+		}
+	}
+	if Current(name) != nil {
+		return EndProduct(name)
+	}
 	if s, err := Find(name); err == nil {
 		return End(s.ID)
 	}
