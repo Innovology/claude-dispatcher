@@ -52,9 +52,20 @@ func rulingAdd(args []string, out io.Writer) error {
 	product := fs.String("product", "", "the product it is for (required)")
 	allow := fs.String("allow", "", "what it lets the steward do itself: "+strings.Join(steward.Allows, ", "))
 	repo := fs.String("repo", "", "narrow it to one repo of the product")
-	until := fs.String("until", "", "when it ends: 6h, 3d, 2026-11-16 09:00 (default 24h)")
-	if err := fs.Parse(args); err != nil {
+	until := fs.String("until", "", "when it ends: 6h, 3d, 2026-11-16T09:00 (default 24h)")
+	// Flags may come after the text, as merge's may: unordered, the first word
+	// of the text ended the flags and every later --allow became part of it.
+	if err := fs.Parse(reorder(args)); err != nil {
 		return err
+	}
+	words := fs.Args()
+	// A day and a time unquoted are two words, and the flag takes only the
+	// first: "--until 2026-11-16 09:00" stood until the END of the 16th — 15
+	// hours past what was said, for a ruling that may grant merges — with
+	// "09:00" as the first word of its text. The time belongs to the day.
+	if dayOnly.MatchString(*until) && len(words) > 0 && clockTime.MatchString(words[0]) {
+		*until += " " + words[0]
+		words = words[1:]
 	}
 	if strings.TrimSpace(*product) == "" {
 		return errors.New("name the product: --product <name>")
@@ -64,7 +75,7 @@ func rulingAdd(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	r := steward.Ruling{Text: strings.Join(fs.Args(), " "), Repo: *repo, GivenAt: t, Until: end}
+	r := steward.Ruling{Text: strings.Join(words, " "), Repo: *repo, GivenAt: t, Until: end}
 	if *allow != "" {
 		r.Allow = strings.Split(*allow, ",")
 	}
@@ -133,6 +144,12 @@ var (
 )
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// dayOnly and clockTime are the two halves of an unquoted "2026-11-16 09:00".
+var (
+	dayOnly   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	clockTime = regexp.MustCompile(`^\d{1,2}:\d{2}$`)
+)
 
 // runMerge is a steward merging a pull request, which it may do only under a
 // ruling that allows it there: the code checks the ruling, so the human's

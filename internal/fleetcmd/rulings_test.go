@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
@@ -121,5 +122,27 @@ func TestMergeSaysWhyGhRefused(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run("merge", []string{"player-app", "931", "--head", head}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "Head branch was modified") {
 		t.Fatalf("got %q", errOut.String())
+	}
+}
+
+// Found in review, both measured: an unquoted "--until 2026-11-16 09:00" stood
+// until the end of the 16th with "09:00" leading its text, and flags after the
+// text were swallowed into it — a merge ruling recorded as guidance for 24h.
+func TestRulingAddReadsWhatWasMeant(t *testing.T) {
+	withStore(t)
+	var out, errOut bytes.Buffer
+	if code := Run("ruling", []string{"add", "--product", "player", "--allow", "merge", "--until", "2026-11-16", "09:00", "merge", "greens"}, &out, &errOut); code != 0 {
+		t.Fatalf("add: %s", errOut.String())
+	}
+	rs := steward.Rulings("player")
+	if len(rs) != 1 || rs[0].Text != "merge greens" || !rs[0].Until.Equal(time.Date(2026, 11, 16, 9, 0, 0, 0, time.Local)) {
+		t.Fatalf("ruling = %+v", rs)
+	}
+	if code := Run("ruling", []string{"add", "--product", "tools", "merge", "greens", "--allow", "merge", "--until", "2h"}, &out, &errOut); code != 0 {
+		t.Fatalf("add: %s", errOut.String())
+	}
+	rs = steward.Rulings("tools")
+	if len(rs) != 1 || rs[0].Text != "merge greens" || len(rs[0].Allow) != 1 || rs[0].Until.Sub(rs[0].GivenAt) != 2*time.Hour {
+		t.Fatalf("flags after the text were not read as flags: %+v", rs)
 	}
 }

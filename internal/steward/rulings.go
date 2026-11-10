@@ -188,7 +188,7 @@ func productsOnRecord() []string {
 }
 
 // ParseUntil reads when a ruling ends: a duration from t ("6h", "3d"), a time
-// ("2026-11-16 09:00", RFC 3339), or a day ("2026-11-16", the end of it).
+// ("2026-11-16T09:00", "2026-11-16 09:00", RFC 3339), or a day ("2026-11-16", the end of it).
 // Empty is DefaultRulingFor.
 func ParseUntil(s string, t time.Time) (time.Time, error) {
 	s = strings.TrimSpace(s)
@@ -212,5 +212,5 @@ func ParseUntil(s string, t time.Time) (time.Time, error) {
 	if v, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
 		return v.Add(24*time.Hour - time.Minute), nil
 	}
-	return time.Time{}, fmt.Errorf("cannot read %q as a time — a duration (6h, 3d), a time (2026-11-16 09:00) or a day (2026-11-16)", s)
+	return time.Time{}, fmt.Errorf("cannot read %q as a time — a duration (6h, 3d), a time (2026-11-16T09:00) or a day (2026-11-16)", s)
 }

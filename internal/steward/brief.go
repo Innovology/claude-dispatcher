@@ -224,7 +224,7 @@ it, in their words:
 
 It asks the human to confirm, on purpose: a ruling is theirs, never yours to
 give yourself, so only record one the human has just given you. ` + "`--until`" + ` takes
-a duration (6h, 3d) or a time (2026-11-16 09:00); ask how long it stands if they
+a duration (6h, 3d) or a time (2026-11-16T09:00); ask how long it stands if they
 did not say, and leaving it out means 24 hours. ` + "`--allow merge`" + ` is for an
 instruction that lets you merge; everything else is guidance you follow.
 
