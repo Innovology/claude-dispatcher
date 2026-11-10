@@ -340,3 +340,33 @@ func TestAFailedStartLeavesNothing(t *testing.T) {
 		t.Fatalf("left behind %v", dirs)
 	}
 }
+
+// The machine-wide steward an earlier build ran is ended and its switch
+// removed — by the cockpit's poll and by `steward stop` — and a product's own
+// steward is never mistaken for it.
+func TestRetireLegacy(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	if _, err := Start("player"); err != nil {
+		t.Fatal(err)
+	}
+	if retired, err := RetireLegacy(); retired || err != nil || len(f.killed) != 0 {
+		t.Fatalf("nothing legacy to retire, got %v %v %v", retired, err, f.killed)
+	}
+	_ = os.MkdirAll(filepath.Dir(legacySwitch()), 0o755)
+	_ = os.WriteFile(legacySwitch(), nil, 0o644)
+	f.running[LegacySession] = true
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"stop"}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "retired") {
+		t.Fatalf("steward stop: %d %q %q", code, out.String(), errOut.String())
+	}
+	if f.running[LegacySession] || !f.running["disp_steward_player"] {
+		t.Fatalf("running = %v", f.running)
+	}
+	if _, err := os.Stat(legacySwitch()); !os.IsNotExist(err) {
+		t.Fatal("the old switch is still there")
+	}
+	if code := Run([]string{"stop"}, &out, &errOut); code == 0 {
+		t.Fatal("with nothing legacy left, a bare stop must ask for the product")
+	}
+}

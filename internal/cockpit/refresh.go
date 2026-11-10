@@ -176,6 +176,11 @@ func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 		// which is a moment only the poll is watching for (dispatch.DeliverBriefs).
 		dispatchpkg.DeliverBriefs(state.LoadAll(), time.Now())
 		dispatchpkg.DeliverColors(state.LoadAll(), time.Now())
+		// The machine-wide steward an earlier build ran is retired here, at
+		// startup and on every poll, so one left running across the upgrade
+		// does not go on answering waits beside the product stewards
+		// (steward.RetireLegacy).
+		_, _ = stewardRetireLegacy()
 		track.Refresh(state.LoadAll(), cfg)
 		return trackedMsg{}
 	}

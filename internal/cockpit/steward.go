@@ -80,6 +80,7 @@ var (
 	stewardEnd           = steward.End
 	stewardRulings       = steward.ActiveRulings
 	stewardOpenQuestions = steward.OpenQuestions
+	stewardRetireLegacy  = steward.RetireLegacy
 )
 
 // stewardClause is the headline's word on the stewards: nothing while there are

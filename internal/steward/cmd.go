@@ -24,6 +24,19 @@ func run(args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "list" {
 		return list(out)
 	}
+	if len(args) == 1 && (args[0] == "stop" || args[0] == "end") {
+		// What `steward stop` meant before stewards were per product: the one
+		// machine-wide steward, which this retires if it is still running.
+		retired, err := RetireLegacy()
+		if err != nil {
+			return err
+		}
+		if retired {
+			_, _ = fmt.Fprintln(out, "the machine-wide steward is retired · stewards are per product now: steward end <product>")
+			return nil
+		}
+		return errors.New("name the product: steward end <product|id> (steward lists them)")
+	}
 	if len(args) != 2 {
 		return errors.New("usage: steward [list] | new <product> | open <id> | end <product|id>")
 	}
