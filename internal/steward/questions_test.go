@@ -90,3 +90,12 @@ func TestBriefCarriesTheRecap(t *testing.T) {
 		}
 	}
 }
+
+// A carried note never wakes the steward again, so the brief sends it back
+// over its noted waits when a ruling may have settled them (found in review).
+func TestBriefRevisitsNotedWaits(t *testing.T) {
+	b := Brief("/bin/cd", Facts{Product: "player"})
+	if !strings.Contains(b, "act on any the\nruling now decides") || !strings.Contains(b, "over the waits you noted") {
+		t.Fatal("the brief does not send the steward back over its noted waits")
+	}
+}

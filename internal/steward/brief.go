@@ -110,7 +110,8 @@ func briefLoop(exe string, f Facts) string {
    not wake you again — nor will the same question asked again — so never
    leave one without an act.
 4. If it exited with ` + "`timed_out`" + `, look over the running rows for anything
-   stuck or out of order, act if something needs it, and go back to step 2.
+   stuck or out of order, and over the waits you noted for anything that has
+   changed since, act if something needs it, and go back to step 2.
 
 Always go back to step 2 before ending a turn, including after talking with the
 human: a steward without its background ` + "`--next`" + ` is asleep for good.
@@ -231,6 +232,11 @@ instruction that lets you merge; everything else is guidance you follow.
 Read the rulings every time you wake — ` + "`" + exe + " ruling list " + p + "`" + ` — and follow
 them over the defaults below. One past its time is void; act as if it was never
 given. When the human withdraws one, ` + "`" + exe + " ruling end <id>`" + `.
+
+A new ruling can settle waits you have already noted, and those will not wake
+you again — a question asked again keeps its note. So right after recording
+one, go through ` + "`status --json`" + ` for every entry with a ` + "`note`" + ` and act on any the
+ruling now decides.
 
 **Merging** is yours only under a ruling that allows it, and only through
 
