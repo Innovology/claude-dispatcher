@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
@@ -18,6 +19,12 @@ import (
 func withStore(t *testing.T, recs ...*state.Dispatch) {
 	t.Helper()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	// Never the real config: products come from what a test names.
+	prev := loadConfig
+	t.Cleanup(func() { loadConfig = prev })
+	loadConfig = func() (*config.Config, error) {
+		return &config.Config{Products: map[string][]string{"player": {"player-app", "design-system"}}}, nil
+	}
 	for _, r := range recs {
 		if err := state.Save(r); err != nil {
 			t.Fatal(err)
@@ -167,7 +174,7 @@ func TestNext(t *testing.T) {
 		&state.Dispatch{ID: "w", Feature: "working", Status: state.StatusWorking},
 	)
 	var out bytes.Buffer
-	if err := runNext(&out, time.Hour, time.Now); err != nil {
+	if err := runNext(&out, "", time.Hour, time.Now); err != nil {
 		t.Fatal(err)
 	}
 	var n Next
@@ -189,7 +196,7 @@ func TestNextTimesOut(t *testing.T) {
 	NextPoll = time.Millisecond
 	t.Cleanup(func() { NextPoll = prev })
 	var out bytes.Buffer
-	if err := runNext(&out, 5*time.Millisecond, time.Now); err != nil {
+	if err := runNext(&out, "", 5*time.Millisecond, time.Now); err != nil {
 		t.Fatal(err)
 	}
 	var n Next
@@ -240,7 +247,7 @@ func TestReplyMarksTheWaitAnswered(t *testing.T) {
 	prev := NextPoll
 	NextPoll = time.Millisecond
 	t.Cleanup(func() { NextPoll = prev })
-	if err := runNext(&out, 5*time.Millisecond, time.Now); err != nil {
+	if err := runNext(&out, "", 5*time.Millisecond, time.Now); err != nil {
 		t.Fatal(err)
 	}
 	var n Next
@@ -296,5 +303,37 @@ func TestNoteRemembersTheQuestion(t *testing.T) {
 	d, _ := find("a")
 	if d.NotedAsk != "Want me to merge #12?" {
 		t.Fatalf("noted ask = %q", d.NotedAsk)
+	}
+}
+
+// A product's steward reads only its product: status and --next narrow to the
+// dispatchers whose repo the config files under it, every entry labelled with
+// the product it is grouped under, and a repo in none is "unassigned".
+func TestStatusNarrowsToAProduct(t *testing.T) {
+	now := time.Now()
+	withStore(t,
+		&state.Dispatch{ID: "p1", Feature: "goldens", RepoName: "player-app", Status: state.StatusNeedsInput, WaitingSince: &now, Said: "Merge it?"},
+		&state.Dispatch{ID: "d1", Feature: "tokens", RepoName: "design-system", Status: state.StatusWorking},
+		&state.Dispatch{ID: "o1", Feature: "other", RepoName: "elsewhere", Product: "stale", Status: state.StatusNeedsInput, WaitingSince: &now, Said: "Ok?"},
+	)
+	var out, errOut bytes.Buffer
+	if code := Run("status", []string{"--product", "player", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("status: %s", errOut.String())
+	}
+	var es []Entry
+	if err := json.Unmarshal(out.Bytes(), &es); err != nil {
+		t.Fatal(err)
+	}
+	if len(es) != 2 || es[0].Product != "player" || es[1].Product != "player" {
+		t.Fatalf("entries = %+v", es)
+	}
+	out.Reset()
+	if err := runNext(&out, "unassigned", time.Hour, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	var n Next
+	_ = json.Unmarshal(out.Bytes(), &n)
+	if len(n.Waiting) != 1 || n.Waiting[0].ID != "o1" || n.Waiting[0].Product != "unassigned" {
+		t.Fatalf("the config, not the record, says where a repo belongs: %+v", n.Waiting)
 	}
 }

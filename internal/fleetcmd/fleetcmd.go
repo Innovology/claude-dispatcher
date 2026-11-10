@@ -28,6 +28,7 @@ import (
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/supervisor"
 )
 
@@ -131,13 +132,14 @@ func runStatus(args []string, out io.Writer) error {
 	asJSON := fs.Bool("json", false, "print the fleet as JSON")
 	next := fs.Bool("next", false, "wait until a dispatcher is waiting unhandled, then print those as JSON")
 	timeout := fs.Duration("timeout", 30*time.Minute, "with --next: give up after this long and say so")
+	product := fs.String("product", "", "only this product's dispatchers — a steward's own")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *next {
-		return runNext(out, *timeout, time.Now)
+		return runNext(out, *product, *timeout, time.Now)
 	}
-	entries := Fleet(state.LoadAll(), time.Now())
+	entries := inProduct(Fleet(state.LoadAll(), time.Now()), *product)
 	if *asJSON {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
@@ -174,11 +176,14 @@ type Next struct {
 // between runs, so nothing that happened between two runs can be missed: a
 // wait is pending until a reply ends it or a note answers it, and both are on
 // the record.
-func runNext(out io.Writer, timeout time.Duration, now func() time.Time) error {
+//
+// product narrows it to one product's dispatchers, which is how each product's
+// steward sleeps on its own work and is never woken for another's.
+func runNext(out io.Writer, product string, timeout time.Duration, now func() time.Time) error {
 	deadline := now().Add(timeout)
 	for {
 		var waiting []Entry
-		for _, e := range Fleet(state.LoadAll(), now()) {
+		for _, e := range inProduct(Fleet(state.LoadAll(), now()), product) {
 			if e.State == "wants-you" && !e.Handled {
 				waiting = append(waiting, e)
 			}
@@ -191,6 +196,32 @@ func runNext(out io.Writer, timeout time.Duration, now func() time.Time) error {
 		}
 		time.Sleep(NextPoll)
 	}
+}
+
+// loadConfig is a seam so tests can name the products.
+var loadConfig = config.Load
+
+// inProduct keeps the entries of one product, each labelled with the product it
+// is grouped under, by the cockpit's own rule (live.go productFor): the config's
+// mapping of its repo — what the human last assigned — with the record's own
+// product only where there is no config to ask, and "unassigned" for neither.
+// An empty product keeps every entry, labelled the same way.
+func inProduct(entries []Entry, product string) []Entry {
+	cfg, err := loadConfig()
+	if err != nil {
+		cfg = nil
+	}
+	var out []Entry
+	for _, e := range entries {
+		if cfg != nil {
+			e.Product = cfg.ProductFor(e.Repo)
+		}
+		e.Product = steward.Key(e.Product)
+		if product == "" || e.Product == steward.Key(product) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // headline is the text form's last column: the ask, else the failure, else the

@@ -121,6 +121,10 @@ type model struct {
 	swapOpen   bool
 	swapAt     *swapTarget
 	swapCursor int
+	// The steward picker over the triage lens (steward.go): every product's
+	// stewards, to jump into, reopen or start.
+	stewardPickOpen   bool
+	stewardPickCursor int
 
 	backlogCursor int
 	picked        map[string]bool
@@ -619,12 +623,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
 
-	case stewardToggledMsg:
-		mm, cmd := m.onStewardToggled(msg)
-		return mm, cmd
-
-	case stewardStartedMsg:
-		mm, cmd := m.onStewardStarted(msg)
+	case stewardOpenedMsg:
+		mm, cmd := m.onStewardOpened(msg)
 		return mm, cmd
 
 	case tidyPlannedMsg:

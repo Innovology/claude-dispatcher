@@ -289,6 +289,8 @@ func (m model) overlayView(w, h int) (string, bool) {
 		return m.viewReply(w, h), true
 	case m.swapOpen:
 		return m.viewSwap(w, h), true
+	case m.stewardPickOpen:
+		return m.viewStewardPick(w, h), true
 	case m.adoptOpenInput && m.adoptAt != nil:
 		return m.viewAdopt(w, h), true
 	case m.paletteOpen:

@@ -9,7 +9,6 @@ import (
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
-	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/track"
 )
 
@@ -177,10 +176,6 @@ func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 		// which is a moment only the poll is watching for (dispatch.DeliverBriefs).
 		dispatchpkg.DeliverBriefs(state.LoadAll(), time.Now())
 		dispatchpkg.DeliverColors(state.LoadAll(), time.Now())
-		// A switched-on steward whose session was taken away — a reboot, claude
-		// exiting in it — comes back here, at startup and on every poll, so
-		// the switch is the whole of the human's involvement (steward.Ensure).
-		_, _ = steward.Ensure()
 		track.Refresh(state.LoadAll(), cfg)
 		return trackedMsg{}
 	}

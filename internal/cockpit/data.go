@@ -48,10 +48,6 @@ var (
 var (
 	fleet        []fleetRow
 	cqLastOutput time.Time
-	// stewardOn is whether the steward session is running, stewardEnabled
-	// whether the human has switched it on (internal/steward). They differ
-	// for the moment between a reboot and the poll that brings it back.
-	stewardOn, stewardEnabled bool
 )
 
 // ---- products ---------------------------------------------------------------

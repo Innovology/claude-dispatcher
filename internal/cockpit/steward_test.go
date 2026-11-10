@@ -27,86 +27,152 @@ func TestQueueSignalLeadsWithTheStewardsNote(t *testing.T) {
 	}
 }
 
-func TestOnStewardStarted(t *testing.T) {
-	m := newModel()
-	mm, cmd := m.onStewardStarted(stewardStartedMsg{err: errors.New("tmux is not available")})
-	if cmd != nil || !strings.Contains(mm.notice, "tmux is not available") {
-		t.Fatalf("a failed start must say why and hand nothing over: %q", mm.notice)
+// withStewards installs the stewards a load found, and fakes for the acts.
+func withStewards(t *testing.T, rows ...stewardRow) *[]string {
+	t.Helper()
+	prevNow, prevOrder := stewardsNow, productOrder
+	ps, pr, pe := stewardStart, stewardReopen, stewardEnd
+	t.Cleanup(func() {
+		stewardsNow, productOrder = prevNow, prevOrder
+		stewardStart, stewardReopen, stewardEnd = ps, pr, pe
+	})
+	stewardsNow = rows
+	productOrder = []string{"alpha", "beta"}
+	var acts []string
+	stewardStart = func(p string) (*steward.Steward, error) {
+		acts = append(acts, "start "+p)
+		return &steward.Steward{ID: "new", Product: p}, nil
 	}
-	// Already running, or started untrusted, both go on to the handover; with
-	// no real session here the handover reports there is nothing to attach to,
+	stewardReopen = func(id string) (*steward.Steward, error) {
+		acts = append(acts, "reopen "+id)
+		return &steward.Steward{ID: id, Product: "alpha"}, nil
+	}
+	stewardEnd = func(id string) (*steward.Steward, error) {
+		acts = append(acts, "end "+id)
+		return &steward.Steward{ID: id, Product: "alpha"}, nil
+	}
+	return &acts
+}
+
+// The headline says nothing without stewards, how many are live, and the
+// interrupted ones apart — those wait on the human.
+func TestStewardClause(t *testing.T) {
+	withStewards(t)
+	if got := stewardClause(); got != "" {
+		t.Errorf("none: %q", got)
+	}
+	stewardsNow = []stewardRow{{id: "a", product: "alpha", state: steward.Live}, {id: "o", product: "alpha", state: steward.Ended}}
+	if got := stewardClause(); got != "steward live" {
+		t.Errorf("one live: %q", got)
+	}
+	stewardsNow = append(stewardsNow, stewardRow{id: "b", product: "beta", state: steward.Live}, stewardRow{id: "c", product: "gamma", state: steward.Interrupted})
+	if got := stewardClause(); got != "2 stewards live · 1 steward interrupted" {
+		t.Errorf("mixed: %q", got)
+	}
+}
+
+// t opens the picker on the selected row's product; each product lists its
+// stewards newest first, then a "new steward" line of its own.
+func TestStewardPickerLists(t *testing.T) {
+	installFleetFixture(t)
+	withStewards(t,
+		stewardRow{id: "live1", product: "alpha", state: steward.Live, opened: time.Now()},
+		stewardRow{id: "old1", product: "alpha", state: steward.Ended, opened: time.Now().Add(-48 * time.Hour)},
+	)
+	items := stewardItems()
+	var got []string
+	for _, it := range items {
+		name := "new"
+		if it.st != nil {
+			name = it.st.id
+		}
+		got = append(got, it.product+":"+name)
+	}
+	if strings.Join(got, " ") != "alpha:live1 alpha:old1 alpha:new beta:new" {
+		t.Fatalf("items = %v", got)
+	}
+	m := newModel()
+	mm, _, _ := m.updateFloorQueue("t")
+	if !mm.stewardPickOpen {
+		t.Fatal("t must open the steward picker")
+	}
+	if it := items[mm.stewardPickCursor]; it.product != mm.stewardPickProduct() {
+		t.Errorf("opened on %q, the row is %q", it.product, mm.stewardPickProduct())
+	}
+	view := mm.viewStewardPick(100, 30)
+	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker lacks %q:\n%s", want, view)
+		}
+	}
+	if h := m.cqFooterHelp(); !strings.Contains(h, "t stewards") {
+		t.Errorf("footer = %q", h)
+	}
+}
+
+// enter reopens an older steward, starts a new one where the product has none
+// live, refuses to start one over a live steward (x ends it on purpose), and x
+// ends one.
+func TestStewardPickerActs(t *testing.T) {
+	installFleetFixture(t)
+	acts := withStewards(t,
+		stewardRow{id: "live1", product: "alpha", state: steward.Live},
+		stewardRow{id: "old1", product: "alpha", state: steward.Ended},
+	)
+	m := newModel()
+	m.stewardPickOpen = true
+	at := func(i int) model { mm := m; mm.stewardPickCursor = i; return mm }
+
+	mm, cmd := at(1).updateStewardPick("enter")
+	if cmd == nil || mm.stewardPickOpen {
+		t.Fatal("enter on an older steward must reopen it")
+	}
+	if msg := cmd().(stewardOpenedMsg); msg.err != nil || msg.product != "alpha" {
+		t.Fatalf("reopen came back %+v", msg)
+	}
+
+	mm, cmd = at(2).updateStewardPick("enter")
+	if cmd != nil || !mm.stewardPickOpen || !strings.Contains(mm.notice, "x ends it") {
+		t.Fatalf("a new steward over a live one must be refused: %q", mm.notice)
+	}
+
+	_, cmd = at(3).updateStewardPick("enter")
+	if cmd == nil {
+		t.Fatal("enter on beta's new line must start one")
+	}
+	cmd()
+
+	_, cmd = at(0).updateStewardPick("x")
+	if cmd == nil {
+		t.Fatal("x on a live steward must end it")
+	}
+	if msg := cmd().(actionMsg); !strings.Contains(msg.notice, "ended") {
+		t.Errorf("end notice %q", msg.notice)
+	}
+	if mm, cmd = at(1).updateStewardPick("x"); cmd != nil || !strings.Contains(mm.notice, "nothing to end") {
+		t.Errorf("x on an ended steward: %q", mm.notice)
+	}
+	if strings.Join(*acts, ",") != "reopen old1,start beta,end live1" {
+		t.Fatalf("acts = %v", *acts)
+	}
+	if mm, _ = at(0).updateStewardPick("esc"); mm.stewardPickOpen {
+		t.Error("esc must close the picker")
+	}
+}
+
+func TestOnStewardOpened(t *testing.T) {
+	m := newModel()
+	mm, _ := m.onStewardOpened(stewardOpenedMsg{product: "alpha", err: errors.New("tmux is not available")})
+	if !strings.Contains(mm.notice, "tmux is not available") {
+		t.Fatalf("a failed start must say why: %q", mm.notice)
+	}
+	// Already live, or started untrusted, both go on to the handover; with no
+	// real session here the handover reports there is nothing to attach to,
 	// which is enough to show it was attempted.
-	for _, err := range []error{steward.ErrRunning, steward.ErrUntrusted} {
-		mm, _ = m.onStewardStarted(stewardStartedMsg{err: err})
+	for _, err := range []error{steward.ErrRunning, steward.ErrUntrusted, nil} {
+		mm, _ = m.onStewardOpened(stewardOpenedMsg{product: "alpha", err: err})
 		if strings.HasPrefix(mm.notice, "steward: ") {
 			t.Errorf("%v must not be reported as a failure: %q", err, mm.notice)
 		}
-	}
-}
-
-// t flips the steward: on when off, off when on, never handing the terminal
-// over — and the headline and footer agree with the key at once.
-func TestStewardToggle(t *testing.T) {
-	prevStart, prevStop, prevOn := stewardStart, stewardStop, stewardSwitchedOn
-	prevE, prevR := stewardEnabled, stewardOn
-	t.Cleanup(func() {
-		stewardStart, stewardStop, stewardSwitchedOn = prevStart, prevStop, prevOn
-		stewardEnabled, stewardOn = prevE, prevR
-	})
-	on := false
-	var started, stopped int
-	stewardSwitchedOn = func() bool { return on }
-	stewardStart = func() error { started++; on = true; return nil }
-	stewardStop = func() error { stopped++; on = false; return nil }
-	stewardEnabled, stewardOn = false, false
-
-	if stewardClause() != "" || stewardToggleVerb() != "start steward" {
-		t.Fatalf("off: clause %q verb %q", stewardClause(), stewardToggleVerb())
-	}
-	msg := stewardToggleCmd()().(stewardToggledMsg)
-	if !msg.on || started != 1 {
-		t.Fatalf("t on an off steward must start it: %+v", msg)
-	}
-	m, _ := newModel().onStewardToggled(msg)
-	if stewardClause() != "steward on" || stewardToggleVerb() != "stop steward" || !strings.Contains(m.notice, "steward on") {
-		t.Fatalf("on: clause %q verb %q notice %q", stewardClause(), stewardToggleVerb(), m.notice)
-	}
-	stewardOn = false // a reboot took its session; the poll will bring it back
-	if stewardClause() != "steward starting" {
-		t.Errorf("switched on but down: %q", stewardClause())
-	}
-	msg = stewardToggleCmd()().(stewardToggledMsg)
-	if msg.on || stopped != 1 {
-		t.Fatalf("t on a running steward must stop it: %+v", msg)
-	}
-	_, _ = newModel().onStewardToggled(msg)
-	if stewardClause() != "" {
-		t.Errorf("off again: %q", stewardClause())
-	}
-
-	stewardStart = func() error { return errors.New("tmux is not available") }
-	if msg := stewardToggleCmd()().(stewardToggledMsg); msg.on || !strings.Contains(msg.notice, "tmux is not available") {
-		t.Errorf("a failed start must stay off and say why: %+v", msg)
-	}
-}
-
-// The footer advertises the switch in the words of what it will do, and t on
-// the table flips it.
-func TestFooterOffersTheStewardSwitch(t *testing.T) {
-	installFleetFixture(t)
-	prev := stewardEnabled
-	t.Cleanup(func() { stewardEnabled = prev })
-	stewardEnabled = false
-	m := newModel()
-	if h := m.cqFooterHelp(); !strings.Contains(h, "t start steward") {
-		t.Errorf("footer = %q", h)
-	}
-	stewardEnabled = true
-	if h := m.cqFooterHelp(); !strings.Contains(h, "t stop steward") {
-		t.Errorf("footer = %q", h)
-	}
-	mm, cmd, _ := m.updateFloorQueue("t")
-	if cmd == nil || !strings.Contains(mm.notice, "stop steward") {
-		t.Errorf("t on the table must flip the switch: notice %q", mm.notice)
 	}
 }
