@@ -324,3 +324,19 @@ func TestRun(t *testing.T) {
 		t.Fatal("an unknown argument must fail")
 	}
 }
+
+// A new steward whose session would not start leaves nothing behind: no
+// record to list, no folder to reopen.
+func TestAFailedStartLeavesNothing(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	newSession = func(supervisor.Session, string, string, string) error {
+		return errors.New("error connecting to /tmp/…/default (File name too long)")
+	}
+	if _, err := Start("player"); err == nil {
+		t.Fatal("a session that would not start reported success")
+	}
+	if dirs, _ := filepath.Glob(filepath.Join(ProductDir("player"), "*")); len(dirs) != 0 || len(All()) != 0 {
+		t.Fatalf("left behind %v", dirs)
+	}
+}

@@ -262,6 +262,9 @@ func Start(product string) (*Steward, error) {
 	s := &Steward{ID: state.NewID(), Product: product, SessionID: newUUID(), CreatedAt: t, OpenedAt: t}
 	err := launch(s, false)
 	if err != nil && !errors.Is(err, ErrUntrusted) {
+		// A conversation that never started is not one to list or reopen: its
+		// folder holds a brief and nothing else, so it goes.
+		_ = os.RemoveAll(s.Dir())
 		return nil, err
 	}
 	return s, err
