@@ -1022,17 +1022,49 @@
   `steward · yours: …` or `answered · …`; the headline says `steward watching`.
   Verified against a real steward and scratch fleet. Full record:
   `docs/adr/0019-the-steward-pushes-what-the-brief-settles.md`.
-- **The steward is a switch, not a session you run.** "Should the steward not
-  be completely opaque to the user? Maybe a on off toggle in triage." `t` on
-  triage flips it in the background (no handover); the headline says `steward
-  on`/`steward starting`, nothing when off; the footer names `t start/stop
-  steward`. On is intent — `steward/enabled` in the state dir (never config:
-  a scratch store must not switch on the real one's) — and `steward.Ensure`
-  makes the fact follow it at startup and every poll: a gone session is
-  restarted, an exited claude (SessionIdle proves the shell) replaced, an
-  unknown answer left alone. Stop clears the switch before the kill, so no poll
-  can revive it in between. Its session is for reading; its output is the
-  notes on the rows. Full record: `docs/adr/0020-the-steward-is-a-switch.md`.
+- **The steward was a switch** (`t` flipped one machine-wide steward that
+  `Ensure` kept running) — superseded by the next entry, and the full record
+  of what it was is `docs/adr/0020-the-steward-is-a-switch.md`.
+- **A steward is a conversation per product, and it keeps moving while you are
+  away.** Asked for as "have this steward per project session be interactive",
+  pointing at `coordinator-10.11`, a session the human started by hand in
+  `player-app/main` and talked to all afternoon. The machine-wide steward's one
+  real night (2026-10-15/16) was 141 wakes, 139 notes, **no replies**, 72 notes
+  on one record re-asking "merge #743?" on every CI tick, and a fleet account
+  every half hour in a session nobody opened — while the human talked to the
+  coordinator it was deferring to. So: **one steward per product** (a product
+  is what work crosses repos in; a repo's queue fits inside it), each a
+  conversation with a record under `state/stewards/<product>/<id>/`, started
+  with `--session-id` so `--resume` reopens it and `--name steward-<product>`
+  so dispatchers can message it, at most one current per product. **Nothing
+  starts one on its own**: a reboot leaves it *interrupted* and the human
+  reopens it or starts fresh — `t` on triage opens the picker (enter jumps in,
+  reopens or starts; x ends; a new one over a live one is refused until it is
+  ended), `steward [list|new|open|end]` from a shell; the switch, its file and
+  `Ensure` are gone. The brief is per product: its repos and where each keeps
+  its rules (they win), the human talks to it here or over Remote Control, it
+  is quiet otherwise, and a working dispatcher is messaged by the `peer` name
+  `status` gives it (Claude Code's session registry) while a stopped one gets
+  `reply`; `status [--next] --product` narrows it to its own. It pushes toward
+  the dispatcher's **goal** — DONE WHEN, read back off the prompt into the
+  record's `Goal`. **The same question asked again keeps its note**
+  (`NotedAsk`); a reply does not carry. **Rulings** are written down, dated and
+  end (`ruling add|end|list`, 24h unless said); recording one is the one verb
+  under `ask` in the steward's settings, so the human confirms each and the
+  steward cannot widen its own hands; `merge <repo> <pr> --head <sha>` refuses
+  without a ruling allowing it there, is pinned to the checked head and logs
+  `StewardMerged`. **Questions are saved, never waited on, and asked all at
+  once on recap**: every question goes through `ask` (2–4 options for a
+  choice, context for someone gone for hours); the steward keeps what does not
+  depend on it moving and never asks through a menu unless the human wrote that
+  turn, because a menu holds the session; one unanswered for
+  `steward_away_after` (15m) is postponed — `status --next` wakes the steward
+  then (`now_away`) and it stops holding work for it; the human typing
+  `recap_keyword` (`recap`) gets every choice as menus and the rest in prose,
+  and `answer` records each. Both settings are on the settings screen; the
+  headline counts saved questions. Verified live against a real steward on a
+  scratch store. Full record:
+  `docs/adr/0029-a-steward-is-a-conversation-per-product.md`.
 - **A finished dispatcher leaves the disk when asked, and takes only what it
   can prove is ours.** Reported as "we need a way to tidy up and completely
   remove worktrees and their node-modules". Only kill ever removed a worktree,
@@ -1174,8 +1206,9 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
-  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap` (`internal/fleetcmd`)
-  and `steward [stop]` (`internal/steward`), `account` (`internal/accountcmd`)
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap`/`ruling`/
+  `merge`/`ask`/`questions`/`answer` (`internal/fleetcmd`) and
+  `steward [list|new|open|end]` (`internal/steward`), `account` (`internal/accountcmd`)
   and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
@@ -1205,10 +1238,13 @@
 - `internal/ask` — the question a stopped session closed on, quoted; shared by
   the triage row and `status`.
 - `internal/fleetcmd` — the triage table's reading and hand-acts on the command
-  line, for a session stewarding the fleet: `status [--json|--next]`, `reply`,
-  `note`, `park`, `unpark`.
-- `internal/steward` — the steward session: its folder, brief (`brief.go`),
-  settings and start/stop.
+  line, for a session stewarding the fleet: `status [--json|--next] [--product]`,
+  `reply`, `note`, `park`, `unpark`; a steward's own `ruling` and `merge`
+  (`rulings.go`) and `ask`, `questions`, `answer` (`questions.go`).
+- `internal/steward` — the product stewards (ADR 0029): each one's record,
+  folder, brief (`brief.go`) and settings, start/reopen/end (`steward.go`),
+  the CLI (`cmd.go`), and the product's rulings (`rulings.go`) and questions
+  saved for the human (`questions.go`).
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
   finished dispatcher's session reopened with `claude --resume <session id>`
   in its own worktree (rebuilt if it was reclaimed). A session ending never
@@ -1223,7 +1259,9 @@
   the human started (ADR 0026) and `brief.go` is the convention it is then
   sent; `swap.go` moves a conversation to another
   account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup
-  prompt; `trust.go` copies a repo's trust onto its worktree.
+  prompt; `trust.go` copies a repo's trust onto its worktree. `goal.go`
+  is DONE WHEN as the prompt says it and the record reads it back; `peer.go` is
+  the name each live Claude session goes by, from Claude Code's registry.
 - `internal/supervisor` — the session backend behind one interface: tmux on
   Unix, a console window per session on Windows. A session is addressed by
   `Session` (socket + name), never by name alone.
