@@ -282,3 +282,19 @@ func TestSwap(t *testing.T) {
 		t.Errorf("unknown account: %v", err)
 	}
 }
+
+// note records the question it was written about, so the same question asked
+// again is still handled (hookcmd carries it) and --next stays asleep.
+func TestNoteRemembersTheQuestion(t *testing.T) {
+	now := time.Now()
+	withStore(t, &state.Dispatch{ID: "a", Feature: "asks", Status: state.StatusNeedsInput,
+		WaitingSince: &now, Said: "CI is green.\n\nWant me to merge #12?"})
+	var out, errOut bytes.Buffer
+	if code := Run("note", []string{"a", "yours: merge #12"}, &out, &errOut); code != 0 {
+		t.Fatalf("note: %s", errOut.String())
+	}
+	d, _ := find("a")
+	if d.NotedAsk != "Want me to merge #12?" {
+		t.Fatalf("noted ask = %q", d.NotedAsk)
+	}
+}

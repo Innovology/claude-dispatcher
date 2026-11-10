@@ -265,9 +265,18 @@ type Dispatch struct {
 	// current wait — "yours: the merge ships billing; CI green, no review" —
 	// written with `claude-dispatcher note`. An annotation like parking, never
 	// a Status. It only speaks for the wait it was written in (StewardNoteAt
-	// after WaitingSince) and is cleared when the next turn starts.
+	// after WaitingSince), with one exception: a later wait that closes on the
+	// same question (NotedAsk) is the same wait asked again, and the note
+	// carries to it. Otherwise the next wait clears it.
 	StewardNote   string     `json:"steward_note,omitempty"`
 	StewardNoteAt *time.Time `json:"steward_note_at,omitempty"`
+	// NotedAsk is the question the note was written about, in the session's
+	// own words (ask.Of of Said at the note), "" when the wait asked nothing.
+	// A dispatcher watching CI ends a turn on every tick, and each one closes
+	// on the same "want me to merge #743?": measured on the first steward's
+	// night, 108 stops on one record and 72 notes rewritten on it, one per
+	// tick, each waking the steward to say what it had said a minute before.
+	NotedAsk string `json:"noted_ask,omitempty"`
 	// Answer is the line last typed into the session to end this wait — by the
 	// cockpit's r or the reply command, the human's or the steward's — stamped
 	// at the send, under the hook lock. The hook that proves it landed

@@ -363,6 +363,9 @@ func runNote(args []string, out io.Writer) error {
 		}
 		now := time.Now()
 		d.StewardNote, d.StewardNoteAt = text, &now
+		// What the note is about, so the same question asked again keeps it
+		// (hookcmd's stampWait) instead of waking the steward to repeat it.
+		d.NotedAsk = ask.Of(d.Said)
 		return "noted " + quote(d.Feature) + " · " + text, nil
 	}, out)
 }
