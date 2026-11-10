@@ -44,6 +44,12 @@ type Question struct {
 	AskedAt    time.Time  `json:"asked_at"`
 	Answer     string     `json:"answer,omitempty"`
 	AnsweredAt *time.Time `json:"answered_at,omitempty"`
+	// AwayAt is when the steward was told the human is away for this one
+	// (`status --next`'s now_away), so each postponed question is announced
+	// exactly once — including one that went past the window while the
+	// steward was busy between two waits, which an announcement anchored on
+	// when a wait began would miss.
+	AwayAt *time.Time `json:"away_at,omitempty"`
 	// Postponed is worked out when the questions are read, never stored: an
 	// open question older than the away window.
 	Postponed bool `json:"postponed,omitempty"`
@@ -185,4 +191,24 @@ func productsWithQuestions() []string {
 		out = append(out, filepath.Base(filepath.Dir(f)))
 	}
 	return out
+}
+
+// MarkAway stamps the questions the steward has just been told the human is
+// away for, so none is announced twice.
+func MarkAway(product string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	release := state.Lock()
+	defer release()
+	qs := Questions(product, now(), 0)
+	t := now()
+	for i := range qs {
+		for _, id := range ids {
+			if qs[i].ID == id && qs[i].AwayAt == nil {
+				qs[i].AwayAt = &t
+			}
+		}
+	}
+	return saveQuestions(product, qs)
 }

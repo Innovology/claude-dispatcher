@@ -91,3 +91,32 @@ func TestNextWakesWhenTheHumanIsAway(t *testing.T) {
 		t.Fatalf("an already-postponed question woke it again: %s", out.String())
 	}
 }
+
+// Found in review: a question that went past the away window while the
+// steward was busy between two waits was never announced, because only a
+// crossing after the wait began counted. It is announced on the next wait
+// now, at once, and stamped so it is announced only that once.
+func TestNextAnnouncesAQuestionThatWentAwayBetweenWaits(t *testing.T) {
+	withStore(t)
+	loadConfig = func() (*config.Config, error) {
+		return &config.Config{StewardAwayAfter: "1ms", Products: map[string][]string{"player": {"player-app"}}}, nil
+	}
+	q, _, err := steward.Ask("player", steward.Question{Text: "Close #801?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond) // past the window before the wait begins
+	var out bytes.Buffer
+	start := time.Now()
+	if err := runNext(&out, "player", time.Second, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	var n Next
+	_ = json.Unmarshal(out.Bytes(), &n)
+	if len(n.NowAway) != 1 || n.NowAway[0] != q.ID || time.Since(start) > 200*time.Millisecond {
+		t.Fatalf("a question already past the window was not announced: %s", out.String())
+	}
+	if qs := steward.OpenQuestions("player", time.Now(), time.Millisecond); qs[0].AwayAt == nil {
+		t.Fatal("the announcement was not stamped on the question")
+	}
+}

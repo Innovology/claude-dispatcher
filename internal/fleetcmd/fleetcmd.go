@@ -205,11 +205,12 @@ type Next struct {
 // With a product it also wakes when one of the product's questions goes
 // unanswered past the away window (steward.Question). That moment is the
 // steward's cue that the human is away — nothing else happens at it, so
-// nothing else would wake it there — and is reported once: a question already
-// past the window when the wait began does not wake it again.
+// nothing else would wake it there. Each is reported once, and the report is
+// stamped on the question (AwayAt) rather than measured from when this wait
+// began: a question that went past the window while the steward was busy
+// between two waits must still be announced, and was not when it was.
 func runNext(out io.Writer, product string, timeout time.Duration, now func() time.Time) error {
-	start := now()
-	deadline := start.Add(timeout)
+	deadline := now().Add(timeout)
 	cfg, err := loadConfig()
 	if err != nil {
 		cfg = nil
@@ -225,12 +226,15 @@ func runNext(out io.Writer, product string, timeout time.Duration, now func() ti
 		qs := questionsNow(product, t, cfg)
 		var away []string
 		for _, q := range qs {
-			if q.Postponed && q.PostponedAt(cfg.AwayAfter()).After(start) {
+			if q.Postponed && q.AwayAt == nil {
 				away = append(away, q.ID)
 			}
 		}
 		timedOut := !t.Before(deadline)
 		if len(waiting) > 0 || len(away) > 0 || timedOut {
+			if err := steward.MarkAway(steward.Key(product), away); err != nil {
+				return err
+			}
 			enc := json.NewEncoder(out)
 			enc.SetIndent("", "  ")
 			return enc.Encode(Next{Waiting: waiting, Questions: qs, NowAway: away,
