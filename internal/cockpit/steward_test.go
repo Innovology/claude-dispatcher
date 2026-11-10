@@ -31,11 +31,20 @@ func TestQueueSignalLeadsWithTheStewardsNote(t *testing.T) {
 func withStewards(t *testing.T, rows ...stewardRow) *[]string {
 	t.Helper()
 	prevNow, prevOrder := stewardsNow, productOrder
-	ps, pr, pe := stewardStart, stewardReopen, stewardEnd
+	ps, pr, pe, pu := stewardStart, stewardReopen, stewardEnd, stewardRulings
 	t.Cleanup(func() {
 		stewardsNow, productOrder = prevNow, prevOrder
-		stewardStart, stewardReopen, stewardEnd = ps, pr, pe
+		stewardStart, stewardReopen, stewardEnd, stewardRulings = ps, pr, pe, pu
 	})
+	stewardRulings = func(p string, _ time.Time) []steward.Ruling {
+		if p != "alpha" {
+			return nil
+		}
+		return []steward.Ruling{
+			{ID: "r1", Text: "one deploy at a time"},
+			{ID: "r2", Text: "merge greens", Allow: []string{steward.AllowMerge}, Repo: "alpha-api", Until: time.Date(2026, 11, 16, 9, 0, 0, 0, time.Local)},
+		}
+	}
 	stewardsNow = rows
 	productOrder = []string{"alpha", "beta"}
 	var acts []string
@@ -100,7 +109,7 @@ func TestStewardPickerLists(t *testing.T) {
 		t.Errorf("opened on %q, the row is %q", it.product, mm.stewardPickProduct())
 	}
 	view := mm.viewStewardPick(100, 30)
-	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended"} {
+	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended", "2 rulings standing · may merge in alpha-api until Mon 09:00"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("picker lacks %q:\n%s", want, view)
 		}

@@ -446,6 +446,11 @@ func write(s *Steward, exe string, f Facts) error {
 // stops on a permission prompt nobody is watching; editing anything is denied,
 // because a lead that starts writing code is a second dispatcher nobody
 // dispatched.
+//
+// Recording a ruling is the one thing it must always ask for ("ask" wins over
+// any mode): a ruling is the human's decision, and asking is what makes the
+// human confirm each one, so the steward cannot grant itself the merges a
+// ruling allows. `merge` itself is allowed, because the verb checks the ruling.
 func Settings(exe string) map[string]any {
 	allow := []string{"Read", "Grep", "Glob"}
 	for _, verb := range stewardVerbs {
@@ -460,13 +465,14 @@ func Settings(exe string) map[string]any {
 	return map[string]any{
 		"permissions": map[string]any{
 			"allow": allow,
+			"ask":   []string{"Bash(" + exe + " ruling add:*)"},
 			"deny":  []string{"Edit", "Write", "NotebookEdit"},
 		},
 	}
 }
 
 // stewardVerbs are the fleet verbs a steward runs without asking.
-var stewardVerbs = []string{"status", "reply", "note", "park", "unpark"}
+var stewardVerbs = []string{"status", "reply", "note", "park", "unpark", "ruling list", "ruling end", "merge"}
 
 // newUUID is a random (version 4) UUID, the form claude's --session-id takes.
 func newUUID() string {

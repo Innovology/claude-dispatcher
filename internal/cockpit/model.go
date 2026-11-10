@@ -9,6 +9,7 @@ import (
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/keymap"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/version"
 )
 
@@ -125,6 +126,9 @@ type model struct {
 	// stewards, to jump into, reopen or start.
 	stewardPickOpen   bool
 	stewardPickCursor int
+	// stewardPickRulings is each product's standing rulings, read when the
+	// picker opens rather than on every frame it is drawn.
+	stewardPickRulings map[string][]steward.Ruling
 
 	backlogCursor int
 	picked        map[string]bool

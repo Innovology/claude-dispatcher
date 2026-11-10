@@ -115,7 +115,7 @@ func TestStartWritesTheBriefAndStartsTheSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	var st struct {
-		Permissions struct{ Allow, Deny []string } `json:"permissions"`
+		Permissions struct{ Allow, Ask, Deny []string } `json:"permissions"`
 	}
 	if err := json.Unmarshal(raw, &st); err != nil {
 		t.Fatal(err)
@@ -131,6 +131,14 @@ func TestStartWritesTheBriefAndStartsTheSession(t *testing.T) {
 	}
 	if strings.Join(st.Permissions.Deny, ",") != "Edit,Write,NotebookEdit" {
 		t.Errorf("deny = %v", st.Permissions.Deny)
+	}
+	// A ruling is the human's: recording one always asks, so the steward cannot
+	// grant itself the merges it allows. The merge verb checks the ruling itself.
+	if strings.Join(st.Permissions.Ask, ",") != "Bash("+exe+" ruling add:*)" {
+		t.Errorf("ask = %v", st.Permissions.Ask)
+	}
+	if !strings.Contains(allowed, "Bash("+exe+" merge:*)") || strings.Contains(allowed, "ruling add") {
+		t.Errorf("allow = %v", st.Permissions.Allow)
 	}
 	if got := StateOf(s); got != Live {
 		t.Errorf("state = %s", got)

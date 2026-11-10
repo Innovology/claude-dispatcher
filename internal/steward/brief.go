@@ -32,6 +32,7 @@ var briefSections = []func(exe string, f Facts) string{
 	briefVerbs,
 	briefLoop,
 	briefTalk,
+	briefRulings,
 	briefPolicy,
 }
 
@@ -160,8 +161,9 @@ then #2 and #3, all within this PR." Never reply to the same wait twice.
 
 Never reply to these. Note them, so the human sees your reading on the table:
 
-- merging, releasing or deploying anything; anything that reaches production,
-  users, customers or other people (messages, emails, tickets, comments);
+- merging (unless a ruling lets you — above), releasing or deploying anything;
+  anything that reaches production, users, customers or other people
+  (messages, emails, tickets, comments);
 - deleting data, force-pushing, rewriting history, changing infrastructure,
   secrets, permissions, billing or spend;
 - a question of product intent, taste or priority the brief does not settle;
@@ -203,4 +205,38 @@ func shellWord(s string) string {
 // plainRune is a rune a shell word needs no quoting for.
 func plainRune(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.'
+}
+
+func briefRulings(exe string, f Facts) string {
+	p := "--product " + shellWord(f.Product)
+	return `## Rulings — what the human has decided, and for how long
+
+When the human gives you a standing instruction — "merge greens while I'm out",
+"#931 waits until I approve its goldens", "one deploy at a time today" — record
+it, in their words:
+
+    ` + exe + ` ruling add ` + p + ` [--allow merge] [--repo <repo>] --until <when> <the instruction>
+
+It asks the human to confirm, on purpose: a ruling is theirs, never yours to
+give yourself, so only record one the human has just given you. ` + "`--until`" + ` takes
+a duration (6h, 3d) or a time (2026-11-16 09:00); ask how long it stands if they
+did not say, and leaving it out means 24 hours. ` + "`--allow merge`" + ` is for an
+instruction that lets you merge; everything else is guidance you follow.
+
+Read the rulings every time you wake — ` + "`" + exe + " ruling list " + p + "`" + ` — and follow
+them over the defaults below. One past its time is void; act as if it was never
+given. When the human withdraws one, ` + "`" + exe + " ruling end <id>`" + `.
+
+**Merging** is yours only under a ruling that allows it, and only through
+
+    ` + exe + ` merge <repo> <pr> --head <full head sha>
+
+which refuses without one. Merge only a pull request that is not a draft, whose
+required checks passed on exactly that head (` + "`gh pr view <n> --json headRefOid`" + `), and
+that no ruling holds back. Then tell the human in one line what merged, and tell
+the dispatcher it belonged to. A deploy, a message, a deletion — everything
+else under "Note" below — stays the human's whatever a ruling says: you have no
+hands for it.
+
+`
 }

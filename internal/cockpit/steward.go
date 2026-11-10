@@ -50,10 +50,11 @@ func collectStewards() []stewardRow {
 // The steward package, as seams so a test can drive the picker without a
 // supervisor.
 var (
-	stewardAll    = steward.All
-	stewardStart  = steward.Start
-	stewardReopen = steward.Reopen
-	stewardEnd    = steward.End
+	stewardAll     = steward.All
+	stewardStart   = steward.Start
+	stewardReopen  = steward.Reopen
+	stewardEnd     = steward.End
+	stewardRulings = steward.ActiveRulings
 )
 
 // stewardClause is the headline's word on the stewards: nothing while there are
@@ -127,6 +128,12 @@ func (m model) stewardPickOpenFor(product string) (model, tea.Cmd) {
 	m.stewardPickOpen = true
 	m.stewardPickCursor = 0
 	items := stewardItems()
+	m.stewardPickRulings = map[string][]steward.Ruling{}
+	for _, it := range items {
+		if _, read := m.stewardPickRulings[it.product]; !read {
+			m.stewardPickRulings[it.product] = stewardRulings(it.product, time.Now())
+		}
+	}
 	for i, it := range items {
 		if it.product != product {
 			continue
@@ -279,6 +286,9 @@ func (m model) viewStewardPick(w, h int) string {
 				out = append(out, "")
 			}
 			out = append(out, fg(cMid, it.product))
+			if rs := m.stewardPickRulings[it.product]; len(rs) > 0 {
+				out = append(out, fg(cDim, "  "+rulingsLine(rs)))
+			}
 			last = it.product
 		}
 		bg, marker, tone := cTransparent, " ", cFg
@@ -307,4 +317,20 @@ func (m model) viewStewardPick(w, h int) string {
 	out = append(out, "")
 	out = append(out, fg(cFaint, "j/k choose · enter jumps in, reopens or starts · x ends one · esc closes"))
 	return clampLines(gutter(strings.Join(out, "\n"), pad), h)
+}
+
+// rulingsLine is a product's standing rulings in one line: how many, and the
+// hand one grants with when it ends, since that is the one with consequences.
+func rulingsLine(rs []steward.Ruling) string {
+	line := countOf(len(rs), "ruling", "rulings") + " standing"
+	for _, r := range rs {
+		if slices.Contains(r.Allow, steward.AllowMerge) {
+			where := ""
+			if r.Repo != "" {
+				where = " in " + r.Repo
+			}
+			return line + " · may merge" + where + " until " + r.Until.Local().Format("Mon 15:04")
+		}
+	}
+	return line
 }

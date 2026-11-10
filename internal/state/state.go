@@ -874,6 +874,11 @@ const (
 	// to" as the reason. Not a lifecycle event: the resumed session's
 	// SessionStart is what says it is running again.
 	EventAccountSwapped = "AccountSwapped"
+	// EventStewardMerged is a product steward merging a pull request under a
+	// ruling that allows it (fleetcmd merge), with the PR as the feature and
+	// the ruling as the reason. Not a lifecycle event: the tracker reads the
+	// merge off the forge as it reads any other.
+	EventStewardMerged = "StewardMerged"
 )
 
 // AppendEvent appends one line to events.jsonl; failures are swallowed because

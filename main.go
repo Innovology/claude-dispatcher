@@ -39,6 +39,9 @@ Usage:
                                steward end <product|id> ends one (t in the cockpit)
   claude-dispatcher account    the Claude subscriptions a dispatch can run under, and what
                                each has left · account add <name> adds and logs one in
+  claude-dispatcher ruling add|end|list
+                               a product's standing rulings · a steward records one only
+                               with your say-so, and merges only under one that allows it
   claude-dispatcher swap <id|feature> <account>
                                move a dispatcher onto another subscription and resume
                                its conversation there (a on its row in the cockpit)
@@ -70,7 +73,7 @@ func main() {
 		}
 	case "steward":
 		os.Exit(steward.Run(args[1:], os.Stdout, os.Stderr))
-	case "status", "reply", "park", "unpark", "note", "tidy", "swap":
+	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "ruling", "merge":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
