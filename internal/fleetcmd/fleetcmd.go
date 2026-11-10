@@ -450,8 +450,15 @@ func runNote(args []string, out io.Writer) error {
 		now := time.Now()
 		d.StewardNote, d.StewardNoteAt = text, &now
 		// What the note is about, so the same question asked again keeps it
-		// (hookcmd's stampWait) instead of waking the steward to repeat it.
-		d.NotedAsk = ask.Of(d.Said)
+		// (hookcmd's stampWait) instead of waking the steward to repeat it —
+		// but only for a turn that ended on it. On a menu, Said is still the
+		// last turn's message: a note about a permission prompt would be
+		// filed under that turn's question, and carried onto it when it was
+		// asked again.
+		d.NotedAsk = ""
+		if d.Status == state.StatusNeedsInput {
+			d.NotedAsk = ask.Of(d.Said)
+		}
 		return "noted " + quote(d.Feature) + " · " + text, nil
 	}, out)
 }

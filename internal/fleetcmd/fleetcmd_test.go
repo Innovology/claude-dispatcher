@@ -355,3 +355,19 @@ func TestStatusNamesThePeer(t *testing.T) {
 		t.Fatalf("peers = %q %q", byID["p1"].Peer, byID["p2"].Peer)
 	}
 }
+
+// A note written on a menu is about the menu: it does not take the question
+// the last turn closed on, so it can never carry onto that question asked
+// again (found in review).
+func TestANoteOnAMenuIsNotAboutTheQuestion(t *testing.T) {
+	now := time.Now()
+	withStore(t, &state.Dispatch{ID: "b", Feature: "billing", Status: state.StatusBlocked, WaitingSince: &now,
+		Said: "CI is green.\n\nWant me to merge #12?"})
+	var out, errOut bytes.Buffer
+	if code := Run("note", []string{"b", "yours: permission prompt"}, &out, &errOut); code != 0 {
+		t.Fatalf("note: %s", errOut.String())
+	}
+	if d, _ := find("b"); d.NotedAsk != "" {
+		t.Fatalf("a menu note took the question %q", d.NotedAsk)
+	}
+}
