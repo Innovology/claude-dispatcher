@@ -1062,8 +1062,10 @@
   then (`now_away`) and it stops holding work for it; the human typing
   `recap_keyword` (`recap`) gets every choice as menus and the rest in prose,
   and `answer` records each. Both settings are on the settings screen; the
-  headline counts saved questions. Verified live against a real steward on a
-  scratch store. Full record:
+  headline counts saved questions. The machine-wide steward an earlier build
+  ran is retired by the cockpit's poll, and the steward's settings deny
+  `gh pr merge` and `git push`, so the ruling-checked verb is its only merge.
+  Verified live against a real steward on a scratch store. Full record:
   `docs/adr/0029-a-steward-is-a-conversation-per-product.md`.
 - **A finished dispatcher leaves the disk when asked, and takes only what it
   can prove is ours.** Reported as "we need a way to tidy up and completely

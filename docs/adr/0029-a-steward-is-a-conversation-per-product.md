@@ -172,5 +172,24 @@ scratch store and a private tmux server:
   product's, so a fresh steward picks them up too.
 - Dispatchers launched before this carry no `Goal`; the steward falls back to
   their prompt.
-- Existing installs keep a `steward/` folder and possibly a `disp_steward`
-  session from the old switch; nothing reads either now.
+- An existing install's machine-wide steward is retired: the cockpit ends a
+  running `disp_steward` session and removes its switch at startup and on
+  every poll, and a bare `steward stop` does the same. Left running, its old
+  brief would go on answering every product's waits beside the new stewards.
+
+## After review
+
+An independent review of the branch found these, each fixed on its own:
+
+- an unquoted `--until 2026-11-16 09:00` stood until the end of the 16th, and
+  flags after a ruling's text were swallowed into it;
+- a question that went past the away window between two waits was never in
+  `now_away` — each announcement is stamped on the question (`AwayAt`) now;
+- a note on a menu recorded the last turn's question and could carry onto it;
+- a carried note never woke the steward again, so a later ruling never
+  reached it — the brief sends it back over noted waits after a ruling;
+- product names that slug alike (or non-Latin ones) shared a session and a
+  rulings file — a lossy slug carries a short hash of the name, and a product
+  the config does not name is refused;
+- `steward end <name>` took a hex-looking product name as an id prefix;
+- the steward's settings did not deny `gh pr merge` or `git push`.
