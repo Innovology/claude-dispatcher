@@ -50,6 +50,11 @@ func runAsk(args []string, out io.Writer) error {
 	if strings.TrimSpace(*product) == "" {
 		return errors.New("name the product: --product <name>")
 	}
+	if cfg, err := loadConfig(); err == nil {
+		if err := steward.CheckProduct(cfg, *product); err != nil {
+			return err
+		}
+	}
 	q := steward.Question{Text: strings.Join(fs.Args(), " "), Context: *context, Options: opts}
 	if *forKey != "" {
 		d, err := find(*forKey)

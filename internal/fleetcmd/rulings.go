@@ -70,6 +70,11 @@ func rulingAdd(args []string, out io.Writer) error {
 	if strings.TrimSpace(*product) == "" {
 		return errors.New("name the product: --product <name>")
 	}
+	if cfg, err := loadConfig(); err == nil {
+		if err := steward.CheckProduct(cfg, *product); err != nil {
+			return err
+		}
+	}
 	t := time.Now()
 	end, err := steward.ParseUntil(*until, t)
 	if err != nil {

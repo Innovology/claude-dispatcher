@@ -26,6 +26,8 @@ package steward
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,10 +89,44 @@ func Key(product string) string {
 
 // slug is the product as a path segment and a session name.
 func slug(product string) string {
-	if s := dispatch.Slugify(Key(product)); s != "" {
+	name := Key(product)
+	s := dispatch.Slugify(name)
+	if s == name {
 		return s
 	}
-	return "product"
+	// A slug that is not the name lost something on the way — case,
+	// punctuation, words past the fifth, every non-Latin letter — and two
+	// names can lose their way to the same one: "Player App" and
+	// "player-app", or any two Cyrillic names, which slug to nothing. They
+	// would share a session, and a rulings file with its merge grants, so
+	// the name's own hash keeps them apart.
+	sum := sha256.Sum256([]byte(name))
+	h := hex.EncodeToString(sum[:3])
+	if s == "" {
+		return "product-" + h
+	}
+	return s + "-" + h
+}
+
+// CheckProduct refuses a product the config does not name. Every store here is
+// keyed by product, so a typo would start a steward, or record a ruling or a
+// question, for a product nothing groups under — a merge grant nobody can
+// use, a question nobody is asked. A config that is not there cannot say, and
+// is not taken to mean no.
+func CheckProduct(cfg *config.Config, product string) error {
+	product = Key(product)
+	if product == Unassigned || cfg == nil {
+		return nil
+	}
+	if _, ok := cfg.Products[product]; ok {
+		return nil
+	}
+	names := []string{Unassigned}
+	for p := range cfg.Products {
+		names = append(names, p)
+	}
+	sort.Strings(names)
+	return fmt.Errorf("no product %q — the config names %s", product, strings.Join(names, ", "))
 }
 
 // SessionName is the product's steward session. The underscore keeps it out of
@@ -247,6 +283,11 @@ var ErrUntrusted = errors.New("started, but its folder could not be marked trust
 // choosing a fresh start over reopening it — and stays reopenable.
 func Start(product string) (*Steward, error) {
 	product = Key(product)
+	if cfg, err := loadConfig(); err == nil {
+		if err := CheckProduct(cfg, product); err != nil {
+			return nil, err
+		}
+	}
 	if !available() {
 		return nil, errors.New(supervisor.Backend() + " is not available")
 	}

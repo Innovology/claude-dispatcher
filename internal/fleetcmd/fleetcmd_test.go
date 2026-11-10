@@ -25,7 +25,7 @@ func withStore(t *testing.T, recs ...*state.Dispatch) {
 	t.Cleanup(func() { loadConfig, peerNames = prev, prevPeers })
 	peerNames = func(...string) map[string]string { return map[string]string{"sess-goldens": "goldens-1b"} }
 	loadConfig = func() (*config.Config, error) {
-		return &config.Config{Products: map[string][]string{"player": {"player-app", "design-system"}}}, nil
+		return &config.Config{Products: map[string][]string{"player": {"player-app", "design-system"}, "tools": {"cockpit"}}}, nil
 	}
 	for _, r := range recs {
 		if err := state.Save(r); err != nil {

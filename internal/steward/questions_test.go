@@ -72,7 +72,7 @@ func TestBriefCarriesTheRecap(t *testing.T) {
 	f := &fakeSup{trusted: true}
 	withFakes(t, f, exePath(t))
 	loadConfig = func() (*config.Config, error) {
-		return &config.Config{RecapKeyword: "back", StewardAwayAfter: "1h30m"}, nil
+		return &config.Config{RecapKeyword: "back", StewardAwayAfter: "1h30m", Products: map[string][]string{"player": {"player-app"}}}, nil
 	}
 	s, err := Start("player")
 	if err != nil {

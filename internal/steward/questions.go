@@ -73,15 +73,17 @@ func (q Question) Open() bool { return q.AnsweredAt == nil }
 // PostponedAt is when an open question counts as postponed.
 func (q Question) PostponedAt(away time.Duration) time.Time { return q.AskedAt.Add(away) }
 
-func questionsPath(product string) string {
-	return filepath.Join(ProductDir(product), "questions.json")
-}
-
 // Questions is every question saved for product, oldest first — the order the
 // human is asked them in — each marked postponed if it is open and has waited
 // longer than away at t.
 func Questions(product string, t time.Time, away time.Duration) []Question {
-	raw, err := os.ReadFile(questionsPath(product))
+	return questionsIn(ProductDir(product), t, away)
+}
+
+// questionsIn reads the questions in a product's folder, addressed by folder
+// for the reason rulingsIn is.
+func questionsIn(dir string, t time.Time, away time.Duration) []Question {
+	raw, err := os.ReadFile(filepath.Join(dir, "questions.json"))
 	if err != nil {
 		return nil
 	}
@@ -107,8 +109,8 @@ func OpenQuestions(product string, t time.Time, away time.Duration) []Question {
 	return out
 }
 
-func saveQuestions(product string, qs []Question) error {
-	if err := os.MkdirAll(ProductDir(product), 0o755); err != nil {
+func saveQuestionsIn(dir string, qs []Question) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	for i := range qs {
@@ -118,11 +120,11 @@ func saveQuestions(product string, qs []Question) error {
 	if err != nil {
 		return err
 	}
-	tmp := questionsPath(product) + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+	path := filepath.Join(dir, "questions.json")
+	if err := os.WriteFile(path+".tmp", append(raw, '\n'), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, questionsPath(product))
+	return os.Rename(path+".tmp", path)
 }
 
 // Ask saves a question for the human. The same question about the same
@@ -145,7 +147,8 @@ func Ask(product string, q Question) (Question, bool, error) {
 	}
 	release := state.Lock()
 	defer release()
-	qs := Questions(product, now(), 0)
+	dir := ProductDir(product)
+	qs := questionsIn(dir, now(), 0)
 	for _, old := range qs {
 		if old.Open() && old.For == q.For && old.Text == q.Text {
 			return old, false, nil
@@ -154,7 +157,7 @@ func Ask(product string, q Question) (Question, bool, error) {
 	q.ID = "q" + state.NewID()[:6]
 	q.AskedAt = now()
 	q.Answer, q.AnsweredAt = "", nil
-	return q, true, saveQuestions(product, append(qs, q))
+	return q, true, saveQuestionsIn(dir, append(qs, q))
 }
 
 // Answer closes a question with the human's answer, in their words, wherever
@@ -166,8 +169,9 @@ func Answer(id, answer string) (product string, q Question, err error) {
 	}
 	release := state.Lock()
 	defer release()
-	for _, p := range productsWithQuestions() {
-		qs := Questions(p, now(), 0)
+	for _, dir := range productDirs() {
+		p := filepath.Base(dir)
+		qs := questionsIn(dir, now(), 0)
 		for i := range qs {
 			if qs[i].ID != id {
 				continue
@@ -177,20 +181,10 @@ func Answer(id, answer string) (product string, q Question, err error) {
 			}
 			t := now()
 			qs[i].Answer, qs[i].AnsweredAt = answer, &t
-			return p, qs[i], saveQuestions(p, qs)
+			return p, qs[i], saveQuestionsIn(dir, qs)
 		}
 	}
 	return "", q, fmt.Errorf("no question %q", id)
-}
-
-// productsWithQuestions is every product folder holding questions, by slug.
-func productsWithQuestions() []string {
-	files, _ := filepath.Glob(filepath.Join(state.Dir(), "stewards", "*", "questions.json"))
-	var out []string
-	for _, f := range files {
-		out = append(out, filepath.Base(filepath.Dir(f)))
-	}
-	return out
 }
 
 // MarkAway stamps the questions the steward has just been told the human is
@@ -201,7 +195,8 @@ func MarkAway(product string, ids []string) error {
 	}
 	release := state.Lock()
 	defer release()
-	qs := Questions(product, now(), 0)
+	dir := ProductDir(product)
+	qs := questionsIn(dir, now(), 0)
 	t := now()
 	for i := range qs {
 		for _, id := range ids {
@@ -210,5 +205,5 @@ func MarkAway(product string, ids []string) error {
 			}
 		}
 	}
-	return saveQuestions(product, qs)
+	return saveQuestionsIn(dir, qs)
 }

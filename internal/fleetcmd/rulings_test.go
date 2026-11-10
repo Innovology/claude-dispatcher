@@ -146,3 +146,15 @@ func TestRulingAddReadsWhatWasMeant(t *testing.T) {
 		t.Fatalf("flags after the text were not read as flags: %+v", rs)
 	}
 }
+
+// A ruling or a question for a product the config does not name is refused.
+func TestUnknownProductRefusedByTheVerbs(t *testing.T) {
+	withStore(t)
+	var out, errOut bytes.Buffer
+	if code := Run("ruling", []string{"add", "--product", "plyer", "--allow", "merge", "merge", "greens"}, &out, &errOut); code == 0 {
+		t.Fatal("a ruling for an unknown product was recorded")
+	}
+	if code := Run("ask", []string{"--product", "plyer", "Merge?"}, &out, &errOut); code == 0 {
+		t.Fatal("a question for an unknown product was saved")
+	}
+}

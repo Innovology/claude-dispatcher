@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
@@ -54,7 +55,9 @@ func withFakes(t *testing.T, f *fakeSup, exe string) {
 	}
 	trustDir = func(string) bool { return f.trusted }
 	executable = func() (string, error) { return exe, nil }
-	loadConfig = func() (*config.Config, error) { return &config.Config{}, nil }
+	loadConfig = func() (*config.Config, error) {
+		return &config.Config{Products: map[string][]string{"player": {"player-app", "design-system"}, "tools": {"cockpit"}}}, nil
+	}
 	discover = func(*config.Config) []repos.Repo {
 		return []repos.Repo{
 			{Name: "player-app", Path: "/src/player-app/main", Product: "player"},
@@ -368,5 +371,48 @@ func TestRetireLegacy(t *testing.T) {
 	}
 	if code := Run([]string{"stop"}, &out, &errOut); code == 0 {
 		t.Fatal("with nothing legacy left, a bare stop must ask for the product")
+	}
+}
+
+// Names that slug alike stay apart: found in review, "Player App" and
+// "player-app", or any two non-Latin names, shared one session and one rulings
+// file — merge grants included. A name that is its own slug keeps it.
+func TestProductNamesThatSlugAlikeStayApart(t *testing.T) {
+	withFakes(t, &fakeSup{trusted: true}, exePath(t))
+	if slug("playerpulse-player") != "playerpulse-player" || slug("") != "unassigned" {
+		t.Fatal("a name that is its own slug must keep it")
+	}
+	for _, pair := range [][2]string{{"Player App", "player-app"}, {"Плеер", "Тренер"}, {"a b c d e f", "a b c d e g"}} {
+		if slug(pair[0]) == slug(pair[1]) || SessionName(pair[0]) == SessionName(pair[1]) {
+			t.Errorf("%q and %q share %q", pair[0], pair[1], slug(pair[0]))
+		}
+	}
+	if _, err := AddRuling("Player App", Ruling{Text: "merge greens", Allow: []string{AllowMerge}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := MergeRuling("player-app", "app", time.Now()); ok {
+		t.Fatal("one product's merge ruling granted another's")
+	}
+	// A ruling found by walking the folders is ended where it is, whatever
+	// its folder is called.
+	rs := Rulings("Player App")
+	if _, _, err := EndRuling(rs[0].ID); err != nil || len(ActiveRulings("Player App", time.Now())) != 0 {
+		t.Fatalf("end: %v", err)
+	}
+}
+
+// A product the config does not name is refused, so a typo cannot start a
+// steward, or record a ruling, for a product nothing groups under.
+func TestUnknownProductRefused(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	if _, err := Start("plyer"); err == nil || !strings.Contains(err.Error(), "player") || len(f.started) != 0 {
+		t.Fatalf("a typo started a steward: %v", err)
+	}
+	if _, err := Start(""); err != nil {
+		t.Fatalf("the unassigned bucket is always a product: %v", err)
+	}
+	if CheckProduct(nil, "anything") != nil {
+		t.Fatal("no config cannot say no")
 	}
 }

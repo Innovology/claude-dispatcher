@@ -61,11 +61,14 @@ func (r Ruling) Grants(kind, repo string, t time.Time) bool {
 	return r.Active(t) && slices.Contains(r.Allow, kind) && (r.Repo == "" || r.Repo == repo)
 }
 
-func rulingsPath(product string) string { return filepath.Join(ProductDir(product), "rulings.json") }
-
 // Rulings is every ruling ever given for product, newest first.
-func Rulings(product string) []Ruling {
-	raw, err := os.ReadFile(rulingsPath(product))
+func Rulings(product string) []Ruling { return rulingsIn(ProductDir(product)) }
+
+// rulingsIn reads the rulings in a product's folder. The store is addressed by
+// folder rather than by product name wherever it is walked, because a folder's
+// name is a product's slug and a slug is not always its own slug again.
+func rulingsIn(dir string) []Ruling {
+	raw, err := os.ReadFile(filepath.Join(dir, "rulings.json"))
 	if err != nil {
 		return nil
 	}
@@ -88,19 +91,19 @@ func ActiveRulings(product string, t time.Time) []Ruling {
 	return out
 }
 
-func saveRulings(product string, rs []Ruling) error {
-	if err := os.MkdirAll(ProductDir(product), 0o755); err != nil {
+func saveRulingsIn(dir string, rs []Ruling) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(rs, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := rulingsPath(product) + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
+	path := filepath.Join(dir, "rulings.json")
+	if err := os.WriteFile(path+".tmp", append(raw, '\n'), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, rulingsPath(product))
+	return os.Rename(path+".tmp", path)
 }
 
 // AddRuling records a ruling for product, under the state lock.
@@ -127,25 +130,27 @@ func AddRuling(product string, r Ruling) (Ruling, error) {
 	r.ID = "r" + state.NewID()[:6]
 	release := state.Lock()
 	defer release()
-	return r, saveRulings(product, append(Rulings(product), r))
+	dir := ProductDir(product)
+	return r, saveRulingsIn(dir, append(rulingsIn(dir), r))
 }
 
-// EndRuling ends a ruling early, wherever it is.
+// EndRuling ends a ruling early, wherever it is, and says which product's
+// folder it was in.
 func EndRuling(id string) (product string, r Ruling, err error) {
 	release := state.Lock()
 	defer release()
-	for _, s := range productsOnRecord() {
-		rs := Rulings(s)
+	for _, dir := range productDirs() {
+		rs := rulingsIn(dir)
 		for i := range rs {
 			if rs[i].ID != id {
 				continue
 			}
 			if rs[i].EndedAt != nil {
-				return s, rs[i], fmt.Errorf("ruling %s has already ended", id)
+				return filepath.Base(dir), rs[i], fmt.Errorf("ruling %s has already ended", id)
 			}
 			t := now()
 			rs[i].EndedAt = &t
-			return s, rs[i], saveRulings(s, rs)
+			return filepath.Base(dir), rs[i], saveRulingsIn(dir, rs)
 		}
 	}
 	return "", Ruling{}, fmt.Errorf("no ruling %q", id)
@@ -162,26 +167,13 @@ func MergeRuling(product, repo string, t time.Time) (Ruling, bool) {
 	return Ruling{}, false
 }
 
-// productsOnRecord is every product that has a folder of its own — a steward,
-// a ruling or a question — by the product name its records carry.
-func productsOnRecord() []string {
-	dirs, _ := filepath.Glob(filepath.Join(state.Dir(), "stewards", "*"))
-	seen := map[string]bool{}
+// productDirs is every product's folder.
+func productDirs() []string {
+	entries, _ := filepath.Glob(filepath.Join(state.Dir(), "stewards", "*"))
 	var out []string
-	add := func(p string) {
-		if !seen[p] {
-			seen[p] = true
-			out = append(out, p)
-		}
-	}
-	for _, s := range All() {
-		add(Key(s.Product))
-	}
-	for _, d := range dirs {
-		// A product with rulings but no steward yet is found by its folder,
-		// whose name is the slug; slug(slug) is the slug, so it reads back.
-		if _, err := os.Stat(filepath.Join(d, "rulings.json")); err == nil {
-			add(filepath.Base(d))
+	for _, e := range entries {
+		if fi, err := os.Stat(e); err == nil && fi.IsDir() {
+			out = append(out, e)
 		}
 	}
 	return out
