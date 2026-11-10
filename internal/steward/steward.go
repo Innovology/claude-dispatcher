@@ -518,7 +518,10 @@ func Settings(exe string) map[string]any {
 		"permissions": map[string]any{
 			"allow": allow,
 			"ask":   []string{"Bash(" + exe + " ruling add:*)"},
-			"deny":  []string{"Edit", "Write", "NotebookEdit"},
+			// Merging straight through gh would step round the ruling the merge
+			// verb checks, so it is denied here; the verb runs gh itself, which
+			// no rule of claude's reaches.
+			"deny": []string{"Edit", "Write", "NotebookEdit", "Bash(gh pr merge:*)", "Bash(git push:*)"},
 		},
 	}
 }

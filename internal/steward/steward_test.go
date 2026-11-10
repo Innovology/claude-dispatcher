@@ -132,7 +132,7 @@ func TestStartWritesTheBriefAndStartsTheSession(t *testing.T) {
 	if strings.Contains(allowed, "gh pr merge") || strings.Contains(allowed, "git push") {
 		t.Error("the steward must not be allowed to merge or push outright")
 	}
-	if strings.Join(st.Permissions.Deny, ",") != "Edit,Write,NotebookEdit" {
+	if strings.Join(st.Permissions.Deny, ",") != "Edit,Write,NotebookEdit,Bash(gh pr merge:*),Bash(git push:*)" {
 		t.Errorf("deny = %v", st.Permissions.Deny)
 	}
 	// A ruling is the human's: recording one always asks, so the steward cannot
