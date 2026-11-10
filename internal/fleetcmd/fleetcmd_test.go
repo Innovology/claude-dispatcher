@@ -19,9 +19,11 @@ import (
 func withStore(t *testing.T, recs ...*state.Dispatch) {
 	t.Helper()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	// Never the real config: products come from what a test names.
-	prev := loadConfig
-	t.Cleanup(func() { loadConfig = prev })
+	// Never the real config or the real session registry: products and peers
+	// come from what a test names.
+	prev, prevPeers := loadConfig, peerNames
+	t.Cleanup(func() { loadConfig, peerNames = prev, prevPeers })
+	peerNames = func(...string) map[string]string { return map[string]string{"sess-goldens": "goldens-1b"} }
 	loadConfig = func() (*config.Config, error) {
 		return &config.Config{Products: map[string][]string{"player": {"player-app", "design-system"}}}, nil
 	}
@@ -335,5 +337,21 @@ func TestStatusNarrowsToAProduct(t *testing.T) {
 	_ = json.Unmarshal(out.Bytes(), &n)
 	if len(n.Waiting) != 1 || n.Waiting[0].ID != "o1" || n.Waiting[0].Product != "unassigned" {
 		t.Fatalf("the config, not the record, says where a repo belongs: %+v", n.Waiting)
+	}
+}
+
+// Each entry names the session the way Claude sessions message each other, so
+// a steward can reach a dispatcher that is still working.
+func TestStatusNamesThePeer(t *testing.T) {
+	withStore(t,
+		&state.Dispatch{ID: "p1", Feature: "goldens", RepoName: "player-app", SessionID: "sess-goldens", Status: state.StatusWorking},
+		&state.Dispatch{ID: "p2", Feature: "quiet", RepoName: "player-app", SessionID: "sess-unlisted", Status: state.StatusWorking},
+	)
+	byID := map[string]Entry{}
+	for _, e := range Fleet(state.LoadAll(), time.Now()) {
+		byID[e.ID] = e
+	}
+	if byID["p1"].Peer != "goldens-1b" || byID["p2"].Peer != "" {
+		t.Fatalf("peers = %q %q", byID["p1"].Peer, byID["p2"].Peer)
 	}
 }

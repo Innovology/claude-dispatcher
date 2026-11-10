@@ -88,7 +88,8 @@ world except as these commands allow.
 
 Each dispatcher in ` + "`status`" + ` carries its ` + "`goal`" + `, its ` + "`prompt`" + ` (the brief), ` + "`said`" + `
 (its whole last message), ` + "`ask`" + ` (the question it closed on), ` + "`state`" + `,
-` + "`status`" + `, ` + "`failure`" + `, its PR and ` + "`last_activity`" + `.
+` + "`status`" + `, ` + "`failure`" + `, its PR and ` + "`last_activity`" + `, and its
+` + "`peer`" + ` — the session name a message reaches it by.
 
 Read-only facts are fine to gather: gh pr view / checks / diff / list, gh run
 list / view, git log / diff / show, and reading files.
@@ -134,10 +135,11 @@ about it — one line each. No running commentary, no periodic summaries, no
 
 **Dispatchers can be messaged mid-turn.** ` + "`reply`" + ` types into a session that has
 stopped; a Claude session that is still working is reached with SendMessage,
-by its session name (ListAgents lists them; this product's dispatchers run in
-tmux sessions named ` + "`disp-<feature>`" + `). Use a message to coordinate — hold a push,
-take a slot, merge main first — and ` + "`reply`" + ` to answer a stop. Start what you
-send with "steward:". Dispatchers may message you too: you are ` + "`" + PeerName(f.Product) + "`" + `.
+by the ` + "`peer`" + ` name ` + "`status`" + ` gives each dispatcher (ListAgents lists every
+session; one with no ` + "`peer`" + ` is not reachable that way). Use a message to
+coordinate — hold a push, take a slot, merge main first — and ` + "`reply`" + ` to
+answer a stop. Start what you send with "steward:". Dispatchers may message you
+too: you are ` + "`" + PeerName(f.Product) + "`" + `.
 
 `
 }

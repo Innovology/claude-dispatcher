@@ -38,6 +38,7 @@ var (
 	sessionIdle  = supervisor.SessionIdle
 	sendKeys     = supervisor.SendKeys
 	swapAccount  = dispatch.SwapAccount
+	peerNames    = dispatch.PeerNames
 )
 
 // Entry is one dispatcher as `status --json` prints it. The field names are the
@@ -85,7 +86,11 @@ type Entry struct {
 	LastActivity time.Time `json:"last_activity"`
 	Started      time.Time `json:"started"`
 	Session      string    `json:"session,omitempty"`
-	Worktree     string    `json:"worktree,omitempty"`
+	// Peer is the name the session goes by among Claude sessions on the
+	// machine: what a steward messages it by while it is still working, which
+	// reply cannot reach. "" when Claude Code's registry does not list it.
+	Peer     string `json:"peer,omitempty"`
+	Worktree string `json:"worktree,omitempty"`
 	// WaitingSince is when it stopped to wait; Note is the steward's note on
 	// that wait, if it has written one. Handled is a wait with a note: it has
 	// been looked at, and waking the steward for it again would be noise.
@@ -283,6 +288,11 @@ func (e Entry) headline() string {
 // that is not over, and every finished one nobody has dismissed.
 func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 	var out []Entry
+	var dirs []string
+	for _, d := range ds {
+		dirs = append(dirs, d.ConfigDir)
+	}
+	peers := peerNames(dirs...)
 	for _, d := range ds {
 		st := stateOf(d, now)
 		if st == "" {
@@ -296,6 +306,7 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
 			Session: d.TmuxSession, Worktree: d.WorktreePath,
+			Peer:         peers[d.SessionID],
 			failure:      dispatch.FailureSummary(d, now),
 			WaitingSince: d.WaitingSince,
 			Note:         d.Note(),
