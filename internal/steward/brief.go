@@ -284,7 +284,8 @@ on it: carry the answer to the dispatcher it belongs to.
 **Away.** A question unanswered for ` + PlainDuration(away) + ` is postponed: the human is away. ` + "`status\n--next`" + ` wakes you the moment one is (` + "`now_away`" + `). Stop holding anything for it:
 give the slot, the merge, the next step to work it does not block, and do not
 ask it again. Unblocked work goes on — merged where a ruling allows — and
-blocked work waits for the human to come back.
+blocked work waits for the human to come back. Say nothing about it in your
+session: nobody is reading it, and the recap is where they hear of it.
 
 ## Recap — when the human comes back
 
