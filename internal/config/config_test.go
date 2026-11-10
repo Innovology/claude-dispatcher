@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExpandHome(t *testing.T) {
@@ -348,5 +349,37 @@ func TestColorFor(t *testing.T) {
 	}
 	if (*Config)(nil).ColorFor("x", "y") != "" {
 		t.Error("nil config")
+	}
+}
+
+// The recap keyword and the away window have defaults, and a value that is not
+// a positive duration never becomes one.
+func TestStewardSettings(t *testing.T) {
+	var none *Config
+	if none.Recap() != "recap" || none.AwayAfter() != 15*time.Minute {
+		t.Fatal("defaults")
+	}
+	c := &Config{RecapKeyword: " back ", StewardAwayAfter: "1h"}
+	if c.Recap() != "back" || c.AwayAfter() != time.Hour {
+		t.Fatalf("got %q %v", c.Recap(), c.AwayAfter())
+	}
+	c.StewardAwayAfter = "-5m"
+	if c.AwayAfter() != DefaultStewardAwayAfter || AwayAfterProblem("-5m") == "" || AwayAfterProblem("soon") == "" || AwayAfterProblem("30m") != "" {
+		t.Fatal("a bad duration must fall back and be refused")
+	}
+}
+
+// Both are written back whole, so editing either in the cockpit keeps it.
+func TestStewardSettingsSurviveSave(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := Save(&Config{RecapKeyword: "back", StewardAwayAfter: "40m"}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Recap() != "back" || c.AwayAfter() != 40*time.Minute {
+		t.Fatalf("got %q %v", c.Recap(), c.AwayAfter())
 	}
 }

@@ -121,6 +121,12 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runRuling(args, out)
 	case "merge":
 		err = runMerge(args, out)
+	case "ask":
+		err = runAsk(args, out)
+	case "questions":
+		err = runQuestions(args, out)
+	case "answer":
+		err = runAnswer(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}
@@ -167,8 +173,15 @@ var NextPoll = 3 * time.Second
 // Next is what `status --next` prints: the waits nobody has handled, or a
 // timeout with none — the steward's cue to look over the running rows.
 type Next struct {
-	Waiting  []Entry `json:"waiting"`
-	TimedOut bool    `json:"timed_out,omitempty"`
+	Waiting []Entry `json:"waiting"`
+	// Questions is the product's questions still open for the human, each
+	// marked postponed once it has waited the away window.
+	Questions []steward.Question `json:"questions,omitempty"`
+	// NowAway is the questions that went past the away window while this
+	// waited: the human did not answer in time, so the steward stops holding
+	// work for them and moves what it can around them.
+	NowAway  []string `json:"now_away,omitempty"`
+	TimedOut bool     `json:"timed_out,omitempty"`
 }
 
 // runNext blocks until some dispatcher is waiting with no steward note on its
@@ -183,20 +196,40 @@ type Next struct {
 //
 // product narrows it to one product's dispatchers, which is how each product's
 // steward sleeps on its own work and is never woken for another's.
+//
+// With a product it also wakes when one of the product's questions goes
+// unanswered past the away window (steward.Question). That moment is the
+// steward's cue that the human is away — nothing else happens at it, so
+// nothing else would wake it there — and is reported once: a question already
+// past the window when the wait began does not wake it again.
 func runNext(out io.Writer, product string, timeout time.Duration, now func() time.Time) error {
-	deadline := now().Add(timeout)
+	start := now()
+	deadline := start.Add(timeout)
+	cfg, err := loadConfig()
+	if err != nil {
+		cfg = nil
+	}
 	for {
+		t := now()
 		var waiting []Entry
-		for _, e := range inProduct(Fleet(state.LoadAll(), now()), product) {
+		for _, e := range inProduct(Fleet(state.LoadAll(), t), product) {
 			if e.State == "wants-you" && !e.Handled {
 				waiting = append(waiting, e)
 			}
 		}
-		timedOut := !now().Before(deadline)
-		if len(waiting) > 0 || timedOut {
+		qs := questionsNow(product, t, cfg)
+		var away []string
+		for _, q := range qs {
+			if q.Postponed && q.PostponedAt(cfg.AwayAfter()).After(start) {
+				away = append(away, q.ID)
+			}
+		}
+		timedOut := !t.Before(deadline)
+		if len(waiting) > 0 || len(away) > 0 || timedOut {
 			enc := json.NewEncoder(out)
 			enc.SetIndent("", "  ")
-			return enc.Encode(Next{Waiting: waiting, TimedOut: len(waiting) == 0 && timedOut})
+			return enc.Encode(Next{Waiting: waiting, Questions: qs, NowAway: away,
+				TimedOut: len(waiting) == 0 && len(away) == 0 && timedOut})
 		}
 		time.Sleep(NextPoll)
 	}

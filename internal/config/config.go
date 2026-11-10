@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -180,6 +181,16 @@ type Config struct {
 	// makes a dispatch indistinguishable from a worktree the human cut by
 	// hand, which on such a machine is the point.
 	BranchPrefix *string `toml:"branch_prefix,omitempty"`
+	// RecapKeyword is what the human types to a product's steward on coming
+	// back, to be asked everything it saved for them while they were away:
+	// each choice as a menu, the rest with the context someone gone for hours
+	// needs. Unset is DefaultRecapKeyword. Read when a steward starts.
+	RecapKeyword string `toml:"recap_keyword,omitempty"`
+	// StewardAwayAfter is how long a question a steward asked can go
+	// unanswered before it takes the human to be away: it stops holding work
+	// for the answer, moves what it can around it, and saves the question for
+	// the recap. A Go duration ("15m", "1h"); unset is DefaultStewardAwayAfter.
+	StewardAwayAfter string `toml:"steward_away_after,omitempty"`
 }
 
 // DefaultBranchPrefix is what a dispatch's branch is called when nobody says
@@ -210,6 +221,49 @@ func (c *Config) ColorFor(repo, product string) string {
 			}
 			return ""
 		}
+	}
+	return ""
+}
+
+// DefaultRecapKeyword is what brings a steward's saved questions back when
+// config names nothing else.
+const DefaultRecapKeyword = "recap"
+
+// DefaultStewardAwayAfter is how long a steward's question waits before the
+// human counts as away, when config names nothing else: long enough to answer
+// from the next room, short enough that an evening out does not hold a CI
+// queue for the length of it.
+const DefaultStewardAwayAfter = 15 * time.Minute
+
+// Recap is the keyword that brings a steward's saved questions back.
+func (c *Config) Recap() string {
+	if c == nil || strings.TrimSpace(c.RecapKeyword) == "" {
+		return DefaultRecapKeyword
+	}
+	return strings.TrimSpace(c.RecapKeyword)
+}
+
+// AwayAfter is how long a steward's question waits before the human counts as
+// away. A value that does not read as a positive duration is the default, the
+// settings screen refusing it before it is ever written (AwayAfterProblem).
+func (c *Config) AwayAfter() time.Duration {
+	if c == nil {
+		return DefaultStewardAwayAfter
+	}
+	if d, err := time.ParseDuration(strings.TrimSpace(c.StewardAwayAfter)); err == nil && d > 0 {
+		return d
+	}
+	return DefaultStewardAwayAfter
+}
+
+// AwayAfterProblem is why s cannot be steward_away_after, or "".
+func AwayAfterProblem(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if d, err := time.ParseDuration(s); err != nil || d <= 0 {
+		return "a duration such as 15m or 1h"
 	}
 	return ""
 }
@@ -370,9 +424,24 @@ func Save(c *Config) error {
 	b.WriteString("# string is no prefix at all, so the branch is the feature's name and a\n")
 	b.WriteString("# checkout folder beside the project carries the same name as its branch.\n")
 	if c.BranchPrefix == nil {
-		b.WriteString("# branch_prefix = \"\"\n\n")
+		b.WriteString("# branch_prefix = \"\"\n")
 	} else {
-		fmt.Fprintf(&b, "branch_prefix = %q\n\n", *c.BranchPrefix)
+		fmt.Fprintf(&b, "branch_prefix = %q\n", *c.BranchPrefix)
+	}
+	b.WriteString("# What you type to a product's steward when you come back, to be asked every\n")
+	b.WriteString("# question it saved while you were away. Unset is \"recap\". Edit in-app with `,`.\n")
+	if c.RecapKeyword == "" {
+		b.WriteString("# recap_keyword = \"recap\"\n")
+	} else {
+		fmt.Fprintf(&b, "recap_keyword = %q\n", c.RecapKeyword)
+	}
+	b.WriteString("# How long a steward's question can go unanswered before it takes you to be\n")
+	b.WriteString("# away: it stops holding work for the answer and saves the question for the\n")
+	b.WriteString("# recap. A duration such as \"15m\" or \"1h\"; unset is 15m.\n")
+	if c.StewardAwayAfter == "" {
+		b.WriteString("# steward_away_after = \"15m\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "steward_away_after = %q\n\n", c.StewardAwayAfter)
 	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")

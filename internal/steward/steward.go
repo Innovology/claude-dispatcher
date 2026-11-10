@@ -386,15 +386,23 @@ func launch(s *Steward, resume bool) error {
 type Facts struct {
 	Product string
 	Repos   []RepoFacts
+	// Recap is the keyword that brings the saved questions back, and
+	// AwayAfter how long a question waits before the human counts as away
+	// (config's recap_keyword and steward_away_after).
+	Recap     string
+	AwayAfter time.Duration
 }
 
 // RepoFacts is one of the product's repos as the brief names it.
 type RepoFacts struct{ Name, Path string }
 
 func factsFor(product string) Facts {
-	f := Facts{Product: Key(product)}
 	cfg, err := loadConfig()
-	if err != nil || cfg == nil {
+	if err != nil {
+		cfg = nil
+	}
+	f := Facts{Product: Key(product), Recap: cfg.Recap(), AwayAfter: cfg.AwayAfter()}
+	if cfg == nil {
 		return f
 	}
 	for _, r := range discover(cfg) {
@@ -472,7 +480,7 @@ func Settings(exe string) map[string]any {
 }
 
 // stewardVerbs are the fleet verbs a steward runs without asking.
-var stewardVerbs = []string{"status", "reply", "note", "park", "unpark", "ruling list", "ruling end", "merge"}
+var stewardVerbs = []string{"status", "reply", "note", "park", "unpark", "ruling list", "ruling end", "merge", "ask", "questions", "answer"}
 
 // newUUID is a random (version 4) UUID, the form claude's --session-id takes.
 func newUUID() string {

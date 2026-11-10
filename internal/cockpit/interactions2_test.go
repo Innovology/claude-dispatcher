@@ -536,9 +536,15 @@ func TestSettingsEditEveryField(t *testing.T) {
 		if !m.settings.editing {
 			t.Fatalf("field %s: enter should start editing", f.key)
 		}
-		switch f.kind {
-		case setRoots:
+		switch {
+		case f.kind == setRoots:
 			for _, ch := range "/tmp/a, /tmp/b" {
+				mm, _ = m.handleKey(string(ch))
+				m = mm.(model)
+			}
+		case f.key == "steward_away_after":
+			// A duration or nothing: "15m" is there already, and "15m30s" reads.
+			for _, ch := range "30s" {
 				mm, _ = m.handleKey(string(ch))
 				m = mm.(model)
 			}

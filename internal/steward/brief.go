@@ -1,7 +1,9 @@
 package steward
 
 import (
+	"fmt"
 	"strings"
+	"time"
 )
 
 // Brief is a steward's standing instructions: the CLAUDE.md in its folder.
@@ -33,6 +35,7 @@ var briefSections = []func(exe string, f Facts) string{
 	briefLoop,
 	briefTalk,
 	briefRulings,
+	briefQuestions,
 	briefPolicy,
 }
 
@@ -239,4 +242,77 @@ else under "Note" below — stays the human's whatever a ruling says: you have n
 hands for it.
 
 `
+}
+
+func briefQuestions(exe string, f Facts) string {
+	p := "--product " + shellWord(f.Product)
+	recap, away := f.Recap, f.AwayAfter
+	if recap == "" {
+		recap = "recap"
+	}
+	if away <= 0 {
+		away = 15 * time.Minute
+	}
+	return `## Questions for the human — and when they are away
+
+Every question for the human is saved, even when they are here, so none is
+lost:
+
+    ` + exe + ` ask ` + p + ` [--for <dispatcher>] [--option "Label | what choosing it does"]… --context "<what they need to decide it>" <the question>
+
+When the answer is a choice, give two to four options, the one you recommend
+first; otherwise give none. Write ` + "`--context`" + ` for someone who has been away for
+hours: what happened, why it blocks, what each answer would set going.
+
+**Never wait for an answer.** Once it is asked:
+
+- keep everything that does not depend on it moving — other dispatchers, other
+  pull requests, the next slot in a queue;
+- tell the dispatcher it holds up to set that part aside and carry on with
+  whatever in its brief does not need it, and that you will bring the answer;
+- note its row: ` + "`yours (saved for " + recap + "): <the question>`" + `.
+
+**Never ask through a menu (AskUserQuestion) unless the human wrote to you in
+this very turn.** A menu stops you dead until it is answered, and from a phone in
+a pocket that can be hours. A question at the end of a message does not.
+
+When the human answers, record it — ` + "`" + exe + " answer <id> <their answer>`" + ` — and act
+on it: carry the answer to the dispatcher it belongs to.
+
+**Away.** A question unanswered for ` + PlainDuration(away) + ` is postponed: the human is away. ` + "`status\n--next`" + ` wakes you the moment one is (` + "`now_away`" + `). Stop holding anything for it:
+give the slot, the merge, the next step to work it does not block, and do not
+ask it again. Unblocked work goes on — merged where a ruling allows — and
+blocked work waits for the human to come back.
+
+## Recap — when the human comes back
+
+When the human's message is ` + "`" + recap + "`" + ` (in any case, on its own), they are back:
+
+1. Run ` + "`" + exe + " questions " + p + " --json`" + `.
+2. Ask every open question that has options through AskUserQuestion — up to
+   four questions a call, as many calls as it takes, each header a few words,
+   your recommended option first.
+3. Then the rest in one message, numbered, each with its context: what it is
+   about, what has happened since it was asked, what each likely answer would
+   set going. Write for someone who has been away for hours.
+4. Then "while you were away", in a few lines: what merged, what started, what
+   is still blocked and on which question.
+5. Record each answer with ` + "`answer`" + `, carry it to the dispatcher it belongs to,
+   and pick the work back up — then go back to sleeping on ` + "`--next`" + `.
+
+`
+}
+
+// PlainDuration is a duration the way a person writes it: 15m, 1h, 1h30m.
+func PlainDuration(d time.Duration) string {
+	h, m := int(d/time.Hour), int(d%time.Hour/time.Minute)
+	switch {
+	case d%time.Minute != 0:
+		return d.String()
+	case h > 0 && m > 0:
+		return fmt.Sprintf("%dh%dm", h, m)
+	case h > 0:
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dm", m)
 }

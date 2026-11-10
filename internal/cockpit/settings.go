@@ -17,6 +17,7 @@ import (
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/keymap"
+	"claude-dispatcher/internal/steward"
 )
 
 type settingsKind int
@@ -55,6 +56,8 @@ var settingsFields = []settingsField{
 	{key: "azure_project", label: "Azure project", hint: "Azure Boards project name", kind: setString},
 	{key: "theme", label: "theme", hint: "enter cycles · system follows your light/dark switch while open", kind: setChoice},
 	{key: "branch_prefix", label: "branch prefix", hint: "every dispatch's branch starts with it · blank is none · a dispatch form can change it for one", kind: setString},
+	{key: "recap_keyword", label: "recap keyword", hint: "what you type to a product's steward when you are back, to be asked everything it saved for you", kind: setString},
+	{key: "steward_away_after", label: "steward away after", hint: "how long its question waits before it takes you to be away and stops holding work for it", kind: setString},
 }
 
 func newSettings(cfg *config.Config) *settingsState {
@@ -82,6 +85,10 @@ func settingsValue(cfg *config.Config, f settingsField) string {
 		return mode
 	case "branch_prefix":
 		return cfg.EffectiveBranchPrefix()
+	case "recap_keyword":
+		return cfg.Recap()
+	case "steward_away_after":
+		return steward.PlainDuration(cfg.AwayAfter())
 	}
 	return ""
 }
@@ -92,6 +99,11 @@ func settingsProblem(f settingsField, val string) string {
 	if f.key == "branch_prefix" {
 		if bad := dispatchpkg.PrefixProblem(strings.TrimSpace(val)); bad != "" {
 			return "branch prefix: " + bad
+		}
+	}
+	if f.key == "steward_away_after" {
+		if bad := config.AwayAfterProblem(val); bad != "" {
+			return "steward away after: " + bad
 		}
 	}
 	return ""
@@ -119,6 +131,11 @@ func settingsCommit(cfg *config.Config, f settingsField, val string) {
 		// Always written, blank included: blank is "no prefix", which config
 		// can only say with the key present (see config.BranchPrefix).
 		cfg.BranchPrefix = &val
+	case "recap_keyword":
+		// Blank is the default, which the file says by leaving the key out.
+		cfg.RecapKeyword = val
+	case "steward_away_after":
+		cfg.StewardAwayAfter = val
 	}
 }
 

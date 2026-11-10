@@ -42,6 +42,9 @@ Usage:
   claude-dispatcher ruling add|end|list
                                a product's standing rulings · a steward records one only
                                with your say-so, and merges only under one that allows it
+  claude-dispatcher ask | questions | answer
+                               the questions a steward saved for you · it asks them
+                               all when you type the recap keyword (settings: ,)
   claude-dispatcher swap <id|feature> <account>
                                move a dispatcher onto another subscription and resume
                                its conversation there (a on its row in the cockpit)
@@ -73,7 +76,7 @@ func main() {
 		}
 	case "steward":
 		os.Exit(steward.Run(args[1:], os.Stdout, os.Stderr))
-	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "ruling", "merge":
+	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "ruling", "merge", "ask", "questions", "answer":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))

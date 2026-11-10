@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/steward"
 )
@@ -30,10 +31,10 @@ func TestQueueSignalLeadsWithTheStewardsNote(t *testing.T) {
 // withStewards installs the stewards a load found, and fakes for the acts.
 func withStewards(t *testing.T, rows ...stewardRow) *[]string {
 	t.Helper()
-	prevNow, prevOrder := stewardsNow, productOrder
+	prevNow, prevOrder, prevQs := stewardsNow, productOrder, stewardQuestionsNow
 	ps, pr, pe, pu := stewardStart, stewardReopen, stewardEnd, stewardRulings
 	t.Cleanup(func() {
-		stewardsNow, productOrder = prevNow, prevOrder
+		stewardsNow, productOrder, stewardQuestionsNow = prevNow, prevOrder, prevQs
 		stewardStart, stewardReopen, stewardEnd, stewardRulings = ps, pr, pe, pu
 	})
 	stewardRulings = func(p string, _ time.Time) []steward.Ruling {
@@ -46,6 +47,7 @@ func withStewards(t *testing.T, rows ...stewardRow) *[]string {
 		}
 	}
 	stewardsNow = rows
+	stewardQuestionsNow = nil
 	productOrder = []string{"alpha", "beta"}
 	var acts []string
 	stewardStart = func(p string) (*steward.Steward, error) {
@@ -183,5 +185,49 @@ func TestOnStewardOpened(t *testing.T) {
 		if strings.HasPrefix(mm.notice, "steward: ") {
 			t.Errorf("%v must not be reported as a failure: %q", err, mm.notice)
 		}
+	}
+}
+
+// Saved questions are on the headline — the line that says there is a recap to
+// ask for — and in the picker, with the keyword that asks for it.
+func TestSavedQuestionsShow(t *testing.T) {
+	installFleetFixture(t)
+	withStewards(t, stewardRow{id: "live1", product: "alpha", state: steward.Live})
+	stewardQuestionsNow = map[string]int{"alpha": 2, "beta": 1}
+	if got := stewardClause(); got != "steward live · 3 questions saved for you" {
+		t.Errorf("clause = %q", got)
+	}
+	m := newModel()
+	m.cfg = &config.Config{RecapKeyword: "back"}
+	mm, _ := m.stewardPickOpenFor("alpha")
+	if view := mm.viewStewardPick(100, 30); !strings.Contains(view, "2 questions saved for you · say back to its steward") {
+		t.Errorf("picker:\n%s", view)
+	}
+}
+
+// The recap keyword and the away window are settings, and a window that is
+// not a duration is refused where it is typed.
+func TestStewardSettingsFields(t *testing.T) {
+	cfg := &config.Config{}
+	field := func(key string) settingsField {
+		for _, f := range settingsFields {
+			if f.key == key {
+				return f
+			}
+		}
+		t.Fatalf("no settings field %q", key)
+		return settingsField{}
+	}
+	recap, away := field("recap_keyword"), field("steward_away_after")
+	if settingsValue(cfg, recap) != "recap" || settingsValue(cfg, away) != "15m" {
+		t.Fatalf("defaults: %q %q", settingsValue(cfg, recap), settingsValue(cfg, away))
+	}
+	if settingsProblem(away, "soon") == "" || settingsProblem(away, "45m") != "" {
+		t.Fatal("the away window must be a duration")
+	}
+	settingsCommit(cfg, recap, " back ")
+	settingsCommit(cfg, away, "45m")
+	if cfg.Recap() != "back" || cfg.AwayAfter() != 45*time.Minute {
+		t.Fatalf("committed %q %v", cfg.Recap(), cfg.AwayAfter())
 	}
 }

@@ -23,6 +23,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/supervisor"
 )
@@ -38,6 +39,29 @@ type stewardRow struct {
 // records and asks the supervisor once per product with a current steward.
 var stewardsNow []stewardRow
 
+// stewardQuestionsNow is each product's count of questions saved for the human
+// and not yet answered, as the last load found it.
+var stewardQuestionsNow map[string]int
+
+// collectStewardQuestions counts the open questions of every product the
+// config names, and of the unassigned bucket. A file read per product.
+func collectStewardQuestions(cfg *config.Config) map[string]int {
+	names := []string{steward.Unassigned}
+	if cfg != nil {
+		for p := range cfg.Products {
+			names = append(names, p)
+		}
+	}
+	out := map[string]int{}
+	t := time.Now()
+	for _, p := range names {
+		if n := len(stewardOpenQuestions(p, t, cfg.AwayAfter())); n > 0 {
+			out[p] = n
+		}
+	}
+	return out
+}
+
 // collectStewards reads every steward and what it is now.
 func collectStewards() []stewardRow {
 	var out []stewardRow
@@ -50,16 +74,19 @@ func collectStewards() []stewardRow {
 // The steward package, as seams so a test can drive the picker without a
 // supervisor.
 var (
-	stewardAll     = steward.All
-	stewardStart   = steward.Start
-	stewardReopen  = steward.Reopen
-	stewardEnd     = steward.End
-	stewardRulings = steward.ActiveRulings
+	stewardAll           = steward.All
+	stewardStart         = steward.Start
+	stewardReopen        = steward.Reopen
+	stewardEnd           = steward.End
+	stewardRulings       = steward.ActiveRulings
+	stewardOpenQuestions = steward.OpenQuestions
 )
 
 // stewardClause is the headline's word on the stewards: nothing while there are
 // none, how many are live, and how many were interrupted — those are waiting on
-// the human to reopen them or start fresh, so they are said apart.
+// the human to reopen them or start fresh, so they are said apart — and how
+// many questions the stewards have saved for the human, which is the line that
+// says there is a recap to ask for.
 func stewardClause() string {
 	live, interrupted := 0, 0
 	for _, s := range stewardsNow {
@@ -80,6 +107,13 @@ func stewardClause() string {
 	}
 	if interrupted > 0 {
 		parts = append(parts, countOf(interrupted, "steward", "stewards")+" interrupted")
+	}
+	saved := 0
+	for _, n := range stewardQuestionsNow {
+		saved += n
+	}
+	if saved > 0 {
+		parts = append(parts, countOf(saved, "question", "questions")+" saved for you")
 	}
 	return strings.Join(parts, " · ")
 }
@@ -288,6 +322,9 @@ func (m model) viewStewardPick(w, h int) string {
 			out = append(out, fg(cMid, it.product))
 			if rs := m.stewardPickRulings[it.product]; len(rs) > 0 {
 				out = append(out, fg(cDim, "  "+rulingsLine(rs)))
+			}
+			if n := stewardQuestionsNow[it.product]; n > 0 {
+				out = append(out, fg(cAmber, "  "+countOf(n, "question", "questions")+" saved for you · say "+m.cfg.Recap()+" to its steward"))
 			}
 			last = it.product
 		}
