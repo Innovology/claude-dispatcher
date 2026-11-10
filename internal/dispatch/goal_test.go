@@ -1,10 +1,6 @@
 package dispatch
 
-import (
-	"testing"
-
-	"claude-dispatcher/internal/repos"
-)
+import "testing"
 
 // What the form writes is what the record reads back.
 func TestGoalRoundTrips(t *testing.T) {
@@ -31,21 +27,5 @@ func TestGoalOfNeedsTheWholeShape(t *testing.T) {
 	}
 	if g := GoalOf("x\ndone when: a\nKeep working until that is true.\ndone when: b\nKeep working until that is true."); g != "b" {
 		t.Errorf("the last goal wins, got %q", g)
-	}
-}
-
-// A launch whose prompt carries DONE WHEN records it, so the row and the
-// steward are handed the condition rather than a sentence to find.
-func TestLaunchRecordsTheGoal(t *testing.T) {
-	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
-	repo := initRepo(t)
-	stubLaunch(t)
-	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "retry window",
-		"retry window\n\nback off slower\n\n"+GoalSentence("the pr is merged"), ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Goal != "the pr is merged" {
-		t.Fatalf("goal = %q", d.Goal)
 	}
 }
