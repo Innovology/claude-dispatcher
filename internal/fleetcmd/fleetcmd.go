@@ -52,6 +52,9 @@ type Entry struct {
 	// Prompt is the brief it was dispatched with — what "inside the brief"
 	// is measured against.
 	Prompt string `json:"prompt,omitempty"`
+	// Goal is the dispatch form's DONE WHEN — the condition it was told to
+	// keep working until — "" when it was given none.
+	Goal string `json:"goal,omitempty"`
 	// State is the triage table's reading: "wants-you" (stopped on something
 	// only the human can answer), "running" (working, or a retry on its way),
 	// "parked" (the human shelved it) or "finished" (ended, not yet dismissed).
@@ -219,7 +222,7 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 		}
 		e := Entry{
 			ID: d.ID, Feature: d.Feature, Repo: d.RepoName, Product: d.Product,
-			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
+			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, Goal: d.Goal, State: st, Status: string(d.Status), Reason: d.StatusReason,
 			Failure: d.Failure, Retrying: dispatch.RetryPending(d, now),
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
 			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),

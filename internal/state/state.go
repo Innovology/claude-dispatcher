@@ -95,6 +95,12 @@ type Dispatch struct {
 	// main repo — refs, PRs, and commit provenance are read from there.
 	WorktreePath string `json:"worktree_path,omitempty"`
 	Prompt       string `json:"prompt"`
+	// Goal is the dispatch form's DONE WHEN: the condition the dispatcher was
+	// told to keep working until, read back off the prompt at launch
+	// (dispatch.GoalOf), "" when none was given. It was a sentence in the
+	// prompt and nowhere else, so nothing could be handed it — not the triage
+	// row, not the steward whose job is to push a dispatcher toward it.
+	Goal string `json:"goal,omitempty"`
 	// Mode is the permission mode the session was dispatched in — one of
 	// dispatch.Mode's values. It is on the record because a resumed session has
 	// to reopen the way it went out and the transcript does not carry it, and
