@@ -1041,7 +1041,16 @@
   reopens it or starts fresh — `t` on triage opens the picker (enter jumps in,
   reopens or starts; x ends; a new one over a live one is refused until it is
   ended), `steward [list|new|open|end]` from a shell; the switch, its file and
-  `Ensure` are gone. The brief is per product: its repos and where each keeps
+  `Ensure` are gone. **Reopening an interrupted one is a setting, off by
+  default** (asked on the PR, settled as one): `steward_reopen = "interrupted"`
+  has the cockpit's poll `--resume` the same conversation, told it was reopened
+  by the cockpit, on `ReopenBackoff` (1m/5m/15m from the last opening; the
+  first step keeps a steward still starting from reading as dead) and then
+  leaves it for the human, the picker saying "did not stay up"; a reopen that
+  holds 15 minutes is forgotten. One the human ended never comes back: `end`
+  writes the ending before the kill, and start/reopen/end and the poll hold one
+  lock (`state.LockNamed`). `/exit` in its pane is claude exiting, not an
+  ending; `x` is. The brief is per product: its repos and where each keeps
   its rules (they win), the human talks to it here or over Remote Control, it
   is quiet otherwise, and a working dispatcher is messaged by the `peer` name
   `status` gives it (Claude Code's session registry) while a stopped one gets

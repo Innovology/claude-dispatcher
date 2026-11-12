@@ -6,7 +6,8 @@ Date: 2026-11-10
 
 Accepted. Supersedes ADR 0020 (the steward is a switch) and amends ADR 0019:
 there is no longer one steward for the machine, nothing starts one on its
-own, and its policy grows rulings, saved questions and a recap.
+own (an interrupted one is reopened by the poll only where `steward_reopen`
+says so), and its policy grows rulings, saved questions and a recap.
 
 ## Context
 
@@ -73,6 +74,38 @@ or starts; `x` ends one, which stays reopenable; a new steward over a live one
 is refused until it is ended, on purpose. `claude-dispatcher steward [list |
 new <product> | open <id> | end <product|id>]` is the same from a shell. The
 switch, its `enabled` file and `Ensure` are gone.
+
+**Reopening an interrupted steward is a setting, and it is off.** Waiting for
+the human ends the away case at the first reboot: Remote Control reaches only
+a session that is running, so until they are back at a cockpit, pre-approved
+merges stop and questions go unsaved. Asked on the PR, the human chose a
+setting: `steward_reopen` in config.toml, on the settings screen as a choice
+like the theme. `"never"` (unset, and any word but the other one) is the
+behaviour above. `"interrupted"` has the cockpit's poll reopen the current
+steward whose session went away without anyone ending it — the same
+conversation, `--resume`d in its own folder, its first message saying it was
+reopened by the cockpit and that the waits it watched may have moved. It
+runs only while a cockpit is open, since the poll is the cockpit's.
+Its limits are what make it safe to leave on:
+
+- A steward the human **ended** never comes back. `end` writes the ending
+  before the session goes, and every start, reopen and end holds one lock
+  (`state.LockNamed("steward.lock")`), so a poll can never read one halfway
+  through being ended and take it for one that went away.
+- **`ReopenBackoff`**, 1m, 5m and 15m from the last opening, says when each
+  attempt in a row may come, and its length is the cap. The first step stops a
+  steward opened a moment ago, whose pane has not yet started claude, from
+  being taken for a dead one; a reboot's steward was opened hours earlier and
+  comes back on the next poll. After the third the steward is the human's,
+  and the picker says so ("reopened 3 times, did not stay up"), because one
+  that dies on every resume is not fixed by a fourth and each reopen can start
+  a turn. An attempt is written before its launch, so a launch tmux refuses
+  waits its step too. A steward found still up 15 minutes after a reopen has
+  its count forgotten, and the human's own reopen clears it.
+- A product the config no longer names is not reopened.
+- `/exit` typed in the steward's session is claude exiting, so it reads as
+  interrupted like a crash does; `x` in the picker is how a steward is put
+  down.
 
 **Its brief is written per product**: the product's repos and where each
 keeps its own rules (CLAUDE.md and Claude Code's project memory, which win),
@@ -146,14 +179,29 @@ scratch store and a private tmux server:
   sleep on `--next`.
 - **Reopen.** `steward end` then `steward open <id>` resumed the same session
   id in its own folder with the earlier conversation intact.
+- **Reopening on its own** (`steward_reopen`), from the built binary on a
+  scratch store and a private tmux server, with a stand-in `claude` on PATH
+  that logged its arguments. Two products' stewards were started and their
+  sessions killed behind their backs. A cockpit with the setting at `never`
+  left both interrupted. Restarted at `interrupted`, its first poll resumed
+  each with `--resume <its own session id>` and the reopened-by-the-cockpit
+  opening, recorded `auto_reopens: 1` on each, and the footer read "reopened
+  beta's and alpha's stewards (they were interrupted)". Then beta was ended
+  with `steward end` and alpha killed again: four polls passed alpha by, it
+  came back on the poll at its five-minute step to the second
+  (`auto_reopens: 2`), and beta never came back.
 
 ## Considered and not done
 
-- **Auto-resuming an interrupted steward.** It would keep the conversation
-  through a reboot, but the human asked for the choice: an interrupted
-  steward is either picked back up or replaced with a fresh one for new work,
-  and only they know which. The cost is that a reboot while they are away
-  stops the steward until they reopen it.
+- **Reopening an interrupted steward by default.** It keeps the conversation
+  through a reboot, but the brief asked for the choice: an interrupted steward
+  is either picked back up or replaced with a fresh one for new work, and only
+  the human knows which. So it is `steward_reopen = "interrupted"`, opted into,
+  and the cost of leaving it off is the one above: a reboot while they are
+  away stops the steward until they reopen it.
+- **Reopening from anywhere but the cockpit's poll** — a systemd unit, a
+  login item, a tmux hook. Each would cover a reboot with no cockpit open, and
+  each is a second place, outside this tool, that decides when a steward runs.
 - **Running the steward in a repo's checkout**, as the coordinator did, so it
   inherits the repo's memory. A product spans repos, and the folder must be
   ours to write the brief into; the brief points at each repo's rules instead.
@@ -176,6 +224,10 @@ scratch store and a private tmux server:
   running `disp_steward` session and removes its switch at startup and on
   every poll, and a bare `steward stop` does the same. Left running, its old
   brief would go on answering every product's waits beside the new stewards.
+- With `steward_reopen` on, a reboot costs each interrupted steward one
+  resumed turn on the cockpit's first poll; one that keeps dying costs at most
+  two more, five and then fifteen minutes later, before it is left for the
+  human.
 
 ## After review
 
