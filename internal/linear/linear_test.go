@@ -15,6 +15,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -44,6 +46,9 @@ func TestNewRequestCarriesTheKey(t *testing.T) {
 	}
 	if sent.Query == "" {
 		t.Error("request carries no query")
+	}
+	if !strings.Contains(sent.Query, "assignedIssues(first: 250,") {
+		t.Errorf("a read asks for a full page of %d: %s", Limit, sent.Query)
 	}
 }
 
@@ -89,8 +94,9 @@ func serve(t *testing.T, h http.HandlerFunc) {
 const okBody = `{"data":{"viewer":{"assignedIssues":{"nodes":[
   {"id":"uuid-1","identifier":"ENG-124","title":"Fix the thing",
    "description":"it is broken","priorityLabel":"Urgent",
-   "updatedAt":"2026-08-19T10:00:00Z","state":{"name":"In Progress"},
-   "team":{"key":"ENG"}},
+   "createdAt":"2026-07-01T08:00:00Z","updatedAt":"2026-08-19T10:00:00Z",
+   "state":{"name":"In Progress"},"team":{"key":"ENG"},
+   "labels":{"nodes":[{"name":"bug"},{"name":"ui"}]}},
   {"id":"uuid-2","identifier":"ENG-125","title":"Second",
    "description":"","priorityLabel":"Medium",
    "updatedAt":"2026-08-18T09:30:00Z","state":{"name":"Todo"},
@@ -137,6 +143,16 @@ func TestAssignedDecodesAndMaps(t *testing.T) {
 	}
 	if !first.UpdatedAt.Equal(time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC)) {
 		t.Errorf("UpdatedAt = %v", first.UpdatedAt)
+	}
+	// Filed and labelled are what the backlog sorts by; the state is not a label.
+	if !first.CreatedAt.Equal(time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)) {
+		t.Errorf("CreatedAt = %v", first.CreatedAt)
+	}
+	if !slices.Equal(first.Labels, []string{"bug", "ui"}) {
+		t.Errorf("Labels = %q", first.Labels)
+	}
+	if second := issues[1]; second.Labels != nil || !second.CreatedAt.IsZero() {
+		t.Errorf("an issue with no labels or filed date reads as none: %+v", second)
 	}
 }
 

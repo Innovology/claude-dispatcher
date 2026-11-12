@@ -59,6 +59,10 @@ func (m model) helpNotes() map[string][]helpRow {
 		"products · lens 2": {
 			{"esc", "close the panel · again closes the assignment editor"},
 		},
+		"the backlog · lens 3": {
+			{prettyKey(m.keys.KeyFor("search.open")), "search it · #123 is a number, words match the title or body"},
+			{"", "the matches stay grouped by product, best first · esc puts the rest back"},
+		},
 		"the other lenses": {
 			{"", "enter keeps the matches · esc on one goes to it in its repo"},
 		},
@@ -70,7 +74,7 @@ func (m model) helpNotes() map[string][]helpRow {
 // must never be invisible because someone forgot a list.
 var helpOrder = []string{
 	"work the fleet", "what has finished", "products · lens 2",
-	"search", "the other lenses", "anywhere",
+	"search", "the backlog · lens 3", "the other lenses", "anywhere",
 }
 
 // helpSections is the key sheet, BUILT from the live keymap rather than written
@@ -148,8 +152,9 @@ func prettyKey(k string) string {
 
 const (
 	// helpKeyCol is the width of the sheet's key column. The widest label it
-	// has to hold is the product panel's tabs, "O R T S H Y".
-	helpKeyCol = 11
+	// has to hold is the backlog's page keys, "pgdown / pgup"; at 11, the
+	// product panel's tabs, it pushed that row's description two columns out.
+	helpKeyCol = 13
 	// helpMaxWidth caps the sheet so its prose stays readable — a sentence run
 	// across a 200-column terminal is one the eye loses its place in.
 	//

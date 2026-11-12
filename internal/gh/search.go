@@ -12,6 +12,7 @@ package gh
 import (
 	"encoding/json"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,24 +35,35 @@ func (r repoField) shortName() string {
 	return r.NameWithOwner
 }
 
-// AssignedIssues returns every open issue assigned to the current user across
-// all of their repos, keyed by bare repo name. One request, cached.
+// AssignedLimit is as many assigned issues as the backlog reads: the most
+// GitHub's search will return for any query. gh pages it a hundred at a time,
+// so it costs a request per hundred issues the human actually has — two for
+// 141 — once per SearchTTL.
 //
-// The bool reports whether the search succeeded; false means callers should
-// leave their existing data alone rather than render "no tickets", which would
-// be a claim rather than an observation.
-func AssignedIssues() (map[string][]Issue, bool) {
+// It was 100. Measured on the account it was reported from, 141 issues were
+// open and assigned and the backlog showed exactly 100: the forty-one it did
+// not were in no list, no search and no count.
+const AssignedLimit = 1000
+
+// AssignedIssues returns every open issue assigned to the current user across
+// all of their repos, keyed by bare repo name. One search, cached.
+//
+// ok reports whether the search succeeded; false means callers should leave
+// their existing data alone rather than render "no tickets", which would be a
+// claim rather than an observation. capped reports that the search stopped at
+// AssignedLimit, so there may be more than it returned.
+func AssignedIssues() (byRepo map[string][]Issue, ok, capped bool) {
 	type result struct {
-		byRepo map[string][]Issue
-		ok     bool
+		byRepo     map[string][]Issue
+		ok, capped bool
 	}
 	r := memo("search:issues:assigned", SearchTTL, func() result {
 		if !Available() {
 			return result{}
 		}
 		out, err := run(exec.Command("gh", "search", "issues",
-			"--assignee", "@me", "--state", "open", "--limit", "100",
-			"--json", "repository,number,title,url,body,state,labels,updatedAt"))
+			"--assignee", "@me", "--state", "open", "--limit", strconv.Itoa(AssignedLimit),
+			"--json", "repository,number,title,url,body,state,labels,createdAt,updatedAt"))
 		if err != nil {
 			return result{}
 		}
@@ -65,6 +77,7 @@ func AssignedIssues() (map[string][]Issue, bool) {
 			Labels     []struct {
 				Name string `json:"name"`
 			} `json:"labels"`
+			CreatedAt time.Time `json:"createdAt"`
 			UpdatedAt time.Time `json:"updatedAt"`
 		}
 		if json.Unmarshal(out, &rows) != nil {
@@ -84,12 +97,13 @@ func AssignedIssues() (map[string][]Issue, bool) {
 				Body:      row.Body,
 				State:     row.State,
 				Labels:    labels,
+				CreatedAt: row.CreatedAt,
 				UpdatedAt: row.UpdatedAt,
 			})
 		}
-		return result{byRepo: byRepo, ok: true}
+		return result{byRepo: byRepo, ok: true, capped: len(rows) >= AssignedLimit}
 	})
-	return r.byRepo, r.ok
+	return r.byRepo, r.ok, r.capped
 }
 
 // OpenPRs returns open pull requests across the user's repos, keyed by bare
