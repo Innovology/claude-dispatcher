@@ -149,3 +149,54 @@ func TestDXCtrlGOnlyWhereItHelps(t *testing.T) {
 		t.Errorf("notice = %q", m.notice)
 	}
 }
+
+// A file that cannot be read back leaves the field alone and says so; an
+// editor's own exit status is reported as its number.
+func TestDXCtrlGReadBackAndExitStatus(t *testing.T) {
+	fe := stubEditor(t)
+	m := dxFormModel(t)
+	m.dxField = dxWhatF
+	m = feed(t, m, text("retry cards"), key(tea.KeyCtrlG))
+	if err := os.Remove(fe.file(t)); err != nil {
+		t.Fatal(err)
+	}
+	mm, _ := m.Update(fe.done(nil))
+	m = mm.(model)
+	if m.dxWhat != "retry cards" || !strings.Contains(m.notice, "could not read") {
+		t.Errorf("WHAT = %q, notice = %q", m.dxWhat, m.notice)
+	}
+
+	// An editor that saves what it was given changes nothing, and says so.
+	m = feed(t, m, key(tea.KeyCtrlG))
+	if m = fe.exit(t, m, "retry cards\n", nil); m.notice != "WHAT unchanged" {
+		t.Errorf("notice = %q", m.notice)
+	}
+
+	err := exec.Command("sh", "-c", "exit 3").Run()
+	if got := exitWords(err); got != "exited 3" {
+		t.Errorf("exitWords(exit 3) = %q", got)
+	}
+}
+
+// No temp directory to write the file in is said, not swallowed; and text
+// coming back to a form that has closed meanwhile is kept where it is.
+func TestDXCtrlGWithNowhereToGo(t *testing.T) {
+	fe := stubEditor(t)
+	m := dxFormModel(t)
+	m.dxField = dxWhatF
+
+	t.Setenv("TMPDIR", t.TempDir()+"/missing")
+	if mm := feed(t, m, key(tea.KeyCtrlG)); fe.cmd != nil || !strings.Contains(mm.notice, "could not open WHAT") {
+		t.Errorf("no temp dir: cmd = %v, notice = %q", fe.cmd, mm.notice)
+	}
+
+	t.Setenv("TMPDIR", t.TempDir())
+	m = feed(t, m, key(tea.KeyCtrlG))
+	path := fe.file(t)
+	// The form closes over a table that has a row on it, so it is gone.
+	m = m.markPending(m.pendingFor("shop-api", "other work", "a prompt")).dxReset()
+	m = fe.exit(t, m, "the brief", nil)
+	if _, err := os.Stat(path); err != nil || !strings.Contains(m.notice, path) {
+		t.Errorf("the file should be kept and named: %v, notice = %q", err, m.notice)
+	}
+}
