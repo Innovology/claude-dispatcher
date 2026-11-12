@@ -870,13 +870,21 @@
   what bubbles' textinput (the `+` overlay) always did, and WHAT, the one
   paragraph, takes `typedBlockFor` (breaks kept as `\n`); **`tailFit`** keeps a
   row's end in one pass (200,000 characters in ~20ms, ctrl+c in 0.2s);
-  **ctrl+u** clears the field and **ctrl+w** its last word, decsearch's pair,
-  named in the footer; and **`featureNameMax` (80)** is a title's ceiling on
-  both forms — the `+` textinput stops there, the dx form refuses at submit, on
-  TITLE and before WHAT, and says so under TITLE as it grows: the length, that
-  the brief goes in WHAT, and ctrl+u. A refusal, not a cut, as with
-  `MaxPromptBytes`. Nothing moves the brief to WHAT for the human. Full record:
-  `docs/adr/0030-a-field-is-the-shape-it-is-drawn.md`.
+  **ctrl+u** deletes before the caret (the whole field, with it at the end),
+  **ctrl+w** the word before it and **ctrl+k** after it, named in the footer;
+  and **`featureNameMax` (80)** is a title's ceiling on both forms — the `+`
+  textinput stops there, the dx form refuses at submit, on TITLE and before
+  WHAT, and says so under TITLE as it grows: the length, that the brief goes in
+  WHAT, and ctrl+u. A refusal, not a cut, as with `MaxPromptBytes`. Nothing
+  moves the brief to WHAT for the human. **The caret moves** in the one-line
+  fields (`dxcaret.go`): arrows by grapheme, alt/ctrl+arrows and alt+b/alt+f by
+  word, home/end, delete, every edit at the caret; held as the bytes after it,
+  tagged with its field, so edits before it never move it and the zero value is
+  the end. WHAT keeps its caret at the end, because its wrap is not a layout a
+  position survives; **ctrl+g** on WHAT or DONE WHEN (`dxeditor.go`) opens the
+  text in the human's editor as Claude Code does, reads it back on exit, and on
+  an editor error (`:cq`) leaves the field and keeps the private file, named.
+  Full record: `docs/adr/0030-a-field-is-the-shape-it-is-drawn.md`.
 - **A question is a wait, and it is the one wait no hook reported.** A
   dispatcher sat on a Claude Code question menu — four options, asking before
   it wrote to another repo — while the table read `1 in flight · 0 want you ·
@@ -1277,7 +1285,9 @@
   the records: the sessions on it that no dispatch claims, and `adopt.go` is
   the key that adopts one. `swap.go` is `a`, the account picker (ADR 0027).
   `search.go` is `/`; `editconfig.go` opens
-  `config.toml` in the human's editor (`e` in settings, `:config`).
+  `config.toml` in the human's editor (`e` in settings, `:config`), and
+  `dxeditor.go` the dispatch form's WHAT or DONE WHEN (ctrl+g); `dxcaret.go`
+  is the caret in the form's one-line fields (ADR 0030).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is
   a real stage and every figure is what it found — the list is a description of
