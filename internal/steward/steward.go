@@ -173,6 +173,17 @@ var (
 	now         = time.Now
 )
 
+// lockStewards serialises every act that reads a steward's record and then
+// writes it or acts on its session: the human's start, reopen and end — from
+// the picker or the command line, so another process — and the cockpit's poll
+// reopening an interrupted one. Without it the poll could read a steward the
+// human was halfway through ending, find its session gone, and bring it back.
+// It is one lock for every product, because an act takes a launch's time and
+// the human makes them one at a time. Only the exported acts take it; nothing
+// they call does, since a second take from the same process would wait on the
+// first for ever.
+var lockStewards = func() (release func()) { return state.LockNamed("steward.lock") }
+
 // All is every steward on record, the most recently opened first.
 func All() []*Steward {
 	paths, _ := filepath.Glob(filepath.Join(state.Dir(), "stewards", "*", "*", "steward.json"))
@@ -291,6 +302,7 @@ func Start(product string) (*Steward, error) {
 	if !available() {
 		return nil, errors.New(supervisor.Backend() + " is not available")
 	}
+	defer lockStewards()()
 	if cur := Current(product); cur != nil {
 		if StateOf(cur) == Live {
 			return cur, ErrRunning
@@ -317,12 +329,13 @@ func Start(product string) (*Steward, error) {
 // is ended — unless it is live, which the human ends first, since ending a
 // conversation somebody may be in the middle of is theirs to do.
 func Reopen(id string) (*Steward, error) {
+	if !available() {
+		return nil, errors.New(supervisor.Backend() + " is not available")
+	}
+	defer lockStewards()()
 	s, err := Find(id)
 	if err != nil {
 		return nil, err
-	}
-	if !available() {
-		return nil, errors.New(supervisor.Backend() + " is not available")
 	}
 	cur := Current(s.Product)
 	if cur != nil && cur.ID == s.ID && StateOf(s) == Live {
@@ -356,6 +369,7 @@ func Reopen(id string) (*Steward, error) {
 // record stamped so it is no longer the product's current steward. It stays
 // reopenable.
 func End(id string) (*Steward, error) {
+	defer lockStewards()()
 	s, err := Find(id)
 	if err != nil {
 		return nil, err
@@ -368,6 +382,7 @@ func End(id string) (*Steward, error) {
 
 // EndProduct ends the product's current steward, whichever it is.
 func EndProduct(product string) (*Steward, error) {
+	defer lockStewards()()
 	cur := Current(product)
 	if cur == nil {
 		return nil, fmt.Errorf("%s has no steward", Key(product))
@@ -375,15 +390,28 @@ func EndProduct(product string) (*Steward, error) {
 	return cur, end(cur)
 }
 
+// end stamps the record before the session goes, so a reader in between — the
+// poll, where the lock could not be taken — sees a steward being put down
+// rather than one whose session went away by itself (ADR 0020's switch, which
+// was cleared before the kill for the same reason). A kill that fails takes
+// the stamp back: the steward is still running.
 func end(s *Steward) error {
-	if Current(s.Product) != nil && Current(s.Product).ID == s.ID && hasSession(session(s.Product)) {
+	cur := Current(s.Product)
+	running := cur != nil && cur.ID == s.ID && hasSession(session(s.Product))
+	t := now()
+	s.EndedAt = &t
+	if err := save(s); err != nil {
+		s.EndedAt = nil
+		return err
+	}
+	if running {
 		if err := killSession(session(s.Product)); err != nil {
+			s.EndedAt = nil
+			_ = save(s)
 			return err
 		}
 	}
-	t := now()
-	s.EndedAt = &t
-	return save(s)
+	return nil
 }
 
 // Openings are the steward's first message, new and reopened. The brief itself

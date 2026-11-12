@@ -452,3 +452,106 @@ func TestEndPrefersTheProductToAnIDPrefix(t *testing.T) {
 		t.Fatal("another product's steward was ended for an id prefix")
 	}
 }
+
+// Every act that reads a steward's record and then touches its session holds
+// the stewards' lock while it does, so the cockpit's poll reopening an
+// interrupted steward and the human starting, reopening or ending one never
+// interleave — whichever goes second reads what the first left.
+func TestStewardActsHoldTheLock(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	held := false
+	prevLock := lockStewards
+	t.Cleanup(func() { lockStewards = prevLock })
+	lockStewards = func() func() {
+		if held {
+			t.Fatal("the stewards' lock was taken twice: a real one would deadlock")
+		}
+		held = true
+		return func() { held = false }
+	}
+	var outside []string
+	pn, pk := newSession, killSession
+	newSession = func(s supervisor.Session, dir, cmd, env string) error {
+		if !held {
+			outside = append(outside, "start")
+		}
+		return pn(s, dir, cmd, env)
+	}
+	killSession = func(s supervisor.Session) error {
+		if !held {
+			outside = append(outside, "kill")
+		}
+		return pk(s)
+	}
+
+	s, err := Start("player")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.idle["disp_steward_player"] = true // claude exited: reopen kills the shell
+	if _, err := Reopen(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := End(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Reopen(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EndProduct("player"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.started) != 3 || len(f.killed) != 3 {
+		t.Fatalf("started %d, killed %d", len(f.started), len(f.killed))
+	}
+	if len(outside) > 0 {
+		t.Errorf("acted on a session outside the lock: %v", outside)
+	}
+	if held {
+		t.Error("the lock was left held")
+	}
+}
+
+// Ending a steward writes the ending before the session goes: anything that
+// reads the record in between — the poll looking for interrupted stewards —
+// sees one being put down, not one that went away by itself. A kill that
+// fails takes the ending back, since the steward is still running.
+func TestEndStampsTheRecordBeforeTheSessionGoes(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	s, err := Start("player")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An ending that cannot be written is no ending: the session stays.
+	if err := os.Chmod(s.Dir(), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	_, err = End(s.ID)
+	_ = os.Chmod(s.Dir(), 0o755)
+	if err == nil || len(f.killed) != 0 {
+		t.Fatalf("an unwritable record must fail the end before the kill: %v %v", err, f.killed)
+	}
+
+	pk := killSession
+	killSession = func(sv supervisor.Session) error { return errors.New("tmux said no") }
+	if _, err := End(s.ID); err == nil {
+		t.Fatal("a failed kill must fail the end")
+	}
+	if cur := Current("player"); cur == nil || cur.ID != s.ID {
+		t.Fatal("a steward whose session could not be ended must stay current")
+	}
+
+	endedFirst := false
+	killSession = func(sv supervisor.Session) error {
+		endedFirst = Current("player") == nil
+		return pk(sv)
+	}
+	if _, err := End(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !endedFirst {
+		t.Error("the session went while the record still said current")
+	}
+}
