@@ -489,6 +489,15 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 
+	// WHAT is the one field here that holds a paragraph, so a pasted brief
+	// keeps its line breaks; every other field is one line, and a paste into it
+	// is folded onto that line (typedTextFor).
+	if field == dxWhatF {
+		if s, ok := typedBlockFor(m.key, k); ok {
+			m.dxWhat += s
+		}
+		return m, nil
+	}
 	if s, ok := typedTextFor(m.key, k); ok {
 		switch field {
 		case dxWhereF:
@@ -497,8 +506,6 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 			m.dxFilter, m.dxRepo = m.dxFilter+s, 0
 		case dxTitleF:
 			m.dxTitle += s
-		case dxWhatF:
-			m.dxWhat += s
 		case dxGoalF:
 			m.dxGoal += s
 		case dxRootF:

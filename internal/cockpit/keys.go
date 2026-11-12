@@ -2,6 +2,7 @@ package cockpit
 
 import (
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -30,11 +31,48 @@ func typedText(raw tea.KeyMsg) (string, bool) {
 	return "", false
 }
 
-// typedTextFor resolves the text for a key, preferring the untouched message.
-// raw is trusted only when it is the message k was derived from; the key-name
-// fallback keeps the cockpit drivable by name (as the tests do), where a real
-// terminal always supplies raw.
+// typedTextFor is what a key types into a ONE-LINE field: the key's text with
+// every line break folded into a space and every other control character
+// dropped (oneLine). Every hand-rolled field in the cockpit is one line except
+// the dx form's WHAT, which asks typedBlockFor instead.
+//
+// The fold is what a paste needs. Typing cannot put a line break into a field —
+// enter is a key of its own — but a bracketed paste arrives as one message
+// carrying every rune, newlines included, and a field drawn as one row then
+// draws as many: a pasted email in the dx form's TITLE pushed WHAT, the
+// switches and the caret off the screen, and backspace went on eating the end
+// of a title nobody could see. bubbles' textinput, which the `+` overlay uses,
+// has always folded the same way; the hand-rolled fields never did.
 func typedTextFor(raw tea.KeyMsg, k string) (string, bool) {
+	s, ok := keyText(raw, k)
+	if !ok {
+		return "", false
+	}
+	s = oneLine(s)
+	return s, s != ""
+}
+
+// typedBlockFor is what a key types into a field that holds a paragraph — the
+// dx form's WHAT, the brief. A pasted brief keeps its line breaks, because they
+// are its structure (a list, a quoted message) and the session reads them; they
+// are only made one kind (\n), since a terminal may deliver a paste's line
+// breaks as \r. Other control characters are dropped as they are on one line:
+// an escape character in a field is a byte written raw to the terminal on every
+// redraw.
+func typedBlockFor(raw tea.KeyMsg, k string) (string, bool) {
+	s, ok := keyText(raw, k)
+	if !ok {
+		return "", false
+	}
+	s = blockText(s)
+	return s, s != ""
+}
+
+// keyText resolves the text for a key, preferring the untouched message. raw is
+// trusted only when it is the message k was derived from; the key-name fallback
+// keeps the cockpit drivable by name (as the tests do), where a real terminal
+// always supplies raw.
+func keyText(raw tea.KeyMsg, k string) (string, bool) {
 	if s, ok := typedText(raw); ok && raw.String() == k {
 		return s, true
 	}
@@ -45,6 +83,50 @@ func typedTextFor(raw tea.KeyMsg, k string) (string, bool) {
 		return k, true
 	}
 	return "", false
+}
+
+// isLineBreak reports the runes a terminal or a clipboard uses to end a line.
+// \v and \f are in it because strings.Fields splits on them too, and NEL and
+// the Unicode separators because a paste from a word processor can carry them.
+func isLineBreak(r rune) bool {
+	switch r {
+	case '\n', '\r', '\v', '\f', '\u0085', '\u2028', '\u2029':
+		return true
+	}
+	return false
+}
+
+// oneLine folds s onto one line: \r\n is one break, each break and each tab is
+// a space, and any other control character is dropped. Spaces the human typed
+// are theirs and are left as they are.
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || isLineBreak(r):
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// blockText keeps s's line breaks, as \n, and drops every other control
+// character but the tab.
+func blockText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.Map(func(r rune) rune {
+		switch {
+		case isLineBreak(r):
+			return '\n'
+		case r == '\t':
+			return r
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // inputMsg is the message to feed a bubbles textinput: the untouched key
