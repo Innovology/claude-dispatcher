@@ -90,3 +90,99 @@ func TestAWorktreeGitRefusedSaysWhyGitRefused(t *testing.T) {
 		t.Errorf("error = %q, want git's fatal line", msg)
 	}
 }
+
+// failNixDevelop makes every session start fail the way nix develop did on the
+// reporting machine.
+func failNixDevelop(t *testing.T) {
+	t.Helper()
+	prev := newSession
+	newSession = func(supervisor.Session, string, string, string) error {
+		return cause.Failed("tmux new-session", []byte(nixDevelopFailure), errors.New("exit status 1"))
+	}
+	t.Cleanup(func() { newSession = prev })
+}
+
+// The record has room for one line of a failed start; the rest — the builder's
+// log, the URL it tried, the `nix log` to run — is kept in a file the record
+// names, under the line it was summed up as.
+func TestAFailedLaunchKeepsWhatItPrinted(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+	stubLaunch(t)
+	failNixDevelop(t)
+
+	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "doomed", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount); err == nil {
+		t.Fatal("expected the launch to fail")
+	}
+	rec := state.LoadAll()[0]
+	if rec.StartOutput == "" {
+		t.Fatal("the record names no output")
+	}
+	b, err := os.ReadFile(rec.StartOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(b)
+	if !strings.HasPrefix(out, strings.TrimPrefix(rec.StatusReason, "did not start: ")+"\n") {
+		t.Errorf("the output does not lead with the cause:\n%s", out)
+	}
+	for _, want := range []string{"copying path", "> curl: (22)", "1 dependency failed"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the output lost %q", want)
+		}
+	}
+}
+
+// A failure with nothing past its one line has nothing to keep: tmux's own
+// refusals are like that, and a file holding the line the row already shows
+// would be a key that opens nothing new.
+func TestAOneLineFailureKeepsNoOutput(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+	stubLaunch(t)
+	prev := newSession
+	newSession = func(supervisor.Session, string, string, string) error {
+		return cause.Failed("tmux new-session", []byte("command too long\n"), errors.New("exit status 1"))
+	}
+	t.Cleanup(func() { newSession = prev })
+
+	if _, err := Launch(repos.Repo{Name: "acme", Path: repo}, "doomed", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount); err == nil {
+		t.Fatal("expected the launch to fail")
+	}
+	if rec := state.LoadAll()[0]; rec.StartOutput != "" {
+		t.Errorf("a one-line failure kept %q", rec.StartOutput)
+	}
+}
+
+// A finished conversation that would not reopen — the resume the screenshot
+// reported, its nix shell failing to build — stays the finished dispatcher it
+// was, and keeps what the failed start printed. The next start that works
+// clears it: it was about a start that is over.
+func TestAFailedResumeKeepsWhatItPrintedAndAStartClearsIt(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+	sup := &stubSupervisor{alive: map[string]bool{}}
+	stubSessions(t, sup)
+	d := finished(t, repo)
+
+	stop := newSession
+	failNixDevelop(t)
+	if _, _, err := Resume(d, ""); err == nil {
+		t.Fatal("the resume started under a shell that would not build")
+	}
+	rec := recordByIDForTest(t, d.ID)
+	if rec.Status != state.StatusExited || rec.StatusReason != "session ended" {
+		t.Errorf("a failed resume rewrote the record: %q / %q", rec.Status, rec.StatusReason)
+	}
+	if rec.StartOutput == "" {
+		t.Fatal("a failed resume kept nothing of what it printed")
+	}
+
+	newSession = stop
+	if _, _, err := Resume(rec, ""); err != nil {
+		t.Fatal(err)
+	}
+	if rec = recordByIDForTest(t, d.ID); rec.StartOutput != "" {
+		t.Errorf("a resume that started still names the last failure's output: %q", rec.StartOutput)
+	}
+}

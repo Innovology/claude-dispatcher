@@ -337,10 +337,29 @@ const MaxPromptBytes = 100 * 1024
 // The reason carries the supervisor's own words. "tmux launch failed" was what
 // this said for every one of them, which turned "command too long" — the whole
 // diagnosis, handed to us by tmux — into four words that diagnose nothing.
+// The words are the cause (internal/cause), and the rest of what was printed
+// is kept beside the record (keepStartOutput).
 func failLaunch(d *state.Dispatch, err error) error {
 	d.Stop(state.StatusExited, "did not start: "+firstLine(err.Error()), time.Now())
+	keepStartOutput(d, err)
 	_ = state.Save(d)
 	return err
+}
+
+// keepStartOutput puts what a session start that failed printed on disk and
+// names the file on d, for the caller to save. The reason a row shows is one
+// line of it; the line names the failure, and when the failure is a nix build
+// the rest — the builder's log, the URL it tried, the `nix log` to run — is
+// what fixing it takes. An error with nothing past its line keeps nothing, and
+// clears what an earlier failure kept, because that was about a start that is
+// not the one that just failed.
+func keepStartOutput(d *state.Dispatch, err error) {
+	d.StartOutput = ""
+	if full := cause.Full(err); full != err.Error() {
+		if path, werr := state.WriteOutput(d.ID, full); werr == nil {
+			d.StartOutput = path
+		}
+	}
 }
 
 // firstLine keeps a status reason to one line; a supervisor's error can carry
