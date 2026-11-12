@@ -27,10 +27,9 @@ func tailFit(s string, w int) string {
 	over, i := dispWidth(s)-w, 0
 	for over > 0 && i < len(s) {
 		cl, cw := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
-		if cl == "" {
-			return ""
-		}
-		i += len(cl)
+		// A non-empty string always has a first cluster; the max only promises
+		// progress, so no input can hold this loop.
+		i += max(len(cl), 1)
 		over -= cw
 	}
 	return s[i:]
@@ -43,11 +42,11 @@ func headFit(s string, w int) string {
 	used, i := 0, 0
 	for i < len(s) {
 		cl, cw := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
-		if cl == "" || used+cw > w {
+		if used+cw > w {
 			break
 		}
 		used += cw
-		i += len(cl)
+		i += max(len(cl), 1)
 	}
 	return s[:i]
 }
