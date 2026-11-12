@@ -1174,18 +1174,19 @@ func dxLabelColor(active bool) string {
 // terminal already draws. When the value outgrows its room it scrolls left,
 // keeping the caret — the point of interest — on screen. An inactive field
 // keeps the caret's column as a space, so the fields stay in line.
+//
+// The value is drawn through oneLine even though typing already folds it: this
+// row is budgeted as one row, and a value set any other way (a pre-filled
+// filter, a later caller) must not be able to draw as several.
 func dxValue(s string, active bool, room int) string {
 	if room < 1 {
 		return ""
 	}
-	r := []rune(s)
-	for len(r) > 0 && dispWidth(string(r))+1 > room {
-		r = r[1:]
-	}
+	shown := tailFit(oneLine(s), room-1)
 	if !active {
-		return fg(cFg, string(r)) + " "
+		return fg(cFg, shown) + " "
 	}
-	return fg(cFg, string(r)) + paint(cSurface, cFg, " ")
+	return fg(cFg, shown) + paint(cSurface, cFg, " ")
 }
 
 // dxWhatRows is WHAT: the label, then the typed text wrapped down the value

@@ -818,6 +818,33 @@ func TestTruncateEdgeCases(t *testing.T) {
 	}
 }
 
+// tailFit keeps the END of a line — the caret's end — and never more than w
+// columns of it, wide characters included.
+func TestTailFit(t *testing.T) {
+	cases := []struct {
+		s    string
+		w    int
+		want string
+	}{
+		{"hello", 0, ""},
+		{"hello", 10, "hello"},
+		{"hello", 5, "hello"},
+		{"hello world", 5, "world"},
+		{"漢字漢字", 4, "漢字"},
+		{"漢字漢字", 3, "字"}, // a wide character that would straddle the edge goes whole
+		{"ab漢", 1, ""},   // nothing of width 1 at the end to keep
+	}
+	for _, c := range cases {
+		got := tailFit(c.s, c.w)
+		if got != c.want {
+			t.Errorf("tailFit(%q, %d) = %q, want %q", c.s, c.w, got, c.want)
+		}
+		if dispWidth(got) > c.w && c.w >= 0 {
+			t.Errorf("tailFit(%q, %d) = %q overflows", c.s, c.w, got)
+		}
+	}
+}
+
 func TestTruncateAnsiEdge(t *testing.T) {
 	if got := truncateAnsi("hello", 0); got != "" {
 		t.Errorf("w<=0: %q", got)
