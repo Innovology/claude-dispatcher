@@ -200,3 +200,41 @@ func TestDXCaretIsDrawnWhereItStands(t *testing.T) {
 		t.Errorf("row is %d columns in 80+%d", w, pad)
 	}
 }
+
+// The edges of the caret: a field too narrow for the character under it, a
+// caret count that lands inside a character, a word move with nothing but
+// spaces ahead, and a key that is neither text nor a caret key on WHAT.
+func TestDXCaretEdges(t *testing.T) {
+	if got := dxValue("", "\u6f22", true, 1); got != paint(cSurface, cFg, " ") {
+		t.Errorf("a wide character in a one-column field should draw the caret alone: %q", got)
+	}
+	if got := dxValue("a", "", true, 0); got != "" {
+		t.Errorf("a field with no room draws nothing: %q", got)
+	}
+
+	m := titleModel(t, "naïve")
+	m.dxCaret = dxCaret{field: dxTitleF, back: 3} // between the two bytes of ï
+	if h, tl := m.dxSplit(dxTitleF); h != "na" || tl != "ïve" {
+		t.Errorf("split inside a character = %q|%q, want it moved to the character's start", h, tl)
+	}
+	if got := m.dxText(dxModeF); got != "" {
+		t.Errorf("a switch has no text, got %q", got)
+	}
+
+	m = titleModel(t, "word   ")
+	m = feed(t, m, key(tea.KeyHome), alt(tea.KeyRight), alt(tea.KeyRight), text("|"))
+	if m.dxTitle != "word   |" {
+		t.Errorf("alt+right with only spaces ahead goes to the end: %q", m.dxTitle)
+	}
+	m = titleModel(t, "one two")
+	m = feed(t, m, key(tea.KeyHome), alt(tea.KeyRight), alt(tea.KeyRight), text("|"))
+	if m.dxTitle != "one two|" {
+		t.Errorf("alt+right onto the last word goes to its end: %q", m.dxTitle)
+	}
+
+	m = dxFormModel(t)
+	m.dxField = dxWhatF
+	if m = feed(t, m, text("brief"), key(tea.KeyF5)); m.dxWhat != "brief" {
+		t.Errorf("a function key typed into WHAT: %q", m.dxWhat)
+	}
+}
