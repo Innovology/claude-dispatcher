@@ -636,6 +636,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mm, cmd := m.onConfigEdited(msg)
 		return mm, cmd
 
+	case dxEditedMsg:
+		mm, cmd := m.onDxEdited(msg)
+		return mm, cmd
+
 	case attachReturnedMsg:
 		m.notice = ""
 		if msg.err != nil {

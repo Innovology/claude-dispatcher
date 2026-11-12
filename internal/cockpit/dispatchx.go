@@ -414,6 +414,14 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		// "ctrl+enter" is accepted in case bubbletea ever does report it.
 		return m.dxSubmit()
 
+	case "ctrl+g":
+		// Claude Code's own key for "write this prompt in my editor"
+		// (dxeditor.go). On a field that is a few words it does nothing.
+		if dxEditable(field) {
+			return m.dxOpenEditor(field)
+		}
+		return m, nil
+
 	case "tab":
 		m.dxField = (field + 1) % dxFieldCount
 		return m, nil
@@ -676,7 +684,7 @@ func (m model) dxTitleHint() string {
 // else on the screen, and it stays that here.
 func (m model) dxWhatHint() string {
 	if m.dxField == dxWhatF {
-		return "wraps as you type · enter moves on · ctrl+d dispatches"
+		return "wraps as you type · ctrl+g opens it in your editor · enter moves on · ctrl+d dispatches"
 	}
 	if strings.TrimSpace(m.dxWhat) != "" {
 		return "the brief the session opens with"
@@ -1024,6 +1032,10 @@ func (m model) dxSummary() string {
 // while they are still exits.
 func (m model) dxFooterHelp() string {
 	if !m.dxAtRest() {
+		// ctrl+g only where it does something: WHAT and DONE WHEN.
+		if dxEditable(m.dxField) {
+			return "enter next field · tab moves · ctrl+g editor · ctrl+u clears · ctrl+d dispatch · esc cancel"
+		}
 		return "enter next field · tab moves · ctrl+u clears · ctrl+d dispatch · esc cancel"
 	}
 	if !m.cqDispatch {
