@@ -698,7 +698,7 @@
   A query being typed comes ahead of the confirm bar, as settings and the
   dispatch form do: a confirm can land on its own (`:tidy` reads its plan in
   the background) and took the "y" typed into a query. Full record:
-  `docs/adr/0027-a-backlog-is-read-by-product-and-found-by-number.md`.
+  `docs/adr/0032-a-backlog-is-read-by-product-and-found-by-number.md`.
 - **A key sheet that can lie is worse than none, and `/` is fzf itself.**
   Every key was a literal in a switch with `?` hand-written beside it — merely
   duplicated while keys are fixed, and the central problem the moment they are
