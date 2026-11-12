@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/account"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/effort"
 )
@@ -44,6 +45,7 @@ const (
 	flProduct
 	flFeature
 	flRepo
+	flAccount
 	flStage
 	flTurn
 	flSignal
@@ -55,7 +57,46 @@ const (
 // fleetCols is one terminal width's column widths. A zero width means the
 // column is shed at this size.
 type fleetCols struct {
-	glyph, product, feature, repo, stage, turn, sigPad, seen, age int
+	glyph, product, feature, repo, account, stage, turn, sigPad, seen, age int
+}
+
+// fleetAccountMax caps the ACCOUNT cell: an account name is a word the human
+// chose, and past this it is clipped rather than taking the feature's width.
+const fleetAccountMax = 14
+
+// fleetAccountWidth is the ACCOUNT cell the rows on the table need: the
+// longest account name — "default" for the human's own login — or the header,
+// plus the 2ch gap the repo and feature cells keep too.
+func fleetAccountWidth(rows []fleetRow) int {
+	nat := len("ACCOUNT")
+	for _, r := range rows {
+		nat = maxi(nat, dispWidth(fleetAccountName(r.account)))
+	}
+	return mini(nat, fleetAccountMax-2) + 2
+}
+
+// fleetAccountName is a record's account as the table names it: the default
+// login by its name too, since with several on the table a blank would read
+// as "unknown" rather than "yours".
+func fleetAccountName(acct string) string {
+	if acct == "" {
+		return account.Default
+	}
+	return acct
+}
+
+// withAccount gives the table an ACCOUNT column of width aw, taken out of the
+// feature cell so the row keeps its width. It is shown only where there is
+// more than one subscription to tell apart (viewFleet), and only where the
+// feature can spare it: a feature name squeezed past legibility to show which
+// login it spends is the wrong trade, and the detail line still says.
+func (c fleetCols) withAccount(aw int) fleetCols {
+	if c.feature-aw < 16 {
+		return c
+	}
+	c.feature -= aw
+	c.account = aw
+	return c
 }
 
 // fleetProductMin is the design's PRODUCT width, kept as the floor so a table
@@ -147,6 +188,9 @@ func fleetLine(w int, cols fleetCols, bg string, v, hex [flCells]string) string 
 	if cols.repo > 0 {
 		segs = append(segs, c(truncate(v[flRepo], cols.repo-2), cols.repo, hex[flRepo]))
 	}
+	if cols.account > 0 {
+		segs = append(segs, c(truncate(v[flAccount], cols.account-2), cols.account, hex[flAccount]))
+	}
 	if cols.stage > 0 {
 		segs = append(segs, c(v[flStage], cols.stage, hex[flStage]))
 	}
@@ -174,7 +218,7 @@ func fleetHeaderLine(w int, cols fleetCols) string {
 	// has been alive. Neither header is "AGE" alone any more, because with two
 	// numbers on the row that one word would name whichever the reader assumed.
 	v := [flCells]string{
-		flProduct: "PRODUCT", flFeature: "FEATURE", flRepo: "REPO",
+		flProduct: "PRODUCT", flFeature: "FEATURE", flRepo: "REPO", flAccount: "ACCOUNT",
 		flStage: "STAGE", flTurn: "TURN", flSignal: "SIGNAL",
 		flSeen: "LAST", flAge: "AGE",
 	}
@@ -237,6 +281,7 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flProduct: cqLabel(r.product),
 		flFeature: r.feature,
 		flRepo:    fleetRepo(r.repo, r.product),
+		flAccount: fleetAccountName(r.account),
 		flStage:   cqPhaseWord(r.stage),
 		flTurn:    turn,
 		flSignal:  r.signal,
@@ -248,6 +293,7 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flProduct: cFaint,
 		flFeature: featHex,
 		flRepo:    cFaint,
+		flAccount: cFaint,
 		flStage:   stageHex,
 		flTurn:    cFaint,
 		flSignal:  rank,
@@ -556,6 +602,11 @@ func (m model) viewFleet(w, h int) string {
 	// Sized from the filtered rows — the ones actually on the table. The header
 	// goes through the same cols, so the two cannot drift.
 	cols := fleetColumns(w, fleetProductWidth(rows))
+	// Which subscription each dispatcher spends, once there is more than one
+	// to tell apart. With one account every row would say the same word.
+	if len(m.accountNames()) > 1 {
+		cols = cols.withAccount(fleetAccountWidth(rows))
+	}
 	sel := clampCursor(m.fleetCursor, len(rows))
 	rule := flG(fg(cRule, strings.Repeat("─", inner)))
 
@@ -686,6 +737,9 @@ func (m model) cqFooterHelp() string {
 	if m.replyOpen {
 		return "type the answer · enter sends it · esc cancels"
 	}
+	if m.swapOpen {
+		return "j/k choose an account · enter moves it there · esc cancels"
+	}
 	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}
@@ -693,6 +747,9 @@ func (m model) cqFooterHelp() string {
 	if r, ok := m.fleetSel(); ok {
 		for _, a := range r.acts {
 			parts = append(parts, a.k+" "+a.d)
+		}
+		if r.swap && len(m.accountNames()) > 1 {
+			parts = append(parts, "a switch account")
 		}
 	}
 	if m.fleetFilter() == fleetHistory {

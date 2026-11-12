@@ -212,6 +212,7 @@ func TestEverySettingTheCockpitWritesSurvivesItsOwnSave(t *testing.T) {
 		// launched under nix develop.
 		SessionEnv:   map[string]string{"shop-api": "", "shop-web": "direnv exec ."},
 		RootBranches: map[string]string{"shop-api": "dev"},
+		Colors:       map[string]string{"shop-api": "orange", "shop": "blue"},
 	}
 	if err := Save(in); err != nil {
 		t.Fatal(err)
@@ -232,6 +233,7 @@ func TestEverySettingTheCockpitWritesSurvivesItsOwnSave(t *testing.T) {
 		"sockets":       {out.Sockets, in.Sockets},
 		"session_env":   {out.SessionEnv, in.SessionEnv},
 		"root_branches": {out.RootBranches, in.RootBranches},
+		"colors":        {out.Colors, in.Colors},
 	} {
 		if !maps.Equal(pair[0], pair[1]) {
 			t.Errorf("[%s] = %v, want %v", name, pair[0], pair[1])
@@ -327,5 +329,24 @@ func TestExpandHomeWithNoHomeLeavesThePathAlone(t *testing.T) {
 	t.Setenv("HOME", "")
 	if got := ExpandHome("~/x"); got != "~/x" {
 		t.Errorf("ExpandHome(~/x) with no home = %q", got)
+	}
+}
+
+// A repo's own colour wins over its product's, and a colour /color would
+// refuse is none at all.
+func TestColorFor(t *testing.T) {
+	c := &Config{Colors: map[string]string{"shop-api": " Orange ", "shop": "blue", "bad": "teal"}}
+	for _, tc := range []struct{ repo, product, want string }{
+		{"shop-api", "shop", "orange"},
+		{"shop-web", "shop", "blue"},
+		{"other", "", ""},
+		{"bad", "shop", ""},
+	} {
+		if got := c.ColorFor(tc.repo, tc.product); got != tc.want {
+			t.Errorf("ColorFor(%q, %q) = %q, want %q", tc.repo, tc.product, got, tc.want)
+		}
+	}
+	if (*Config)(nil).ColorFor("x", "y") != "" {
+		t.Error("nil config")
 	}
 }

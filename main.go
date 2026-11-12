@@ -43,6 +43,9 @@ Usage:
                                (t on the triage table does the same)
   claude-dispatcher account    the Claude subscriptions a dispatch can run under, and what
                                each has left · account add <name> adds and logs one in
+  claude-dispatcher swap <id|feature> <account>
+                               move a dispatcher onto another subscription and resume
+                               its conversation there (a on its row in the cockpit)
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -71,7 +74,7 @@ func main() {
 		}
 	case "steward":
 		os.Exit(runSteward(args[1:]))
-	case "status", "reply", "park", "unpark", "note", "tidy", "worktree", "dispatch":
+	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "worktree", "dispatch":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet, and the two verbs a branchless conversation
 		// turns into work with — see internal/fleetcmd.

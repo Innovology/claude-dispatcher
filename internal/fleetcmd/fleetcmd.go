@@ -23,7 +23,9 @@ import (
 	"strings"
 	"time"
 
+	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/ask"
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
@@ -34,6 +36,7 @@ var (
 	sessionAlive = supervisor.HasSession
 	sessionIdle  = supervisor.SessionIdle
 	sendKeys     = supervisor.SendKeys
+	swapAccount  = dispatch.SwapAccount
 )
 
 // Entry is one dispatcher as `status --json` prints it. The field names are the
@@ -116,6 +119,8 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runUnpark(args, out)
 	case "tidy":
 		err = runTidy(args, out)
+	case "swap":
+		err = runSwap(args, out)
 	case "worktree":
 		err = runWorktree(args, out)
 	case "dispatch":
@@ -394,6 +399,43 @@ func runUnpark(args []string, out io.Writer) error {
 		d.ParkedReason, d.ParkedAt = "", nil
 		return quote(d.Feature) + " back on the fleet", nil
 	}, out)
+}
+
+// runSwap moves a dispatcher onto another Claude subscription and resumes its
+// conversation there (dispatch.SwapAccount) — what to do when the one it runs
+// on has run out. It is not on the steward's allowed list: choosing which
+// subscription pays is spend, and spend is the human's.
+func runSwap(args []string, out io.Writer) error {
+	if len(args) < 2 || len(args) > 3 {
+		return errors.New("usage: swap <id|feature> <account> [message]")
+	}
+	// A config that will not load still has the default account in it.
+	cfg, cfgErr := config.Load()
+	to, ok := account.Find(cfg, args[1])
+	if !ok {
+		if cfgErr != nil {
+			return fmt.Errorf("no account %q (the config did not load: %v)", args[1], cfgErr)
+		}
+		return fmt.Errorf("no account %q — claude-dispatcher account lists them", args[1])
+	}
+	d, err := find(args[0])
+	if err != nil {
+		return err
+	}
+	msg := ""
+	if len(args) == 3 {
+		msg = args[2]
+	}
+	mode, session, err := swapAccount(d, to, msg)
+	if err != nil {
+		return err
+	}
+	verb := "resumed"
+	if mode == dispatch.ResumeRelaunched {
+		verb = "started again"
+	}
+	_, _ = fmt.Fprintf(out, "%s %s on %s · session %s\n", quote(d.Feature), verb, to.Name, session)
+	return nil
 }
 
 // edit applies an annotation under the hook lock, against a fresh read, so it

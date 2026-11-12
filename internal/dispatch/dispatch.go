@@ -157,6 +157,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		TmuxSocket:   r.Socket,
 		EnvCommand:   repos.EnvIn(r.Env, r.Path, worktree),
 		PaneShell:    r.Shell,
+		Color:        r.Color,
 		Account:      accountName(acct),
 		ConfigDir:    acct.Env(),
 		TmuxSession:  uniqueName(supervisor.Session{Name: "disp-" + slug, Socket: r.Socket}),

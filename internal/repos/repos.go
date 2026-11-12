@@ -65,6 +65,9 @@ type Repo struct {
 	// form names none (config's [root_branches]), or "" for the remote's
 	// default.
 	RootBranch string
+	// Color is the prompt-bar colour this repo's dispatches are given (config's
+	// [colors], by repo then product), or "" for Claude Code's default.
+	Color string
 	// Pinned reports that Path was named by the human in `[checkouts]` rather
 	// than chosen. Screens say which, because the two answer different
 	// questions: an automatic choice is a guess worth correcting, and a pin is
@@ -159,6 +162,7 @@ func Discover(cfg *config.Config) []Repo {
 		r.WorktreeRoot, r.WorktreePrefix = worktreeLayoutFor(cfg, r.GitDir, wts)
 		r.BranchPrefix = branchPrefixFor(cfg)
 		r.RootBranch = cfg.RootBranchFor(r.Name)
+		r.Color = cfg.ColorFor(r.Name, r.Product)
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {

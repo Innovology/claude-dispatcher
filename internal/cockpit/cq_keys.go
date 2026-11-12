@@ -370,6 +370,12 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 			m.replyAt = &replyTarget{id: r.id, feature: r.feature, ask: r.why}
 			return m, nil, true
 		}
+		// The account picker, for a dispatcher whose turn is over — the
+		// swap ends its claude, so it is offered nowhere that would lose one.
+		if k == "a" && r.swap {
+			mm, cmd := m.swapOpenFor(r)
+			return mm, cmd, true
+		}
 		if k == "p" && r.kind == "queue" {
 			m.parkOpen, m.parkText = true, ""
 			m.parkAt = &parkTarget{id: r.id, feature: r.feature}

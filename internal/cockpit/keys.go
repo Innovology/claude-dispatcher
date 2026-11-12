@@ -214,6 +214,10 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateReply(k)
 		return mm, cmd
 	}
+	if m.swapOpen {
+		mm, cmd := m.updateSwap(k)
+		return mm, cmd
+	}
 	// Naming an adoption is text entry too, and it opens over the products
 	// lens, whose own letters would otherwise take the keyboard back.
 	if m.adoptOpenInput {

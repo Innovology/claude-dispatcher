@@ -892,6 +892,21 @@
   OUT switch itself shows as config beside the mode. Existing installs
   re-run `init` to get the two new hook entries. Full record:
   `docs/adr/0005-a-fan-out-is-hook-truth-swept-with-the-turn.md`.
+- **A project's colour is typed in, because there is no flag for it.**
+  `[colors]` (repo name, else product name) gives a dispatch's session that
+  prompt-bar colour so sessions from different projects tell apart at a
+  glance. Claude Code 2.1.281 sets it only with the `/color` slash command,
+  which writes an `agent-color` entry into the transcript that `--resume`
+  restores (so resume and an account swap keep it); the hidden
+  `--agent-color` flag is a teammate's colour and leaves a session's bar
+  grey, measured. `/color` is an immediate command — measured to apply
+  mid-turn without touching the turn — so `dispatch.DeliverColors` types it
+  as soon as a load sees the session's id (SessionStart: the REPL is up), on
+  the load that the hook's write triggers, with the poll behind it. Never on a
+  menu, into a pane claude has left or cannot be seen into, into a finished
+  session or an adopted one; stamped (`ColorAt`) under the hook lock before
+  the keys go, so it is sent once. A value `/color` would refuse is no colour.
+  Full record: `docs/adr/0028-a-projects-colour-is-typed-in.md`.
 - **A question is a wait, and it is the one wait no hook reported.** A
   dispatcher sat on a Claude Code question menu — four options, asking before
   it wrote to another repo — while the table read `1 in flight · 0 want you ·
@@ -1119,6 +1134,11 @@
   **dir**, because the transcript is there. Trust is inherited into the
   account's own `.claude.json`. Full record:
   `docs/adr/0022-a-subscription-is-a-config-directory.md`.
+  - **The table says which subscription each row spends** — an ACCOUNT
+    column, `default` named too, shown only when more than one account is
+    configured (one would put the same word on every row) and only where the
+    feature cell can spare it; the detail line's `on <name>` stays for the
+    rest.
   - **The usage lens shows those figures, and a reading only goes forward.**
     The lens drew its bars from the transcript learner, while the forms already
     had Claude Code's own numbers. Measured on one Max login, the lens said 77%
@@ -1137,6 +1157,17 @@
     `mergeWindow` keeps the higher figure. A later `resets_at` starts the next
     window. An earlier one is a stale session and changes nothing, not even
     the reading's age.
+  - **A conversation can change subscription.** Running out stranded a
+    dispatcher on its account for the rest of the window, because `--resume`
+    under another config dir answers "No conversation found" (measured on
+    2.1.281). Copied into that dir's `projects/<folder>/` — beside its
+    subagent folder and `file-history/<id>` — the same session id resumes
+    there. So `a` on a row whose turn is over (and `swap <id> <account>`)
+    copies, never moves, ends the old claude, re-points the record and
+    resumes, opening with `continue` only if an API error ended the last turn.
+    Mid-turn, on a menu, adopted, same account, or an account that would stall
+    are refused by name. Full record:
+    `docs/adr/0027-a-conversation-can-change-subscription.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `<branch_prefix><slug>` (`feature/` unless config or the form says
   otherwise), commits, and PRs enrich it automatically. Every
@@ -1199,7 +1230,7 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
-  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`, and the two a
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap`, and the two a
   branchless conversation turns into work with, `worktree`/`dispatch`
   (`internal/fleetcmd`)
   and `steward [stop]` (`internal/steward`), `account` (`internal/accountcmd`)
@@ -1241,13 +1272,15 @@
   in its own worktree (rebuilt if it was reclaimed). A session ending never
   loses a dispatcher — triage's `h` and the product panel's `H` tab list every
   finished one and resume it. `contract.go` is the working contract every
-  launch closes with; `retry.go` is the `continue` a transient API error gets.
+  launch closes with; `retry.go` is the `continue` a transient API error gets. `color.go` types a
+  project's `/color` into its sessions (ADR 0028).
   `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
   `root.go` is where a feature branch starts: the remote's own default, the
   human's named `Root`, and the branch list the forms offer — and the reason
   none of it trusts `origin/HEAD`. `adopt.go` wraps a record around a session
   the human started (ADR 0026) and `brief.go` is the convention it is then
-  sent; `stall.go` is when a silent launch counts as stopped on a startup
+  sent; `swap.go` moves a conversation to another
+  account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup
   prompt; `trust.go` copies a repo's trust onto its worktree.
   `branching.go` is BRANCH, and `branchless.go` the dispatch that cuts
   none: a conversation across a product, in a folder of its own (ADR 0028);
@@ -1278,7 +1311,8 @@
   and 170 columns (more panes on wide screens, never one ballooned view).
   `collect_sessions.go` is the one collector that reads the machine rather than
   the records: the sessions on it that no dispatch claims, and `adopt.go` is
-  the key that adopts one. `search.go` is `/`; `editconfig.go` opens
+  the key that adopts one. `swap.go` is `a`, the account picker (ADR 0027).
+  `search.go` is `/`; `editconfig.go` opens
   `config.toml` in the human's editor (`e` in settings, `:config`).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is
