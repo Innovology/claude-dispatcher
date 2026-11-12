@@ -9,6 +9,7 @@ import (
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/keymap"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/version"
 )
 
@@ -121,6 +122,13 @@ type model struct {
 	swapOpen   bool
 	swapAt     *swapTarget
 	swapCursor int
+	// The steward picker over the triage lens (steward.go): every product's
+	// stewards, to jump into, reopen or start.
+	stewardPickOpen   bool
+	stewardPickCursor int
+	// stewardPickRulings is each product's standing rulings, read when the
+	// picker opens rather than on every frame it is drawn.
+	stewardPickRulings map[string][]steward.Ruling
 
 	backlogCursor int
 	picked        map[string]bool
@@ -552,6 +560,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, upgradeTick()
 
 	case trackedMsg:
+		if msg.notice != "" {
+			m.notice = msg.notice
+		}
 		return m.requestLoad(loadPlain)
 
 	case actionMsg:
@@ -619,12 +630,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
 
-	case stewardToggledMsg:
-		mm, cmd := m.onStewardToggled(msg)
-		return mm, cmd
-
-	case stewardStartedMsg:
-		mm, cmd := m.onStewardStarted(msg)
+	case stewardOpenedMsg:
+		mm, cmd := m.onStewardOpened(msg)
 		return mm, cmd
 
 	case tidyPlannedMsg:

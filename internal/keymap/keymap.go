@@ -101,7 +101,7 @@ var Defaults = []Binding{
 	{Action: "fleet.park", Scope: Fleet, Key: "p", Help: "park it · say why, it waits below the fleet · again unparks", Section: "work the fleet"},
 	{Action: "fleet.account", Scope: Fleet, Key: "a", Help: "switch account · move it to another subscription and resume the same conversation there", Section: "work the fleet"},
 	{Action: "fleet.dispatch", Scope: Fleet, Key: "d", Help: "dispatch · pick a repo, say what it does", Section: "work the fleet"},
-	{Action: "fleet.steward", Scope: Fleet, Key: "t", Help: "steward on/off · it answers what the brief settles, notes the rest on your rows", Section: "work the fleet"},
+	{Action: "fleet.steward", Scope: Fleet, Key: "t", Help: "stewards · jump into a product's steward, reopen an older one, or start a new one", Section: "work the fleet"},
 	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher that has ended and left the table, newest worked first", Section: "what has finished"},
 	{Action: "fleet.openpr", Scope: Fleet, Key: "o", Help: "open its pull request", Section: "what has finished"},
 

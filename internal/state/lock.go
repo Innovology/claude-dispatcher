@@ -17,11 +17,17 @@ import (
 // lock that cannot be taken must never stall a live Claude session, so any
 // failure returns a no-op release and the caller proceeds unlocked — exactly
 // the pre-lock behaviour, no worse.
-func Lock() (release func()) {
+func Lock() (release func()) { return LockNamed("hook.lock") }
+
+// LockNamed is Lock under a file of its own in the state directory, for a
+// load-modify-save that is not a dispatch record's and must not queue behind
+// the hooks: a steward's record, which the cockpit's poll and the human's own
+// keys both write (internal/steward). It fails open the same way.
+func LockNamed(name string) (release func()) {
 	if err := EnsureDirs(); err != nil {
 		return func() {}
 	}
-	f, err := os.OpenFile(filepath.Join(Dir(), "hook.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(filepath.Join(Dir(), name), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return func() {}
 	}

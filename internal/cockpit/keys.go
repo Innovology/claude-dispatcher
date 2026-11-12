@@ -132,18 +132,13 @@ func (m model) runCommand() (model, tea.Cmd) {
 		m.paletteOpen, m.paletteText = false, ""
 		return m.startUpgrade()
 	}
-	if c.name == "steward" {
+	if c.name == "steward" || c.name == "stewards" {
 		m.paletteOpen, m.paletteText = false, ""
-		m.notice = "starting the steward…"
-		return m, stewardStartCmd()
+		return m.stewardPickOpenFor(m.stewardPickProduct())
 	}
 	if c.name == "tidy" {
 		m.paletteOpen, m.paletteText = false, ""
 		return m.startTidy()
-	}
-	if c.name == "stop steward" {
-		m.paletteOpen, m.paletteText = false, ""
-		return m, stewardStopCmd()
 	}
 	direct := map[string]string{
 		"backlog": "backlog", "usage": "usage",
@@ -216,6 +211,10 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 	}
 	if m.swapOpen {
 		mm, cmd := m.updateSwap(k)
+		return mm, cmd
+	}
+	if m.stewardPickOpen {
+		mm, cmd := m.updateStewardPick(k)
 		return mm, cmd
 	}
 	// Naming an adoption is text entry too, and it opens over the products

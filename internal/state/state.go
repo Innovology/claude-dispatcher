@@ -95,6 +95,12 @@ type Dispatch struct {
 	// main repo — refs, PRs, and commit provenance are read from there.
 	WorktreePath string `json:"worktree_path,omitempty"`
 	Prompt       string `json:"prompt"`
+	// Goal is the dispatch form's DONE WHEN: the condition the dispatcher was
+	// told to keep working until, read back off the prompt at launch
+	// (dispatch.GoalOf), "" when none was given. It was a sentence in the
+	// prompt and nowhere else, so nothing could be handed it — not the triage
+	// row, not the steward whose job is to push a dispatcher toward it.
+	Goal string `json:"goal,omitempty"`
 	// Mode is the permission mode the session was dispatched in — one of
 	// dispatch.Mode's values. It is on the record because a resumed session has
 	// to reopen the way it went out and the transcript does not carry it, and
@@ -265,9 +271,18 @@ type Dispatch struct {
 	// current wait — "yours: the merge ships billing; CI green, no review" —
 	// written with `claude-dispatcher note`. An annotation like parking, never
 	// a Status. It only speaks for the wait it was written in (StewardNoteAt
-	// after WaitingSince) and is cleared when the next turn starts.
+	// after WaitingSince), with one exception: a later wait that closes on the
+	// same question (NotedAsk) is the same wait asked again, and the note
+	// carries to it. Otherwise the next wait clears it.
 	StewardNote   string     `json:"steward_note,omitempty"`
 	StewardNoteAt *time.Time `json:"steward_note_at,omitempty"`
+	// NotedAsk is the question the note was written about, in the session's
+	// own words (ask.Of of Said at the note), "" when the wait asked nothing.
+	// A dispatcher watching CI ends a turn on every tick, and each one closes
+	// on the same "want me to merge #743?": measured on the first steward's
+	// night, 108 stops on one record and 72 notes rewritten on it, one per
+	// tick, each waking the steward to say what it had said a minute before.
+	NotedAsk string `json:"noted_ask,omitempty"`
 	// Answer is the line last typed into the session to end this wait — by the
 	// cockpit's r or the reply command, the human's or the steward's — stamped
 	// at the send, under the hook lock. The hook that proves it landed
@@ -859,6 +874,11 @@ const (
 	// to" as the reason. Not a lifecycle event: the resumed session's
 	// SessionStart is what says it is running again.
 	EventAccountSwapped = "AccountSwapped"
+	// EventStewardMerged is a product steward merging a pull request under a
+	// ruling that allows it (fleetcmd merge), with the PR as the feature and
+	// the ruling as the reason. Not a lifecycle event: the tracker reads the
+	// merge off the forge as it reads any other.
+	EventStewardMerged = "StewardMerged"
 )
 
 // AppendEvent appends one line to events.jsonl; failures are swallowed because

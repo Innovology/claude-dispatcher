@@ -7,7 +7,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -35,10 +34,17 @@ Usage:
                                the steward's reading of a dispatcher's wait
   claude-dispatcher tidy       list the worktrees finished dispatchers left on disk
                                · tidy --yes removes them (: tidy in the cockpit)
-  claude-dispatcher steward    switch the fleet's steward on · steward stop switches it off
-                               (t on the triage table does the same)
+  claude-dispatcher steward    every product steward and its state · steward new <product>
+                               starts one, steward open <id> reopens an older one,
+                               steward end <product|id> ends one (t in the cockpit)
   claude-dispatcher account    the Claude subscriptions a dispatch can run under, and what
                                each has left · account add <name> adds and logs one in
+  claude-dispatcher ruling add|end|list
+                               a product's standing rulings · a steward records one only
+                               with your say-so, and merges only under one that allows it
+  claude-dispatcher ask | questions | answer
+                               the questions a steward saved for you · it asks them
+                               all when you type the recap keyword (settings: ,)
   claude-dispatcher swap <id|feature> <account>
                                move a dispatcher onto another subscription and resume
                                its conversation there (a on its row in the cockpit)
@@ -69,8 +75,8 @@ func main() {
 			os.Exit(1)
 		}
 	case "steward":
-		os.Exit(runSteward(args[1:]))
-	case "status", "reply", "park", "unpark", "note", "tidy", "swap":
+		os.Exit(steward.Run(args[1:], os.Stdout, os.Stderr))
+	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "ruling", "merge", "ask", "questions", "answer":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
@@ -101,36 +107,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		os.Exit(2)
 	}
-}
-
-// runSteward starts or stops the steward session (internal/steward).
-func runSteward(args []string) int {
-	if len(args) > 0 && args[0] == "stop" {
-		// Stop switches it off before it looks for a session, so "not running"
-		// still leaves it off — which is what was asked for.
-		if err := steward.Stop(); err != nil && steward.Enabled() {
-			fmt.Fprintln(os.Stderr, "steward:", err)
-			return 1
-		}
-		fmt.Println("steward off")
-		return 0
-	}
-	if len(args) > 0 {
-		fmt.Fprintf(os.Stderr, "steward: unknown argument %q (steward | steward stop)\n", args[0])
-		return 2
-	}
-	switch err := steward.Start(); {
-	case errors.Is(err, steward.ErrUntrusted):
-		fmt.Println("steward " + err.Error() + " · tmux attach -t =" + steward.Session)
-	case errors.Is(err, steward.ErrRunning):
-		fmt.Println("steward already running · jump in from the cockpit (: steward) or tmux attach -t =" + steward.Session)
-	case err != nil:
-		fmt.Fprintln(os.Stderr, "steward:", err)
-		return 1
-	default:
-		fmt.Println("steward started in " + steward.Dir() + " · jump in from the cockpit (: steward) or tmux attach -t =" + steward.Session)
-	}
-	return 0
 }
 
 func runCockpit() {

@@ -481,6 +481,12 @@ func TestRefreshCmds(t *testing.T) {
 	// GitHub for real, and a rate-limit answer parks gh for every test after
 	// this one.
 	fakeGHOnPath(t, "SUCCESS")
+	// The poll retires an earlier build's machine-wide steward; a test must not
+	// reach the real tmux server to do it.
+	prevRetire := stewardRetireLegacy
+	t.Cleanup(func() { stewardRetireLegacy = prevRetire })
+	retired := 0
+	stewardRetireLegacy = func() (bool, error) { retired++; return false, nil }
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
 	cfg := &config.Config{}
@@ -502,6 +508,9 @@ func TestRefreshCmds(t *testing.T) {
 	msg = trackRefreshCmd(cfg)()
 	if _, ok := msg.(trackedMsg); !ok {
 		t.Errorf("trackRefreshCmd = %#v", msg)
+	}
+	if retired != 1 {
+		t.Errorf("the poll did not retire the old steward (%d calls)", retired)
 	}
 
 	if cmd := waitState(nil); cmd == nil {
