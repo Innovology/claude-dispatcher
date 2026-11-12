@@ -98,19 +98,16 @@ var storeHash = regexp.MustCompile(`/nix/store/[0-9a-df-np-sv-z]{32}-`)
 // Of is the line of out that says why the command that printed it failed, in
 // one line of at most maxLen runes; "" for no output at all.
 func Of(out string) string {
-	lines := clean(out)
+	lines, _ := clean(out)
 	if len(lines) == 0 {
 		return ""
 	}
-	for i, ln := range lines {
-		if !topLevel(ln) || !isError(strings.TrimSpace(ln)) {
-			continue
-		}
+	if i := firstError(lines); i >= 0 {
 		end := i + 1
 		for end < len(lines) && !topLevel(lines[end]) {
 			end++
 		}
-		return finish(fromBlock(strings.TrimSpace(ln), lines[i+1:end]))
+		return finish(fromBlock(strings.TrimSpace(lines[i]), lines[i+1:end]))
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		if s := strings.TrimSpace(lines[i]); !progress(s) {
@@ -118,6 +115,28 @@ func Of(out string) string {
 		}
 	}
 	return finish(strings.TrimSpace(lines[len(lines)-1]))
+}
+
+// LineOf is the line of out, counted from 1, where the error Of reads opens:
+// where a person reading all of it should start. 0 when out holds no error
+// line, and the cause was read from its last words instead.
+func LineOf(out string) int {
+	lines, at := clean(out)
+	if i := firstError(lines); i >= 0 {
+		return at[i]
+	}
+	return 0
+}
+
+// firstError is the index of the first line that opens an error at the top
+// level, or -1.
+func firstError(lines []string) int {
+	for i, ln := range lines {
+		if topLevel(ln) && isError(strings.TrimSpace(ln)) {
+			return i
+		}
+	}
+	return -1
 }
 
 // fromBlock is the cause an error line and the indented block under it give.
@@ -151,8 +170,7 @@ func fromBlock(head string, block []string) string {
 		if nested != "" {
 			return nested
 		}
-		head = strings.TrimSpace(head + " " + logged)
-		return head
+		return strings.TrimSpace(head + " " + logged)
 	}
 	deeper := nested
 	if deeper == "" {
@@ -170,10 +188,10 @@ func fromBlock(head string, block []string) string {
 // clean splits out into the lines a person would have seen: colour codes
 // gone, a progress line's carriage returns resolved to what it last said, and
 // blank lines dropped. Indentation is kept, because it is how nix says which
-// lines belong to which error.
-func clean(out string) []string {
-	var lines []string
-	for _, ln := range strings.Split(out, "\n") {
+// lines belong to which error. at holds each kept line's number in out,
+// counted from 1.
+func clean(out string) (lines []string, at []int) {
+	for n, ln := range strings.Split(out, "\n") {
 		ln = strings.TrimRight(ln, "\r")
 		if i := strings.LastIndexByte(ln, '\r'); i >= 0 {
 			ln = ln[i+1:]
@@ -181,9 +199,10 @@ func clean(out string) []string {
 		ln = strings.TrimRight(ansi.Strip(ln), " \t")
 		if strings.TrimSpace(ln) != "" {
 			lines = append(lines, ln)
+			at = append(at, n+1)
 		}
 	}
-	return lines
+	return lines, at
 }
 
 func topLevel(ln string) bool { return ln != "" && ln[0] != ' ' && ln[0] != '\t' }

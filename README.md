@@ -368,7 +368,7 @@ To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key alr
 | screen | ids |
 |---|---|
 | anywhere | `quit` `help` `palette` `settings` `dispatch.new` `upgrade` `undo` `redraw` (`quit.now`, ctrl+c, is fixed) |
-| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.account` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` |
+| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.account` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` `fleet.output` |
 | products | `products.down` `products.up` `products.open` `products.assign` `products.new` `search.open` |
 | assignment editor | `editor.down` `editor.up` `editor.close` `editor.pane` `editor.mark` `editor.move` `editor.linear` `editor.unassign` `editor.reset` `editor.where` `editor.server` |
 | an unfolded row | `fold.down` `fold.up` `fold.pick` `fold.leave` |

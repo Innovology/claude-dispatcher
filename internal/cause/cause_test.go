@@ -182,3 +182,21 @@ func TestACommandThatPrintedNothingSaysHowItEnded(t *testing.T) {
 		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
+
+// Reading all of it starts at the error, not at the top of fifty lines of
+// downloads: LineOf is where the error Of reads opens, counted the way an
+// editor counts, blank lines included.
+func TestLineOfIsWhereTheErrorOpens(t *testing.T) {
+	out := fixture(t, "nix-develop-download-failed.txt")
+	n := LineOf(out)
+	lines := strings.Split(out, "\n")
+	if n < 1 || n > len(lines) || !strings.HasPrefix(lines[n-1], "error: Cannot build") {
+		t.Fatalf("LineOf = %d, which is not the first error line", n)
+	}
+	if got := LineOf("summary line\n\n" + out); got != n+2 {
+		t.Errorf("LineOf under a two-line lead = %d, want %d", got, n+2)
+	}
+	if got := LineOf("Killed\n"); got != 0 {
+		t.Errorf("LineOf with no error line = %d, want 0", got)
+	}
+}
