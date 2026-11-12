@@ -241,3 +241,51 @@ func TestDXCtrlUOnWhereAndPrefix(t *testing.T) {
 		t.Errorf("a cleared prefix cuts a bare branch, got %q", got)
 	}
 }
+
+// A title past a name's length is refused at submit, on TITLE, before the form
+// asks for WHAT — it is almost always the brief in the wrong field, and the
+// refusal names both the field it belongs in and the key that clears this one.
+// Nothing typed is lost.
+func TestDXSubmitRefusesATitleThatIsABrief(t *testing.T) {
+	m := dxFormModel(t)
+	m.dxField = dxTitleF
+	m = paste(t, m, pastedEmail)
+	title := m.dxTitle
+
+	m.dxField = dxGoalF
+	m, cmd := m.dxSubmit()
+	if cmd != nil {
+		t.Fatal("a brief-length title must not launch")
+	}
+	if m.dxField != dxTitleF {
+		t.Errorf("field = %d, want TITLE — not WHAT, which is empty because the brief is here", m.dxField)
+	}
+	for _, want := range []string{"characters", "WHAT", "ctrl+u"} {
+		if !strings.Contains(m.notice, want) {
+			t.Errorf("notice %q should mention %q", m.notice, want)
+		}
+	}
+	if !m.cqDispatch || m.dxTitle != title {
+		t.Error("a refused submit keeps the form and the title")
+	}
+	// The hint says so as the title grows, before any submit.
+	if h := m.dxTitleHint(); !strings.Contains(h, "longer than a title") || strings.Contains(h, "branch ") {
+		t.Errorf("TITLE's hint = %q", h)
+	}
+}
+
+// The ceiling is the + overlay's, and a title at it still launches.
+func TestDXTitleAtTheCeilingLaunches(t *testing.T) {
+	got := captureLaunches(t)
+
+	m := dxFormModel(t)
+	m.dxTitle = strings.Repeat("x", featureNameMax)
+	m.dxWhat = "the brief"
+	m, _ = m.dxSubmit()
+	if got.n != 1 || got.feature != strings.Repeat("x", featureNameMax) {
+		t.Errorf("an %d-character title should launch, got %d launches of %q (notice %q)", featureNameMax, got.n, got.feature, m.notice)
+	}
+	if newDispatchForm(nil).feature.CharLimit != featureNameMax {
+		t.Error("the two forms must share one ceiling")
+	}
+}

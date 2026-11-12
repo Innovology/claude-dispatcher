@@ -280,6 +280,25 @@ func dxSlugWords(s string, max int) string {
 	return strings.Join(parts, "-")
 }
 
+// featureNameMax is how long a feature's name may be, in characters, on both
+// dispatch forms. The `+` overlay's textinput stops taking characters there;
+// the dx form refuses at submit and says so under TITLE (dxTitleLong), because
+// the overrun it sees is a paste, and a paste cut silently at 80 characters
+// reads as a title that happens to stop mid-word.
+//
+// The name is not the branch — the slug is capped at dispatch.SlugWords — but
+// it is what the record is filed under and what every screen and the history
+// list print, and a brief pasted into TITLE by mistake would otherwise be
+// filed as a 3,000-character name.
+const featureNameMax = 80
+
+// dxTitleLong reports whether TITLE has run past a name's length, and by how
+// many characters it now stands.
+func (m model) dxTitleLong() (int, bool) {
+	n := utf8.RuneCountInString(strings.TrimSpace(m.dxTitle))
+	return n, n > featureNameMax
+}
+
 // dxBranch is the branch TITLE will produce. "untitled" is display-only: submit
 // refuses a title that slugs to nothing long before Launch could see it.
 func (m model) dxBranch() string {
@@ -600,6 +619,15 @@ func (m model) dxSubmit() (model, tea.Cmd) {
 		m.dxField, m.notice = dxTitleF, "name it — the branch is named from the title"
 		return m, nil
 	}
+	// Asked before WHAT is: a title this long is almost always the brief, typed
+	// or pasted into the wrong field, and "say what it should do" would send the
+	// human to an empty WHAT without saying where their brief went.
+	if n, long := m.dxTitleLong(); long {
+		m.dxField = dxTitleF
+		m.notice = "a title is a few words, this one is " + itoa(n) + " characters — " +
+			"the brief goes in WHAT · ctrl+u clears the title"
+		return m, nil
+	}
 	if strings.TrimSpace(m.dxWhat) == "" {
 		m.dxField = dxWhatF
 		m.notice = "say what it should do — the title alone is not a brief"
@@ -686,7 +714,15 @@ func (m model) dxRepoNone() string {
 
 // dxTitleHint turns into the branch preview as soon as there is something to
 // preview — the one place the human sees the name their history is filed under.
+//
+// Past a name's length it stops previewing and says so, as it happens rather
+// than at submit: the branch would be five words cut from a paragraph, and the
+// line is the one place on the form that sees TITLE growing into a brief.
 func (m model) dxTitleHint() string {
+	if n, long := m.dxTitleLong(); long {
+		return itoa(n) + " characters — longer than a title (" + itoa(featureNameMax) +
+			"), the brief goes in WHAT · ctrl+u clears"
+	}
 	if strings.TrimSpace(m.dxTitle) != "" {
 		return "branch " + m.dxBranch()
 	}
