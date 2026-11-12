@@ -58,12 +58,39 @@ value set by any route other than typing still draws as one row. A
 200,000-character title draws in about 20ms, and ctrl+c after the same
 paste-and-backspace sequence quits in 0.2s.
 
-**A field has a way out short of the form.** ctrl+u clears the field that has
-the keyboard and ctrl+w drops its last word — the readline pair the decisions
-search already answers to — through the same `dxEdit` as backspace, so WHERE
-still sends its cursor home and PREFIX still records an override. The footer
-names ctrl+u. They are not keymap actions, for the reason a query's keys are
-not (ADR 0024): while a field has the keyboard every key is the field's.
+**A field has a way out short of the form.** ctrl+u deletes everything before
+the caret, which with the caret at the end (where it is unless moved) clears
+the field; ctrl+w deletes the word before it and ctrl+k everything after it —
+the readline keys the decisions search and the `+` overlay's textinput already
+answer to — through the same `dxEdit` as backspace, so WHERE still sends its
+cursor home and PREFIX still records an override. The footer names ctrl+u.
+They are not keymap actions, for the reason a query's keys are not (ADR 0024):
+while a field has the keyboard every key is the field's.
+
+**The caret moves.** Asked for in the same breath as "enable arrow keys
+navigation in the title": a typo three words back was fixed by deleting the
+three words. In the one-line fields left/right step a character as the screen
+draws it (a grapheme, so an accent or a skin tone is never split), alt or ctrl
+with them — and alt+b/alt+f, what a Mac terminal sends for option-arrow — a
+word, home/end and ctrl+a/ctrl+e the ends, and delete takes the character under
+the caret; typing and pastes go in where it stands. It is held as the bytes
+*after* it, tagged with its field (`dxCaret`): every edit is at the caret, so
+that count is unchanged by anything done before it, the zero value is the end,
+and a key arriving in another field sends it home. The row is drawn around it
+every frame rather than scrolled and remembered: what follows gets up to half
+the room, so at the end the line scrolls exactly as it did. WHAT keeps its
+caret at the end — its wrap collapses runs of spaces, so a position in the text
+is not a position on the screen without a layout that keeps one.
+
+**A long field opens in the human's editor.** ctrl+g on WHAT or DONE WHEN is
+what it is in Claude Code: the text in `$VISUAL`/`$EDITOR`/vi (the editor `e`
+on settings uses, handed the terminal the same way), read back on exit with the
+caret at the end and the editor's closing newline dropped — WHAT keeping its
+lines, DONE WHEN folded onto its one. The file is private (0600) and removed
+only once its text is in the form; an editor that exits with an error (vim's
+`:cq`, the deliberate "never mind") leaves the field alone and keeps the file,
+named in the notice, because it may be the only copy of a long brief. It is
+the answer to WHAT's limits: the box shows six rows and the caret only the end.
 
 **A title is a name.** `featureNameMax` (80) is the ceiling on both forms. The
 `+` overlay's textinput stops there as it always did; the dx form **refuses** at
