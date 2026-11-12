@@ -22,6 +22,13 @@ import (
 
 // collectBacklog merges GitHub, Linear and Azure backlog items into
 // s.backlogTickets.
+// linearAssigned is the Linear read collectBacklog makes, once per token. It is
+// a var so a test can stand in for Linear: the read is an HTTP call to
+// api.linear.app, and a test that made it would be a test of the network. Its
+// one caller was covered only by accident, through a token another test leaked
+// into the environment (isolateIntegrationEnv).
+var linearAssigned = linear.Assigned
+
 func collectBacklog(ctx *collectCtx, s *snapshot) {
 	tickets := []ticket{}
 
@@ -78,7 +85,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	reads := linearReads(ctx.cfg)
 	readIssues := make([][]linear.Issue, len(reads))
 	forEach(reads, func(i int, r linearRead) {
-		if issues, err := linear.Assigned(r.key); err == nil {
+		if issues, err := linearAssigned(r.key); err == nil {
 			readIssues[i] = issues
 		}
 	})
