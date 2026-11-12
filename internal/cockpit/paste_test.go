@@ -226,7 +226,7 @@ func TestDXCtrlWDropsTheLastWord(t *testing.T) {
 func TestDXCtrlUOnWhereAndPrefix(t *testing.T) {
 	m := dxFormModel(t)
 	m.dxFilter, m.dxRepo = "shop", 1
-	m = m.dxEdit(dxWhereF, func(string) string { return "" })
+	m = m.dxEdit(dxWhereF, func(string, string) (string, string) { return "", "" })
 	if m.dxFilter != "" || m.dxRepo != 0 {
 		t.Errorf("WHERE cleared to %q with cursor %d", m.dxFilter, m.dxRepo)
 	}

@@ -74,7 +74,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -124,7 +123,7 @@ const dxUnassigned = clUnassigned
 // must agree on what "closed" means.
 func (m model) dxReset() model {
 	m.cqDispatch = false
-	m.dxField, m.dxRepo = dxWhereF, 0
+	m.dxField, m.dxRepo, m.dxCaret = dxWhereF, 0, dxCaret{}
 	m.dxFilter, m.dxTitle, m.dxWhat, m.dxGoal = "", "", "", ""
 	m.dxRoot = ""
 	m.dxPrefix = nil
@@ -397,6 +396,11 @@ func dxPrompt(title, what, goal string) string {
 func (m model) dxKey(k string) (model, tea.Cmd) {
 	rows := m.dxRows()
 	field := m.dxField
+	// A caret put in another field is that field's, and this one's is at its
+	// end: leaving a field and coming back puts the caret where typing resumes.
+	if m.dxCaret.field != field {
+		m.dxCaret = dxCaret{field: field}
+	}
 
 	switch k {
 	case "esc":
@@ -492,93 +496,30 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 
-	// backspace takes a character; ctrl+w the last word and ctrl+u the whole
-	// field — the readline pair the decisions search already answers to. The
-	// pair is the way out of one field without leaving the form: esc takes the
-	// repo pick, the root, the mode and every other field with it, and
-	// backspace one character at a time is no way out of a paste.
-	switch k {
-	case "backspace":
-		return m.dxEdit(field, dxChop), nil
-	case "ctrl+w":
-		return m.dxEdit(field, dxDropWord), nil
-	case "ctrl+u":
-		return m.dxEdit(field, func(string) string { return "" }), nil
+	// The caret's keys (dxcaret.go): backspace and delete a character, ctrl+w
+	// the word before the caret, ctrl+u everything before it and ctrl+k
+	// everything after, and the arrows, home and end to move. ctrl+u with the
+	// caret at the end clears the field — the way out of one field without
+	// leaving the form, since esc takes the repo pick, the root, the mode and
+	// every other field with it, and backspace one character at a time is no
+	// way out of a paste.
+	if mm, ok := m.dxCaretKey(field, k); ok {
+		return mm, nil
 	}
 
-	// WHAT is the one field here that holds a paragraph, so a pasted brief
-	// keeps its line breaks; every other field is one line, and a paste into it
-	// is folded onto that line (typedTextFor).
+	// Text goes in at the caret. WHAT is the one field here that holds a
+	// paragraph, so a pasted brief keeps its line breaks; every other field is
+	// one line, and a paste into it is folded onto that line (typedTextFor).
+	typed := typedTextFor
 	if field == dxWhatF {
-		if s, ok := typedBlockFor(m.key, k); ok {
-			m.dxWhat += s
-		}
-		return m, nil
+		typed = typedBlockFor
 	}
-	if s, ok := typedTextFor(m.key, k); ok {
-		switch field {
-		case dxWhereF:
-			// A narrowed list is a different list, so the cursor goes home
-			// rather than pointing at whatever now sits at that index.
-			m.dxFilter, m.dxRepo = m.dxFilter+s, 0
-		case dxTitleF:
-			m.dxTitle += s
-		case dxGoalF:
-			m.dxGoal += s
-		case dxRootF:
-			m.dxRoot += s
-		case dxPrefixF:
-			m = m.dxSetPrefix(m.dxPrefixText() + s)
-		}
+	if s, ok := typed(m.key, k); ok {
+		m = m.dxEdit(field, func(h, t string) (string, string) { return h + s, t })
 	}
 	// Everything else is swallowed: the form owns the keyboard, and a stray
 	// key must not act on the queue behind it.
 	return m, nil
-}
-
-// dxEdit applies an edit to the text of the field that has the keyboard. WHERE
-// sends its cursor home, because a different filter is a different list.
-// PREFIX records the edit as this dispatch's override, so clearing it means
-// "no prefix", which is an answer of its own (see dxPrefixText).
-func (m model) dxEdit(field dxFieldID, edit func(string) string) model {
-	switch field {
-	case dxWhereF:
-		m.dxFilter, m.dxRepo = edit(m.dxFilter), 0
-	case dxTitleF:
-		m.dxTitle = edit(m.dxTitle)
-	case dxWhatF:
-		m.dxWhat = edit(m.dxWhat)
-	case dxGoalF:
-		m.dxGoal = edit(m.dxGoal)
-	case dxRootF:
-		m.dxRoot = edit(m.dxRoot)
-	case dxPrefixF:
-		m = m.dxSetPrefix(edit(m.dxPrefixText()))
-	}
-	return m
-}
-
-// dxDropWord is ctrl+w: s without its last word, keeping the space before it so
-// the next word typed is a new one. A word ends at any space, including a
-// brief's line breaks.
-func dxDropWord(s string) string {
-	q := strings.TrimRightFunc(s, unicode.IsSpace)
-	i := strings.LastIndexFunc(q, unicode.IsSpace)
-	if i < 0 {
-		return ""
-	}
-	_, n := utf8.DecodeRuneInString(q[i:])
-	return q[:i+n]
-}
-
-// dxChop drops the last rune of s (backspace, on a string that may hold
-// multi-byte characters).
-func dxChop(s string) string {
-	r := []rune(s)
-	if len(r) == 0 {
-		return s
-	}
-	return string(r[:len(r)-1])
 }
 
 // mini2/maxi2 are mini/maxi for the field id, which is its own type.
@@ -1125,7 +1066,7 @@ func (m model) dxView(w, h int) string {
 		cqGap(3), cqGap(4),
 		cqFixed(flG(fg(cDim, truncate(m.cqPromptLead(), inner)))),
 		cqGap(1), cqGap(2),
-		cqFixed(m.dxFieldRow(inner, "WHERE", m.dxFilter, m.dxField == dxWhereF, m.dxRepoCount())),
+		cqFixed(m.dxFieldRow(inner, "WHERE", dxWhereF, m.dxRepoCount())),
 	}
 
 	// The gap under TITLE is order 10: the last spacer to go, because the two
@@ -1133,19 +1074,19 @@ func (m model) dxView(w, h int) string {
 	// touching its brief reads as one run-on sentence.
 	aboveWhat := []cqRow{
 		cqGap(5),
-		cqFixed(m.dxFieldRow(inner, "TITLE", m.dxTitle, m.dxField == dxTitleF, "")),
+		cqFixed(m.dxFieldRow(inner, "TITLE", dxTitleF, "")),
 		cqFixed(dxHintRow(inner, m.dxTitleHint())),
 		cqGap(10),
 	}
 	belowWhat := []cqRow{
 		cqFixed(dxHintRow(inner, m.dxWhatHint())),
 		cqGap(7),
-		cqFixed(m.dxFieldRow(inner, "DONE WHEN", m.dxGoal, m.dxField == dxGoalF, "")),
+		cqFixed(m.dxFieldRow(inner, "DONE WHEN", dxGoalF, "")),
 		cqFixed(dxHintRow(inner, m.dxGoalHint())),
 		cqGap(8),
-		cqFixed(m.dxFieldRow(inner, "ROOT", m.dxRoot, m.dxField == dxRootF, "")),
+		cqFixed(m.dxFieldRow(inner, "ROOT", dxRootF, "")),
 		cqFixed(dxHintRow(inner, m.dxRootHint())),
-		cqFixed(m.dxFieldRow(inner, "PREFIX", m.dxPrefixText(), m.dxField == dxPrefixF, m.dxPrefixNote())),
+		cqFixed(m.dxFieldRow(inner, "PREFIX", dxPrefixF, m.dxPrefixNote())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModeF, "MODE", dxModeWords(), m.dxModeSel(), m.dxModeHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxModelF, "MODEL", dxModelWords(), m.dxModelSel(), m.dxModelHint())),
 		cqFixed(dxSwitchRow(inner, m.dxField == dxAccountF, "ACCOUNT", m.dxAccountWords(), m.dxAccountSel(), m.dxAccountHint())),
@@ -1192,13 +1133,15 @@ func (m model) dxView(w, h int) string {
 
 // dxFieldRow is one labelled input line: LABEL, the typed value, the caret, and
 // (on WHERE only) a right-aligned count.
-func (m model) dxFieldRow(inner int, label, value string, active bool, right string) string {
+func (m model) dxFieldRow(inner int, label string, f dxFieldID, right string) string {
+	active := m.dxField == f
 	lbl := fg(dxLabelColor(active), padTo(truncate(label, dxLabelW), dxLabelW, alignLeft))
 	room := inner - dxLabelW - dxGapW
 	if right != "" {
 		room -= dispWidth(right) + dxGapW
 	}
-	left := lbl + blank(dxGapW) + dxValue(value, active, room)
+	head, tail := m.dxSplit(f)
+	left := lbl + blank(dxGapW) + dxValue(head, tail, active, room)
 	if right == "" {
 		return flG(left)
 	}
@@ -1236,26 +1179,46 @@ func dxLabelColor(active bool) string {
 	return cFaint
 }
 
-// dxValue is a field's text with the block caret after it.
+// dxValue is a field's text with the block caret in it: head is the text
+// before the caret, tail the text from it on.
 //
 // The caret is steady. The design blinks it, but the cockpit has no blink tick
 // and adding one would cost a full redraw twice a second for a cursor the
-// terminal already draws. When the value outgrows its room it scrolls left,
-// keeping the caret — the point of interest — on screen. An inactive field
+// terminal already draws. At the end of the text it is a block of its own; in
+// the middle it is the character it stands on, drawn in reverse.
+//
+// When the value outgrows its room the caret stays on screen: what follows it
+// is given up to half the room, and what comes before it the rest, so with the
+// caret at the end the line scrolls left as it always has, and moved back into
+// a long title the text slides past a caret that stays put mid-field. The
+// window is worked out from the caret every frame rather than remembered, so
+// nothing else has to keep it in step. An inactive field shows its end and
 // keeps the caret's column as a space, so the fields stay in line.
 //
 // The value is drawn through oneLine even though typing already folds it: this
 // row is budgeted as one row, and a value set any other way (a pre-filled
 // filter, a later caller) must not be able to draw as several.
-func dxValue(s string, active bool, room int) string {
+func dxValue(head, tail string, active bool, room int) string {
 	if room < 1 {
 		return ""
 	}
-	shown := tailFit(oneLine(s), room-1)
+	head, tail = oneLine(head), oneLine(tail)
 	if !active {
-		return fg(cFg, shown) + " "
+		return fg(cFg, tailFit(head+tail, room-1)) + " "
 	}
-	return fg(cFg, shown) + paint(cSurface, cFg, " ")
+	under, rest := " ", ""
+	if tail != "" {
+		under = firstCluster(tail)
+		rest = tail[len(under):]
+	}
+	avail := room - dispWidth(under)
+	if avail < 0 {
+		return paint(cSurface, cFg, " ")
+	}
+	want := mini(dispWidth(rest), avail/2)
+	before := tailFit(head, avail-want)
+	after := headFit(rest, avail-dispWidth(before))
+	return fg(cFg, before) + paint(cSurface, cFg, under) + fg(cFg, after)
 }
 
 // dxWhatRows is WHAT: the label, then the typed text wrapped down the value

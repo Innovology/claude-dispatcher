@@ -271,6 +271,7 @@ type model struct {
 	// called, what it does, when it is done, and how much it may do without
 	// asking. See dispatchx.go — cqDispatch is what says the form is open.
 	dxField  dxFieldID         // which line owns the keyboard
+	dxCaret  dxCaret           // where the caret stands in that line's text; see dxcaret.go
 	dxFilter string            // WHERE: repo filter (runes from the key message)
 	dxRepo   int               // cursor into dxRows(); clamped on read, reset by filtering
 	dxTitle  string            // TITLE: the feature name, and the branch

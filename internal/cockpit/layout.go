@@ -36,6 +36,22 @@ func tailFit(s string, w int) string {
 	return s[i:]
 }
 
+// headFit is the start of s that fits in w columns, measured the way tailFit
+// measures: each grapheme once. It is what follows a caret moved back into a
+// long field.
+func headFit(s string, w int) string {
+	used, i := 0, 0
+	for i < len(s) {
+		cl, cw := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
+		if cl == "" || used+cw > w {
+			break
+		}
+		used += cw
+		i += len(cl)
+	}
+	return s[:i]
+}
+
 // truncate clips s to at most w columns, adding an ellipsis when it overflows.
 func truncate(s string, w int) string {
 	if w <= 0 {
