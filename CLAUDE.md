@@ -405,7 +405,7 @@
   (`status --next` skips it), because every stop is the human's turn to talk. An
   empty branch asks the forge nothing, since `gh` reads an empty `--head` as every
   PR. Full record:
-  `docs/adr/0028-branchless-work-is-a-conversation-across-the-product.md`.
+  `docs/adr/0033-branchless-work-is-a-conversation-across-the-product.md`.
 - **A colour is a role, and the switch is news.** The cockpit paints only
   foregrounds onto the terminal's own ground, and it painted the dark design's
   hexes whatever that ground was: on a light terminal (NixOS/niri, ghostty
@@ -1173,7 +1173,7 @@
   otherwise), commits, and PRs enrich it automatically. Every
   dispatch that changes code works on a feature branch, even in repos that
   ship from main (PR from branch onto main). The one that cuts none is a
-  conversation, which changes nothing (ADR 0028).
+  conversation, which changes nothing (ADR 0033).
 - "Done means live": a feature stays open until deployed, unless explicitly
   stated otherwise. Deploys are always GitHub Actions; `internal/track`
   flips features to done when the deploy workflow succeeds after PR merge
@@ -1283,7 +1283,7 @@
   account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup
   prompt; `trust.go` copies a repo's trust onto its worktree.
   `branching.go` is BRANCH, and `branchless.go` the dispatch that cuts
-  none: a conversation across a product, in a folder of its own (ADR 0028);
+  none: a conversation across a product, in a folder of its own (ADR 0033);
   `work.go` is how it takes a branch and `send.go` how it sends workers out.
 - `internal/supervisor` — the session backend behind one interface: tmux on
   Unix, a console window per session on Windows. A session is addressed by
