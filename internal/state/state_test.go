@@ -404,3 +404,56 @@ func TestNewIDsAreDistinct(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// A branchless dispatcher's folder holds its brief and keys its transcript; it
+// is not a checkout, so nothing that removes a worktree may treat it as one. A
+// conversation about a whole product names no repo, and says so.
+func TestABranchlessRecordOwnsNoWorktree(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	d := &Dispatch{Branchless: true, Product: "pp", WorktreePath: filepath.Join(BranchlessDir(), "sitrep")}
+	if d.OwnsWorktree() {
+		t.Error("a branchless record claims its folder as a worktree")
+	}
+	if !d.WholeProduct() {
+		t.Error("a branchless record with no repo is not about its whole product")
+	}
+	if d.RepoName = "player-app"; d.WholeProduct() {
+		t.Error("a conversation that starts on a repo counts as the whole product")
+	}
+	if (&Dispatch{WorktreePath: "/wt"}).WholeProduct() || !(&Dispatch{WorktreePath: "/wt"}).OwnsWorktree() {
+		t.Error("an ordinary record changed")
+	}
+	if !strings.HasPrefix(BranchlessDir(), Dir()) {
+		t.Errorf("BranchlessDir %q is outside the state dir %q", BranchlessDir(), Dir())
+	}
+}
+
+// What kill and tidy may remove, and whether a record is still only talking:
+// a dispatch's own worktree; for a conversation, nothing until it cuts one for
+// its work, and never a worktree it only went into; never an adopted record's
+// directory. A conversation that took a branch is not one any more.
+func TestRemovableCheckoutAndConversation(t *testing.T) {
+	now := time.Now()
+	for _, c := range []struct {
+		name         string
+		d            *Dispatch
+		removable    string
+		conversation bool
+	}{
+		{"dispatch", &Dispatch{WorktreePath: "/wt/x", Branch: "feature/x"}, "/wt/x", false},
+		{"adopted", &Dispatch{WorktreePath: "/src/app", AdoptedAt: &now}, "", false},
+		{"conversation", &Dispatch{Branchless: true, WorktreePath: "/state/branchless/x"}, "", true},
+		{"cut", &Dispatch{Branchless: true, WorktreePath: "/state/branchless/x", Branch: "feature/y",
+			Checkout: "/wt/y", CheckoutCut: true}, "/wt/y", false},
+		{"entered", &Dispatch{Branchless: true, WorktreePath: "/state/branchless/x", Branch: "theirs",
+			Checkout: "/src/theirs"}, "", false},
+		{"nil", nil, "", false},
+	} {
+		if got := c.d.RemovableCheckout(); got != c.removable {
+			t.Errorf("%s: removable = %q, want %q", c.name, got, c.removable)
+		}
+		if got := c.d.Conversation(); got != c.conversation {
+			t.Errorf("%s: conversation = %v, want %v", c.name, got, c.conversation)
+		}
+	}
+}

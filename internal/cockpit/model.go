@@ -281,6 +281,9 @@ type model struct {
 	dxMode   dispatchpkg.Mode  // MODE: auto / manual / plan — the session's permission mode
 	dxModel  dispatchpkg.Model // MODEL: default, or a claude alias — what the session runs
 	dxFanOut bool              // FAN OUT: may the session spread across agents when the task splits
+	// dxBranching is BRANCH: whether it cuts a branch of its own, or is a
+	// conversation across the product with none (dispatch/branching.go).
+	dxBranching dispatchpkg.Branching
 	// ACCOUNT: the Claude subscription it runs under, by name ("default" is
 	// the human's own login). See accounts.go.
 	dxAccount string

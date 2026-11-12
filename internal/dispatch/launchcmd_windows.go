@@ -31,10 +31,23 @@ import (
 // shell is accepted and ignored: a console window has no shell to drop to, it
 // has `pause`. config.toml's `shell` is a Unix setting, and a Windows build
 // silently doing something else with it would be worse than not reading it.
-func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model, configDir string) string {
+func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model, configDir string, dirs ...string) string {
 	return fmt.Sprintf(`%sset "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
-		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s %s",
-			modeArgs(mode), modelArgs(model), psReadFile(promptPath))))
+		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s %s%s",
+			modeArgs(mode), modelArgs(model), psReadFile(promptPath), addDirArgs(dirs))))
+}
+
+// addDirArgs is --add-dir and its directories, last for the reason the Unix
+// build gives: the flag is variadic and would take the prompt for a directory.
+func addDirArgs(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
+	quoted := make([]string, len(dirs))
+	for i, d := range dirs {
+		quoted[i] = psQuote(d)
+	}
+	return " --add-dir " + strings.Join(quoted, " ")
 }
 
 // resumeCommand is launchCommand for a session that already exists: claude
@@ -52,14 +65,14 @@ func StewardCommand(stateDir, opening string) string {
 	return env + psRun(fmt.Sprintf("claude%s %s", modeArgs(ModeAuto), psQuote(opening))) + " & pause"
 }
 
-func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model, configDir string) string {
+func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model, configDir string, dirs ...string) string {
 	arg := ""
 	if promptPath != "" {
 		arg = " " + psReadFile(promptPath)
 	}
 	return fmt.Sprintf(`%sset "CLAUDE_DISPATCHER_ID=%s" && %s & pause`,
-		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s --resume %s%s",
-			modeArgs(mode), modelArgs(model), psQuote(sessionID), arg)))
+		configDirSet(configDir), dispatcherID, psRun(fmt.Sprintf("claude%s%s --resume %s%s%s",
+			modeArgs(mode), modelArgs(model), psQuote(sessionID), arg, addDirArgs(dirs))))
 }
 
 // psRun wraps a PowerShell statement in the invocation that runs it. -NoProfile

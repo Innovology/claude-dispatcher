@@ -218,6 +218,11 @@ func floorState(rec *state.Dispatch) string {
 	case state.StatusWorking:
 		return "working"
 	case state.StatusDone:
+		// A conversation that is over shipped nothing, and has no place on a
+		// floor of work in production.
+		if rec.Conversation() {
+			return ""
+		}
 		return "live"
 	case state.StatusExited:
 		if rec.PRState == "MERGED" || rec.PRMergedAt != nil {
@@ -285,7 +290,7 @@ func floorAsk(rec *state.Dispatch, st string, commits int, age string) *askBlock
 	}
 	return &askBlock{
 		kicker:   strings.ToUpper(stateMetaBy[st].label),
-		headline: rec.RepoName + " · " + rec.StatusReason,
+		headline: cqPlaceOf(rec) + " · " + rec.StatusReason,
 		evidence: strconv.Itoa(commits) + " commits · " + age,
 		actions:  []action{{"y", "approve"}, {"n", "deny"}, {"r", "reply"}, {"enter", "attach"}},
 	}

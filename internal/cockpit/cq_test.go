@@ -363,7 +363,7 @@ func TestCQStandInFormKeepsHForHistory(t *testing.T) {
 func TestCQFormEnterWalksFieldsAndEscClears(t *testing.T) {
 	m := cqModel(t)
 	m = press(m, "d")
-	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxRootF, dxPrefixF, dxModeF} {
+	for _, want := range []dxFieldID{dxTitleF, dxWhatF, dxGoalF, dxBranchF, dxRootF, dxPrefixF, dxModeF} {
 		m = press(m, "enter")
 		if m.dxField != want {
 			t.Fatalf("enter should advance to field %d, got %d", want, m.dxField)

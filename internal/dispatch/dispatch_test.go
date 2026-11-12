@@ -236,6 +236,41 @@ func TestCleanupWorktree(t *testing.T) {
 	}
 }
 
+// A clean worktree is not a worktree with nothing in it. Commits made on a
+// detached HEAD are held by that HEAD alone, and `git worktree remove` takes
+// the HEAD with the folder, so the kill key's cleanup would have dropped them
+// where nothing — no branch, no reflog — could bring them back. The disk
+// reclaim already keeps such a worktree (unreachableHead); the kill now asks
+// the same question.
+func TestCleanupWorktreeKeepsCommitsOnlyItsDetachedHeadHolds(t *testing.T) {
+	repo := initRepo(t)
+	wt := filepath.Join(t.TempDir(), "look")
+	gitIn(t, repo, "worktree", "add", "--detach", wt, "main")
+	gitIn(t, wt, "commit", "--allow-empty", "-m", "found it")
+
+	if CleanupWorktree(repo, wt) {
+		t.Fatal("removed a worktree whose detached HEAD is the only thing holding a commit")
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Fatal("the worktree went anyway")
+	}
+
+	// Once a branch holds the commit the HEAD is no longer its only copy, and
+	// the clean worktree goes as any other does.
+	gitIn(t, repo, "branch", "keep", gitIn(t, wt, "rev-parse", "HEAD"))
+	if !CleanupWorktree(repo, wt) {
+		t.Error("a clean detached worktree whose commits a branch holds should be removed")
+	}
+
+	// And a detached worktree that never committed is the common case: its
+	// HEAD is a commit main already has.
+	fresh := filepath.Join(t.TempDir(), "fresh")
+	gitIn(t, repo, "worktree", "add", "--detach", fresh, "main")
+	if !CleanupWorktree(repo, fresh) {
+		t.Error("a clean detached worktree at a commit main holds should be removed")
+	}
+}
+
 // Two live dispatches of one feature would share worktrees/<repo>/<slug> —
 // two claude sessions in a single checkout, the collision worktrees exist to
 // prevent — so the second is refused while the first is still running.

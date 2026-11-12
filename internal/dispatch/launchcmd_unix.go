@@ -28,10 +28,29 @@ import (
 // configDir is the account's CLAUDE_CONFIG_DIR, carried inline for the same
 // reason the id is: tmux starts a session with its server's environment, not
 // ours. "" — the default account — sets nothing at all (see account.Env).
-func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model, configDir string) string {
-	return fmt.Sprintf("%sCLAUDE_DISPATCHER_ID=%s claude%s%s %s%s",
+//
+// dirs are directories the session may reach beyond its own (a branchless
+// dispatch's repos, see branchless.go), and they go last — see addDirArgs.
+func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Model, configDir string, dirs ...string) string {
+	return fmt.Sprintf("%sCLAUDE_DISPATCHER_ID=%s claude%s%s %s%s%s",
 		configDirEnv(configDir), dispatcherID, modeArgs(mode), modelArgs(model),
-		readFileArg(promptPath), exitShell(shell))
+		readFileArg(promptPath), addDirArgs(dirs), exitShell(shell))
+}
+
+// addDirArgs is --add-dir and its directories as a leading-space fragment, or
+// "" for none. It is placed after the prompt, with nothing of claude's after
+// it, because the flag is variadic (`--add-dir <directories...>`): put before
+// the prompt it would read the prompt as one more directory, and the session
+// would open on nothing.
+func addDirArgs(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
+	quoted := make([]string, len(dirs))
+	for i, d := range dirs {
+		quoted[i] = shellQuote(d)
+	}
+	return " --add-dir " + strings.Join(quoted, " ")
 }
 
 // StewardCommand is the command the steward session runs: claude in auto mode,
@@ -89,14 +108,14 @@ func exitShell(shell string) string {
 // not of the transcript it reopens. The account is passed again for a harder
 // reason: the transcript lives in that account's config directory, and claude
 // started under any other cannot find the conversation at all.
-func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model, configDir string) string {
+func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model, configDir string, dirs ...string) string {
 	arg := ""
 	if promptPath != "" {
 		arg = " " + readFileArg(promptPath)
 	}
-	return fmt.Sprintf("%sCLAUDE_DISPATCHER_ID=%s claude%s%s --resume %s%s%s",
+	return fmt.Sprintf("%sCLAUDE_DISPATCHER_ID=%s claude%s%s --resume %s%s%s%s",
 		configDirEnv(configDir), dispatcherID, modeArgs(mode), modelArgs(model),
-		shellQuote(sessionID), arg, exitShell(shell))
+		shellQuote(sessionID), arg, addDirArgs(dirs), exitShell(shell))
 }
 
 // readFileArg is the shell fragment that expands to a file's contents as ONE

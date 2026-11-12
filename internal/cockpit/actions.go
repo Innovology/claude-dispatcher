@@ -140,7 +140,7 @@ func killCmd(features []string) tea.Cmd {
 			// An adopted dispatcher's directory is the human's own checkout,
 			// which existed before the record and outlives it. OwnsWorktree is
 			// the only thing standing between `x` and somebody's working copy.
-			if rec.OwnsWorktree() && !dispatchpkg.CleanupWorktree(rec.RepoPath, rec.WorktreePath) {
+			if p := rec.RemovableCheckout(); p != "" && !dispatchpkg.CleanupWorktree(rec.RepoPath, p) {
 				kept++
 			}
 			n++
@@ -157,7 +157,7 @@ func killCmd(features []string) tea.Cmd {
 		}
 		notice := strings.Join(parts, " · ")
 		if kept > 0 {
-			notice += fmt.Sprintf(" · %d worktree(s) kept (uncommitted changes)", kept)
+			notice += fmt.Sprintf(" · %d worktree(s) kept (holding work no branch has)", kept)
 		}
 		return actionMsg{notice: notice}
 	}
@@ -199,10 +199,15 @@ func markDoneCmd(feature string) tea.Cmd {
 			return actionMsg{notice: "\"" + feature + "\" has no record to mark"}
 		}
 		now := time.Now()
-		rec.Stop(state.StatusDone, "marked shipped", now)
+		// A branchless dispatcher shipped nothing, and its record says so.
+		word := "marked shipped"
+		if rec.Conversation() {
+			word = "marked done"
+		}
+		rec.Stop(state.StatusDone, word, now)
 		rec.Dismiss(now) // the human's own ending, and so already read
 		_ = state.Save(rec)
-		return actionMsg{notice: "\"" + feature + "\" marked shipped"}
+		return actionMsg{notice: "\"" + feature + "\" " + word}
 	}
 }
 
@@ -267,13 +272,13 @@ func resumeCmd(id, prompt string) tea.Cmd {
 		}
 		if mode == dispatchpkg.ResumeRelaunched {
 			return resumedMsg{
-				notice:  "started \"" + rec.Feature + "\" again in " + rec.RepoName + " · it never ran, so there was nothing to resume",
+				notice:  "started \"" + rec.Feature + "\" again in " + cqPlaceOf(rec) + " · it never ran, so there was nothing to resume",
 				session: resumedAt(rec, session),
 				env:     rec.EnvCommand,
 			}
 		}
 		return resumedMsg{
-			notice:  "resumed \"" + rec.Feature + "\" in " + rec.RepoName,
+			notice:  "resumed \"" + rec.Feature + "\" in " + cqPlaceOf(rec),
 			session: resumedAt(rec, session),
 			env:     rec.EnvCommand,
 		}
@@ -332,6 +337,46 @@ func launchCmd(cfg *config.Config, repoName, feature, prompt string, mode dispat
 		return launchedMsg{feature: feature, notice: "dispatched \"" + d.Feature + "\" → " + d.RepoName}
 	}
 }
+
+// launchBranchlessCmd dispatches a conversation with no branch: about the
+// whole of product when repoName is empty, else starting on repoName and
+// reaching the rest of its product (dispatch.ScopeOf). The scope is resolved
+// here, against a fresh discovery, for the reason launchCmd resolves its repo
+// here: a repo that has moved or gone since the form was drawn is a launch that
+// says so.
+func launchBranchlessCmd(cfg *config.Config, product, repoName, feature, prompt string, mode dispatchpkg.Mode, mdl dispatchpkg.Model, fanOut bool, acctName string) tea.Cmd {
+	return func() tea.Msg {
+		if cfg == nil {
+			return launchFailed(feature, "no config — cannot dispatch")
+		}
+		acct, ok := account.Find(cfg, acctName)
+		if !ok {
+			return launchFailed(feature, "no account named "+acctName+" — claude-dispatcher account")
+		}
+		scope, err := dispatchpkg.ScopeOf(repos.Discover(cfg), product, repoName)
+		if err != nil {
+			return launchFailed(feature, err.Error())
+		}
+		scope.Color = cfg.ColorFor(scope.Focus, scope.Product)
+		d, err := launchConversation(scope, feature, prompt, mode, mdl, fanOut, acct)
+		if err != nil {
+			return launchFailed(feature, err.Error())
+		}
+		where := d.RepoName
+		if where == "" {
+			where = "all of " + d.Product
+		}
+		return launchedMsg{feature: feature, notice: "dispatched \"" + d.Feature + "\" → " + where + " · no branch"}
+	}
+}
+
+// launchBranchless is the seam both forms hand a branchless dispatch through,
+// for the reason launchDispatch is one.
+var launchBranchless = launchBranchlessCmd
+
+// launchConversation is the dispatch package's launch, as a seam, so a test
+// can read what the command reports without starting a session.
+var launchConversation = dispatchpkg.LaunchBranchless
 
 // launchDispatch is the seam both dispatch forms hand off through, named as a
 // variable so a test can read what a form actually passes without starting a

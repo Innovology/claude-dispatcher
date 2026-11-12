@@ -89,6 +89,34 @@ type Dispatch struct {
 	// picked it up rather than cutting it, and on records written before a
 	// dispatch recorded where it started.
 	Root string `json:"root,omitempty"`
+	// Branchless records that this dispatch cut no branch (dispatch.BranchNone):
+	// a session over a product rather than a feature in a repo, for a
+	// conversation whose answer is the conversation. It has no checkout of
+	// its own: WorktreePath is a folder under the state dir holding its brief,
+	// and AddDirs are the canonical checkouts of the product's repos, which
+	// the session reaches through --add-dir. Branch stays "", which every
+	// forge read takes as nothing to ask. RepoName is the repo the
+	// conversation started on, or "" for the product as a whole; Product
+	// then says which one.
+	Branchless bool `json:"branchless,omitempty"`
+	// AddDirs are the directories a branchless session was given beyond its
+	// own (claude --add-dir). On the record because Resume has to give them
+	// again — they are a property of the session, not of its transcript — and
+	// because config may have moved a repo since.
+	AddDirs []string `json:"add_dirs,omitempty"`
+	// Checkout is the worktree a branchless dispatcher's conversation moved
+	// into when it turned into work (dispatch.TakeBranch), and CheckoutCut says
+	// this cockpit cut it, so kill and tidy may remove it as they would any
+	// dispatch's. A branch that already had a worktree — somebody's PR branch
+	// checked out beside the repo — is entered, not cut, and is never removed.
+	// WorktreePath stays the conversation's own folder: the transcript is keyed
+	// by where the session started, and that is where Resume reopens it.
+	Checkout    string `json:"checkout,omitempty"`
+	CheckoutCut bool   `json:"checkout_cut,omitempty"`
+	// DispatchedBy is the record id of the dispatcher that sent this one — a
+	// conversation turned orchestrator, sending out workers with
+	// `claude-dispatcher dispatch`. Empty for everything a human dispatched.
+	DispatchedBy string `json:"dispatched_by,omitempty"`
 	// WorktreePath is the dispatch's own checkout of Branch (a git worktree
 	// under WorktreesDir); the claude session runs there so concurrent
 	// dispatches never fight over the repo's working copy. RepoPath stays the
@@ -326,9 +354,38 @@ func (d *Dispatch) Adopted() bool {
 // OwnsWorktree reports whether WorktreePath is a checkout this cockpit cut and
 // may therefore remove. An adopted dispatcher's directory is the human's own,
 // and was there before the record.
+//
+// A branchless dispatcher's folder is not a checkout at all: it holds the
+// session's brief, and it is where its transcript is keyed, so a resume needs
+// it back. Nothing that removes a worktree has anything to do there.
 func (d *Dispatch) OwnsWorktree() bool {
-	return d != nil && d.WorktreePath != "" && d.AdoptedAt == nil
+	return d != nil && d.WorktreePath != "" && d.AdoptedAt == nil && !d.Branchless
 }
+
+// RemovableCheckout is the checkout kill and tidy may remove for this record,
+// or "": a dispatch's own worktree, or the one a branchless conversation cut
+// when it turned into work. Never a folder that is not a checkout, and never
+// one somebody else made.
+func (d *Dispatch) RemovableCheckout() string {
+	switch {
+	case d == nil:
+		return ""
+	case d.Branchless && d.CheckoutCut:
+		return d.Checkout
+	case d.OwnsWorktree():
+		return d.WorktreePath
+	}
+	return ""
+}
+
+// WholeProduct reports a branchless dispatcher about its product as a whole,
+// rather than one that started on a repo in it.
+func (d *Dispatch) WholeProduct() bool { return d != nil && d.Branchless && d.RepoName == "" }
+
+// Conversation reports a dispatcher that started with no branch and is still
+// only talking: it has not taken one (dispatch.TakeBranch). Once it has, it is
+// a worker like any other — tracked by its branch, shipped by its PR.
+func (d *Dispatch) Conversation() bool { return d != nil && d.Branchless && d.Branch == "" }
 
 // HoldsSessionBorn reports whether a session found at this record's address
 // (TmuxSocket, TmuxSession), created at born, is the session the record took
@@ -697,6 +754,11 @@ func DispatchesDir() string { return filepath.Join(Dir(), "dispatches") }
 
 // WorktreesDir holds per-dispatch git worktrees, worktrees/<repo>/<slug>.
 func WorktreesDir() string { return filepath.Join(Dir(), "worktrees") }
+
+// BranchlessDir holds a folder per branchless dispatch, branchless/<slug>-<id>: the
+// directory its session runs in, with nothing in it but its brief. It is not
+// a checkout — the session reads the product's own (see dispatch.Scope).
+func BranchlessDir() string { return filepath.Join(Dir(), "branchless") }
 
 // PromptsDir holds the prompt each dispatch was launched with, one file per
 // dispatch. The file is the transport, not a copy: the launch command reads it
