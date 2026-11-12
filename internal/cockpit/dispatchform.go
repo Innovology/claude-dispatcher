@@ -193,7 +193,7 @@ func newDispatchForm(cfg *config.Config) *dispatchForm {
 
 	feature := textinput.New()
 	feature.Placeholder = "payment retry flow"
-	feature.CharLimit = 80
+	feature.CharLimit = featureNameMax
 
 	prefix := textinput.New()
 	prefix.Placeholder = "none"
