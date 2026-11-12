@@ -94,3 +94,22 @@ func installFixture(t *testing.T) {
 		"alpha": {{k: "lead time", v: "2h", band: "high", spark: "▁▂▃"}},
 	}
 }
+
+// isolateIntegrationEnv blanks the variables a settings save exports
+// (applyConfigEnv: LINEAR_API_KEY, AZURE_DEVOPS_ORG, AZURE_DEVOPS_PROJECT) for
+// the rest of t, and puts them back when it ends.
+//
+// A save exports what was typed with os.Setenv, process-wide, and a test that
+// saved settings left it there: TestSettingsEditEveryField set all three to
+// "value" for every test after it. A later test that ran the real collectors
+// then queried Linear with that token and ran `az boards query`, which on a CI
+// runner (az is installed there) wrote ~/.azure into a HOME the test was
+// removing — "TempDir RemoveAll cleanup: … .azure: directory not empty", a
+// failure that came and went with timing. Call it in any test that saves those
+// fields, and before running the collectors against a sandboxed HOME.
+func isolateIntegrationEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"LINEAR_API_KEY", "AZURE_DEVOPS_ORG", "AZURE_DEVOPS_PROJECT"} {
+		t.Setenv(k, "")
+	}
+}

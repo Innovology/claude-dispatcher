@@ -876,6 +876,39 @@
   session or an adopted one; stamped (`ColorAt`) under the hook lock before
   the keys go, so it is sent once. A value `/color` would refuse is no colour.
   Full record: `docs/adr/0028-a-projects-colour-is-typed-in.md`.
+- **A field is the shape it is drawn, and every key has a way out.** Reported
+  as "need to have an escape from a bad state": a brief pasted into the dx
+  form's TITLE left a title that could not be deleted, a cockpit that would not
+  quit and a terminal that had to be closed. Three faults, reproduced against
+  the real binary. A bracketed paste is one key message with its newlines in
+  it, and `typedTextFor` passed them through, so TITLE (budgeted one row) drew
+  as ninety and pushed WHAT, the switches and the caret off screen.
+  `dxValue`'s scroll dropped a rune from the front and re-measured the rest on
+  every redraw, quadratic, and Bubble Tea redraws after every message, so each
+  queued key paid it again: after a 9,163-character paste and twenty
+  backspaces, **ctrl+c quit 122 seconds later** (it was resolved first all
+  along, but queued behind the backspaces). And between backspace (one
+  character, at an end that was off screen) and esc (the whole form) there was
+  nothing. So: **`typedTextFor` is one-line text** — breaks and tabs fold to a
+  space, other control characters drop — for every hand-rolled field, which is
+  what bubbles' textinput (the `+` overlay) always did, and WHAT, the one
+  paragraph, takes `typedBlockFor` (breaks kept as `\n`); **`tailFit`** keeps a
+  row's end in one pass (200,000 characters in ~20ms, ctrl+c in 0.2s);
+  **ctrl+u** deletes before the caret (the whole field, with it at the end),
+  **ctrl+w** the word before it and **ctrl+k** after it, named in the footer;
+  and **`featureNameMax` (80)** is a title's ceiling on both forms — the `+`
+  textinput stops there, the dx form refuses at submit, on TITLE and before
+  WHAT, and says so under TITLE as it grows: the length, that the brief goes in
+  WHAT, and ctrl+u. A refusal, not a cut, as with `MaxPromptBytes`. Nothing
+  moves the brief to WHAT for the human. **The caret moves** in the one-line
+  fields (`dxcaret.go`): arrows by grapheme, alt/ctrl+arrows and alt+b/alt+f by
+  word, home/end, delete, every edit at the caret; held as the bytes after it,
+  tagged with its field, so edits before it never move it and the zero value is
+  the end. WHAT keeps its caret at the end, because its wrap is not a layout a
+  position survives; **ctrl+g** on WHAT or DONE WHEN (`dxeditor.go`) opens the
+  text in the human's editor as Claude Code does, reads it back on exit, and on
+  an editor error (`:cq`) leaves the field and keeps the private file, named.
+  Full record: `docs/adr/0030-a-field-is-the-shape-it-is-drawn.md`.
 - **A question is a wait, and it is the one wait no hook reported.** A
   dispatcher sat on a Claude Code question menu — four options, asking before
   it wrote to another repo — while the table read `1 in flight · 0 want you ·
@@ -1279,7 +1312,9 @@
   the records: the sessions on it that no dispatch claims, and `adopt.go` is
   the key that adopts one. `swap.go` is `a`, the account picker (ADR 0027).
   `search.go` is `/`; `editconfig.go` opens
-  `config.toml` in the human's editor (`e` in settings, `:config`).
+  `config.toml` in the human's editor (`e` in settings, `:config`), and
+  `dxeditor.go` the dispatch form's WHAT or DONE WHEN (ctrl+g); `dxcaret.go`
+  is the caret in the form's one-line fields (ADR 0030).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is
   a real stage and every figure is what it found — the list is a description of

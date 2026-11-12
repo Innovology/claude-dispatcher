@@ -4,10 +4,52 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // dispWidth is the rendered column width of s, ignoring any ANSI colour codes.
 func dispWidth(s string) int { return lipgloss.Width(s) }
+
+// tailFit is the end of s that fits in w columns: what a one-line field shows
+// once its text outgrows it, because the caret is at the end and the end is
+// where the typing is. s is one line of plain text (oneLine).
+//
+// It measures each grapheme once, front to back, and stops at the first one it
+// can keep. The loop it replaced dropped one rune from the front and measured
+// everything left, on every redraw: quadratic in the length of the field. A
+// 9,000-character paste cost half a second a frame, and each key queued behind
+// it — the backspaces, esc, ctrl+c — paid that again, so the cockpit looked
+// frozen with a title in it.
+func tailFit(s string, w int) string {
+	if w < 1 {
+		return ""
+	}
+	over, i := dispWidth(s)-w, 0
+	for over > 0 && i < len(s) {
+		cl, cw := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
+		// A non-empty string always has a first cluster; the max only promises
+		// progress, so no input can hold this loop.
+		i += max(len(cl), 1)
+		over -= cw
+	}
+	return s[i:]
+}
+
+// headFit is the start of s that fits in w columns, measured the way tailFit
+// measures: each grapheme once. It is what follows a caret moved back into a
+// long field.
+func headFit(s string, w int) string {
+	used, i := 0, 0
+	for i < len(s) {
+		cl, cw := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
+		if used+cw > w {
+			break
+		}
+		used += cw
+		i += max(len(cl), 1)
+	}
+	return s[:i]
+}
 
 // truncate clips s to at most w columns, adding an ellipsis when it overflows.
 func truncate(s string, w int) string {
