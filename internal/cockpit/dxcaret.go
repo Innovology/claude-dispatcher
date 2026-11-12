@@ -206,11 +206,8 @@ func lastCluster(s string) string {
 	last := ""
 	for i := 0; i < len(s); {
 		c := firstCluster(s[i:])
-		if c == "" {
-			break
-		}
 		last = c
-		i += len(c)
+		i += max(len(c), 1)
 	}
 	return last
 }
