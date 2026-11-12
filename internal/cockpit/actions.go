@@ -357,6 +357,7 @@ func launchBranchlessCmd(cfg *config.Config, product, repoName, feature, prompt 
 		if err != nil {
 			return launchFailed(feature, err.Error())
 		}
+		scope.Color = cfg.ColorFor(scope.Focus, scope.Product)
 		d, err := launchConversation(scope, feature, prompt, mode, mdl, fanOut, acct)
 		if err != nil {
 			return launchFailed(feature, err.Error())

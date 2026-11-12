@@ -44,6 +44,11 @@ type Scope struct {
 	// Focus is the repo the conversation starts on, or "" for the product as a
 	// whole.
 	Focus string
+	// Color is the prompt-bar colour the session is given (ADR 0028): the
+	// focus repo's [colors] entry, else the product's. Set by the caller, which
+	// holds the config; a discovered repo carries only its own resolution, so
+	// about the whole product there is no repo to read it from.
+	Color string
 }
 
 // ScopeOf is the scope for a product, or for one repo in it: every repo the
@@ -242,6 +247,7 @@ func LaunchBranchless(s Scope, feature, prompt string, mode Mode, model Model, f
 		Branchless:   true,
 		AddDirs:      dirs,
 		WorktreePath: home,
+		Color:        s.Color,
 		Prompt:       prompt,
 		Mode:         string(mode),
 		Model:        string(model),

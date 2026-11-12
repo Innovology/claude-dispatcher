@@ -216,6 +216,25 @@ func TestAWholeProductConversationBorrowsNoRepo(t *testing.T) {
 	}
 }
 
+// The colour a conversation's session is given is its scope's, put on the
+// record the way Launch puts a repo's there, so DeliverColors types it in once
+// the session is up (ADR 0028's [colors]).
+func TestAConversationCarriesItsScopesColour(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	all := portfolio(t)
+	stubStart(t)
+
+	s, _ := ScopeOf(all, "pp", "")
+	s.Color = "cyan"
+	d, err := LaunchBranchless(s, "byga colour", "what is the status of byga?", ModeAuto, DefaultModel, false, ownAccount)
+	if err != nil {
+		t.Fatalf("LaunchBranchless: %v", err)
+	}
+	if d.Color != "cyan" {
+		t.Errorf("record colour = %q, want the scope's", d.Color)
+	}
+}
+
 // One live dispatch per name holds here too: the folder is keyed by the slug,
 // exactly as a worktree is, and a second session in it would share a brief and
 // a transcript key with the first.

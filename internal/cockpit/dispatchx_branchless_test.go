@@ -257,3 +257,36 @@ func TestALaunchedConversationSaysWhereItWent(t *testing.T) {
 		t.Errorf("from a repo: %+v, scope %+v", msg, asked)
 	}
 }
+
+// A conversation is given its project's colour the way a dispatch is (ADR
+// 0028's [colors]): the repo it starts on, else its product. About the whole
+// product there is no repo, so the product's entry is the only one that can
+// name it — and it is the one that should, since that is what it is about.
+func TestAConversationIsGivenItsProjectsColour(t *testing.T) {
+	prev := launchConversation
+	t.Cleanup(func() { launchConversation = prev })
+	var asked dispatchpkg.Scope
+	launchConversation = func(s dispatchpkg.Scope, feature, _ string, _ dispatchpkg.Mode, _ dispatchpkg.Model, _ bool, _ account.Account) (*state.Dispatch, error) {
+		asked = s
+		return &state.Dispatch{Feature: feature, RepoName: s.Focus, Product: s.Product, Branchless: true}, nil
+	}
+	cfg := &config.Config{
+		Roots:    []string{seedRepoRoot(t, "player-app", "playerpulse")},
+		Products: map[string][]string{"pp": {"player-app", "playerpulse"}},
+		Colors:   map[string]string{"pp": "cyan", "playerpulse": "green"},
+	}
+	for _, c := range []struct{ focus, want string }{
+		{"", "cyan"},             // the whole product: its own entry
+		{"playerpulse", "green"}, // a repo with an entry of its own
+		{"player-app", "cyan"},   // a repo without one: its product's
+	} {
+		product := "pp"
+		if c.focus != "" {
+			product = ""
+		}
+		launchBranchlessCmd(cfg, product, c.focus, "talk "+c.focus, "y", dispatchpkg.ModeAuto, dispatchpkg.DefaultModel, false, "")()
+		if asked.Color != c.want {
+			t.Errorf("focus %q: colour %q, want %q", c.focus, asked.Color, c.want)
+		}
+	}
+}
