@@ -168,3 +168,76 @@ func TestDXLongTitleDrawsQuickly(t *testing.T) {
 		t.Errorf("TITLE should show the end of its text:\n%s", out)
 	}
 }
+
+// ctrl+u empties the field that has the keyboard and nothing else: the repo
+// pick, the other fields and the switches stay. That is the escape from a paste
+// in the wrong field that esc is not — esc closes the form with all of it.
+func TestDXCtrlUClearsOnlyTheField(t *testing.T) {
+	m := dxFormModel(t)
+	m.dxField = dxTitleF
+	m = paste(t, m, pastedEmail)
+	m.dxWhat, m.dxGoal, m.dxRoot = "the brief", "ci green", "main"
+
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = mm.(model)
+
+	if m.dxTitle != "" {
+		t.Errorf("ctrl+u left TITLE = %q", m.dxTitle)
+	}
+	if !m.cqDispatch || m.dxField != dxTitleF {
+		t.Error("ctrl+u must leave the form open on the field it cleared")
+	}
+	if m.dxWhat != "the brief" || m.dxGoal != "ci green" || m.dxRoot != "main" {
+		t.Errorf("ctrl+u reached past its field: what=%q goal=%q root=%q", m.dxWhat, m.dxGoal, m.dxRoot)
+	}
+	if !strings.Contains(m.dxFooterHelp(), "ctrl+u clears") {
+		t.Errorf("the footer should name the key: %q", m.dxFooterHelp())
+	}
+}
+
+// ctrl+w drops the last word, on every text field, and a brief's line break
+// ends a word like a space does.
+func TestDXCtrlWDropsTheLastWord(t *testing.T) {
+	cases := map[string]string{
+		"payment retries":       "payment ",
+		"payment retries  ":     "payment ",
+		"one":                   "",
+		"":                      "",
+		"fix login\n- retry":    "fix login\n- ",
+		"naïve café":            "naïve ",
+		"word\u00a0nbsp-joined": "word\u00a0",
+	}
+	for in, want := range cases {
+		if got := dxDropWord(in); got != want {
+			t.Errorf("dxDropWord(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	m := dxFormModel(t)
+	m.dxField, m.dxWhat = dxWhatF, "retry declined cards"
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	if got := mm.(model).dxWhat; got != "retry declined " {
+		t.Errorf("ctrl+w on WHAT = %q", got)
+	}
+}
+
+// Clearing WHERE is a different list, so the cursor goes home; clearing PREFIX
+// is "no prefix", an answer of its own, not the default coming back.
+func TestDXCtrlUOnWhereAndPrefix(t *testing.T) {
+	m := dxFormModel(t)
+	m.dxFilter, m.dxRepo = "shop", 1
+	m = m.dxEdit(dxWhereF, func(string) string { return "" })
+	if m.dxFilter != "" || m.dxRepo != 0 {
+		t.Errorf("WHERE cleared to %q with cursor %d", m.dxFilter, m.dxRepo)
+	}
+
+	m.dxField = dxPrefixF
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = mm.(model)
+	if m.dxPrefix == nil || *m.dxPrefix != "" {
+		t.Errorf("ctrl+u on PREFIX should record an empty override, got %v", m.dxPrefix)
+	}
+	if got := m.dxBranch(); got != "untitled" {
+		t.Errorf("a cleared prefix cuts a bare branch, got %q", got)
+	}
+}
