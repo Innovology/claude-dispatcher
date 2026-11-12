@@ -404,3 +404,39 @@ func TestNewIDsAreDistinct(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// What a failed start printed goes under the state dir, one file per dispatch,
+// and the next failure of the same dispatch replaces it: what is worth reading
+// is why it does not start now. A state dir that cannot be made says so.
+func TestAFailedStartsOutputIsKeptOnePerDispatch(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
+	path, err := WriteOutput("abc123", "tmux new-session: error: x\n\nbuilding …\nerror: x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(path) != OutputDir() || !strings.HasPrefix(path, dir) {
+		t.Fatalf("output written to %s, want it under %s", path, OutputDir())
+	}
+	again, err := WriteOutput("abc123", "tmux new-session: error: y")
+	if err != nil || again != path {
+		t.Fatalf("a second failure went to %s (%v), want %s", again, err, path)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "tmux new-session: error: y" {
+		t.Errorf("output holds %q, want the latest failure's", b)
+	}
+	// A dispatch whose file cannot be written is refused, not reported kept.
+	if err := os.Mkdir(filepath.Join(OutputDir(), "dir.txt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteOutput("dir", "go"); err == nil {
+		t.Error("output written over a directory was reported written")
+	}
+
+	blocker := filepath.Join(t.TempDir(), "file")
+	writeFile(t, blocker, "not a directory")
+	t.Setenv("CLAUDE_DISPATCHER_STATE", filepath.Join(blocker, "state"))
+	if _, err := WriteOutput("x", "go"); err == nil {
+		t.Error("output that could not be written was reported written")
+	}
+}

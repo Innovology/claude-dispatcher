@@ -347,6 +347,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `enter` | attach the selected dispatcher's tmux session · open what is selected |
 | `y` · `x` · `s` | ship (squash-merge) · kill — dismiss, on a finished row; release, on an adopted one · skip to the back |
 | `o` | open the selected dispatcher's pull request |
+| `l` | on a dispatcher whose session would not start: everything the failed start printed, in your editor, at the error |
 | `/` · `n` · `ctrl+n` | search the list in front of you (fzf matching, lit in place) · next match · previous match |
 | `O` `R` `T` `S` `H` `Y` | in a product's panel: overview · review · team · shipped · history · your own sessions |
 | `space` · `A` | in your sessions: mark one · adopt it (or every marked one) as a dispatcher; it keeps running |
@@ -368,7 +369,7 @@ To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key alr
 | screen | ids |
 |---|---|
 | anywhere | `quit` `help` `palette` `settings` `dispatch.new` `upgrade` `undo` `redraw` (`quit.now`, ctrl+c, is fixed) |
-| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.account` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` |
+| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.account` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` `fleet.output` |
 | products | `products.down` `products.up` `products.open` `products.assign` `products.new` `search.open` |
 | assignment editor | `editor.down` `editor.up` `editor.close` `editor.pane` `editor.mark` `editor.move` `editor.linear` `editor.unassign` `editor.reset` `editor.where` `editor.server` |
 | an unfolded row | `fold.down` `fold.up` `fold.pick` `fold.leave` |
@@ -415,7 +416,7 @@ Each publisher's `skip_upload` is templated on its token, so an unset token mean
 ## Troubleshooting
 
 - **Every new dispatch asks you to "answer its startup prompt"** (or, on an older build, sits at *starting session*) — the hook isn't firing, so no session ever reports that it started. Re-run `claude-dispatcher init`; confirm `~/.claude/settings.json` points at the installed binary. If it is only one dispatch, attach: it is usually Claude Code asking whether to trust the folder.
-- **A repo's dispatches die at once with a `nix develop` error** — its `flake.nix` has no dev shell, or not one these sessions should use. `[session_env]` with `repo = ""` turns it off for that repo.
+- **A repo's dispatches die at once with a `nix develop` error** — its `flake.nix` has no dev shell, or not one these sessions should use. `[session_env]` with `repo = ""` turns it off for that repo. The row says which build failed and why in one line; `l` on it opens all of what `nix develop` printed — the builder's log and the `nix log` command to run — at the error.
 - **`SessionStart:startup hook error … .claude-dispatcher-wrapped: No such file or directory`** — the hook names a `/nix/store` build that has been garbage-collected (older releases pinned it there). Re-run `claude-dispatcher init`: it repoints every dispatcher hook at the path you invoked it through and removes the duplicates earlier installs left behind, without touching anyone else's hooks.
 - **`needs you` vs `blocked` lag** — those rely on the `Notification` hook matchers (`idle_prompt` / `permission_prompt`); `Stop` covers turn completion regardless.
 - **Backlog empty** — set a Linear key / Azure org in settings, and check `gh auth status` for GitHub Issues. One product's Linear tickets missing is usually the scope of its own token: a key granted only some of that workspace's teams returns nothing for the rest, rather than an error.

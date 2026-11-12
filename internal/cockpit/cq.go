@@ -382,6 +382,13 @@ func cqActs(rec *state.Dispatch, kind string) []cqAct {
 		if dispatchpkg.NeverStarted(rec) {
 			acts[0] = cqAct{k: "⏎", d: "start again", ok: "starting \"" + rec.Feature + "\" again…", keep: true}
 		}
+		// The lead says why its session would not start in one line; this is
+		// the rest of what was printed, for when the line is not enough to fix
+		// it. Offered only where there is more than the line (StartOutput).
+		if rec.StartOutput != "" {
+			acts = append(acts, cqAct{k: "l", d: "full error",
+				ok: "opening what \"" + rec.Feature + "\" printed…", keep: true})
+		}
 		if rec.PRNumber > 0 {
 			// No forge is threaded in here, so the flash names the feature rather
 			// than a "#123" that would be wrong on azure devops. The row's REF

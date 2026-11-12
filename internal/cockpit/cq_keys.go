@@ -189,6 +189,8 @@ func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
 		return m, unparkCmd(r.id)
 	case "o":
 		return m, openPRCmd(r.repo, r.ref)
+	case "l":
+		return m.openStartOutput(r)
 	case "y":
 		// On a review row y means "merge it", which is a real squash-merge on
 		// the forge; everywhere else it only marks the record done.

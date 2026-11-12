@@ -104,6 +104,7 @@ var Defaults = []Binding{
 	{Action: "fleet.steward", Scope: Fleet, Key: "t", Help: "steward on/off · it answers what the brief settles, notes the rest on your rows", Section: "work the fleet"},
 	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher that has ended and left the table, newest worked first", Section: "what has finished"},
 	{Action: "fleet.openpr", Scope: Fleet, Key: "o", Help: "open its pull request", Section: "what has finished"},
+	{Action: "fleet.output", Scope: Fleet, Key: "l", Help: "everything a session that would not start printed · in your editor, at the error", Section: "what has finished"},
 
 	// ---- products lens ------------------------------------------------------
 	{Action: "products.down", Scope: Products, Key: "j"},

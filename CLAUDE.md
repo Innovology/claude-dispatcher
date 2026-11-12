@@ -427,6 +427,30 @@
   The `+` form's `CharLimit = 500` went with it: a silent truncation and a loud
   refusal are not two settings of one dial. Full record:
   `docs/adr/0009-a-dispatch-that-did-not-happen-is-a-thing-that-happened.md`.
+- **A failure is read for its cause, and the rest is kept.** Reported as "on
+  macos build i could see more errors … not so here on nixos". Two causes,
+  neither about NixOS. The footer `spread` the help and the notice, and spread
+  drops the right side when both do not fit, so on a laptop-width terminal
+  every "launch failed" and "resume failed" vanished while a wide screen
+  showed them (a multi-line one spilled down it). And a failure was its first
+  line: a dispatch whose `nix develop` could not build printed 883 lines,
+  measured, and the record kept "copying path '…-nss-cacert-3.115' from
+  'https://cache.nixos.org'...", the one line that says nothing went wrong;
+  `git worktree add` leads with "Preparing worktree" the same way. So **a
+  notice never drops and never hides the keys**: one that does not fit beside
+  the help takes its own line above it (the first try gave it the help's room,
+  and a notice stands until the next, so the keys, `l` among them, were gone
+  for as long). **A command's error is its cause** (`internal/cause`): the
+  first top-level `error:`/`fatal:` line, the deepest error in the indented
+  block under it (a builder's `> ` complaint, the bottom of an eval trace),
+  else the last line that is not progress; store hashes dropped, 300 runes at
+  most. `tmux new-session` and both worktree git calls return a `cause.Error`,
+  so every `err.Error()` is that line and the output rides behind it. **The
+  rest is kept**: a failed launch, relaunch or resume writes cause and output
+  to `state/output/<id>.txt` (`StartOutput`), and `l` (`fleet.output`) opens it
+  in `$EDITOR` at the error, offered only where there is more than the line.
+  The audit keeps all of it (`cause.Full`). Full record:
+  `docs/adr/0031-a-failure-is-read-for-its-cause.md`.
 - **`origin/HEAD` is a cache, not an answer — and the root branch is a
   choice.** Reported as "the dispatcher attempts to fork a dead branch", with
   the launch that did it sitting in the event log 0009 had just added:
@@ -1178,9 +1202,9 @@
   and `steward [stop]` (`internal/steward`), `account` (`internal/accountcmd`)
   and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
-  dispatch audit) and `prompts/<id>.txt`, the prompt each dispatch is launched
-  with, under `~/.local/state/claude-dispatcher/` (override:
-  `CLAUDE_DISPATCHER_STATE`).
+  dispatch audit), `prompts/<id>.txt`, the prompt each dispatch is launched
+  with, and `output/<id>.txt`, what a session start that failed printed, under
+  `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
 - `internal/keymap` — every action the cockpit has (id, scope, default key,
   help line), `[keys]` overrides, and the collision rules. `?` is built from it.
 - `internal/fuzzy` — `/` search, wrapping fzf's own matcher in process; returns
@@ -1204,6 +1228,9 @@
   the record's `Said` (the last message, whole) and `Failure` (StopFailure).
 - `internal/ask` — the question a stopped session closed on, quoted; shared by
   the triage row and `status`.
+- `internal/cause` — the line of a failed command's output that says why, and
+  the error type that carries that line with the whole output behind it
+  (ADR 0031).
 - `internal/fleetcmd` — the triage table's reading and hand-acts on the command
   line, for a session stewarding the fleet: `status [--json|--next]`, `reply`,
   `note`, `park`, `unpark`.

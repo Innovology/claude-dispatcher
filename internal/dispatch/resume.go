@@ -209,10 +209,19 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		if relaunch {
 			return "", "", failLaunch(d, err)
 		}
+		// A conversation that would not reopen is still the finished
+		// dispatcher it was a moment ago, so its status is left alone. What it
+		// gains is what the failed start printed: the footer has room for the
+		// cause, and on a nix machine the rest is the builder's log.
+		was := d.StartOutput
+		if keepStartOutput(d, err); d.StartOutput != was {
+			_ = state.Save(d)
+		}
 		return "", "", err
 	}
 
 	started := time.Now()
+	d.StartOutput = ""
 	d.TmuxSession = name
 	d.Status = state.StatusLaunching
 	d.StatusReason = "resuming its session"

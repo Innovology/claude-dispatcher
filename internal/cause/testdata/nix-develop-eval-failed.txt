@@ -1,0 +1,24 @@
+error:
+       … while calling the 'derivationStrict' builtin
+         at «nix-internal»/derivation-internal.nix:37:12:
+           36|
+           37|   strict = derivationStrict drvAttrs;
+             |            ^
+           38|
+
+       … while evaluating derivation 'nix-shell'
+         whose name attribute is located at /nix/store/5rlswh6ibg6v04kls6k6g9aph1hwrw40-source/flake.nix:4:7
+
+       … while evaluating attribute 'buildInputs' of derivation 'nix-shell'
+         at /nix/store/5rlswh6ibg6v04kls6k6g9aph1hwrw40-source/flake.nix:7:7:
+            6|       builder = "/bin/sh";
+            7|       buildInputs = [ self.nonexistent.attr ];
+             |       ^
+            8|     };
+
+       error: attribute 'nonexistent' missing
+       at /nix/store/5rlswh6ibg6v04kls6k6g9aph1hwrw40-source/flake.nix:7:23:
+            6|       builder = "/bin/sh";
+            7|       buildInputs = [ self.nonexistent.attr ];
+             |                       ^
+            8|     };

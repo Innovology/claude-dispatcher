@@ -239,6 +239,13 @@ type Dispatch struct {
 	// the adoption. It is also the record's hold on its address: a session
 	// created after it has only taken the name (HoldsSessionBorn).
 	SessionStartedAt *time.Time `json:"session_started_at,omitempty"`
+	// StartOutput is the file holding everything the supervisor printed the
+	// last time this dispatch's session would not start — a launch, a
+	// relaunch or a resume (WriteOutput). The reason on the record is one line
+	// of it (internal/cause) and that line is usually enough; when it is not,
+	// this is the rest, and the row offers it. Set only when there was more
+	// than the line; cleared when a session does start.
+	StartOutput string `json:"start_output,omitempty"`
 	// Failure is the API error that ended the session's last turn, as Claude
 	// Code's StopFailure hook reported it. That hook fires *instead of* Stop, so
 	// without it a turn killed by an overloaded API left the record saying
@@ -722,6 +729,24 @@ func WritePrompt(name, prompt string) (string, error) {
 	}
 	path := PromptPath(name)
 	if err := os.WriteFile(path, []byte(prompt), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// OutputDir holds what a session that would not start printed, one file per
+// dispatch (Dispatch.StartOutput).
+func OutputDir() string { return filepath.Join(Dir(), "output") }
+
+// WriteOutput keeps text as the start output of dispatch id and returns where.
+// A later failure of the same dispatch replaces it: what is worth reading is
+// why it does not start now.
+func WriteOutput(id, text string) (string, error) {
+	if err := os.MkdirAll(OutputDir(), 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(OutputDir(), id+".txt")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		return "", err
 	}
 	return path, nil
