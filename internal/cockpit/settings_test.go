@@ -13,6 +13,7 @@ import (
 // budget, commits it, and checks the value reached config and re-saves. HOME is
 // sandboxed so it never touches the real config.toml.
 func TestSettingsEditPersists(t *testing.T) {
+	isolateIntegrationEnv(t)
 	t.Setenv("HOME", t.TempDir())
 
 	m := newModel()
@@ -110,6 +111,7 @@ func TestSettingsRefusesABadPrefixAndKeepsWhatWasTyped(t *testing.T) {
 // and a commit leaves a flash naming what was saved. Without the first the
 // human types blind; without the second "enter" looks like it did nothing.
 func TestSettingsShowsTheFieldBeingTypedAndWhatWasSaved(t *testing.T) {
+	isolateIntegrationEnv(t)
 	t.Setenv("HOME", t.TempDir())
 	m := newModel()
 	m.width, m.height = 160, 40
