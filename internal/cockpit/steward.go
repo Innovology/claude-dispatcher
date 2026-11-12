@@ -7,9 +7,12 @@ package cockpit
 // every product's stewards — the live one, the one a reboot interrupted, the
 // ones put down — under a "new steward" line of its own. enter jumps into a
 // live steward, reopens an older one where it left off, or starts a new one;
-// x ends the live or interrupted one, which stays reopenable. Nothing starts or
-// restarts a steward on its own: an interrupted steward is reopened, or
-// replaced with a fresh one, when the human says which (ADR 0029).
+// x ends the live or interrupted one, which stays reopenable. Nothing starts a
+// steward on its own, and by default nothing restarts one either: an
+// interrupted steward is reopened, or replaced with a fresh one, when the human
+// says which. config's steward_reopen = "interrupted" lets the poll reopen it
+// instead, a few times and then no more (steward.ReopenInterrupted); one the
+// human ended never comes back (ADR 0029).
 //
 // What a steward does still shows where the human already looks — its notes
 // and answers on their rows — and the headline says how many are live, and
@@ -33,6 +36,9 @@ type stewardRow struct {
 	id, product string
 	state       steward.State
 	opened      time.Time
+	// spent is the poll having reopened it as many times as it will
+	// (steward.ReopensSpent): interrupted now, it waits for the human.
+	spent bool
 }
 
 // stewardsNow is every steward as the last load found it. A load reads the
@@ -66,9 +72,32 @@ func collectStewardQuestions(cfg *config.Config) map[string]int {
 func collectStewards() []stewardRow {
 	var out []stewardRow
 	for _, s := range stewardAll() {
-		out = append(out, stewardRow{id: s.ID, product: steward.Key(s.Product), state: steward.StateOf(s), opened: s.OpenedAt})
+		out = append(out, stewardRow{id: s.ID, product: steward.Key(s.Product), state: steward.StateOf(s), opened: s.OpenedAt, spent: s.ReopensSpent()})
 	}
 	return out
+}
+
+// stewardReopenNotice is the footer's word on what the poll reopened, and on
+// any reopen that failed: a steward coming back by itself is news the human
+// did not ask for at that moment, and a failed one is the reason it did not.
+func stewardReopenNotice(reopened []*steward.Steward, err error) string {
+	var names []string
+	for _, s := range reopened {
+		names = append(names, steward.Key(s.Product)+"'s")
+	}
+	var parts []string
+	switch len(names) {
+	case 0:
+	case 1:
+		parts = append(parts, "reopened "+names[0]+" steward (it was interrupted)")
+	default:
+		last := len(names) - 1
+		parts = append(parts, "reopened "+strings.Join(names[:last], ", ")+" and "+names[last]+" stewards (they were interrupted)")
+	}
+	if err != nil {
+		parts = append(parts, "steward: "+strings.ReplaceAll(err.Error(), "\n", "; "))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // The steward package, as seams so a test can drive the picker without a
@@ -81,6 +110,8 @@ var (
 	stewardRulings       = steward.ActiveRulings
 	stewardOpenQuestions = steward.OpenQuestions
 	stewardRetireLegacy  = steward.RetireLegacy
+	// stewardReopenInterrupted is the poll's reopen, behind steward_reopen.
+	stewardReopenInterrupted = steward.ReopenInterrupted
 )
 
 // stewardClause is the headline's word on the stewards: nothing while there are
@@ -343,6 +374,9 @@ func (m model) viewStewardPick(w, h int) string {
 			glyph, word, wordTone = "●", "live", cGreen
 		case steward.Interrupted:
 			glyph, word, wordTone = "◌", "interrupted · enter reopens", cAmber
+			if it.st.spent {
+				word = "interrupted · reopened " + countOf(len(steward.ReopenBackoff), "time", "times") + ", did not stay up · enter reopens"
+			}
 		}
 		out = append(out, row(cw, bg,
 			c(marker, 2, cMid),

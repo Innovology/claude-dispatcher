@@ -53,7 +53,9 @@ type (
 	// ageTickMsg is the clock tick: a redraw and nothing else.
 	ageTickMsg struct{}
 	// trackedMsg fires after a track.Refresh pass (PR/deploy reconciliation).
-	trackedMsg struct{}
+	// Its notice is what the pass did that the human should hear about: a
+	// steward it reopened, or could not (steward_reopen).
+	trackedMsg struct{ notice string }
 	// bootProgressMsg carries one opening-screen step transition to the UI.
 	bootProgressMsg bootUpdate
 	// bootTickMsg paces the opening screen's spinner and colour sweep.
@@ -181,8 +183,15 @@ func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 		// does not go on answering waits beside the product stewards
 		// (steward.RetireLegacy).
 		_, _ = stewardRetireLegacy()
+		// And where a steward a reboot or a crash took down is reopened, when
+		// steward_reopen says so: the poll is the one loop that runs while the
+		// human is away, which is when it matters (steward.ReopenInterrupted).
+		notice := ""
+		if cfg.ReopensInterruptedStewards() {
+			notice = stewardReopenNotice(stewardReopenInterrupted())
+		}
 		track.Refresh(state.LoadAll(), cfg)
-		return trackedMsg{}
+		return trackedMsg{notice: notice}
 	}
 }
 

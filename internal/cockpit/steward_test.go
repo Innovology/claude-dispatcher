@@ -291,3 +291,66 @@ func TestStewardReopenSaveFailureIsSaid(t *testing.T) {
 		t.Fatalf("notice %q, flash %q", m.notice, m.settings.saved)
 	}
 }
+
+// The poll reopens interrupted stewards only where steward_reopen says so, and
+// says what it reopened — or could not — in the footer, since a steward coming
+// back by itself is news the human did not ask for at that moment.
+func TestThePollReopensInterruptedStewardsOnlyWhenAsked(t *testing.T) {
+	fakeGHOnPath(t, "SUCCESS")
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	prevRetire, prevReopen := stewardRetireLegacy, stewardReopenInterrupted
+	t.Cleanup(func() { stewardRetireLegacy, stewardReopenInterrupted = prevRetire, prevReopen })
+	stewardRetireLegacy = func() (bool, error) { return false, nil }
+	calls := 0
+	var reopened []*steward.Steward
+	var failed error
+	stewardReopenInterrupted = func() ([]*steward.Steward, error) { calls++; return reopened, failed }
+
+	if msg := trackRefreshCmd(&config.Config{})().(trackedMsg); calls != 0 || msg.notice != "" {
+		t.Fatalf("steward_reopen unset, yet the poll reopened (%d calls, %q)", calls, msg.notice)
+	}
+	on := &config.Config{StewardReopen: config.StewardReopenInterrupted}
+	if msg := trackRefreshCmd(on)().(trackedMsg); calls != 1 || msg.notice != "" {
+		t.Fatalf("on, with nothing to reopen: %d calls, %q", calls, msg.notice)
+	}
+	reopened = []*steward.Steward{{ID: "s1", Product: "alpha"}}
+	if msg := trackRefreshCmd(on)().(trackedMsg); msg.notice != "reopened alpha's steward (it was interrupted)" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+	reopened = []*steward.Steward{{ID: "s1", Product: "alpha"}, {ID: "s2", Product: ""}}
+	failed = errors.New("beta's steward: no server")
+	msg := trackRefreshCmd(on)().(trackedMsg)
+	if msg.notice != "reopened alpha's and unassigned's stewards (they were interrupted) · steward: beta's steward: no server" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+
+	m := newModel()
+	m.cfg = &config.Config{}
+	mm, _ := m.Update(msg)
+	if got := mm.(model).notice; got != msg.notice {
+		t.Errorf("the footer says %q", got)
+	}
+	mm, _ = mm.(model).Update(trackedMsg{})
+	if got := mm.(model).notice; got != msg.notice {
+		t.Error("a quiet poll wiped the notice")
+	}
+}
+
+// A steward the poll gave up on says so in the picker, since it is the one
+// interrupted steward that will not come back unless the human reopens it.
+func TestThePickerSaysWhenThePollGaveUp(t *testing.T) {
+	withStewards(t,
+		stewardRow{id: "dead1", product: "alpha", state: steward.Interrupted, spent: true},
+		stewardRow{id: "down1", product: "beta", state: steward.Interrupted},
+	)
+	m := newModel()
+	m.cfg = &config.Config{}
+	mm, _ := m.stewardPickOpenFor("alpha")
+	view := mm.viewStewardPick(140, 30)
+	if !strings.Contains(view, "interrupted · reopened 3 times, did not stay up · enter reopens") {
+		t.Errorf("picker:\n%s", view)
+	}
+	if strings.Count(view, "did not stay up") != 1 {
+		t.Errorf("an interrupted steward the poll has not given up on says it did:\n%s", view)
+	}
+}

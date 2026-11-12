@@ -560,6 +560,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, upgradeTick()
 
 	case trackedMsg:
+		if msg.notice != "" {
+			m.notice = msg.notice
+		}
 		return m.requestLoad(loadPlain)
 
 	case actionMsg:
