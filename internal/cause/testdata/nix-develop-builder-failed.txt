@@ -1,0 +1,18 @@
+unpacking 'https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.zst' into the Git cache...
+warning: not writing modified lock file of flake 'path:/home/user/src/app':
+• Added input 'nixpkgs':
+    'https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1115905.9ac0edc06bfb/nixexprs.tar.zst?narHash=sha256-BszPqU/Au5mm0nQIDUMnsksh6hgIp7iyaX/UBcuRa0c%3D' (2026-11-10)
+building '/nix/store/zdrxxi78c9smk5xbvx28w45hx8s9p769-broken-dep-1794486413.drv'...
+error: Cannot build '/nix/store/zdrxxi78c9smk5xbvx28w45hx8s9p769-broken-dep-1794486413.drv'.
+       Reason: builder failed with exit code 2.
+       Output paths:
+         /nix/store/ngawc86l2iq49jgw1h5sxll5gswsk2ld-broken-dep-1794486413
+       Last 2 log lines:
+       > compiling
+       > make: *** [Makefile:12: all] Error 2
+       For full logs, run:
+         nix log /nix/store/zdrxxi78c9smk5xbvx28w45hx8s9p769-broken-dep-1794486413.drv
+error: Cannot build '/nix/store/aqjxqgb2g9h3x04xwcafmcy5gj5x2vm5-nix-shell-env.drv'.
+       Reason: 1 dependency failed.
+       Output paths:
+         /nix/store/4bg80lbbf9kjx83n1lq5syd8qa0lhwdw-nix-shell-env

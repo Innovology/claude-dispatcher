@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/cause"
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -99,8 +100,11 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	defer func() {
 		switch {
 		case err != nil:
+			// The audit keeps everything the command printed, under its cause:
+			// the record and the screen have room for the one line, and this is
+			// where the rest is read when the line is not enough.
 			audit(state.Event{Event: state.EventDispatchFailed, Feature: feature, Repo: r.Name,
-				Reason: err.Error(), DispatcherID: idOf(d)})
+				Reason: cause.Full(err), DispatcherID: idOf(d)})
 		case d != nil:
 			audit(state.Event{Event: state.EventDispatchLaunched, Feature: feature, Repo: r.Name,
 				DispatcherID: d.ID, Cwd: d.WorktreePath})
@@ -696,12 +700,15 @@ func ensureWorktreeFrom(repoPath, path, branch string, root Root, repoRoot strin
 			return "", err
 		}
 		if out, err := exec.Command("git", "-C", repoPath, "branch", "--no-track", branch, base).CombinedOutput(); err != nil {
-			return "", fmt.Errorf("git branch %s from %s: %s", branch, base, strings.TrimSpace(string(out)))
+			return "", cause.Failed("git branch "+branch+" from "+base, out, err)
 		}
 		from = shortRef(base)
 	}
 	if out, err := exec.Command("git", "-C", repoPath, "worktree", "add", path, branch).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git worktree add %s: %s", branch, strings.TrimSpace(string(out)))
+		// git says what it is doing before it says why it could not — "Preparing
+		// worktree (checking out …)", then the fatal line — so the line kept is
+		// found, not taken first (internal/cause).
+		return "", cause.Failed("git worktree add "+branch, out, err)
 	}
 	return from, nil
 }
