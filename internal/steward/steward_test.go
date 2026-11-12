@@ -555,3 +555,237 @@ func TestEndStampsTheRecordBeforeTheSessionGoes(t *testing.T) {
 		t.Error("the session went while the record still said current")
 	}
 }
+
+// withClock makes the package's clock one the test moves.
+func withClock(t *testing.T, at time.Time) *time.Time {
+	t.Helper()
+	prev := now
+	t.Cleanup(func() { now = prev })
+	clock := at
+	now = func() time.Time { return clock }
+	return &clock
+}
+
+// With steward_reopen on, the poll reopens a steward a reboot took down: the
+// same conversation resumed in its own folder, told why it is back, and
+// counted, so a steward that keeps dying is not reopened for ever.
+func TestReopenInterruptedResumesTheSameConversation(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	clock := withClock(t, time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC))
+	s, err := Start("player")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.running["disp_steward_player"] = false // the weekend's reboot
+	*clock = clock.Add(30 * time.Hour)
+
+	got, err := ReopenInterrupted()
+	if err != nil || len(got) != 1 || got[0].ID != s.ID {
+		t.Fatalf("reopened %v, %v", got, err)
+	}
+	last := f.started[len(f.started)-1]
+	if !strings.Contains(last, "--resume '"+s.SessionID+"'") || !strings.Contains(last, "|"+s.Dir()+"|") {
+		t.Fatalf("not the same conversation in its own folder: %s", last)
+	}
+	if !strings.Contains(last, "reopened you on its own") {
+		t.Errorf("the steward is not told it was interrupted and reopened by the cockpit: %s", last)
+	}
+	cur := Current("player")
+	if cur == nil || cur.ID != s.ID || cur.AutoReopens != 1 || !cur.OpenedAt.Equal(*clock) || StateOf(cur) != Live {
+		t.Fatalf("after the reopen: %+v (%s)", cur, StateOf(cur))
+	}
+	if again, _ := ReopenInterrupted(); len(again) != 0 {
+		t.Fatal("a live steward was reopened")
+	}
+}
+
+// What the poll never reopens: a steward the human ended, a live one, and one
+// for a product the config no longer names — whose steward would be stewarding
+// nothing that groups.
+func TestReopenInterruptedLeavesTheRestAlone(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	clock := withClock(t, time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC))
+	ended, _ := Start("player")
+	if _, err := End(ended.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Start("tools"); err != nil {
+		t.Fatal(err)
+	}
+	gone := &Steward{ID: "gone1", Product: "retired", SessionID: newUUID(), OpenedAt: *clock}
+	if err := save(gone); err != nil {
+		t.Fatal(err)
+	}
+	*clock = clock.Add(time.Hour)
+	started := len(f.started)
+
+	got, err := ReopenInterrupted()
+	if err != nil || len(got) != 0 || len(f.started) != started {
+		t.Fatalf("reopened %v (%v), started %v", got, err, f.started[started:])
+	}
+}
+
+// A steward opened a moment ago whose claude is not up yet reads as
+// interrupted; the first step is a minute so it is never taken for one.
+func TestReopenInterruptedWaitsOutAStartingSteward(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	clock := withClock(t, time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC))
+	if _, err := Start("player"); err != nil {
+		t.Fatal(err)
+	}
+	f.idle["disp_steward_player"] = true // the pane's shell has not run claude yet
+	*clock = clock.Add(30 * time.Second)
+	if got, _ := ReopenInterrupted(); len(got) != 0 {
+		t.Fatal("a steward still starting was reopened")
+	}
+	*clock = clock.Add(31 * time.Second)
+	if got, _ := ReopenInterrupted(); len(got) != 1 {
+		t.Fatal("a steward a minute dead was not reopened")
+	}
+	// The shell the dead claude left behind is replaced, not stacked beside.
+	if len(f.killed) != 1 {
+		t.Errorf("killed %v", f.killed)
+	}
+}
+
+// A steward that dies on every reopen is reopened on the backoff — a minute,
+// five, fifteen, each from the last attempt — and then left for the human,
+// whose own reopen starts the count again.
+func TestReopenInterruptedBacksOffThenLeavesItToTheHuman(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	clock := withClock(t, time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC))
+	s, _ := Start("player")
+	die := func() { f.idle["disp_steward_player"] = true } // claude exits at once
+	die()
+	*clock = clock.Add(2 * time.Hour)
+	for i, step := range ReopenBackoff {
+		if i > 0 {
+			*clock = clock.Add(step - time.Second)
+			if got, _ := ReopenInterrupted(); len(got) != 0 {
+				t.Fatalf("attempt %d came before its %v", i+1, step)
+			}
+			*clock = clock.Add(time.Second)
+		}
+		if got, _ := ReopenInterrupted(); len(got) != 1 {
+			t.Fatalf("attempt %d did not come at %v", i+1, step)
+		}
+		die()
+	}
+	cur := Current("player")
+	if cur.AutoReopens != len(ReopenBackoff) || !cur.ReopensSpent() {
+		t.Fatalf("after the last step: %+v", cur)
+	}
+	*clock = clock.Add(48 * time.Hour)
+	if got, _ := ReopenInterrupted(); len(got) != 0 {
+		t.Fatal("reopened past the last step")
+	}
+	if StateOf(cur) != Interrupted {
+		t.Fatal("a steward the poll gave up on must still read as interrupted, for the human")
+	}
+	if _, err := Reopen(s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if cur := Current("player"); cur.AutoReopens != 0 || cur.ReopensSpent() {
+		t.Fatalf("the human's reopen did not start the count again: %+v", cur)
+	}
+}
+
+// A reopen that held — the steward seen live a quarter of an hour after it —
+// is forgotten, so next week's reboot starts on the first step again.
+func TestReopenInterruptedForgetsAReopenThatHeld(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	clock := withClock(t, time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC))
+	mustStart(t, "player")
+	f.running["disp_steward_player"] = false
+	*clock = clock.Add(time.Hour)
+	mustReopen(t)
+	*clock = clock.Add(14 * time.Minute)
+	mustReopen(t)
+	if Current("player").AutoReopens != 1 {
+		t.Fatal("forgotten before it had held")
+	}
+	*clock = clock.Add(time.Minute)
+	mustReopen(t)
+	if n := Current("player").AutoReopens; n != 0 {
+		t.Fatalf("a reopen that held is still counted: %d", n)
+	}
+}
+
+// A launch that fails still counts as an attempt and waits its step: a session
+// tmux refuses must not be asked for again on every poll.
+func TestReopenInterruptedCountsAFailedLaunch(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	clock := withClock(t, time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC))
+	mustStart(t, "player")
+	f.running["disp_steward_player"] = false
+	*clock = clock.Add(time.Hour)
+	newSession = func(supervisor.Session, string, string, string) error { return errors.New("no server") }
+	got, err := ReopenInterrupted()
+	if len(got) != 0 || err == nil || !strings.Contains(err.Error(), "player's steward: no server") {
+		t.Fatalf("reopened %v, %v", got, err)
+	}
+	if n := Current("player").AutoReopens; n != 1 {
+		t.Fatalf("the failed attempt was not counted: %d", n)
+	}
+	calls := 0
+	newSession = func(supervisor.Session, string, string, string) error { calls++; return nil }
+	*clock = clock.Add(time.Minute)
+	_, _ = ReopenInterrupted() // whether it errs is not the point: it must not launch
+	if calls != 0 {
+		t.Fatal("retried before its step")
+	}
+}
+
+// No supervisor is nothing to do; a config that cannot be read does not say
+// no to a product; a shell that cannot be cleared out of the way fails that
+// steward's reopen and says whose.
+func TestReopenInterruptedEdges(t *testing.T) {
+	f := &fakeSup{trusted: true}
+	withFakes(t, f, exePath(t))
+	clock := withClock(t, time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC))
+	mustStart(t, "player")
+	f.idle["disp_steward_player"] = true
+	*clock = clock.Add(time.Hour)
+
+	available = func() bool { return false }
+	if got, err := ReopenInterrupted(); got != nil || err != nil {
+		t.Fatalf("without a supervisor: %v %v", got, err)
+	}
+	available = func() bool { return true }
+
+	killSession = func(supervisor.Session) error { return errors.New("tmux said no") }
+	if _, err := ReopenInterrupted(); err == nil || !strings.Contains(err.Error(), "player's steward: tmux said no") {
+		t.Fatalf("a failed kill: %v", err)
+	}
+
+	killSession = func(s supervisor.Session) error { f.running[s.Name] = false; return nil }
+	loadConfig = func() (*config.Config, error) { return nil, errors.New("unreadable") }
+	*clock = clock.Add(time.Hour)
+	if got, err := ReopenInterrupted(); err != nil || len(got) != 1 {
+		t.Fatalf("an unreadable config stopped the reopen: %v %v", got, err)
+	}
+}
+
+func mustStart(t *testing.T, product string) *Steward {
+	t.Helper()
+	s, err := Start(product)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func mustReopen(t *testing.T) []*Steward {
+	t.Helper()
+	got, err := ReopenInterrupted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}

@@ -63,7 +63,16 @@ type Steward struct {
 	// steward of the product being started or reopened. Nil on the current
 	// one, live or interrupted.
 	EndedAt *time.Time `json:"ended_at,omitempty"`
+	// AutoReopens is how many times in a row the cockpit's poll has reopened
+	// it without the reopen holding (ReopenInterrupted). The human's own
+	// reopen clears it, and so does a poll that finds it still up reopenHeld
+	// after the last one.
+	AutoReopens int `json:"auto_reopens,omitempty"`
 }
+
+// ReopensSpent reports whether the poll has reopened s as many times as it
+// will: an interrupted steward past this waits for the human.
+func (s *Steward) ReopensSpent() bool { return s.AutoReopens >= len(ReopenBackoff) }
 
 // State is what a steward is right now.
 type State string
@@ -72,8 +81,9 @@ const (
 	// Live: the product's current steward, with claude running in its session.
 	Live State = "live"
 	// Interrupted: the current steward whose session went away without anyone
-	// ending it — a reboot, a crash, claude exiting. Nothing brings it back on
-	// its own: the human reopens it, or starts a new one.
+	// ending it — a reboot, a crash, claude exiting. The human reopens it, or
+	// starts a new one; with config's steward_reopen on, the cockpit's poll
+	// reopens it too (ReopenInterrupted).
 	Interrupted State = "interrupted"
 	// Ended: put down, and reopenable.
 	Ended State = "ended"
@@ -313,7 +323,7 @@ func Start(product string) (*Steward, error) {
 	}
 	t := now()
 	s := &Steward{ID: state.NewID(), Product: product, SessionID: newUUID(), CreatedAt: t, OpenedAt: t}
-	err := launch(s, false)
+	err := launch(s, openedNew)
 	if err != nil && !errors.Is(err, ErrUntrusted) {
 		// A conversation that never started is not one to list or reopen: its
 		// folder holds a brief and nothing else, so it goes.
@@ -358,11 +368,102 @@ func Reopen(id string) (*Steward, error) {
 	}
 	s.EndedAt = nil
 	s.OpenedAt = now()
-	err = launch(s, true)
+	// The human reopening it is a fresh start for the poll's count.
+	s.AutoReopens = 0
+	err = launch(s, openedByHuman)
 	if err != nil && !errors.Is(err, ErrUntrusted) {
 		return nil, err
 	}
 	return s, err
+}
+
+// ReopenBackoff is how long after its last opening an interrupted steward
+// waits before the poll reopens it, one step per attempt in a row. Its length
+// is the cap.
+//
+// The first step is a minute so that a steward opened a moment ago — by the
+// human or by the poll — is never taken for one that went away: between tmux
+// starting its pane and the pane's shell running claude, the session reads as
+// idle. A steward a reboot interrupted was opened hours before, so its first
+// reopen is the next poll. The rest is the schedule a failed turn's "continue"
+// keeps (dispatch.RetryBackoff), and then the steward is the human's: one that
+// dies again and again — a resume claude refuses, a binary gone from PATH —
+// is not fixed by a fourth try, and every reopen can start a turn, so
+// reopening it every minute for ever would be spend nobody asked for.
+var ReopenBackoff = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute}
+
+// reopenHeld is how long a steward the poll reopened has to stay up for the
+// reopen to count as having worked. A poll that finds it live past that
+// forgets the count, so next week's reboot starts on the first step again.
+const reopenHeld = 15 * time.Minute
+
+// ReopenInterrupted reopens each product's interrupted steward — the current
+// one, whose session went away without anyone ending it — resuming the same
+// conversation, on the ReopenBackoff schedule. It is the cockpit poll's, and
+// runs only where config's steward_reopen says so. A steward the human ended
+// is never reopened, whatever the setting; nor is a live one, nor one for a
+// product the config no longer names, which would be stewarding nothing that
+// groups. It returns the stewards it reopened, and the launches that failed.
+func ReopenInterrupted() ([]*Steward, error) {
+	if !available() {
+		return nil, nil
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		cfg = nil
+	}
+	defer lockStewards()()
+	t := now()
+	var out []*Steward
+	var errs []error
+	seen := map[string]bool{}
+	// All is newest-opened first, so the first of a product's that has not
+	// ended is its current one (Current).
+	for _, s := range All() {
+		if s.EndedAt != nil || seen[Key(s.Product)] {
+			continue
+		}
+		seen[Key(s.Product)] = true
+		if StateOf(s) == Live {
+			if s.AutoReopens > 0 && t.Sub(s.OpenedAt) >= reopenHeld {
+				s.AutoReopens = 0
+				if err := save(s); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			continue
+		}
+		if CheckProduct(cfg, s.Product) != nil || s.ReopensSpent() || t.Before(s.OpenedAt.Add(ReopenBackoff[s.AutoReopens])) {
+			continue
+		}
+		if err := reopenItself(s, t); err != nil {
+			errs = append(errs, fmt.Errorf("%s's steward: %w", Key(s.Product), err))
+			continue
+		}
+		out = append(out, s)
+	}
+	return out, errors.Join(errs...)
+}
+
+// reopenItself is the poll's reopen of an interrupted steward. The attempt is
+// written before the launch, so one that fails still counts and waits its
+// step: a session tmux refuses is not asked for again on every poll.
+func reopenItself(s *Steward, t time.Time) error {
+	s.AutoReopens++
+	s.OpenedAt = t
+	if err := save(s); err != nil {
+		return err
+	}
+	// The shell an exited claude left behind gives the reopened one its name.
+	if hasSession(session(s.Product)) {
+		if err := killSession(session(s.Product)); err != nil {
+			return err
+		}
+	}
+	if err := launch(s, openedByPoll); err != nil && !errors.Is(err, ErrUntrusted) {
+		return err
+	}
+	return nil
 }
 
 // End puts a steward down: its session ended if it is the live one, and the
@@ -414,12 +515,26 @@ func end(s *Steward) error {
 	return nil
 }
 
+// openedBy is how a steward came to be running, which its first message says.
+type openedBy int
+
+const (
+	openedNew     openedBy = iota // a new conversation
+	openedByHuman                 // reopened from the picker or `steward open`
+	openedByPoll                  // reopened by the poll after an interruption
+)
+
 // Openings are the steward's first message, new and reopened. The brief itself
 // is CLAUDE.md in its folder, which claude loads on every start and keeps
-// through compaction.
-func opening(s *Steward, resume bool) string {
-	if resume {
+// through compaction. One the poll reopened is told so, because it went down
+// without being told anything, and the waits it was watching may have moved
+// while it was gone.
+func opening(s *Steward, by openedBy) string {
+	switch by {
+	case openedByHuman:
 		return "You have been reopened. Your CLAUDE.md may have changed since — read it again, then the rulings and the open questions, and carry on stewarding " + Key(s.Product) + "."
+	case openedByPoll:
+		return "Your session went away without anyone ending it — a reboot, a crash or claude exiting — and the cockpit has reopened you on its own. The waits you were watching may have moved while you were down. Your CLAUDE.md may have changed since — read it again, then the rulings and the open questions, and carry on stewarding " + Key(s.Product) + "."
 	}
 	return "Start stewarding " + Key(s.Product) + ", as your CLAUDE.md describes."
 }
@@ -427,7 +542,8 @@ func opening(s *Steward, resume bool) string {
 // launch writes the steward's folder fresh — its brief and settings follow the
 // binary and the config, so an upgrade changes how it works on its next start —
 // trusts it, starts the session and saves the record.
-func launch(s *Steward, resume bool) error {
+func launch(s *Steward, by openedBy) error {
+	resume := by != openedNew
 	exe, err := binary()
 	if err != nil {
 		return err
@@ -437,7 +553,7 @@ func launch(s *Steward, resume bool) error {
 	}
 	trusted := trustDir(s.Dir())
 	cmd := dispatch.StewardCommand(os.Getenv("CLAUDE_DISPATCHER_STATE"), dispatch.StewardLaunch{
-		SessionID: s.SessionID, Resume: resume, Name: PeerName(s.Product), Opening: opening(s, resume),
+		SessionID: s.SessionID, Resume: resume, Name: PeerName(s.Product), Opening: opening(s, by),
 	})
 	if err := newSession(session(s.Product), s.Dir(), cmd, ""); err != nil {
 		return err
