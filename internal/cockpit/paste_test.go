@@ -9,6 +9,7 @@ package cockpit
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -143,5 +144,27 @@ func TestApplyEditFoldsAPaste(t *testing.T) {
 	msg := pasteMsg("first line\nsecond line")
 	if next, _, _ := applyEdit("", msg.String(), msg); next != "first line second line" {
 		t.Errorf("applyEdit(paste) = %q", next)
+	}
+}
+
+// A title of any length draws in time linear in its length. The scroll that
+// keeps the caret in view used to be quadratic: a 9,000-character title cost
+// half a second a frame, every key paid it again, and esc and ctrl+c waited
+// behind the backspaces — the cockpit read as frozen. At 200,000 characters the
+// old loop ran for minutes; this budget is a thousand times what the linear one
+// takes, so it fails on a regression and not on a slow machine.
+func TestDXLongTitleDrawsQuickly(t *testing.T) {
+	m := dxFormModel(t)
+	m.dxField = dxTitleF
+	m.dxTitle = strings.Repeat("a pasted brief that is not a title ", 200_000/35)
+
+	start := time.Now()
+	out := m.dxView(120, 40)
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("one frame with a %d-character title took %s", len(m.dxTitle), took)
+	}
+	// And what it draws is the end, where the caret is.
+	if !strings.Contains(out, "not a title") {
+		t.Errorf("TITLE should show the end of its text:\n%s", out)
 	}
 }
