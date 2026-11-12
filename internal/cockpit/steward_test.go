@@ -2,6 +2,8 @@ package cockpit
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -229,5 +231,63 @@ func TestStewardSettingsFields(t *testing.T) {
 	settingsCommit(cfg, away, "45m")
 	if cfg.Recap() != "back" || cfg.AwayAfter() != 45*time.Minute {
 		t.Fatalf("committed %q %v", cfg.Recap(), cfg.AwayAfter())
+	}
+}
+
+// Whether an interrupted steward is reopened on its own is a choice on the
+// settings screen: enter steps never → interrupted → never and saves each,
+// without opening the text editor, since a typed "interupted" would be a
+// setting that silently means never.
+func TestStewardReopenIsAChoiceInSettings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newModel()
+	m.width, m.height = 160, 60
+	m.cfg = &config.Config{}
+	m.lens = "products"
+	m = press(m, ",")
+	for m.settings.fields[m.settings.cursor].key != "steward_reopen" {
+		if m.settings.cursor == len(m.settings.fields)-1 {
+			t.Fatal("no steward_reopen field")
+		}
+		m = press(m, "j")
+	}
+	if !strings.Contains(m.View(), "never") {
+		t.Error("the field does not say its default")
+	}
+	for _, want := range []string{"interrupted", "never"} {
+		m = press(m, "enter")
+		if m.settings.editing {
+			t.Fatal("a choice field opened the text editor")
+		}
+		if got := m.cfg.StewardReopenMode(); got != want {
+			t.Fatalf("enter stepped to %q, want %q", got, want)
+		}
+		if got, err := config.Load(); err != nil || got.StewardReopenMode() != want {
+			t.Fatalf("saved %q (%v), want %q", got.StewardReopen, err, want)
+		}
+		if m.settings.saved != "steward reopen saved" {
+			t.Errorf("flash = %q", m.settings.saved)
+		}
+	}
+}
+
+// A choice that cannot be saved says so rather than flashing "saved", and with
+// no config there is nothing to step.
+func TestStewardReopenSaveFailureIsSaid(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(home, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	m := newModel()
+	m.settings = newSettings(nil)
+	if mm, _ := m.cycleStewardReopen(); mm.notice != "" || mm.settings.saved != "" {
+		t.Fatal("no config, yet something was said")
+	}
+	m.cfg = &config.Config{}
+	m.settings = newSettings(m.cfg)
+	m, _ = m.cycleStewardReopen()
+	if !strings.HasPrefix(m.notice, "save failed: ") || m.settings.saved != "" {
+		t.Fatalf("notice %q, flash %q", m.notice, m.settings.saved)
 	}
 }

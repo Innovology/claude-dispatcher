@@ -58,6 +58,7 @@ var settingsFields = []settingsField{
 	{key: "branch_prefix", label: "branch prefix", hint: "every dispatch's branch starts with it · blank is none · a dispatch form can change it for one", kind: setString},
 	{key: "recap_keyword", label: "recap keyword", hint: "what you type to a product's steward when you are back, to be asked everything it saved for you", kind: setString},
 	{key: "steward_away_after", label: "steward away after", hint: "how long its question waits before it takes you to be away and stops holding work for it", kind: setString},
+	{key: "steward_reopen", label: "steward reopen", hint: "enter cycles · interrupted: the poll reopens a steward a reboot or crash took down · never: you reopen it with t", kind: setChoice},
 }
 
 func newSettings(cfg *config.Config) *settingsState {
@@ -89,6 +90,8 @@ func settingsValue(cfg *config.Config, f settingsField) string {
 		return cfg.Recap()
 	case "steward_away_after":
 		return steward.PlainDuration(cfg.AwayAfter())
+	case "steward_reopen":
+		return cfg.StewardReopenMode()
 	}
 	return ""
 }
@@ -196,6 +199,9 @@ func (m model) updateSettings(k string) (model, tea.Cmd) {
 		st.saved = ""
 	case "enter":
 		f := st.fields[st.cursor]
+		if f.key == "steward_reopen" {
+			return m.cycleStewardReopen()
+		}
 		if f.kind == setChoice {
 			return m.cycleTheme()
 		}
@@ -229,6 +235,23 @@ func (m model) cycleTheme() (model, tea.Cmd) {
 	}
 	if next == themeSystem {
 		return m.followSystem()
+	}
+	return m, nil
+}
+
+// cycleStewardReopen steps steward_reopen to its next mode and saves it. The
+// poll reads it from the config it is handed, so the next one acts on it.
+func (m model) cycleStewardReopen() (model, tea.Cmd) {
+	if m.cfg == nil {
+		return m, nil
+	}
+	modes := config.StewardReopenModes
+	next := modes[(slices.Index(modes, m.cfg.StewardReopenMode())+1)%len(modes)]
+	m.cfg.StewardReopen = next
+	if err := config.Save(m.cfg); err != nil {
+		m.notice = "save failed: " + err.Error()
+	} else {
+		m.settings.saved = "steward reopen saved"
 	}
 	return m, nil
 }

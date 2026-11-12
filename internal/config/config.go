@@ -191,6 +191,39 @@ type Config struct {
 	// for the answer, moves what it can around it, and saves the question for
 	// the recap. A Go duration ("15m", "1h"); unset is DefaultStewardAwayAfter.
 	StewardAwayAfter string `toml:"steward_away_after,omitempty"`
+	// StewardReopen is whether the cockpit reopens a product's steward whose
+	// session went away without anyone ending it — a reboot, a crash, claude
+	// exiting. StewardReopenNever (unset) leaves it for the human to reopen
+	// from the picker; StewardReopenInterrupted resumes the same conversation
+	// from the poll, while a cockpit is open. A steward the human ended never
+	// comes back either way (ADR 0029).
+	StewardReopen string `toml:"steward_reopen,omitempty"`
+}
+
+// What steward_reopen can say. Never is first: it is the default, and the
+// settings screen steps through them in this order.
+const (
+	StewardReopenNever       = "never"
+	StewardReopenInterrupted = "interrupted"
+)
+
+// StewardReopenModes is every steward_reopen, the default first.
+var StewardReopenModes = []string{StewardReopenNever, StewardReopenInterrupted}
+
+// StewardReopenMode is steward_reopen as it is acted on. Anything but
+// "interrupted" is never, because a misspelt opt-in must not turn on a machine
+// acting by itself.
+func (c *Config) StewardReopenMode() string {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.StewardReopen), StewardReopenInterrupted) {
+		return StewardReopenInterrupted
+	}
+	return StewardReopenNever
+}
+
+// ReopensInterruptedStewards reports whether the poll reopens an interrupted
+// steward.
+func (c *Config) ReopensInterruptedStewards() bool {
+	return c.StewardReopenMode() == StewardReopenInterrupted
 }
 
 // DefaultBranchPrefix is what a dispatch's branch is called when nobody says
@@ -439,9 +472,19 @@ func Save(c *Config) error {
 	b.WriteString("# away: it stops holding work for the answer and saves the question for the\n")
 	b.WriteString("# recap. A duration such as \"15m\" or \"1h\"; unset is 15m.\n")
 	if c.StewardAwayAfter == "" {
-		b.WriteString("# steward_away_after = \"15m\"\n\n")
+		b.WriteString("# steward_away_after = \"15m\"\n")
 	} else {
-		fmt.Fprintf(&b, "steward_away_after = %q\n\n", c.StewardAwayAfter)
+		fmt.Fprintf(&b, "steward_away_after = %q\n", c.StewardAwayAfter)
+	}
+	b.WriteString("# Whether a steward whose session went away without you ending it — a\n")
+	b.WriteString("# reboot, a crash, claude exiting — is reopened on its own. \"never\" (unset)\n")
+	b.WriteString("# leaves it for you to reopen from t; \"interrupted\" resumes the same\n")
+	b.WriteString("# conversation from the cockpit's poll, while a cockpit is open. One you\n")
+	b.WriteString("# ended never comes back. Edit in-app with `,`.\n")
+	if c.StewardReopen == "" {
+		b.WriteString("# steward_reopen = \"interrupted\"\n\n")
+	} else {
+		fmt.Fprintf(&b, "steward_reopen = %q\n\n", c.StewardReopen)
 	}
 	b.WriteString("# The Linear token each product's backlog is read with, keyed by product\n")
 	b.WriteString("# name. A token sees one workspace and only the teams Linear granted it, so\n")

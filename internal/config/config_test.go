@@ -383,3 +383,57 @@ func TestStewardSettingsSurviveSave(t *testing.T) {
 		t.Fatalf("got %q %v", c.Recap(), c.AwayAfter())
 	}
 }
+
+// An interrupted steward is reopened only where the config says so: unset, or
+// any word but "interrupted", is "never" — the behaviour from before there was
+// a setting — because a misspelt opt-in must not turn on a machine acting by
+// itself.
+func TestStewardReopen(t *testing.T) {
+	var none *Config
+	if none.StewardReopenMode() != StewardReopenNever || none.ReopensInterruptedStewards() {
+		t.Fatal("no config must mean never")
+	}
+	for in, want := range map[string]string{
+		"":              StewardReopenNever,
+		"never":         StewardReopenNever,
+		" Interrupted ": StewardReopenInterrupted,
+		"always":        StewardReopenNever,
+	} {
+		c := &Config{StewardReopen: in}
+		if got := c.StewardReopenMode(); got != want {
+			t.Errorf("%q reads as %q, want %q", in, got, want)
+		}
+		if c.ReopensInterruptedStewards() != (want == StewardReopenInterrupted) {
+			t.Errorf("%q: ReopensInterruptedStewards disagrees with the mode", in)
+		}
+	}
+	if !slices.Equal(StewardReopenModes, []string{StewardReopenNever, StewardReopenInterrupted}) {
+		t.Errorf("modes = %v: the settings screen cycles these, the default first", StewardReopenModes)
+	}
+}
+
+// It is written back whole, and an unset one is written as the commented
+// example, so the file says the setting exists.
+func TestStewardReopenSurvivesSave(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := Save(&Config{}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "# steward_reopen = \"interrupted\"\n") {
+		t.Errorf("an unset steward_reopen is not offered in the file:\n%s", raw)
+	}
+	if err := Save(&Config{StewardReopen: "interrupted"}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.ReopensInterruptedStewards() {
+		t.Fatalf("steward_reopen came back as %q", c.StewardReopen)
+	}
+}
