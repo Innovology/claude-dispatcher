@@ -74,6 +74,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -471,22 +473,18 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 		return m, nil
 	}
 
-	if k == "backspace" {
-		switch field {
-		case dxWhereF:
-			m.dxFilter, m.dxRepo = dxChop(m.dxFilter), 0
-		case dxTitleF:
-			m.dxTitle = dxChop(m.dxTitle)
-		case dxWhatF:
-			m.dxWhat = dxChop(m.dxWhat)
-		case dxGoalF:
-			m.dxGoal = dxChop(m.dxGoal)
-		case dxRootF:
-			m.dxRoot = dxChop(m.dxRoot)
-		case dxPrefixF:
-			m = m.dxSetPrefix(dxChop(m.dxPrefixText()))
-		}
-		return m, nil
+	// backspace takes a character; ctrl+w the last word and ctrl+u the whole
+	// field — the readline pair the decisions search already answers to. The
+	// pair is the way out of one field without leaving the form: esc takes the
+	// repo pick, the root, the mode and every other field with it, and
+	// backspace one character at a time is no way out of a paste.
+	switch k {
+	case "backspace":
+		return m.dxEdit(field, dxChop), nil
+	case "ctrl+w":
+		return m.dxEdit(field, dxDropWord), nil
+	case "ctrl+u":
+		return m.dxEdit(field, func(string) string { return "" }), nil
 	}
 
 	// WHAT is the one field here that holds a paragraph, so a pasted brief
@@ -517,6 +515,41 @@ func (m model) dxKey(k string) (model, tea.Cmd) {
 	// Everything else is swallowed: the form owns the keyboard, and a stray
 	// key must not act on the queue behind it.
 	return m, nil
+}
+
+// dxEdit applies an edit to the text of the field that has the keyboard. WHERE
+// sends its cursor home, because a different filter is a different list.
+// PREFIX records the edit as this dispatch's override, so clearing it means
+// "no prefix", which is an answer of its own (see dxPrefixText).
+func (m model) dxEdit(field dxFieldID, edit func(string) string) model {
+	switch field {
+	case dxWhereF:
+		m.dxFilter, m.dxRepo = edit(m.dxFilter), 0
+	case dxTitleF:
+		m.dxTitle = edit(m.dxTitle)
+	case dxWhatF:
+		m.dxWhat = edit(m.dxWhat)
+	case dxGoalF:
+		m.dxGoal = edit(m.dxGoal)
+	case dxRootF:
+		m.dxRoot = edit(m.dxRoot)
+	case dxPrefixF:
+		m = m.dxSetPrefix(edit(m.dxPrefixText()))
+	}
+	return m
+}
+
+// dxDropWord is ctrl+w: s without its last word, keeping the space before it so
+// the next word typed is a new one. A word ends at any space, including a
+// brief's line breaks.
+func dxDropWord(s string) string {
+	q := strings.TrimRightFunc(s, unicode.IsSpace)
+	i := strings.LastIndexFunc(q, unicode.IsSpace)
+	if i < 0 {
+		return ""
+	}
+	_, n := utf8.DecodeRuneInString(q[i:])
+	return q[:i+n]
 }
 
 // dxChop drops the last rune of s (backspace, on a string that may hold
@@ -1014,7 +1047,7 @@ func (m model) dxSummary() string {
 // while they are still exits.
 func (m model) dxFooterHelp() string {
 	if !m.dxAtRest() {
-		return "enter next field · tab moves · ctrl+d dispatch · esc cancel"
+		return "enter next field · tab moves · ctrl+u clears · ctrl+d dispatch · esc cancel"
 	}
 	if !m.cqDispatch {
 		// The form standing in for an empty table, where h is still the way to
