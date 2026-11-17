@@ -43,6 +43,20 @@ jobs:
         with:
           version: latest
 
+  # The flake's package runs the suite a second time, inside the Nix sandbox
+  # and from a source holding only what nix/package.nix names. A test that
+  # reads a file left out of it passes in `test` above and fails only here —
+  # which is how #95 broke the Nix build with every check on it green.
+  # `nix flake check` builds that package (checkPhase included) and the gofmt
+  # check. Linux only: what this guards — a file missing from the source — is
+  # the same on every platform the flake builds for.
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix flake check -L
+
   # Native Windows build gate. Runtime behaviour of the Windows session backend
   # still needs validation on a real machine; this keeps the tree compiling and
   # vetting for windows so the port can't silently regress. (Tests are not run
