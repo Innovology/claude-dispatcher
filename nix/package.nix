@@ -10,19 +10,44 @@
   version ? "dev",
 }:
 
+let
+  # A Go test's fixtures live in a directory named testdata beside its
+  # package, whatever the files in it are called, so they are found by the
+  # directory's name — and fileFilter cannot do that, because its predicate
+  # sees a file's own name and never the directories above it. This walks the
+  # tree for them instead, skipping what the go tool skips: a directory whose
+  # name starts with "." or "_" holds no package whose tests could read one.
+  testdataDirs =
+    dir:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        name: type:
+        if type != "directory" || lib.hasPrefix "." name || lib.hasPrefix "_" name then
+          [ ]
+        else if name == "testdata" then
+          [ (dir + "/${name}") ]
+        else
+          testdataDirs (dir + "/${name}")
+      ) (builtins.readDir dir)
+    );
+in
 buildGoModule {
   pname = "claude-dispatcher";
   inherit version;
 
-  # Only the Go sources decide the build, so editing the README or the
-  # workflows does not invalidate the derivation.
+  # Only what the build and its tests read decides the derivation — the Go
+  # sources and the tests' fixtures — so editing the README or the workflows
+  # does not invalidate it.
   src = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [
-      ../go.mod
-      ../go.sum
-      (lib.fileset.fileFilter (f: f.hasExt "go") ../.)
-    ];
+    fileset = lib.fileset.unions (
+      [
+        ../go.mod
+        ../go.sum
+        (lib.fileset.fileFilter (f: f.hasExt "go") ../.)
+      ]
+      ++ testdataDirs ../.
+    );
   };
 
   vendorHash = "sha256-DZ7Iz/MbDeoYMWfH/Dfe49gOtG6b/Yv5t6zNxRbvQFg=";
