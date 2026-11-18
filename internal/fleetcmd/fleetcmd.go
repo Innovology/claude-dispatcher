@@ -28,6 +28,7 @@ import (
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/supervisor"
 )
 
@@ -37,6 +38,7 @@ var (
 	sessionIdle  = supervisor.SessionIdle
 	sendKeys     = supervisor.SendKeys
 	swapAccount  = dispatch.SwapAccount
+	peerNames    = dispatch.PeerNames
 )
 
 // Entry is one dispatcher as `status --json` prints it. The field names are the
@@ -52,6 +54,9 @@ type Entry struct {
 	// Prompt is the brief it was dispatched with — what "inside the brief"
 	// is measured against.
 	Prompt string `json:"prompt,omitempty"`
+	// Goal is the dispatch form's DONE WHEN — the condition it was told to
+	// keep working until — "" when it was given none.
+	Goal string `json:"goal,omitempty"`
 	// State is the triage table's reading: "wants-you" (stopped on something
 	// only the human can answer), "running" (working, or a retry on its way),
 	// "parked" (the human shelved it) or "finished" (ended, not yet dismissed).
@@ -81,7 +86,11 @@ type Entry struct {
 	LastActivity time.Time `json:"last_activity"`
 	Started      time.Time `json:"started"`
 	Session      string    `json:"session,omitempty"`
-	Worktree     string    `json:"worktree,omitempty"`
+	// Peer is the name the session goes by among Claude sessions on the
+	// machine: what a steward messages it by while it is still working, which
+	// reply cannot reach. "" when Claude Code's registry does not list it.
+	Peer     string `json:"peer,omitempty"`
+	Worktree string `json:"worktree,omitempty"`
 	// WaitingSince is when it stopped to wait; Note is the steward's note on
 	// that wait, if it has written one. Handled is a wait with a note: it has
 	// been looked at, and waking the steward for it again would be noise.
@@ -113,6 +122,16 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runTidy(args, out)
 	case "swap":
 		err = runSwap(args, out)
+	case "ruling":
+		err = runRuling(args, out)
+	case "merge":
+		err = runMerge(args, out)
+	case "ask":
+		err = runAsk(args, out)
+	case "questions":
+		err = runQuestions(args, out)
+	case "answer":
+		err = runAnswer(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}
@@ -128,13 +147,14 @@ func runStatus(args []string, out io.Writer) error {
 	asJSON := fs.Bool("json", false, "print the fleet as JSON")
 	next := fs.Bool("next", false, "wait until a dispatcher is waiting unhandled, then print those as JSON")
 	timeout := fs.Duration("timeout", 30*time.Minute, "with --next: give up after this long and say so")
+	product := fs.String("product", "", "only this product's dispatchers — a steward's own")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *next {
-		return runNext(out, *timeout, time.Now)
+		return runNext(out, *product, *timeout, time.Now)
 	}
-	entries := Fleet(state.LoadAll(), time.Now())
+	entries := inProduct(Fleet(state.LoadAll(), time.Now()), *product)
 	if *asJSON {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
@@ -158,8 +178,15 @@ var NextPoll = 3 * time.Second
 // Next is what `status --next` prints: the waits nobody has handled, or a
 // timeout with none — the steward's cue to look over the running rows.
 type Next struct {
-	Waiting  []Entry `json:"waiting"`
-	TimedOut bool    `json:"timed_out,omitempty"`
+	Waiting []Entry `json:"waiting"`
+	// Questions is the product's questions still open for the human, each
+	// marked postponed once it has waited the away window.
+	Questions []steward.Question `json:"questions,omitempty"`
+	// NowAway is the questions that went past the away window while this
+	// waited: the human did not answer in time, so the steward stops holding
+	// work for them and moves what it can around them.
+	NowAway  []string `json:"now_away,omitempty"`
+	TimedOut bool     `json:"timed_out,omitempty"`
 }
 
 // runNext blocks until some dispatcher is waiting with no steward note on its
@@ -171,23 +198,76 @@ type Next struct {
 // between runs, so nothing that happened between two runs can be missed: a
 // wait is pending until a reply ends it or a note answers it, and both are on
 // the record.
-func runNext(out io.Writer, timeout time.Duration, now func() time.Time) error {
+//
+// product narrows it to one product's dispatchers, which is how each product's
+// steward sleeps on its own work and is never woken for another's.
+//
+// With a product it also wakes when one of the product's questions goes
+// unanswered past the away window (steward.Question). That moment is the
+// steward's cue that the human is away — nothing else happens at it, so
+// nothing else would wake it there. Each is reported once, and the report is
+// stamped on the question (AwayAt) rather than measured from when this wait
+// began: a question that went past the window while the steward was busy
+// between two waits must still be announced, and was not when it was.
+func runNext(out io.Writer, product string, timeout time.Duration, now func() time.Time) error {
 	deadline := now().Add(timeout)
+	cfg, err := loadConfig()
+	if err != nil {
+		cfg = nil
+	}
 	for {
+		t := now()
 		var waiting []Entry
-		for _, e := range Fleet(state.LoadAll(), now()) {
+		for _, e := range inProduct(Fleet(state.LoadAll(), t), product) {
 			if e.State == "wants-you" && !e.Handled {
 				waiting = append(waiting, e)
 			}
 		}
-		timedOut := !now().Before(deadline)
-		if len(waiting) > 0 || timedOut {
+		qs := questionsNow(product, t, cfg)
+		var away []string
+		for _, q := range qs {
+			if q.Postponed && q.AwayAt == nil {
+				away = append(away, q.ID)
+			}
+		}
+		timedOut := !t.Before(deadline)
+		if len(waiting) > 0 || len(away) > 0 || timedOut {
+			if err := steward.MarkAway(steward.Key(product), away); err != nil {
+				return err
+			}
 			enc := json.NewEncoder(out)
 			enc.SetIndent("", "  ")
-			return enc.Encode(Next{Waiting: waiting, TimedOut: len(waiting) == 0 && timedOut})
+			return enc.Encode(Next{Waiting: waiting, Questions: qs, NowAway: away,
+				TimedOut: len(waiting) == 0 && len(away) == 0 && timedOut})
 		}
 		time.Sleep(NextPoll)
 	}
+}
+
+// loadConfig is a seam so tests can name the products.
+var loadConfig = config.Load
+
+// inProduct keeps the entries of one product, each labelled with the product it
+// is grouped under, by the cockpit's own rule (live.go productFor): the config's
+// mapping of its repo — what the human last assigned — with the record's own
+// product only where there is no config to ask, and "unassigned" for neither.
+// An empty product keeps every entry, labelled the same way.
+func inProduct(entries []Entry, product string) []Entry {
+	cfg, err := loadConfig()
+	if err != nil {
+		cfg = nil
+	}
+	var out []Entry
+	for _, e := range entries {
+		if cfg != nil {
+			e.Product = cfg.ProductFor(e.Repo)
+		}
+		e.Product = steward.Key(e.Product)
+		if product == "" || e.Product == steward.Key(product) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // headline is the text form's last column: the ask, else the failure, else the
@@ -212,6 +292,11 @@ func (e Entry) headline() string {
 // that is not over, and every finished one nobody has dismissed.
 func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 	var out []Entry
+	var dirs []string
+	for _, d := range ds {
+		dirs = append(dirs, d.ConfigDir)
+	}
+	peers := peerNames(dirs...)
 	for _, d := range ds {
 		st := stateOf(d, now)
 		if st == "" {
@@ -219,12 +304,13 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 		}
 		e := Entry{
 			ID: d.ID, Feature: d.Feature, Repo: d.RepoName, Product: d.Product,
-			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
+			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, Goal: d.Goal, State: st, Status: string(d.Status), Reason: d.StatusReason,
 			Failure: d.Failure, Retrying: dispatch.RetryPending(d, now),
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
 			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
 			Session: d.TmuxSession, Worktree: d.WorktreePath,
+			Peer:         peers[d.SessionID],
 			failure:      dispatch.FailureSummary(d, now),
 			WaitingSince: d.WaitingSince,
 			Note:         d.Note(),
@@ -363,6 +449,16 @@ func runNote(args []string, out io.Writer) error {
 		}
 		now := time.Now()
 		d.StewardNote, d.StewardNoteAt = text, &now
+		// What the note is about, so the same question asked again keeps it
+		// (hookcmd's stampWait) instead of waking the steward to repeat it —
+		// but only for a turn that ended on it. On a menu, Said is still the
+		// last turn's message: a note about a permission prompt would be
+		// filed under that turn's question, and carried onto it when it was
+		// asked again.
+		d.NotedAsk = ""
+		if d.Status == state.StatusNeedsInput {
+			d.NotedAsk = ask.Of(d.Said)
+		}
 		return "noted " + quote(d.Feature) + " · " + text, nil
 	}, out)
 }

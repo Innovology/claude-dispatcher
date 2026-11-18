@@ -298,8 +298,8 @@ func TestCQLabelUppercasesAndNamesTheUnmapped(t *testing.T) {
 
 // ---- v3: the chain, the goal, the status strip and the evidence -------------
 
-// The goal row must never present a prompt as a completion criterion: nothing
-// records a goal yet, so the label says what the text actually is.
+// The goal row must never present a prompt as a completion criterion: without
+// a recorded goal, the label says what the text actually is.
 func TestCQGoalLabelsThePromptAsAPrompt(t *testing.T) {
 	text, label := cqGoal(&state.Dispatch{Prompt: "Fix the retry window.\nThen add a test."})
 	if label != "prompt" {
@@ -463,5 +463,13 @@ func TestANeverStartedRowOffersToStartAgain(t *testing.T) {
 	ran := &state.Dispatch{Feature: "robustness", Status: state.StatusExited, SessionID: "sess-1"}
 	if acts := cqActs(ran, "done"); acts[0].d != "resume" {
 		t.Errorf("a dispatcher with a conversation should resume it: %+v", acts[0])
+	}
+}
+
+// DONE WHEN is on the record now, and it is the one text that is a goal.
+func TestCQGoalPrefersTheRecordedGoal(t *testing.T) {
+	text, label := cqGoal(&state.Dispatch{Prompt: "Fix the retry window.", Goal: "ci is green"})
+	if text != "ci is green" || label != "goal" {
+		t.Errorf("goal = (%q,%q), want the recorded DONE WHEN", text, label)
 	}
 }

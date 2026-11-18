@@ -9,7 +9,6 @@ import (
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/gh"
 	"claude-dispatcher/internal/state"
-	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/track"
 )
 
@@ -54,7 +53,9 @@ type (
 	// ageTickMsg is the clock tick: a redraw and nothing else.
 	ageTickMsg struct{}
 	// trackedMsg fires after a track.Refresh pass (PR/deploy reconciliation).
-	trackedMsg struct{}
+	// Its notice is what the pass did that the human should hear about: a
+	// steward it reopened, or could not (steward_reopen).
+	trackedMsg struct{ notice string }
 	// bootProgressMsg carries one opening-screen step transition to the UI.
 	bootProgressMsg bootUpdate
 	// bootTickMsg paces the opening screen's spinner and colour sweep.
@@ -177,12 +178,20 @@ func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 		// which is a moment only the poll is watching for (dispatch.DeliverBriefs).
 		dispatchpkg.DeliverBriefs(state.LoadAll(), time.Now())
 		dispatchpkg.DeliverColors(state.LoadAll(), time.Now())
-		// A switched-on steward whose session was taken away — a reboot, claude
-		// exiting in it — comes back here, at startup and on every poll, so
-		// the switch is the whole of the human's involvement (steward.Ensure).
-		_, _ = steward.Ensure()
+		// The machine-wide steward an earlier build ran is retired here, at
+		// startup and on every poll, so one left running across the upgrade
+		// does not go on answering waits beside the product stewards
+		// (steward.RetireLegacy).
+		_, _ = stewardRetireLegacy()
+		// And where a steward a reboot or a crash took down is reopened, when
+		// steward_reopen says so: the poll is the one loop that runs while the
+		// human is away, which is when it matters (steward.ReopenInterrupted).
+		notice := ""
+		if cfg.ReopensInterruptedStewards() {
+			notice = stewardReopenNotice(stewardReopenInterrupted())
+		}
 		track.Refresh(state.LoadAll(), cfg)
-		return trackedMsg{}
+		return trackedMsg{notice: notice}
 	}
 }
 
