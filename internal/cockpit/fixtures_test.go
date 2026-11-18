@@ -1,6 +1,9 @@
 package cockpit
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // fixtures_test.go gives the interaction tests their own data.
 //
@@ -54,10 +57,10 @@ func installFixture(t *testing.T) {
 	// Index 3 is deliberately already taken — the backlog test asserts that
 	// dispatching a taken ticket is refused.
 	backlogTickets = []ticket{
-		{id: "T-1", src: "gh", title: "first", repo: "alpha-api", product: "alpha", pri: "high", age: "1d"},
-		{id: "T-2", src: "gh", title: "second", repo: "alpha-api", product: "alpha", pri: "med", age: "2d"},
-		{id: "T-3", src: "gh", title: "third", repo: "alpha-web", product: "alpha", pri: "low", age: "3d"},
-		{id: "T-4", src: "gh", title: "fourth", repo: "beta-svc", product: "beta", pri: "med", age: "4d", taken: "one"},
+		{id: "T-1", src: "gh", title: "first", repo: "alpha-api", product: "alpha", pri: "high", touched: time.Now().Add(-1 * 24 * time.Hour)},
+		{id: "T-2", src: "gh", title: "second", repo: "alpha-api", product: "alpha", pri: "med", touched: time.Now().Add(-2 * 24 * time.Hour)},
+		{id: "T-3", src: "gh", title: "third", repo: "alpha-web", product: "alpha", pri: "low", touched: time.Now().Add(-3 * 24 * time.Hour)},
+		{id: "T-4", src: "gh", title: "fourth", repo: "beta-svc", product: "beta", pri: "med", touched: time.Now().Add(-4 * 24 * time.Hour), taken: "one"},
 	}
 
 	// cursor 0 and 1 are the user's own PRs (not self-approvable); index 2 is
@@ -92,5 +95,24 @@ func installFixture(t *testing.T) {
 	}
 	productVelocity = map[string][]velTile{
 		"alpha": {{k: "lead time", v: "2h", band: "high", spark: "▁▂▃"}},
+	}
+}
+
+// isolateIntegrationEnv blanks the variables a settings save exports
+// (applyConfigEnv: LINEAR_API_KEY, AZURE_DEVOPS_ORG, AZURE_DEVOPS_PROJECT) for
+// the rest of t, and puts them back when it ends.
+//
+// A save exports what was typed with os.Setenv, process-wide, and a test that
+// saved settings left it there: TestSettingsEditEveryField set all three to
+// "value" for every test after it. A later test that ran the real collectors
+// then queried Linear with that token and ran `az boards query`, which on a CI
+// runner (az is installed there) wrote ~/.azure into a HOME the test was
+// removing — "TempDir RemoveAll cleanup: … .azure: directory not empty", a
+// failure that came and went with timing. Call it in any test that saves those
+// fields, and before running the collectors against a sandboxed HOME.
+func isolateIntegrationEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"LINEAR_API_KEY", "AZURE_DEVOPS_ORG", "AZURE_DEVOPS_PROJECT"} {
+		t.Setenv(k, "")
 	}
 }

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"claude-dispatcher/internal/cause"
 )
 
 func Available() bool {
@@ -139,10 +141,17 @@ func (s Server) ListSessions() []string {
 // ended. Wrapping the command instead makes the launcher the pane's foreground
 // process, and a pane whose command is not a shell is taken at its word as
 // busy — for ever, since the launcher never exits.
+//
+// A failure says why in one line and keeps the rest (cause.Error). With env
+// set, what failed is usually the environment and not tmux at all, and `nix
+// develop` building a shell prints every path it copies and every derivation
+// it builds before the error — 883 lines, measured, of which the first was the
+// one the record kept: "copying path '…-nss-cacert-3.115' from
+// 'https://cache.nixos.org'...".
 func (s Server) NewSession(name, dir, shellCommand, env string) error {
 	out, err := s.clientIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, "--", "/bin/sh", "-c", shellCommand).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("tmux new-session: %s", strings.TrimSpace(string(out)))
+		return cause.Failed("tmux new-session", out, err)
 	}
 	s.EnsureDetachKey()
 	s.SetStatusHint(name)

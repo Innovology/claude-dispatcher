@@ -47,6 +47,7 @@ type envScenario struct {
 // carries a transcript with real usage tokens and a 429 rate-limit hit.
 func buildEnvScenario(t *testing.T) envScenario {
 	t.Helper()
+	isolateIntegrationEnv(t) // the collectors run for real here; no backlog source may reach out
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)

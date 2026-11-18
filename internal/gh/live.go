@@ -14,12 +14,16 @@ import (
 
 // Issue is an open issue assigned to the current user.
 type Issue struct {
-	Number    int
-	Title     string
-	URL       string
-	Body      string
-	State     string
-	Labels    []string
+	Number int
+	Title  string
+	URL    string
+	Body   string
+	State  string
+	Labels []string
+	// CreatedAt is when the issue was filed and UpdatedAt when anything last
+	// happened on it. The backlog sorts by either, and they answer different
+	// questions: how long it has been waiting, and how long nobody has looked.
+	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 

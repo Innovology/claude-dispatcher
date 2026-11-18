@@ -93,6 +93,9 @@ var lastDiscovered []repos.Repo
 
 var backlogTickets []ticket
 
+// backlogCut is the sources whose last read came back full (snapshot.backlogCut).
+var backlogCut []string
+
 // ---- decisions --------------------------------------------------------------
 
 var (

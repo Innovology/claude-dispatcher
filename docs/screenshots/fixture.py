@@ -75,6 +75,106 @@ DIFFS = {
                         ("docs/export.md", 60)],
 }
 
+# The backlog: open issues assigned to you, as `gh search issues` returns them.
+# The cockpit asks gh for them, so the fixture puts a stand-in gh first on the
+# session's PATH (see write_gh) that answers that one search and fails every
+# other call, which is how a forge with nothing to say for these repos reads.
+#
+# repo, number, title, labels, filed (days ago), last touched (days ago), body
+BACKLOG = [
+    ("acme-api", 214, "Seat limits ignore the grace window on downgrade", ["bug", "billing"], 12, 1,
+     "Downgrading a plan drops seats at once instead of after the 7-day grace window."),
+    ("acme-api", 209, "Rate limiter counts retries twice", ["bug"], 20, 6,
+     "A retried request is charged against the bucket a second time."),
+    ("acme-api", 201, "Webhook signatures fail after key rotation", ["p0", "security"], 3, 0,
+     "Deliveries signed with the previous key are rejected during the overlap window."),
+    ("acme-api", 188, "Paginate the audit log endpoint", ["api"], 41, 15,
+     "The endpoint returns every event at once; large tenants time out."),
+    ("acme-api", 176, "Document the seat API errors", ["docs"], 60, 33,
+     "Each error code needs an example and what to do about it."),
+    ("acme-api", 162, "Move invoice numbering to a sequence", ["billing"], 75, 40,
+     "Numbers are derived from a count and collide under load."),
+    ("acme-web", 97, "Audit filters lose their state on reload", ["bug", "ui"], 9, 2,
+     "Filters reset to defaults whenever the page is refreshed."),
+    ("acme-web", 93, "Dark mode for the billing pages", ["ui"], 30, 21,
+     "The billing pages still render light whatever the theme says."),
+    ("acme-web", 88, "Keyboard shortcut for the seat table", ["ui", "a11y"], 44, 30,
+     "The seat table cannot be reached from the keyboard."),
+    ("acme-web", 81, "Empty state for teams with no invoices", ["ui"], 52, 41,
+     "A new team sees a blank table and no explanation."),
+    ("acme-web", 77, "Customer report: export button does nothing on Safari", ["customer", "bug"], 6, 1,
+     "Clicking export on Safari 18 shows no download and no error."),
+    ("acme-hq", 41, "Weekly digest goes out twice on DST change", ["bug"], 18, 9,
+     "The scheduler runs the job once per local hour, and the hour repeats."),
+    ("acme-hq", 38, "Retire the legacy CSV importer", ["chore"], 90, 70,
+     "Nothing has called it since the new importer shipped."),
+    ("bluefin-core", 330, "League tiebreak ignores head-to-head", ["bug", "scoring"], 5, 1,
+     "Teams level on points are ordered by goal difference before head-to-head."),
+    ("bluefin-core", 327, "Fixture generator repeats home games", ["scoring"], 14, 8,
+     "Some teams get three home games in a row."),
+    ("bluefin-core", 319, "Cache standings per round", ["perf"], 28, 20,
+     "Standings are recomputed on every request."),
+    ("bluefin-core", 305, "Season rollover keeps last season's byes", ["bug"], 35, 12,
+     "Byes from the previous season carry into the new fixture list."),
+    ("bluefin-core", 298, "Expose standings as JSON", ["api"], 48, 44,
+     "Partners scrape the HTML table today."),
+    ("bluefin-web", 145, "Offline mode shows stale scores", ["bug", "offline"], 7, 3,
+     "Cached scores are shown without saying how old they are."),
+    ("bluefin-web", 141, "Install prompt on Android", ["ui"], 22, 18,
+     "The app never offers to be installed."),
+    ("bluefin-web", 136, "Translate the fixtures page", ["i18n"], 39, 26,
+     "Dates and team names are hard-coded in English."),
+    ("bluefin-web", 129, "Score ticker flickers on slow phones", ["perf", "ui"], 57, 50,
+     "Every update re-renders the whole ticker."),
+    ("orbit-billing", 66, "Invoice PDF missing the VAT number", ["urgent", "billing"], 2, 0,
+     "Invoices for EU customers are not compliant without it."),
+    ("orbit-billing", 63, "Proration rounds the wrong way", ["bug", "billing"], 16, 10,
+     "Mid-cycle upgrades are charged one cent too much."),
+    ("orbit-billing", 58, "Dunning emails ignore the customer's locale", ["i18n"], 33, 29,
+     "Every reminder is sent in English."),
+    ("orbit-billing", 51, "Refunds report for finance", ["report"], 64, 60,
+     "Finance rebuilds this by hand every month."),
+    ("acme-api", 155, "Seat API returns 500 on an empty team", ["bug"], 8, 4,
+     "Listing seats for a team with no members throws instead of returning []."),
+    ("acme-api", 149, "Trim the audit payload", ["perf"], 70, 62,
+     "Every event carries the whole request body."),
+    ("acme-web", 72, "Billing settings link is broken in the footer", ["bug", "billing"], 4, 2,
+     "The footer still points at the old billing route."),
+    ("acme-hq", 35, "Archive closed workspaces after a year", ["chore"], 120, 110,
+     "Nobody has opened most of them since they closed."),
+    ("bluefin-core", 290, "Ranking export for the federation", ["report"], 66, 58,
+     "The federation wants the table as a spreadsheet each month."),
+    ("bluefin-web", 122, "Team page loads every past season", ["perf"], 61, 55,
+     "A club with twenty seasons downloads all of them up front."),
+    ("orbit-billing", 47, "Retry failed card charges with backoff", ["billing"], 45, 31,
+     "A declined charge is retried every hour, forever."),
+    ("scratch-tools", 12, "Script to rotate staging keys", ["chore"], 25, 25,
+     "Rotation is a page of manual steps today."),
+    ("scratch-tools", 9, "Lint the deploy scripts", ["chore"], 80, 79,
+     "Two of them fail shellcheck."),
+    ("legacy-importer", 7, "Importer chokes on BOM-prefixed files", ["bug"], 100, 95,
+     "Files saved from Excel start with a byte-order mark."),
+]
+
+
+def write_gh(root):
+    """Write the stand-in gh into root/bin, and the issues it answers with."""
+    def iso(days):
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(NOW - days * 86400))
+    issues = [{
+        "repository": {"name": repo, "nameWithOwner": f"example/{repo}"},
+        "number": n, "title": title, "url": f"https://example.invalid/{repo}/issues/{n}",
+        "body": body, "state": "open", "labels": [{"name": l} for l in labels],
+        "createdAt": iso(filed), "updatedAt": iso(touched),
+    } for repo, n, title, labels, filed, touched, body in BACKLOG]
+    bin_dir = root / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "issues.json").write_text(json.dumps(issues))
+    gh = bin_dir / "gh"
+    gh.write_text('#!/bin/sh\ncase "$*" in\n  "search issues"*) cat "$(dirname "$0")/issues.json" ;;\n'
+                  '  *) exit 1 ;;\nesac\n')
+    gh.chmod(0o755)
+
 
 def sh(*a, cwd=None):
     subprocess.run(a, cwd=cwd, check=True,
@@ -189,8 +289,9 @@ def main():
     for p, rs in PRODUCTS.items():
         cfg.append(f'{p} = [{", ".join(chr(34)+r+chr(34) for r in rs)}]')
     (HOME / ".config" / "claude-dispatcher" / "config.toml").write_text("\n".join(cfg) + "\n")
+    write_gh(ROOT)
 
-    print(f"fixture: {len(names)} repos, {len(DISPATCHES)} dispatches -> {ROOT}")
+    print(f"fixture: {len(names)} repos, {len(DISPATCHES)} dispatches, {len(BACKLOG)} issues -> {ROOT}")
 
 if __name__ == "__main__":
     main()

@@ -515,6 +515,7 @@ func TestProductShippedTabFull(t *testing.T) {
 // ---- settings.go: field editing across every kind ----------------------------
 
 func TestSettingsEditEveryField(t *testing.T) {
+	isolateIntegrationEnv(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 

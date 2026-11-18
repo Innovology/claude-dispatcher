@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"claude-dispatcher/internal/config"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // bootAt returns a model showing the opening screen at the given terminal size.
@@ -285,5 +286,34 @@ func TestBootNamesAMissingSupervisorAndForgeAsWarnings(t *testing.T) {
 	}
 	if u := final[bootForge]; !u.warn || u.detail != "gh not found — no pr or check signals" {
 		t.Errorf("forge step = %+v, want a warning naming gh", u)
+	}
+}
+
+// The sessions step counts the sessions on the machine that no dispatch
+// claims: a human's own servers, which the sessions tab lists. They are stood
+// in for here rather than looked for. On a CI runner, whether any exist
+// depends on which tmux tests in other packages, run in parallel, happen to
+// have a session open at that moment. That made this line's coverage come and
+// go between runs of the same tree: live.go -1% on one run, unchanged on the
+// next.
+func TestBootCountsTheSessionsOfYourOwn(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	defer restoreVars(captureVars())
+	withServers(t, map[string][]supervisor.SessionInfo{
+		"work": {sessAt("work", "main", "/src/app"), sessAt("work", "notes", "/src/notes")},
+	})
+
+	var mu sync.Mutex
+	final := map[string]bootUpdate{}
+	loadSnapshotReporting(&config.Config{}, func(u bootUpdate) {
+		mu.Lock()
+		defer mu.Unlock()
+		if u.complete {
+			final[u.id] = u
+		}
+	})
+
+	if u := final[bootSessions]; !strings.Contains(u.detail, "2 sessions of your own") {
+		t.Errorf("sessions step = %q, want it to count the two unclaimed sessions", u.detail)
 	}
 }
