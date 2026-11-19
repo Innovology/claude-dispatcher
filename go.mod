@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/junegunn/fzf v0.74.3
+	github.com/junegunn/fzf v0.74.5
 	golang.org/x/sys v0.38.0
 )
 
