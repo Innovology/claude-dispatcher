@@ -48,11 +48,48 @@ var contractSentences = map[Mode][]string{
 	},
 }
 
-// withContract closes the prompt with the mode's contract, leaving out any
-// sentence the prompt already carries.
-func withContract(prompt string, mode Mode) string {
+// BranchlessInstruction leads the contract of a dispatch that cut no branch
+// (branching.go), in every mode.
+//
+// A conversation is where it starts, not where it has to stay: the point is to
+// talk about a product and then, when the talk arrives somewhere, become a
+// worker on a branch of its own or an orchestrator sending work out. So the
+// sentence says where it is — in the human's own checkouts, shared with them and
+// with any session they started there, which it reads and never changes — and
+// that work goes onto a branch first, by the two verbs its CLAUDE.md names
+// (work.go). It replaces auto's "commit as you go, open the PR", which is how to
+// carry work through once there is a branch, and the brief says that there.
+const BranchlessInstruction = "This dispatch starts as a conversation, with no branch: the repositories CLAUDE.md lists are the human's own working copies, so read them freely and answer here, but change nothing in them — when the conversation turns into work, take it onto a branch of its own or send it out, as CLAUDE.md describes, and carry it through from there."
+
+// autoShipSentence is auto's "commit as you go, open the PR": how to carry work
+// through on a branch, which a conversation does not have yet. Its brief says
+// it for when it does. Manual's check-in before committing and plan's plan put
+// up for approval stay: both stop for the human before any change, which is
+// what a conversation turning into work should do in those modes.
+var autoShipSentence = contractSentences[ModeAuto][0]
+
+// contractFor is the contract a dispatch closes with: the mode's, and for a
+// dispatch with no branch, the branchless sentence leading it in place of
+// auto's commit-and-PR.
+func contractFor(mode Mode, b Branching) []string {
+	sentences := contractSentences[mode.Normalize()]
+	if !b.None() {
+		return sentences
+	}
+	out := []string{BranchlessInstruction}
+	for _, s := range sentences {
+		if s != autoShipSentence {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// withContract closes the prompt with the contract, leaving out any sentence
+// the prompt already carries.
+func withContract(prompt string, mode Mode, b Branching) string {
 	var missing []string
-	for _, s := range contractSentences[mode.Normalize()] {
+	for _, s := range contractFor(mode, b) {
 		if !strings.Contains(prompt, s) {
 			missing = append(missing, s)
 		}

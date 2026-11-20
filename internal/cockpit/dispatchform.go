@@ -28,8 +28,18 @@ package cockpit
 // branch at all — the repo's default is resolved from the remote at launch, and
 // a form that filled it in here would be quoting the same stale local cache
 // that made dispatches fork dead branches (see dispatch/root.go).
+//
+// BRANCH is the feature step's third line, for the reason the prefix is its
+// second: it is changed on few dispatches, and a step is a keypress on every
+// one. None makes the dispatch a conversation — no branch, no worktree, a
+// session over the repo's whole product (dispatch/branchless.go) — and the
+// product as a whole is a row of its own on the repo step, after the repos so
+// an untouched list still opens on the first one. With no branch there is
+// nothing to prefix and nothing to cut from a root, so the walk passes over
+// the prefix and the ROOT step.
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -85,7 +95,83 @@ type dispatchForm struct {
 	fanoutSel int             // step 7: cursor into dispatchFanoutOptions
 	prompt    textinput.Model // step 8: the prompt
 
+	// branching is step 2's third line, BRANCH, and branchFocus whether it has
+	// the keyboard. whole is a product picked as a whole on step 1, and
+	// wholeRepos how many repos it spans; repo is then empty, and the dispatch
+	// cuts no branch whatever branching says.
+	branching   dispatchpkg.Branching
+	branchFocus bool
+	whole       string
+	wholeRepos  int
+
 	errMsg string
+}
+
+// dfTarget is one row of the repo step: a repo, or a product as a whole.
+type dfTarget struct {
+	repo    repos.Repo
+	product string // a product picked whole; repo is then empty
+	repos   int    // how many repos that product spans
+}
+
+// targets is the repo step's list: the repos the filter matches, then each
+// product of more than one repo whose name it matches, as a whole. A product
+// of one repo is that repo, and a repo in no product has no product to offer.
+func (df *dispatchForm) targets() []dfTarget {
+	var out []dfTarget
+	for _, r := range df.filtered() {
+		out = append(out, dfTarget{repo: r})
+	}
+	count := map[string]int{}
+	for _, r := range df.repos {
+		if r.Product != "" {
+			count[r.Product]++
+		}
+	}
+	var names []string
+	for p, n := range count {
+		if n > 1 {
+			names = append(names, p)
+		}
+	}
+	sort.Strings(names)
+	q := strings.TrimSpace(strings.ToLower(df.filter.Value()))
+	for _, p := range names {
+		if q == "" || strings.Contains(strings.ToLower(p), q) {
+			out = append(out, dfTarget{product: p, repos: count[p]})
+		}
+	}
+	return out
+}
+
+// noBranch reports whether this dispatch cuts no branch: BRANCH says none, or
+// what was picked is a whole product, which has no one repo to cut one in.
+func (df *dispatchForm) noBranch() bool { return df.whole != "" || df.branching.None() }
+
+// scopeLabel is what a branchless dispatch spans, as this form says it.
+func (df *dispatchForm) scopeLabel() string {
+	switch {
+	case df.whole != "":
+		return "spans all " + itoa(df.wholeRepos) + " repos of " + df.whole
+	case df.repo.Product != "":
+		return "starts on " + df.repo.Name + " and reaches all of " + df.repo.Product
+	}
+	return "is about " + df.repo.Name
+}
+
+// focusFeature puts step 2's keyboard on the feature name, the prefix or
+// BRANCH, blurring the others.
+func (df *dispatchForm) focusFeature(prefix, branch bool) tea.Cmd {
+	df.prefixFocus, df.branchFocus = prefix, branch
+	df.feature.Blur()
+	df.prefix.Blur()
+	switch {
+	case prefix:
+		return df.prefix.Focus()
+	case branch:
+		return nil
+	}
+	return df.feature.Focus()
 }
 
 // rootOption is one row of the ROOT step: the default, then a branch each.
@@ -260,6 +346,7 @@ func (df *dispatchForm) filtered() []repos.Repo {
 // choice with them: a root is a branch in one repo, and carrying "release/24"
 // across to a repo that has no such branch would be carrying a launch failure.
 func (df *dispatchForm) pickRepo(r repos.Repo) {
+	df.whole, df.wholeRepos = "", 0
 	if df.repo.Path == r.Path && df.roots != nil {
 		return
 	}
@@ -289,18 +376,25 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			}
 			return m, nil
 		case "down", "ctrl+j":
-			if df.cursor < len(df.filtered())-1 {
+			if df.cursor < len(df.targets())-1 {
 				df.cursor++
 			}
 			return m, nil
 		case "enter":
-			vis := df.filtered()
+			vis := df.targets()
 			if len(vis) == 0 {
 				df.errMsg = "no repo matches — esc, then , to edit scan roots"
 				return m, nil
 			}
 			df.cursor = clampCursor(df.cursor, len(vis))
-			df.pickRepo(vis[df.cursor])
+			if t := vis[df.cursor]; t.product != "" {
+				// A product has no one repo, so none of the repo's own answers —
+				// its branches, its root — apply.
+				df.repo, df.roots, df.rootSel = repos.Repo{}, nil, 0
+				df.whole, df.wholeRepos = t.product, t.repos
+			} else {
+				df.pickRepo(t.repo)
+			}
 			df.step = dispatchFeature
 			df.filter.Blur()
 			return m, df.feature.Focus()
@@ -318,21 +412,40 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 		switch k {
 		case "esc":
 			df.step = dispatchRepo
+			df.focusFeature(false, false)
 			df.feature.Blur()
-			df.prefix.Blur()
-			df.prefixFocus = false
 			return m, df.filter.Focus()
 		case "tab", "shift+tab":
-			df.prefixFocus = !df.prefixFocus
-			if df.prefixFocus {
-				df.feature.Blur()
-				return m, df.prefix.Focus()
+			// feature → prefix → branch, and round; the prefix drops out of the
+			// walk with no branch to prefix.
+			at := 0
+			switch {
+			case df.prefixFocus:
+				at = 1
+			case df.branchFocus:
+				at = 2
 			}
-			df.prefix.Blur()
-			return m, df.feature.Focus()
+			step := 1
+			if k == "shift+tab" {
+				step = 2
+			}
+			for {
+				at = (at + step) % 3
+				if at != 1 || !df.noBranch() {
+					break
+				}
+			}
+			return m, df.focusFeature(at == 1, at == 2)
 		case "enter":
 			if strings.TrimSpace(df.feature.Value()) == "" {
 				df.errMsg = "feature name is required — history is navigated by feature"
+				return m, nil
+			}
+			df.focusFeature(false, false)
+			df.feature.Blur()
+			if df.noBranch() {
+				// Nothing is cut, so there is no root to cut it from.
+				df.step = dispatchMode
 				return m, nil
 			}
 			if bad := dispatchpkg.PrefixProblem(df.branchPrefix()); bad != "" {
@@ -340,11 +453,24 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 				return m, nil
 			}
 			df.step = dispatchRoot
-			df.feature.Blur()
-			df.prefix.Blur()
-			df.prefixFocus = false
 			return m, df.rootFilter.Focus()
 		default:
+			if df.branchFocus {
+				switch k {
+				case " ", "space", "left", "right":
+					if df.whole != "" {
+						df.errMsg = "a whole product has no one repo to cut a branch in — esc and pick a repo for that"
+						return m, nil
+					}
+					if df.branching.None() {
+						df.branching = dispatchpkg.BranchNew
+					} else {
+						df.branching = dispatchpkg.BranchNone
+					}
+				}
+				// A switch, not a field: nothing on it types.
+				return m, nil
+			}
 			var cmd tea.Cmd
 			if df.prefixFocus {
 				df.prefix, cmd = df.prefix.Update(m.inputMsg(k))
@@ -396,6 +522,10 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 		// for the model and fan-out steps below.
 		switch k {
 		case "esc":
+			if df.noBranch() {
+				df.step = dispatchFeature
+				return m, df.focusFeature(false, false)
+			}
 			df.step = dispatchRoot
 			return m, df.rootFilter.Focus()
 		case "up", "ctrl+k", "left":
@@ -497,6 +627,30 @@ func (m model) updateDispatchForm(k string) (model, tea.Cmd) {
 			fanOut := df.fanOut()
 			acct := m.dfAccount()
 			prefix := df.branchPrefix()
+			if df.noBranch() {
+				product, focus := df.whole, repo
+				if df.whole != "" {
+					focus = ""
+				}
+				m.dispatchForm = nil
+				notice := "dispatching \"" + feature + "\" · no branch · " + string(mode)
+				if mdl != dispatchpkg.DefaultModel {
+					notice += " · " + string(mdl)
+				}
+				if acct != account.Default {
+					notice += " · on " + acct
+				}
+				if fanOut {
+					notice += " · fans out"
+				}
+				m.notice = notice + "…"
+				filed := product
+				if filed == "" {
+					filed = df.repo.Product
+				}
+				m = m.markPending(m.pendingBranchless(filed, focus, feature, prompt)).fleetSync()
+				return m, launchBranchless(m.cfg, product, focus, feature, prompt, mode, mdl, fanOut, acct)
+			}
 			m.dispatchForm = nil
 			notice := "dispatching \"" + feature + "\" · " + string(mode)
 			if mdl != dispatchpkg.DefaultModel {
@@ -590,12 +744,20 @@ func (m model) viewDispatchForm(w, h int) string {
 		if prod == "" {
 			prod = "—"
 		}
-		lines = append(lines, row(iw, "", c("repo", 10, cFaint), flexc(df.repo.Name+"  ·  "+prod, cMid)))
+		what := df.repo.Name + "  ·  " + prod
+		if df.whole != "" {
+			what = "all " + itoa(df.wholeRepos) + " repos  ·  " + df.whole
+		}
+		lines = append(lines, row(iw, "", c("repo", 10, cFaint), flexc(what, cMid)))
 	}
 	if df.step > dispatchFeature {
-		lines = append(lines, row(iw, "", c("feature", 10, cFaint), flexc(df.branchPreview(), cMid)))
+		name := df.branchPreview()
+		if df.noBranch() {
+			name = strings.TrimSpace(df.feature.Value()) + "  ·  no branch"
+		}
+		lines = append(lines, row(iw, "", c("feature", 10, cFaint), flexc(name, cMid)))
 	}
-	if df.step > dispatchRoot {
+	if df.step > dispatchRoot && !df.noBranch() {
 		lines = append(lines, row(iw, "", c("root", 10, cFaint), flexc(df.rootLabel(), cMid)))
 	}
 	if df.step > dispatchMode {
@@ -618,7 +780,7 @@ func (m model) viewDispatchForm(w, h int) string {
 	case dispatchRepo:
 		lines = append(lines, fg(cMid, "▸ ")+df.filter.View())
 		lines = append(lines, "")
-		vis := df.filtered()
+		vis := df.targets()
 		if len(vis) == 0 {
 			lines = append(lines, blank(2)+fg(cFaint, "no repos — check scan roots in settings (,)"))
 			break
@@ -630,30 +792,59 @@ func (m model) viewDispatchForm(w, h int) string {
 		}
 		start, end := window(sel, len(vis), room)
 		for i := start; i < end; i++ {
-			r := vis[i]
+			t := vis[i]
 			bg, marker, nameColor := cTransparent, " ", cFg
 			if i == sel {
 				bg, marker, nameColor = cSel, "▸", cWhite
 			}
-			prod := r.Product
+			name, prod := t.repo.Name, t.repo.Product
+			if t.product != "" {
+				name, prod = "all "+itoa(t.repos)+" repos · no branch", t.product
+			}
 			if prod == "" {
 				prod = "—"
 			}
 			lines = append(lines, row(iw, bg,
 				c(marker, 2, cMid),
-				c(r.Name, 34, nameColor),
+				c(name, 34, nameColor),
 				flexc(prod, cDim),
 			))
 		}
 
 	case dispatchFeature:
-		nameC, prefixC, tabTo := cMid, cFaint, "prefix"
-		if df.prefixFocus {
-			nameC, prefixC, tabTo = cFaint, cMid, "feature"
+		nameC, prefixC, branchC := cMid, cFaint, cFaint
+		switch {
+		case df.prefixFocus:
+			nameC, prefixC = cFaint, cMid
+		case df.branchFocus:
+			nameC, branchC = cFaint, cMid
+		}
+		tabTo := "prefix"
+		switch {
+		case df.prefixFocus:
+			tabTo = "branch"
+		case df.branchFocus:
+			tabTo = "feature"
+		case df.noBranch():
+			tabTo = "branch"
 		}
 		lines = append(lines, row(iw, "", c("feature", 10, nameC), flexc(df.feature.View(), cWhite)))
-		lines = append(lines, row(iw, "", c("prefix", 10, prefixC), flexc(df.prefix.View(), cWhite)))
+		if df.noBranch() {
+			lines = append(lines, row(iw, "", c("prefix", 10, cFaint), flexc("— no branch, so no prefix", cFaint)))
+		} else {
+			lines = append(lines, row(iw, "", c("prefix", 10, prefixC), flexc(df.prefix.View(), cWhite)))
+		}
+		sel := 0
+		if df.noBranch() {
+			sel = 1
+		}
+		lines = append(lines, row(iw, "", c("branch", 10, branchC), flexc(dxSwitchValue(dxBranchOptions(), sel), cWhite)))
 		lines = append(lines, "")
+		if df.noBranch() {
+			lines = append(lines, blank(2)+fg(cFaint, "no branch — a conversation that ")+fg(cMid, df.scopeLabel()))
+			lines = append(lines, blank(2)+fg(cFaint, "enter → mode · tab → "+tabTo+" · space on branch flips · esc → repo"))
+			break
+		}
 		lines = append(lines, blank(2)+fg(cFaint, "the branch will be ")+fg(cMid, df.branchPreview()))
 		if bad := dispatchpkg.PrefixProblem(df.branchPrefix()); bad != "" {
 			lines = append(lines, blank(2)+fg(cAmber, "prefix: "+bad))
@@ -716,7 +907,11 @@ func (m model) viewDispatchForm(w, h int) string {
 			))
 		}
 		lines = append(lines, "")
-		lines = append(lines, blank(2)+fg(cFaint, "enter → model · esc → root"))
+		back := "root"
+		if df.noBranch() {
+			back = "feature" // nothing was cut, so ROOT was never a step
+		}
+		lines = append(lines, blank(2)+fg(cFaint, "enter → model · esc → "+back))
 
 	case dispatchModel:
 		lines = append(lines, fg(cMid, "model")+fg(cFaint, "  what the session runs — default passes no flag"))
