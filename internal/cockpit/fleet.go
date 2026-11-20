@@ -20,6 +20,7 @@ package cockpit
 // is empty, and a table that invents a column is worse than one that says less.
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -126,6 +127,10 @@ type fleetRow struct {
 	fanOut  bool
 	subLive []string
 	subDone []string
+	// handoff is where this dispatcher's work came from and went, one clause
+	// a side — handed off from "orders endpoint" in api — or "" when it is
+	// neither end of a handoff (fleetHandoff).
+	handoff string
 
 	acts []cqAct
 	// swap is whether `a` may move it to another account: its turn is over,
@@ -218,6 +223,16 @@ func collectFleet(ctx *collectCtx, s *snapshot) {
 			// record's own answer to whether that reading has happened yet.
 			rows = append(rows, fleetEndedRow(ctx, s, passes, rec, rec.Held()))
 		}
+	}
+
+	// Both ends of a handoff name the other, whatever kind of row each is: the
+	// one that handed off is usually finished and the one it started running.
+	byID := make(map[string]*state.Dispatch, len(ctx.records))
+	for _, rec := range ctx.records {
+		byID[rec.ID] = rec
+	}
+	for i := range rows {
+		rows[i].handoff = fleetHandoff(byID, byID[rows[i].id])
 	}
 
 	fleetSort(rows)
@@ -686,16 +701,56 @@ func fleetEndedRow(ctx *collectCtx, s *snapshot, passes map[string]int,
 // reports the furthest point its work actually reached — deployed over merged
 // over marked — and "stopped" for a session that ended with none of them, which
 // is the honest word for both a kill and a plain exit.
+//
+// A handoff sits under a merge: it says where the work went, which matters
+// more than how the session ended, but less than its own work reaching the
+// branch it ships from, and the detail panel names the successor either way.
 func cqEnded(rec *state.Dispatch) string {
 	switch {
 	case rec.DeployedAt != nil:
 		return "deployed"
 	case rec.PRState == "MERGED":
 		return "merged"
+	case len(rec.HandedOffTo) > 0:
+		return "handed off"
 	case rec.Status == state.StatusDone:
 		return "marked shipped"
 	}
 	return "stopped"
+}
+
+// fleetHandoff is the detail panel's line for either end of a handoff (ADR
+// 0034): where this dispatcher's work came from, and where it went. A record
+// the store no longer holds is named by its id, which `status` still finds.
+//
+// Where it went is left out when the row's own sentence already says it: a
+// run the handoff ended leads with its reason, which is written in exactly
+// these words (dispatch.ReasonHandedOffTo), and the panel saying it twice in
+// four lines reads as two handoffs.
+func fleetHandoff(byID map[string]*state.Dispatch, rec *state.Dispatch) string {
+	if rec == nil {
+		return ""
+	}
+	name := func(id string) string {
+		if d := byID[id]; d != nil {
+			return fmt.Sprintf("%q in %s", d.Feature, d.RepoName)
+		}
+		return id
+	}
+	var parts []string
+	if rec.HandedOffFrom != "" {
+		parts = append(parts, "handed off from "+name(rec.HandedOffFrom))
+	}
+	if len(rec.HandedOffTo) > 0 {
+		to := make([]string, len(rec.HandedOffTo))
+		for i, id := range rec.HandedOffTo {
+			to[i] = name(id)
+		}
+		if clause := "handed off to " + strings.Join(to, ", "); clause != rec.StatusReason {
+			parts = append(parts, clause)
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 // fleetMoved is when a dispatcher was last seen doing anything: the freshest of

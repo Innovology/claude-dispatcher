@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/binpath"
 	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -97,50 +98,6 @@ func hookSpecs() []hookSpec {
 
 const nixStore = "/nix/store/"
 
-// hookExe returns the path to bake into the hook command.
-//
-// os.Executable answers with the real file — on Linux /proc/self/exe is
-// already resolved — which for a Nix install is /nix/store/<hash>-…: a path
-// that changes with every upgrade and disappears at the next garbage
-// collection, leaving a hook that silently never fires again. Homebrew has the
-// same shape, one Cellar version deep. The durable name is the one the human
-// invoked through (/run/current-system/sw/bin/…, ~/.nix-profile/bin/…, the
-// brew shim, ~/.local/bin/…), so prefer that — but only once it is proven to
-// resolve to this very binary. PATH may hold a second, older copy (the
-// brew-vs-~/.local/bin trap in the README); a hook aimed at the wrong build
-// would be worse than one pinned to the right one.
-func hookExe(exe, argv0 string, lookPath, eval func(string) (string, error)) string {
-	cand := argv0
-	if !strings.ContainsRune(cand, filepath.Separator) {
-		found, err := lookPath(cand)
-		if err != nil {
-			return exe
-		}
-		cand = found
-	}
-	cand, err := filepath.Abs(cand)
-	if err != nil {
-		return exe
-	}
-	if resolved, err := eval(cand); err != nil || (resolved != exe && !wraps(resolved, exe)) {
-		return exe
-	}
-	return cand
-}
-
-// wraps reports whether wrapper is the makeWrapper script in front of exe. The
-// Nix package wraps the binary to put git and tmux on its PATH, and wrapProgram
-// does it by moving bin/claude-dispatcher to bin/.claude-dispatcher-wrapped and
-// writing a script that execs it in its place. So the name on PATH resolves to
-// the script and os.Executable to the moved binary: the two never compare
-// equal, and without this every Nix install pinned its hook to the store path
-// — which the next garbage collection deletes. Same directory is the proof: a
-// store path's hash names exactly one build.
-func wraps(wrapper, exe string) bool {
-	return filepath.Dir(wrapper) == filepath.Dir(exe) &&
-		filepath.Base(exe) == "."+filepath.Base(wrapper)+"-wrapped"
-}
-
 // installExe is the binary the hooks and the status line are baked to, or ""
 // when there is no durable one to bake (a `go run` build) — said, not hidden.
 func installExe() (string, error) {
@@ -151,12 +108,12 @@ func installExe() (string, error) {
 	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = resolved
 	}
-	if strings.Contains(exe, "go-build") {
+	if binpath.Temporary(exe) {
 		fmt.Println("\n! running via `go run` — install a real binary first (make install), then re-run init,")
 		fmt.Println("  otherwise the hook would point at a temporary build path.")
 		return "", nil
 	}
-	exe = hookExe(exe, os.Args[0], exec.LookPath, filepath.EvalSymlinks)
+	exe = binpath.Durable(exe, os.Args[0], exec.LookPath, filepath.EvalSymlinks)
 	if strings.HasPrefix(exe, nixStore) {
 		fmt.Println("\n! this build was run straight out of /nix/store, so the hook can only point at")
 		fmt.Println("  this exact build — it stops firing at the next garbage collection. Install it")

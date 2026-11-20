@@ -2,7 +2,9 @@
 // dispatcher is doing and wants (`status`), and the things a human does to one
 // from the triage table without attaching — answer it (`reply`), shelve it
 // (`park`) and take it back up (`unpark`) — plus the steward's own act, saying
-// what it makes of a wait (`note`), and its wake-up (`status --next`).
+// what it makes of a wait (`note`), and its wake-up (`status --next`). One verb
+// is a dispatcher's own: `handoff`, run from inside its session, sends its work
+// on to another repo of its product and finishes it (handoff.go).
 //
 // It exists so a Claude Code session can steward the fleet. The cockpit is a
 // TUI, and a session cannot read one; these print what the triage table says,
@@ -91,6 +93,11 @@ type Entry struct {
 	// session to pick it up.
 	Answer  string `json:"answer,omitempty"`
 	Handled bool   `json:"handled,omitempty"`
+	// HandedOffFrom is the id of the dispatcher that handed its work on to
+	// this one, and HandedOffTo the ids this one handed its work on to
+	// (`handoff`): where a piece of work came from and where it went.
+	HandedOffFrom string   `json:"handed_off_from,omitempty"`
+	HandedOffTo   []string `json:"handed_off_to,omitempty"`
 
 	failure string // the row's failure clause, for the text form
 }
@@ -113,6 +120,8 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runTidy(args, out)
 	case "swap":
 		err = runSwap(args, out)
+	case "handoff":
+		err = runHandoff(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}
@@ -225,11 +234,13 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
 			Session: d.TmuxSession, Worktree: d.WorktreePath,
-			failure:      dispatch.FailureSummary(d, now),
-			WaitingSince: d.WaitingSince,
-			Note:         d.Note(),
-			Answer:       d.Answered(),
-			Handled:      d.Handled(),
+			failure:       dispatch.FailureSummary(d, now),
+			WaitingSince:  d.WaitingSince,
+			Note:          d.Note(),
+			Answer:        d.Answered(),
+			Handled:       d.Handled(),
+			HandedOffFrom: d.HandedOffFrom,
+			HandedOffTo:   d.HandedOffTo,
 		}
 		if d.Status == state.StatusNeedsInput || d.Finished() {
 			e.Said, e.Ask = d.Said, ask.Of(d.Said)

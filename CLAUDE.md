@@ -1219,6 +1219,35 @@
     Mid-turn, on a menu, adopted, same account, or an account that would stall
     are refused by name. Full record:
     `docs/adr/0027-a-conversation-can-change-subscription.md`.
+- **A dispatcher can hand its work on to another repo of its product.** Asked
+  for as "spawn a new separate dispatch session from within an existing one":
+  what a dispatcher builds is often something a repo beside it has to consume,
+  and only the dispatcher knows that. `claude-dispatcher handoff --repo <repo>
+  --title <words> <brief>`, run inside its session, finds it by
+  `CLAUDE_DISPATCHER_ID`, or by `CLAUDE_CODE_SESSION_ID` for an adopted one,
+  and launches an ordinary dispatch in the other repo. The new dispatch runs
+  on the same account, mode and model, and its prompt says where the work it
+  builds on lives. The session's variables are scrubbed first, because a pane
+  inherits its client (ADR 0014). **Only another repo of the same product**,
+  as config has it now; anything else is refused, naming the repos that would
+  do. **Both ends are linked** (`HandedOffFrom`/`HandedOffTo`, lineage and
+  never a status). **The run that handed off ends `exited`, not `done`.** That
+  is the "correct signal" the request asked for: done means live, and a
+  handoff does not make the sender's work live. The tracker still follows an
+  exited record's branch to done when its own pull request merges and
+  deploys. One already live keeps done. The ending is held, not dismissed
+  (nobody watched it, ADR 0012), with SIGNAL "handed off". **Its session's
+  wind-down cannot reopen it**: the turn the handoff ran in ends and claude
+  idles, so hookcmd holds a record in the handoff's ending (`HandedOff`, read
+  off `ReasonHandedOff`) as it holds a done one, and only a prompt or a dialog
+  reopens it. A launch that failed ends nothing. **A dispatch is told it can do
+  this.** A launch in a repo with siblings (`repos.Repo.Siblings`) gets one
+  sentence before the contract, naming the product, the repos beside it and
+  the command at the binary's durable path (`internal/binpath`, which `init`
+  shares). The cockpit shows both ends: SIGNAL, a detail line saying where the
+  work came from or went, its own count in history, and no "rejected" in the
+  products lens. Full record:
+  `docs/adr/0034-a-dispatcher-can-hand-its-work-on.md`.
 - Features are named at dispatch time (hybrid model): the name is the key;
   branch `<branch_prefix><slug>` (`feature/` unless config or the form says
   otherwise), commits, and PRs enrich it automatically. Every
@@ -1280,7 +1309,7 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
-  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap` (`internal/fleetcmd`)
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap`/`handoff` (`internal/fleetcmd`)
   and `steward [stop]` (`internal/steward`), `account` (`internal/accountcmd`)
   and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
@@ -1315,7 +1344,8 @@
   (ADR 0031).
 - `internal/fleetcmd` — the triage table's reading and hand-acts on the command
   line, for a session stewarding the fleet: `status [--json|--next]`, `reply`,
-  `note`, `park`, `unpark`.
+  `note`, `park`, `unpark`; and `handoff`, a dispatcher's own, run from
+  inside its session (ADR 0034).
 - `internal/steward` — the steward session: its folder, brief (`brief.go`),
   settings and start/stop.
 - `internal/dispatch` — branch + tmux + record creation, and `Resume`: a
@@ -1333,6 +1363,11 @@
   sent; `swap.go` moves a conversation to another
   account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup
   prompt; `trust.go` copies a repo's trust onto its worktree.
+  `handoff.go` is a dispatcher handing its work on to another repo of its
+  product, and the sentence a launch is told it can with (ADR 0034).
+- `internal/binpath` — the durable path to name this binary by in anything
+  that outlives the process: the hooks `init` bakes, and the command a
+  dispatch's prompt names.
 - `internal/supervisor` — the session backend behind one interface: tmux on
   Unix, a console window per session on Windows. A session is addressed by
   `Session` (socket + name), never by name alone.

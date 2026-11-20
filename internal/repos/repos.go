@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -73,6 +74,10 @@ type Repo struct {
 	// questions: an automatic choice is a guess worth correcting, and a pin is
 	// a decision worth seeing before it is changed.
 	Pinned bool
+	// Siblings are the other repos of this one's product, by name and in name
+	// order — where a dispatcher here may hand its work on to (ADR 0034).
+	// Empty for a repo in no product, and for one alone in its product.
+	Siblings []string
 }
 
 const maxDepth = 3
@@ -171,7 +176,27 @@ func Discover(cfg *config.Config) []Repo {
 		}
 		return out[i].Path < out[j].Path
 	})
+	withSiblings(out)
 	return out
+}
+
+// withSiblings gives each repo the names of the others in its product. They
+// are the repos found, not the names config lists: a product entry naming a
+// repo no root reaches is not somewhere a dispatch can be launched.
+func withSiblings(rs []Repo) {
+	byProduct := map[string][]string{}
+	for _, r := range rs {
+		if r.Product != "" {
+			byProduct[r.Product] = append(byProduct[r.Product], r.Name)
+		}
+	}
+	for i := range rs {
+		for _, name := range byProduct[rs[i].Product] {
+			if name != rs[i].Name && !slices.Contains(rs[i].Siblings, name) {
+				rs[i].Siblings = append(rs[i].Siblings, name)
+			}
+		}
+	}
 }
 
 func tooDeep(root, path string) bool {
