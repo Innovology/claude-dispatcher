@@ -57,12 +57,12 @@ func addDirArgs(dirs []string) string {
 // the model are passed again because both are properties of the new session,
 // not of the transcript it reopens.
 // StewardCommand is the steward session's command — see the Unix build.
-func StewardCommand(stateDir, opening string) string {
+func StewardCommand(stateDir string, l StewardLaunch) string {
 	env := ""
 	if stateDir != "" {
 		env = `set "CLAUDE_DISPATCHER_STATE=` + stateDir + `" && `
 	}
-	return env + psRun(fmt.Sprintf("claude%s %s", modeArgs(ModeAuto), psQuote(opening))) + " & pause"
+	return env + psRun(fmt.Sprintf("claude%s%s %s", modeArgs(ModeAuto), stewardArgs(l, psQuote), psQuote(l.Opening))) + " & pause"
 }
 
 func resumeCommand(dispatcherID, sessionID, promptPath, shell string, mode Mode, model Model, configDir string, dirs ...string) string {

@@ -488,8 +488,8 @@ func TestApplyStampsTheWait(t *testing.T) {
 		t.Errorf("a new stop is a new wait; the old note is stale: since=%v note=%q", d.WaitingSince, d.Note())
 	}
 	apply(d, "UserPromptSubmit", hookInput{})
-	if d.WaitingSince != nil || d.StewardNote != "" {
-		t.Errorf("working again: since=%v note=%q", d.WaitingSince, d.StewardNote)
+	if d.WaitingSince != nil || d.Note() != "" {
+		t.Errorf("working again: since=%v note=%q", d.WaitingSince, d.Note())
 	}
 	apply(d, "Notification:permission_prompt", hookInput{})
 	if d.WaitingSince == nil {
@@ -509,5 +509,50 @@ func TestApplyClearsTheAnswerWhenWorkResumes(t *testing.T) {
 	apply(d, "UserPromptSubmit", hookInput{})
 	if d.Answer != "" || d.AnsweredAt != nil {
 		t.Fatalf("answer survived the turn it started: %q", d.Answer)
+	}
+}
+
+// A dispatcher watching CI ends a turn on every tick and closes each on the
+// same question. The note written about that question carries to the next
+// wait that asks it, so the steward is not woken to write it again; a wait
+// asking anything else drops it.
+func TestASameQuestionAskedAgainKeepsItsNote(t *testing.T) {
+	const asks = "#743 is green so far.\n\nWant me to merge #743 without the live send?"
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "Stop", hookInput{LastAssistantMessage: asks})
+	now := time.Now()
+	d.StewardNote, d.StewardNoteAt = "yours: merge #743", &now
+	d.NotedAsk = "Want me to merge #743 without the live send?"
+
+	apply(d, "UserPromptSubmit", hookInput{}) // the CI monitor's tick
+	if d.Note() != "" {
+		t.Fatalf("a working session has no note on show, got %q", d.Note())
+	}
+	time.Sleep(2 * time.Millisecond)
+	apply(d, "Stop", hookInput{LastAssistantMessage: "Web smoke passed.\n\nWant me to merge #743 without the live send?"})
+	if d.Note() != "yours: merge #743" || !d.Handled() {
+		t.Fatalf("the same question asked again lost its note: note=%q handled=%v", d.Note(), d.Handled())
+	}
+
+	apply(d, "UserPromptSubmit", hookInput{})
+	time.Sleep(2 * time.Millisecond)
+	apply(d, "Stop", hookInput{LastAssistantMessage: "Merged.\n\nShall I delete the branch?"})
+	if d.Note() != "" || d.StewardNote != "" || d.NotedAsk != "" {
+		t.Fatalf("a different question kept a note about another: note=%q asked=%q", d.StewardNote, d.NotedAsk)
+	}
+}
+
+// A reply is not carried the way a note is: one typed and then asked again did
+// not settle anything.
+func TestARepliedQuestionAskedAgainIsOpen(t *testing.T) {
+	const q = "Want me to merge it?"
+	d := &state.Dispatch{Status: state.StatusWorking}
+	apply(d, "Stop", hookInput{LastAssistantMessage: q})
+	now := time.Now()
+	d.Answer, d.AnsweredAt = "steward: yes", &now
+	apply(d, "UserPromptSubmit", hookInput{})
+	apply(d, "Stop", hookInput{LastAssistantMessage: q})
+	if d.Handled() {
+		t.Fatal("a reply carried to the question asked again")
 	}
 }

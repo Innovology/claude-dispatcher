@@ -47,14 +47,15 @@ type cqAct struct {
 // cqGoal is what the dispatcher is trying to achieve, and what that text
 // actually is.
 //
-// There is no completion criterion on a dispatch record: the dispatch form's
-// "DONE WHEN" field is folded into the prompt and not persisted separately, so
-// nothing here can honestly be labelled a goal. The prompt is the nearest real
-// thing, and it is a different claim — a brief, not a definition of done — so
-// it is labelled "prompt" and never dressed up as one. When state.Dispatch
-// grows a Goal field this becomes `if rec.Goal != "" { return rec.Goal, "goal" }`
-// ahead of the prompt.
+// The record's Goal is the dispatch form's DONE WHEN, read back off the prompt
+// at launch, and is the one text here that is a definition of done. Without
+// one, the prompt is the nearest real thing, and it is a different claim — a
+// brief, not a definition of done — so it is labelled "prompt" and never
+// dressed up as one.
 func cqGoal(rec *state.Dispatch) (text, label string) {
+	if rec.Goal != "" {
+		return rec.Goal, "goal"
+	}
 	if p := cqFirstSentence(rec.Prompt); p != "" {
 		return p, "prompt"
 	}

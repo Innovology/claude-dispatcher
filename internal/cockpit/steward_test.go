@@ -2,10 +2,13 @@ package cockpit
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/steward"
 )
@@ -27,86 +30,327 @@ func TestQueueSignalLeadsWithTheStewardsNote(t *testing.T) {
 	}
 }
 
-func TestOnStewardStarted(t *testing.T) {
-	m := newModel()
-	mm, cmd := m.onStewardStarted(stewardStartedMsg{err: errors.New("tmux is not available")})
-	if cmd != nil || !strings.Contains(mm.notice, "tmux is not available") {
-		t.Fatalf("a failed start must say why and hand nothing over: %q", mm.notice)
+// withStewards installs the stewards a load found, and fakes for the acts.
+func withStewards(t *testing.T, rows ...stewardRow) *[]string {
+	t.Helper()
+	prevNow, prevOrder, prevQs := stewardsNow, productOrder, stewardQuestionsNow
+	ps, pr, pe, pu := stewardStart, stewardReopen, stewardEnd, stewardRulings
+	t.Cleanup(func() {
+		stewardsNow, productOrder, stewardQuestionsNow = prevNow, prevOrder, prevQs
+		stewardStart, stewardReopen, stewardEnd, stewardRulings = ps, pr, pe, pu
+	})
+	stewardRulings = func(p string, _ time.Time) []steward.Ruling {
+		if p != "alpha" {
+			return nil
+		}
+		return []steward.Ruling{
+			{ID: "r1", Text: "one deploy at a time"},
+			{ID: "r2", Text: "merge greens", Allow: []string{steward.AllowMerge}, Repo: "alpha-api", Until: time.Date(2026, 11, 16, 9, 0, 0, 0, time.Local)},
+		}
 	}
-	// Already running, or started untrusted, both go on to the handover; with
-	// no real session here the handover reports there is nothing to attach to,
+	stewardsNow = rows
+	stewardQuestionsNow = nil
+	productOrder = []string{"alpha", "beta"}
+	var acts []string
+	stewardStart = func(p string) (*steward.Steward, error) {
+		acts = append(acts, "start "+p)
+		return &steward.Steward{ID: "new", Product: p}, nil
+	}
+	stewardReopen = func(id string) (*steward.Steward, error) {
+		acts = append(acts, "reopen "+id)
+		return &steward.Steward{ID: id, Product: "alpha"}, nil
+	}
+	stewardEnd = func(id string) (*steward.Steward, error) {
+		acts = append(acts, "end "+id)
+		return &steward.Steward{ID: id, Product: "alpha"}, nil
+	}
+	return &acts
+}
+
+// The headline says nothing without stewards, how many are live, and the
+// interrupted ones apart — those wait on the human.
+func TestStewardClause(t *testing.T) {
+	withStewards(t)
+	if got := stewardClause(); got != "" {
+		t.Errorf("none: %q", got)
+	}
+	stewardsNow = []stewardRow{{id: "a", product: "alpha", state: steward.Live}, {id: "o", product: "alpha", state: steward.Ended}}
+	if got := stewardClause(); got != "steward live" {
+		t.Errorf("one live: %q", got)
+	}
+	stewardsNow = append(stewardsNow, stewardRow{id: "b", product: "beta", state: steward.Live}, stewardRow{id: "c", product: "gamma", state: steward.Interrupted})
+	if got := stewardClause(); got != "2 stewards live · 1 steward interrupted" {
+		t.Errorf("mixed: %q", got)
+	}
+}
+
+// t opens the picker on the selected row's product; each product lists its
+// stewards newest first, then a "new steward" line of its own.
+func TestStewardPickerLists(t *testing.T) {
+	installFleetFixture(t)
+	withStewards(t,
+		stewardRow{id: "live1", product: "alpha", state: steward.Live, opened: time.Now()},
+		stewardRow{id: "old1", product: "alpha", state: steward.Ended, opened: time.Now().Add(-48 * time.Hour)},
+	)
+	items := stewardItems()
+	var got []string
+	for _, it := range items {
+		name := "new"
+		if it.st != nil {
+			name = it.st.id
+		}
+		got = append(got, it.product+":"+name)
+	}
+	if strings.Join(got, " ") != "alpha:live1 alpha:old1 alpha:new beta:new" {
+		t.Fatalf("items = %v", got)
+	}
+	m := newModel()
+	mm, _, _ := m.updateFloorQueue("t")
+	if !mm.stewardPickOpen {
+		t.Fatal("t must open the steward picker")
+	}
+	if it := items[mm.stewardPickCursor]; it.product != mm.stewardPickProduct() {
+		t.Errorf("opened on %q, the row is %q", it.product, mm.stewardPickProduct())
+	}
+	view := mm.viewStewardPick(100, 30)
+	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended", "2 rulings standing · may merge in alpha-api until Mon 09:00"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker lacks %q:\n%s", want, view)
+		}
+	}
+	if h := m.cqFooterHelp(); !strings.Contains(h, "t stewards") {
+		t.Errorf("footer = %q", h)
+	}
+}
+
+// enter reopens an older steward, starts a new one where the product has none
+// live, refuses to start one over a live steward (x ends it on purpose), and x
+// ends one.
+func TestStewardPickerActs(t *testing.T) {
+	installFleetFixture(t)
+	acts := withStewards(t,
+		stewardRow{id: "live1", product: "alpha", state: steward.Live},
+		stewardRow{id: "old1", product: "alpha", state: steward.Ended},
+	)
+	m := newModel()
+	m.stewardPickOpen = true
+	at := func(i int) model { mm := m; mm.stewardPickCursor = i; return mm }
+
+	mm, cmd := at(1).updateStewardPick("enter")
+	if cmd == nil || mm.stewardPickOpen {
+		t.Fatal("enter on an older steward must reopen it")
+	}
+	if msg := cmd().(stewardOpenedMsg); msg.err != nil || msg.product != "alpha" {
+		t.Fatalf("reopen came back %+v", msg)
+	}
+
+	mm, cmd = at(2).updateStewardPick("enter")
+	if cmd != nil || !mm.stewardPickOpen || !strings.Contains(mm.notice, "x ends it") {
+		t.Fatalf("a new steward over a live one must be refused: %q", mm.notice)
+	}
+
+	_, cmd = at(3).updateStewardPick("enter")
+	if cmd == nil {
+		t.Fatal("enter on beta's new line must start one")
+	}
+	cmd()
+
+	_, cmd = at(0).updateStewardPick("x")
+	if cmd == nil {
+		t.Fatal("x on a live steward must end it")
+	}
+	if msg := cmd().(actionMsg); !strings.Contains(msg.notice, "ended") {
+		t.Errorf("end notice %q", msg.notice)
+	}
+	if mm, cmd = at(1).updateStewardPick("x"); cmd != nil || !strings.Contains(mm.notice, "nothing to end") {
+		t.Errorf("x on an ended steward: %q", mm.notice)
+	}
+	if strings.Join(*acts, ",") != "reopen old1,start beta,end live1" {
+		t.Fatalf("acts = %v", *acts)
+	}
+	if mm, _ = at(0).updateStewardPick("esc"); mm.stewardPickOpen {
+		t.Error("esc must close the picker")
+	}
+}
+
+func TestOnStewardOpened(t *testing.T) {
+	m := newModel()
+	mm, _ := m.onStewardOpened(stewardOpenedMsg{product: "alpha", err: errors.New("tmux is not available")})
+	if !strings.Contains(mm.notice, "tmux is not available") {
+		t.Fatalf("a failed start must say why: %q", mm.notice)
+	}
+	// Already live, or started untrusted, both go on to the handover; with no
+	// real session here the handover reports there is nothing to attach to,
 	// which is enough to show it was attempted.
-	for _, err := range []error{steward.ErrRunning, steward.ErrUntrusted} {
-		mm, _ = m.onStewardStarted(stewardStartedMsg{err: err})
+	for _, err := range []error{steward.ErrRunning, steward.ErrUntrusted, nil} {
+		mm, _ = m.onStewardOpened(stewardOpenedMsg{product: "alpha", err: err})
 		if strings.HasPrefix(mm.notice, "steward: ") {
 			t.Errorf("%v must not be reported as a failure: %q", err, mm.notice)
 		}
 	}
 }
 
-// t flips the steward: on when off, off when on, never handing the terminal
-// over — and the headline and footer agree with the key at once.
-func TestStewardToggle(t *testing.T) {
-	prevStart, prevStop, prevOn := stewardStart, stewardStop, stewardSwitchedOn
-	prevE, prevR := stewardEnabled, stewardOn
-	t.Cleanup(func() {
-		stewardStart, stewardStop, stewardSwitchedOn = prevStart, prevStop, prevOn
-		stewardEnabled, stewardOn = prevE, prevR
-	})
-	on := false
-	var started, stopped int
-	stewardSwitchedOn = func() bool { return on }
-	stewardStart = func() error { started++; on = true; return nil }
-	stewardStop = func() error { stopped++; on = false; return nil }
-	stewardEnabled, stewardOn = false, false
-
-	if stewardClause() != "" || stewardToggleVerb() != "start steward" {
-		t.Fatalf("off: clause %q verb %q", stewardClause(), stewardToggleVerb())
+// Saved questions are on the headline — the line that says there is a recap to
+// ask for — and in the picker, with the keyword that asks for it.
+func TestSavedQuestionsShow(t *testing.T) {
+	installFleetFixture(t)
+	withStewards(t, stewardRow{id: "live1", product: "alpha", state: steward.Live})
+	stewardQuestionsNow = map[string]int{"alpha": 2, "beta": 1}
+	if got := stewardClause(); got != "steward live · 3 questions saved for you" {
+		t.Errorf("clause = %q", got)
 	}
-	msg := stewardToggleCmd()().(stewardToggledMsg)
-	if !msg.on || started != 1 {
-		t.Fatalf("t on an off steward must start it: %+v", msg)
-	}
-	m, _ := newModel().onStewardToggled(msg)
-	if stewardClause() != "steward on" || stewardToggleVerb() != "stop steward" || !strings.Contains(m.notice, "steward on") {
-		t.Fatalf("on: clause %q verb %q notice %q", stewardClause(), stewardToggleVerb(), m.notice)
-	}
-	stewardOn = false // a reboot took its session; the poll will bring it back
-	if stewardClause() != "steward starting" {
-		t.Errorf("switched on but down: %q", stewardClause())
-	}
-	msg = stewardToggleCmd()().(stewardToggledMsg)
-	if msg.on || stopped != 1 {
-		t.Fatalf("t on a running steward must stop it: %+v", msg)
-	}
-	_, _ = newModel().onStewardToggled(msg)
-	if stewardClause() != "" {
-		t.Errorf("off again: %q", stewardClause())
-	}
-
-	stewardStart = func() error { return errors.New("tmux is not available") }
-	if msg := stewardToggleCmd()().(stewardToggledMsg); msg.on || !strings.Contains(msg.notice, "tmux is not available") {
-		t.Errorf("a failed start must stay off and say why: %+v", msg)
+	m := newModel()
+	m.cfg = &config.Config{RecapKeyword: "back"}
+	mm, _ := m.stewardPickOpenFor("alpha")
+	if view := mm.viewStewardPick(100, 30); !strings.Contains(view, "2 questions saved for you · say back to its steward") {
+		t.Errorf("picker:\n%s", view)
 	}
 }
 
-// The footer advertises the switch in the words of what it will do, and t on
-// the table flips it.
-func TestFooterOffersTheStewardSwitch(t *testing.T) {
-	installFleetFixture(t)
-	prev := stewardEnabled
-	t.Cleanup(func() { stewardEnabled = prev })
-	stewardEnabled = false
+// The recap keyword and the away window are settings, and a window that is
+// not a duration is refused where it is typed.
+func TestStewardSettingsFields(t *testing.T) {
+	cfg := &config.Config{}
+	field := func(key string) settingsField {
+		for _, f := range settingsFields {
+			if f.key == key {
+				return f
+			}
+		}
+		t.Fatalf("no settings field %q", key)
+		return settingsField{}
+	}
+	recap, away := field("recap_keyword"), field("steward_away_after")
+	if settingsValue(cfg, recap) != "recap" || settingsValue(cfg, away) != "15m" {
+		t.Fatalf("defaults: %q %q", settingsValue(cfg, recap), settingsValue(cfg, away))
+	}
+	if settingsProblem(away, "soon") == "" || settingsProblem(away, "45m") != "" {
+		t.Fatal("the away window must be a duration")
+	}
+	settingsCommit(cfg, recap, " back ")
+	settingsCommit(cfg, away, "45m")
+	if cfg.Recap() != "back" || cfg.AwayAfter() != 45*time.Minute {
+		t.Fatalf("committed %q %v", cfg.Recap(), cfg.AwayAfter())
+	}
+}
+
+// Whether an interrupted steward is reopened on its own is a choice on the
+// settings screen: enter steps never → interrupted → never and saves each,
+// without opening the text editor, since a typed "interupted" would be a
+// setting that silently means never.
+func TestStewardReopenIsAChoiceInSettings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	m := newModel()
-	if h := m.cqFooterHelp(); !strings.Contains(h, "t start steward") {
-		t.Errorf("footer = %q", h)
+	m.width, m.height = 160, 60
+	m.cfg = &config.Config{}
+	m.lens = "products"
+	m = press(m, ",")
+	for m.settings.fields[m.settings.cursor].key != "steward_reopen" {
+		if m.settings.cursor == len(m.settings.fields)-1 {
+			t.Fatal("no steward_reopen field")
+		}
+		m = press(m, "j")
 	}
-	stewardEnabled = true
-	if h := m.cqFooterHelp(); !strings.Contains(h, "t stop steward") {
-		t.Errorf("footer = %q", h)
+	if !strings.Contains(m.View(), "never") {
+		t.Error("the field does not say its default")
 	}
-	mm, cmd, _ := m.updateFloorQueue("t")
-	if cmd == nil || !strings.Contains(mm.notice, "stop steward") {
-		t.Errorf("t on the table must flip the switch: notice %q", mm.notice)
+	for _, want := range []string{"interrupted", "never"} {
+		m = press(m, "enter")
+		if m.settings.editing {
+			t.Fatal("a choice field opened the text editor")
+		}
+		if got := m.cfg.StewardReopenMode(); got != want {
+			t.Fatalf("enter stepped to %q, want %q", got, want)
+		}
+		if got, err := config.Load(); err != nil || got.StewardReopenMode() != want {
+			t.Fatalf("saved %q (%v), want %q", got.StewardReopen, err, want)
+		}
+		if m.settings.saved != "steward reopen saved" {
+			t.Errorf("flash = %q", m.settings.saved)
+		}
+	}
+}
+
+// A choice that cannot be saved says so rather than flashing "saved", and with
+// no config there is nothing to step.
+func TestStewardReopenSaveFailureIsSaid(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(home, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	m := newModel()
+	m.settings = newSettings(nil)
+	if mm, _ := m.cycleStewardReopen(); mm.notice != "" || mm.settings.saved != "" {
+		t.Fatal("no config, yet something was said")
+	}
+	m.cfg = &config.Config{}
+	m.settings = newSettings(m.cfg)
+	m, _ = m.cycleStewardReopen()
+	if !strings.HasPrefix(m.notice, "save failed: ") || m.settings.saved != "" {
+		t.Fatalf("notice %q, flash %q", m.notice, m.settings.saved)
+	}
+}
+
+// The poll reopens interrupted stewards only where steward_reopen says so, and
+// says what it reopened — or could not — in the footer, since a steward coming
+// back by itself is news the human did not ask for at that moment.
+func TestThePollReopensInterruptedStewardsOnlyWhenAsked(t *testing.T) {
+	fakeGHOnPath(t, "SUCCESS")
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	prevRetire, prevReopen := stewardRetireLegacy, stewardReopenInterrupted
+	t.Cleanup(func() { stewardRetireLegacy, stewardReopenInterrupted = prevRetire, prevReopen })
+	stewardRetireLegacy = func() (bool, error) { return false, nil }
+	calls := 0
+	var reopened []*steward.Steward
+	var failed error
+	stewardReopenInterrupted = func() ([]*steward.Steward, error) { calls++; return reopened, failed }
+
+	if msg := trackRefreshCmd(&config.Config{})().(trackedMsg); calls != 0 || msg.notice != "" {
+		t.Fatalf("steward_reopen unset, yet the poll reopened (%d calls, %q)", calls, msg.notice)
+	}
+	on := &config.Config{StewardReopen: config.StewardReopenInterrupted}
+	if msg := trackRefreshCmd(on)().(trackedMsg); calls != 1 || msg.notice != "" {
+		t.Fatalf("on, with nothing to reopen: %d calls, %q", calls, msg.notice)
+	}
+	reopened = []*steward.Steward{{ID: "s1", Product: "alpha"}}
+	if msg := trackRefreshCmd(on)().(trackedMsg); msg.notice != "reopened alpha's steward (it was interrupted)" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+	reopened = []*steward.Steward{{ID: "s1", Product: "alpha"}, {ID: "s2", Product: ""}}
+	failed = errors.New("beta's steward: no server")
+	msg := trackRefreshCmd(on)().(trackedMsg)
+	if msg.notice != "reopened alpha's and unassigned's stewards (they were interrupted) · steward: beta's steward: no server" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+
+	m := newModel()
+	m.cfg = &config.Config{}
+	mm, _ := m.Update(msg)
+	if got := mm.(model).notice; got != msg.notice {
+		t.Errorf("the footer says %q", got)
+	}
+	mm, _ = mm.(model).Update(trackedMsg{})
+	if got := mm.(model).notice; got != msg.notice {
+		t.Error("a quiet poll wiped the notice")
+	}
+}
+
+// A steward the poll gave up on says so in the picker, since it is the one
+// interrupted steward that will not come back unless the human reopens it.
+func TestThePickerSaysWhenThePollGaveUp(t *testing.T) {
+	withStewards(t,
+		stewardRow{id: "dead1", product: "alpha", state: steward.Interrupted, spent: true},
+		stewardRow{id: "down1", product: "beta", state: steward.Interrupted},
+	)
+	m := newModel()
+	m.cfg = &config.Config{}
+	mm, _ := m.stewardPickOpenFor("alpha")
+	view := mm.viewStewardPick(140, 30)
+	if !strings.Contains(view, "interrupted · reopened 3 times, did not stay up · enter reopens") {
+		t.Errorf("picker:\n%s", view)
+	}
+	if strings.Count(view, "did not stay up") != 1 {
+		t.Errorf("an interrupted steward the poll has not given up on says it did:\n%s", view)
 	}
 }

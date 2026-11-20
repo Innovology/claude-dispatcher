@@ -221,3 +221,19 @@ func TestOccupiedWorktreeSaysWhatItIsOn(t *testing.T) {
 // ownAccount is the human's own login: what every launch ran on before there
 // were accounts, and what these tests are about.
 var ownAccount = account.Account{Name: account.Default}
+
+// A launch whose prompt carries DONE WHEN records it, so the row and the
+// steward are handed the condition rather than a sentence to find.
+func TestLaunchRecordsTheGoal(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	repo := initRepo(t)
+	stubLaunch(t)
+	d, err := Launch(repos.Repo{Name: "acme", Path: repo}, "retry window",
+		"retry window\n\nback off slower\n\n"+GoalSentence("the pr is merged"), ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Goal != "the pr is merged" {
+		t.Fatalf("goal = %q", d.Goal)
+	}
+}
