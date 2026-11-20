@@ -253,7 +253,11 @@ func collectProducts(ctx *collectCtx, s *snapshot) {
 			if rec.CreatedAt.After(weekAgo) {
 				dispatched7d++
 			}
-			if (rec.Status == state.StatusExited || rec.PRState == "CLOSED") && rec.UpdatedAt.After(weekAgo) {
+			// A dispatcher that handed its work on ended exited, and was not
+			// turned down: its work went on in another repo (ADR 0034). Its own
+			// pull request being closed unmerged still counts.
+			ended := rec.Status == state.StatusExited && len(rec.HandedOffTo) == 0
+			if (ended || rec.PRState == "CLOSED") && rec.UpdatedAt.After(weekAgo) {
 				rejected7d++
 			}
 

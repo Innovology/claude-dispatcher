@@ -52,6 +52,9 @@ Usage:
   claude-dispatcher swap <id|feature> <account>
                                move a dispatcher onto another subscription and resume
                                its conversation there (a on its row in the cockpit)
+  claude-dispatcher handoff --repo <repo> --title <words> <brief>
+                               from inside a dispatcher: hand its work on to another repo
+                               of its product, and finish
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -81,10 +84,11 @@ func main() {
 	case "steward":
 		os.Exit(steward.Run(args[1:], os.Stdout, os.Stderr))
 	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "worktree", "dispatch",
-		"ruling", "merge", "ask", "questions", "answer":
+		"ruling", "merge", "ask", "questions", "answer", "handoff":
 		// The triage table's reading and its three hands, for a session
-		// stewarding the fleet, and the two verbs a branchless conversation
-		// turns into work with — see internal/fleetcmd.
+		// stewarding the fleet, the two verbs a branchless conversation turns
+		// into work with, and the handoff a dispatcher makes from inside its
+		// own session — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
 	case "account", "accounts":
 		os.Exit(accountcmd.Run(args[1:], os.Stdout, os.Stderr))

@@ -406,16 +406,27 @@ func fleetCoded(rows []fleetRow) time.Duration {
 // one screen where every row is finished, so the hours are the whole of what
 // the work turned out to be rather than a running count. Same rule as the
 // fleet's — appended only when it fits whole.
+//
+// A handoff is counted on its own, and only where there is one: it is neither
+// a ship — the work it handed on from may not have reached anywhere — nor a
+// stop, since the work went on in another repo (ADR 0034).
 func (m model) fleetHistoryHeadline(inner int, rows []fleetRow) string {
-	shipped := 0
+	shipped, handed := 0, 0
 	for _, r := range rows {
-		if r.signal != "stopped" {
+		switch r.signal {
+		case "stopped":
+		case "handed off":
+			handed++
+		default:
 			shipped++
 		}
 	}
 	left := fg(cFg, itoa(len(rows))+" finished") + "   " +
-		fg(cFaint, itoa(shipped)+" shipped") + "   " +
-		fg(cFaint, itoa(len(rows)-shipped)+" stopped")
+		fg(cFaint, itoa(shipped)+" shipped") + "   "
+	if handed > 0 {
+		left += fg(cFaint, itoa(handed)+" handed off") + "   "
+	}
+	left += fg(cFaint, itoa(len(rows)-shipped-handed)+" stopped")
 	right := "⏎ resumes one · h back to the fleet"
 	left = fleetAppendCoded(left, right, rows, inner)
 	return flG(flSpread(left, fg(cFaint, right), inner))
@@ -559,6 +570,12 @@ func (m model) fleetDetail(w int, r fleetRow) []cqRow {
 	if ag := cqAgentsDetail(r); ag != "" {
 		out = append(out, cqFixed(flG(fg(cFaint,
 			truncate("subagents · "+ag, inner)))))
+	}
+	// Where the work came from or went, for either end of a handoff: a row
+	// that says "handed off" in SIGNAL is not finished with until this says to
+	// whom, and the dispatcher it started reads as unexplained without it.
+	if r.handoff != "" {
+		out = append(out, cqFixed(flG(fg(cFaint, truncate(r.handoff, inner)))))
 	}
 
 	if m.cqFlash != "" {
