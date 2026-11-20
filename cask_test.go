@@ -28,10 +28,11 @@ import (
 
 func TestCaskHooksGuardMacOnlyCommands(t *testing.T) {
 	raw, err := os.ReadFile(".goreleaser.yml")
-	// The Nix build ships only the Go sources (see nix/package.nix), and runs
-	// the suite from that copy — there is no release config there to read.
+	// The Nix build ships only the Go sources and their testdata (see
+	// nix/package.nix), and runs the suite from that copy — there is no
+	// release config there to read.
 	if errors.Is(err, fs.ErrNotExist) {
-		t.Skip("no .goreleaser.yml alongside the sources — nix builds ship only the Go files")
+		t.Skip("no .goreleaser.yml alongside the sources — nix builds ship only the Go sources and their testdata")
 	}
 	if err != nil {
 		t.Fatal(err)
