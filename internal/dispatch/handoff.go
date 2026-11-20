@@ -12,9 +12,33 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/binpath"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 )
+
+// handoffVerb is the command the launch prompt names, and how withHandoff
+// recognises a prompt that already names it.
+const handoffVerb = "handoff --repo"
+
+// withHandoff tells a dispatch whose repo has siblings in its product that it
+// can hand work on to them, and how. It is composed at Launch, before the
+// contract, because a session can only use a command it has been told about,
+// and a dispatcher's own judgement is what decides that the next step belongs
+// in another repo: nothing in the cockpit can see that a change here is
+// something a repo beside it has to consume.
+//
+// "Push your own part first" is said because the handoff ends this run: once
+// it returns the cockpit no longer counts the dispatcher as working, and
+// whatever it had not pushed is work in a worktree nobody is in.
+func withHandoff(prompt string, r repos.Repo) string {
+	if len(r.Siblings) == 0 || strings.Contains(prompt, handoffVerb) {
+		return prompt
+	}
+	s := fmt.Sprintf("This repo is one of %s's, beside %s. If the next step belongs in another of them — something there has to consume what you build here — hand it off rather than doing it from this checkout: `%s %s <repo> --title \"<a few words>\" \"<what it should do, and what of yours it builds on>\"` dispatches it there and marks this dispatcher finished, so push your own part first.",
+		r.Product, andList(r.Siblings), binpath.Self(), handoffVerb)
+	return strings.TrimRight(prompt, "\n") + "\n\n" + s
+}
 
 // andList joins names the way a sentence lists them.
 func andList(names []string) string {

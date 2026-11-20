@@ -10,10 +10,33 @@ import (
 	"time"
 
 	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/binpath"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
 	"claude-dispatcher/internal/supervisor"
 )
+
+// A dispatch whose repo has others beside it in its product is told it can hand
+// work on to them, by name and with the command: a session uses only what it
+// has been told about. One alone in its product, or in none, is told nothing.
+func TestALaunchIsToldWhereItCanHandOff(t *testing.T) {
+	shop := repos.Repo{Name: "api", Product: "shop", Siblings: []string{"app", "web"}}
+	got := withHandoff("build the endpoint", shop)
+	for _, want := range []string{"build the endpoint\n\n", "one of shop's", "app and web",
+		binpath.Self() + " handoff --repo <repo>", "marks this dispatcher finished", "push your own part first"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt does not carry %q:\n%s", want, got)
+		}
+	}
+	if again := withHandoff(got, shop); again != got {
+		t.Errorf("a prompt that already names the handoff gained it twice:\n%s", again)
+	}
+	for _, alone := range []repos.Repo{{Name: "api"}, {Name: "api", Product: "shop"}} {
+		if got := withHandoff("go", alone); got != "go" {
+			t.Errorf("a repo with no siblings was told about a handoff: %q", got)
+		}
+	}
+}
 
 func TestAndList(t *testing.T) {
 	cases := map[string][]string{"": nil, "a": {"a"}, "a and b": {"a", "b"}, "a, b and c": {"a", "b", "c"}}
@@ -116,10 +139,13 @@ func TestAHandoffDispatchesTheWorkAndEndsTheRun(t *testing.T) {
 	if next.HandedOffFrom != from.ID {
 		t.Errorf("the new dispatcher does not say where it came from: %q", next.HandedOffFrom)
 	}
+	// It can hand on in turn, since api is beside it; manual mode's contract
+	// closes the prompt after that sentence.
 	for _, want := range []string{"show orders\n\nlist the new orders on the account page\n\n",
 		`Handed off by "orders endpoint", a dispatcher in api, branch feature/orders-endpoint, https://example.test/api/pull/7`,
 		"Its checkout is /wt/api/orders-endpoint.",
-		"Do one pass, then stop and check in"} { // manual mode's contract, after the handoff
+		"handoff --repo",
+		"Do one pass, then stop and check in"} {
 		if !strings.Contains(next.Prompt, want) {
 			t.Errorf("the prompt does not carry %q:\n%s", want, next.Prompt)
 		}
