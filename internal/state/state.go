@@ -55,6 +55,13 @@ const ReasonTurnComplete = "turn complete — waiting on you"
 // writes it and the cockpit's lead for a stalled launch matches it.
 const ReasonUntrustedLaunch = "starting session · not marked trusted, so claude will ask first"
 
+// ReasonHandedOff leads the StatusReason of a dispatcher that ended its run by
+// handing its work on to another repo of its product, followed by what it was
+// handed to. Named for the same reason as ReasonQuestion: dispatch writes it
+// and hookcmd's guard reads it (HandedOff), so the session's own trailing
+// events cannot put a finished run back on the table.
+const ReasonHandedOff = "handed off to "
+
 // Priority orders statuses by how urgently they need the human's attention.
 func (s Status) Priority() int {
 	switch s {
@@ -299,6 +306,15 @@ type Dispatch struct {
 	// table (see DismissedAt), so shipping this cannot flush a year of history
 	// onto the fleet.
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	// HandedOffFrom is the record id of the dispatcher that handed its work on
+	// to this one — a dispatcher in another repo of the same product whose
+	// work this one consumes (`claude-dispatcher handoff`, ADR 0034).
+	// HandedOffTo is the other end of the same link: the dispatchers this one
+	// handed its work on to, in the order it did, since one change can need
+	// consuming in more than one repo. Lineage, never a status — what the
+	// handoff did to the status is ReasonHandedOff's to say.
+	HandedOffFrom string   `json:"handed_off_from,omitempty"`
+	HandedOffTo   []string `json:"handed_off_to,omitempty"`
 	// DismissedAt is the human taking a finished dispatcher off the triage
 	// table. Like parking it is an annotation, never a Status: it says the
 	// finish has been read, not that anything about the work changed. Until it
@@ -314,6 +330,15 @@ func (d *Dispatch) Parked() bool { return d.ParkedAt != nil || d.ParkedReason !=
 // Finished reports whether this dispatcher's session is over for good.
 func (d *Dispatch) Finished() bool {
 	return d.Status == StatusDone || d.Status == StatusExited
+}
+
+// HandedOff reports a dispatcher whose run is over because it handed its work
+// on (ReasonHandedOff), and that nothing has reopened since: the status is the
+// one the handoff left. Its session is usually still up — the handoff is run
+// from inside it, and claude sits at its prompt afterwards — so, like a done
+// record, only proof of a new turn may move it (hookcmd.reopensDone).
+func (d *Dispatch) HandedOff() bool {
+	return d != nil && d.Finished() && strings.HasPrefix(d.StatusReason, ReasonHandedOff)
 }
 
 // Held reports whether the triage table should still be carrying this finished

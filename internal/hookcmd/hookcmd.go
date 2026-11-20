@@ -32,7 +32,9 @@
 // and idle_prompt defers to it either way.
 //
 // A done record is terminal for every event but those that prove its
-// session is still going — see reopensDone.
+// session is still going — see reopensDone. So is a record that handed its
+// work on (state.HandedOff): the handoff runs inside the session, which goes
+// on to end the very turn it ran in.
 //
 // Events are attributed to a dispatch by, in order: the CLAUDE_DISPATCHER_ID
 // env var (set at launch, inherited through tmux -> claude -> hook), the
@@ -270,6 +272,15 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 	changed := applyFanOut(d, event, in)
 	if d.Status == state.StatusDone && !reopensDone(event) {
 		return changed // done means live; only proof of life downgrades it
+	}
+	// A run that handed its work on ended inside its own session, and that
+	// session carries on: the tool that ran the handoff completes, the turn
+	// ends, and later claude idles at its prompt. Each of those would put the
+	// record back on the table as waiting on the human — the very stop the
+	// handoff exists to spare them — so it is held the way done is, and only
+	// a new turn or a dialog reopens it.
+	if d.HandedOff() && !reopensDone(event) {
+		return changed
 	}
 	wasWaiting := d.Waiting()
 	statusChanged := applyStatus(d, event, in)
