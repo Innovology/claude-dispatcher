@@ -5,10 +5,15 @@ package cockpit
 // table (pick with space, dispatch with enter); the right pane is the selected
 // ticket's detail plus the "dispatch as" preview and the picked list.
 //
-// Faithful port of the design's BACKLOG data, backlogList/ticketSelected,
-// handleKey('backlog') and renderVals.backlog.
+// What the table holds and in what order — grouped by product, narrowed by
+// source and product, sorted with `o` — is backlog_order.go, and `/` is
+// blsearch.go. This file draws it and handles its keys. The table is windowed
+// on the cursor, because a backlog is routinely longer than the screen and a
+// table that stopped at the bottom edge read as the whole of it, with j
+// walking the cursor off into rows nobody could see.
 
 import (
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,31 +22,6 @@ import (
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/keymap"
 )
-
-// backlogList filters the tickets by the active source filter. "all" is
-// everything; otherwise src must equal the filter (gh | lin | ado).
-func (m model) backlogList() []ticket {
-	if m.srcFilter == "" || m.srcFilter == "all" {
-		return backlogTickets
-	}
-	out := make([]ticket, 0, len(backlogTickets))
-	for _, t := range backlogTickets {
-		if t.src == m.srcFilter {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// ticketSelected returns the ticket under the (clamped) backlog cursor, or a
-// placeholder when the backlog is empty (real portfolio with nothing queued).
-func (m model) ticketSelected() ticket {
-	l := m.backlogList()
-	if len(l) == 0 {
-		return ticket{title: "no open tickets", body: "nothing in the backlog for this source.", pri: "med", age: "—"}
-	}
-	return l[clampCursor(m.backlogCursor, len(l))]
-}
 
 // backlogSlug lowercases id and collapses every run of non-alphanumerics to a
 // single dash — the design's t.id.toLowerCase().replace(/[^a-z0-9]+/g,'-').
@@ -145,126 +125,138 @@ func backlogWhere(t ticket) string {
 // viewBacklog renders the backlog table (left) and the selected-ticket detail
 // (right). Narrow terminals collapse to the table only.
 func (m model) viewBacklog(w, h int) string {
-	list := m.backlogList()
+	rows := m.blRows()
 	pickedCount := len(m.picked)
 	showDetail := m.fit().showDetail
 
-	leftW := w
-	rightW := 0
+	leftW, rightW := m.blLeftW(w), 0
 	if showDetail {
-		leftW = w * 58 / 100
 		rightW = w - leftW - 1 // 1 col for the vertical rule
 	}
 
-	left := m.backlogLeft(list, pickedCount, leftW, h)
+	left := m.backlogLeft(rows, leftW, h)
 	if !showDetail {
 		return clampLines(left, h)
 	}
-	right := m.backlogRight(pickedCount, rightW, h)
+	right := m.backlogRight(rows, pickedCount, rightW, h)
 	out := hjoin(padBlockTo(left, h), vrule(h, cRule), padBlockTo(right, h))
 	return clampLines(out, h)
 }
 
-// backlogLeft builds the ticket table pane.
-func (m model) backlogLeft(list []ticket, pickedCount, leftW, h int) string {
-	innerW := leftW - 2*pad
-	on := clampCursor(m.backlogCursor, len(list))
+// blFooterLines is how many lines the table pane's footer takes.
+const blFooterLines = 2
 
-	// header: "backlog · N open · M picked" + sources kicker
-	title := backlogSpread(
-		fg(cDim, "backlog · "+itoa(len(list))+" open · "+itoa(pickedCount)+" picked"),
-		fg(cFaint, "github issues · linear · azure boards"),
-		leftW,
-	)
-	colHead := "  " + row(innerW, "",
+// blLeftW is the table pane's width on a screen w wide: all of it, or the
+// share the detail pane leaves.
+func (m model) blLeftW(w int) int {
+	if m.fit().showDetail {
+		return w * 58 / 100
+	}
+	return w
+}
+
+// blTableHeight is how many lines the table gets in a pane h tall: what the
+// head (blHead) and the footer leave.
+func (m model) blTableHeight(rows []blRow, h int) int {
+	return maxi(h-len(m.blHead(rows, m.blLeftW(m.width)))-blFooterLines, 0)
+}
+
+// blLine is one line of the table: a ticket, the divider above one, or the
+// quote under one. row is the ticket it belongs to.
+type blLine struct {
+	row       int
+	div, snip bool
+}
+
+// blLayout is the table's lines in the order they are drawn, and the line each
+// row's ticket is drawn on. It is the one place that says how many lines a
+// ticket costs, for drawing the window and for paging through it.
+func blLayout(rows []blRow, found *blFound) (lines []blLine, first []int) {
+	first = make([]int, len(rows))
+	for i, r := range rows {
+		if i == 0 || rows[i-1].group != r.group {
+			lines = append(lines, blLine{row: i, div: true})
+		}
+		first[i] = len(lines)
+		lines = append(lines, blLine{row: i})
+		if found.quotes(r.at) {
+			lines = append(lines, blLine{row: i, snip: true})
+		}
+	}
+	return lines, first
+}
+
+// blPaged is the row pgdown (dir 1) or pgup (dir -1) lands on from the cursor:
+// a table's height of LINES on, less three, not that many tickets. The window
+// is centred on the cursor, and the lines at its two edges can be the ones
+// that say what was cut off — two at the top, where a cut ticket's quote goes
+// with it — so three short of a screen is what leaves every ticket between
+// the old window and the new one drawn in one or the other. Counted in tickets, a page of quoted search hits jumped twice as
+// far as the screen showed and skipped tickets that were never drawn. It
+// always moves at least one ticket while there is one to move to.
+func (m model) blPaged(rows []blRow, dir int) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	_, first := blLayout(rows, m.blFoundNow())
+	cur := clampCursor(m.backlogCursor, len(rows))
+	target := first[cur] + dir*maxi(m.blTableHeight(rows, m.bodyHeight())-3, 1)
+	i := cur
+	for i+dir >= 0 && i+dir < len(rows) && (first[i+dir]-target)*dir <= 0 {
+		i += dir
+	}
+	if i == cur {
+		i = clampCursor(cur+dir, len(rows))
+	}
+	return i
+}
+
+// blHead is the lines above the table: the title, the query line while a
+// search is up, and the column heads.
+//
+// The title carries the view — the order, and what the table is narrowed to —
+// on its right, and where the two do not fit on one line the view takes a line
+// of its own. Beside the title it was dropped, and from 110 columns to about
+// 140 nothing on screen said which order, product or source was on.
+func (m model) blHead(rows []blRow, leftW int) []string {
+	// "12 of 340" while anything narrows the table, so a filter left on is
+	// never read as the size of the backlog.
+	count := itoa(len(rows)) + " open"
+	if len(rows) != len(backlogTickets) {
+		count = itoa(len(rows)) + " of " + itoa(len(backlogTickets)) + " open"
+	}
+	title := fg(cDim, "backlog · "+count+" · "+itoa(len(m.picked))+" picked")
+	// A source that came back full may hold more than the table does.
+	if len(backlogCut) > 0 {
+		title += fg(cFaint, " · "+strings.Join(backlogCut, " · "))
+	}
+	view := fg(cFaint, m.blViewLabel())
+	lines := []string{backlogSpread(title, view, leftW)}
+	if dispWidth(title)+1+dispWidth(view) > leftW-2*pad {
+		lines = []string{backlogSpread(title, "", leftW), backlogSpread(view, "", leftW)}
+	}
+	if m.blSearchShown() {
+		lines = append(lines, m.blQueryLine(rows, leftW))
+	}
+	return append(lines, "  "+row(leftW-2*pad, "",
 		c("", 4, cFaint),
 		c("TICKET", 17, cFaint),
 		flexc("TITLE", cFaint),
 		c("REPO", 17, cFaint),
 		cr("SOURCE", 9, cFaint),
-		cr("STATE", 12, cFaint),
-	) + "  "
+		cr(blColumn(m.blOrderNow()), 12, cFaint),
+	)+"  ")
+}
 
-	lines := []string{title, colHead}
-
-	for n, t := range list {
-		cursor := n == on
-		pick := m.picked[t.id]
-		bg := ""
-		if cursor {
-			bg = cSel
-		}
-		edge := ""
-		switch {
-		case pick:
-			edge = cGreen
-		case cursor:
-			edge = cMid
-		}
-		marker := ""
-		switch {
-		case pick:
-			marker = "✓"
-		case cursor:
-			marker = "▸"
-		}
-		priGlyph := "·"
-		switch t.pri {
-		case "urgent":
-			priGlyph = "■"
-		case "high":
-			priGlyph = "◆"
-		}
-		titleColor := cFg
-		switch {
-		case t.taken != "":
-			titleColor = cDim
-		case cursor:
-			titleColor = cWhite
-		}
-		idColor := cMid
-		if cursor {
-			idColor = cWhite
-		}
-		// Azure work items carry no updated-at, so the age is blank; print
-		// nothing rather than a bare " old".
-		state := ""
-		if t.age != "" {
-			state = t.age + " old"
-		}
-		stateColor := cDim
-		if t.taken != "" {
-			state = "dispatched"
-			stateColor = cGreen
-		}
-
-		edgeCh := " "
-		if edge != "" {
-			edgeCh = "▎"
-		}
-		leftGut := paint(edge, bg, edgeCh) + paint("", bg, " ")
-		body := row(innerW, bg,
-			c(marker, 2, cMid),
-			c(priGlyph, 2, priColor[t.pri]),
-			c(t.id, 17, idColor),
-			flexc(t.title, titleColor),
-			c(t.repo, 17, cDim),
-			cr(sourceMeta[t.src].label, 9, sourceMeta[t.src].color),
-			cr(state, 12, stateColor),
-		)
-		rightGut := paint("", bg, "  ")
-		lines = append(lines, leftGut+body+rightGut)
-	}
+// backlogLeft builds the ticket table pane.
+func (m model) backlogLeft(rows []blRow, leftW, h int) string {
+	innerW := leftW - 2*pad
+	lines := m.blHead(rows, leftW)
+	lines = append(lines, m.blTable(rows, innerW, maxi(h-len(lines)-blFooterLines, 0))...)
 
 	footer := []string{
 		"  " + fg(cRule, strings.Repeat("─", innerW)) + "  ",
-		backlogSpread(
-			// "triage", not the design's "1 floor": "floor" is the internal lens
-			// id, and the lens bar two rows up calls it triage.
-			fg(cDim, "space pick · enter dispatch now · ctrl+d dispatch "+itoa(pickedCount)+" picked · s source · 1 triage"),
-			"",
-			leftW,
-		),
+		backlogSpread(fg(cDim, m.blPaneHelp()), "", leftW),
 	}
 
 	// Pin the footer to the bottom of the pane.
@@ -272,9 +264,237 @@ func (m model) backlogLeft(list []ticket, pickedCount, leftW, h int) string {
 	return vjoin(append([]string{top}, footer...)...)
 }
 
+// blPaneHelp is the table pane's own key line: how to change what the table
+// shows. The footer under the whole screen names what to do with a ticket.
+func (m model) blPaneHelp() string {
+	if m.blTyping {
+		return "#123 names a number · words match the title or body · enter keeps the matches"
+	}
+	return strings.Join([]string{
+		m.keyHint("search.open", "search"),
+		m.keyHint("backlog.order", "order"), m.keyHint("backlog.reverse", "reverse"),
+		m.keyHint("backlog.product", "product"), m.keyHint("backlog.source", "source"),
+		prettyKey(m.keys.KeyFor("backlog.first")) + "/" + prettyKey(m.keys.KeyFor("backlog.last")) + " ends",
+	}, " · ")
+}
+
+// blQueryLine is the query as it is drawn, with a cursor while it is typed and
+// what it found once there is anything to find.
+func (m model) blQueryLine(rows []blRow, w int) string {
+	q := "/" + m.blQuery
+	if m.blTyping {
+		q += "▏"
+	}
+	right := "#123 · a title · a word from the body"
+	if m.blSearching() {
+		groups := map[string]bool{}
+		for _, r := range rows {
+			groups[r.group] = true
+		}
+		right = countOf(len(rows), "match", "matches") + " in " + countOf(len(groups), "product", "products")
+		if len(rows) == 0 {
+			right = "no match"
+			if n := m.blHitsElsewhere(); n > 0 {
+				right = countOf(n, "match", "matches") + " outside this product and source"
+			}
+		}
+	}
+	return backlogSpread(fg(cSearchHit, q), fg(cFaint, right), w)
+}
+
+// blTable is the table's lines, product group by product group, windowed on
+// the cursor.
+//
+// A group starts with a divider naming it and counting its tickets, and a hit
+// found in its body or labels carries the words that matched on a line under
+// it. Where the window cuts the table, its top line says how many tickets are
+// above — and, when the divider naming the product on screen has scrolled
+// away, which product that is — and its bottom line how many are below. A
+// table that simply stopped at the bottom edge read as the whole backlog.
+func (m model) blTable(rows []blRow, w, h int) []string {
+	if h <= 0 {
+		return nil
+	}
+	if len(rows) == 0 {
+		return []string{"  " + fg(cFaint, truncate(m.blEmpty(), w)) + "  "}
+	}
+	found, o := m.blFoundNow(), m.blOrderNow()
+	sel := clampCursor(m.backlogCursor, len(rows))
+	counts := map[string]int{}
+	for _, r := range rows {
+		counts[r.group]++
+	}
+
+	lines, first := blLayout(rows, found)
+
+	start, end := window(first[sel], len(lines), h)
+	out := make([]string, 0, end-start)
+	for _, ln := range lines[start:end] {
+		r := rows[ln.row]
+		switch {
+		case ln.div:
+			out = append(out, blDivider(w, r.group+" · "+itoa(counts[r.group])))
+		case ln.snip:
+			out = append(out, blSnipLine(found, r, w))
+		default:
+			out = append(out, m.blTicketLine(found, r, ln.row == sel, o, w))
+		}
+	}
+
+	// What the window cut off, said where it cut. Never over the cursor's own
+	// line: window centres it, so from three lines up neither edge is it.
+	if h >= 3 {
+		if start > 0 {
+			above := 0
+			for _, f := range first {
+				if f <= start {
+					above++
+				}
+			}
+			more := "↑ " + countOf(above, "more ticket", "more tickets") + " above"
+			switch next := lines[start+1]; {
+			case next.div:
+				out[0] = "  " + fg(cFaint, truncate(more, w))
+			case next.snip:
+				// The ticket the cut took is the one this quote is under, so the
+				// quote goes with it: the product's name, then the count in its
+				// place. A quote is never the cursor's line.
+				out[0] = blDivider(w, rows[next.row].group)
+				out[1] = "  " + fg(cFaint, truncate(more, w))
+			default:
+				out[0] = blDivider(w, rows[next.row].group+" · "+more)
+			}
+		}
+		if end < len(lines) {
+			below := 0
+			for _, f := range first {
+				if f >= end-1 {
+					below++
+				}
+			}
+			out[len(out)-1] = "  " + fg(cFaint, truncate("↓ "+countOf(below, "more ticket", "more tickets")+" below", w))
+		}
+	}
+	return out
+}
+
+// blDivider is the line above a product's tickets, set into a rule so it reads
+// as a boundary rather than as a row.
+func blDivider(w int, label string) string {
+	lead := "── "
+	text := truncate(label, maxi(w-dispWidth(lead)-1, 1)) + " "
+	rest := maxi(0, w-dispWidth(lead)-dispWidth(text))
+	return "  " + fg(cRule, lead) + fg(cFaint, text) + fg(cRule, strings.Repeat("─", rest)) + "  "
+}
+
+// blTicketLine is one ticket's row: what is picked or under the cursor, its
+// priority, id and title — lit where a search matched them — its repo and
+// source, and the figure the table is ordered by.
+func (m model) blTicketLine(found *blFound, r blRow, cursor bool, o blOrder, w int) string {
+	t := r.t
+	pick := m.picked[t.id]
+	bg := ""
+	if cursor {
+		bg = cSel
+	}
+	edge := ""
+	switch {
+	case pick:
+		edge = cGreen
+	case cursor:
+		edge = cMid
+	}
+	marker := ""
+	switch {
+	case pick:
+		marker = "✓"
+	case cursor:
+		marker = "▸"
+	}
+	priGlyph := "·"
+	switch t.pri {
+	case "urgent":
+		priGlyph = "■"
+	case "high":
+		priGlyph = "◆"
+	}
+	titleColor := cFg
+	switch {
+	case t.taken != "":
+		titleColor = cDim
+	case cursor:
+		titleColor = cWhite
+	}
+	idColor := cMid
+	if cursor {
+		idColor = cWhite
+	}
+	// A ticket already out says so in green. The word takes the column only
+	// where its figure is not what the table is sorted by; where it is, the
+	// figure stays, in green, so the order can still be read down the column.
+	state, stateColor := blCell(t, o), cDim
+	if t.taken != "" {
+		stateColor = cGreen
+		if !blColumnSorts(o) {
+			state = "dispatched"
+		}
+	}
+	lit := found.lit(r.at)
+
+	edgeCh := " "
+	if edge != "" {
+		edgeCh = "▎"
+	}
+	leftGut := paint(edge, bg, edgeCh) + paint("", bg, " ")
+	body := row(w, bg,
+		c(marker, 2, cMid),
+		c(priGlyph, 2, priColor[t.pri]),
+		c(t.id, 17, idColor).highlight(lit.id, cSearchHit),
+		flexc(t.title, titleColor).highlight(lit.title, cSearchHit),
+		c(t.repo, 17, cDim),
+		cr(sourceMeta[t.src].label, 9, sourceMeta[t.src].color),
+		cr(state, 12, stateColor),
+	)
+	rightGut := paint("", bg, "  ")
+	return leftGut + body + rightGut
+}
+
+// blSnipLine is the line under a hit found in its body or labels: the words
+// that matched, lit, under the title they explain.
+func blSnipLine(found *blFound, r blRow, w int) string {
+	text, lit, _ := found.snippet(r.at)
+	return "  " + row(w, "", c("", 4+17, ""), flexc(text, cMid).highlight(lit, cSearchHit)) + "  "
+}
+
+// blSelectedRow is the row under the (clamped) cursor; ok is false when the
+// table is empty.
+func blSelectedRow(rows []blRow, cursor int) (blRow, bool) {
+	if len(rows) == 0 {
+		return blRow{}, false
+	}
+	return rows[clampCursor(cursor, len(rows))], true
+}
+
+// blDates is when a ticket was filed and when anything last happened on it,
+// leaving out what its source does not say.
+func blDates(t ticket) string {
+	var parts []string
+	if !t.filed.IsZero() {
+		parts = append(parts, "filed "+blkAge(t.filed)+" ago")
+	}
+	if !t.touched.IsZero() {
+		parts = append(parts, "last touched "+blkAge(t.touched)+" ago")
+	}
+	return strings.Join(parts, " · ")
+}
+
 // backlogRight builds the selected-ticket detail pane.
-func (m model) backlogRight(pickedCount, rightW, h int) string {
-	t := m.ticketSelected()
+func (m model) backlogRight(rows []blRow, pickedCount, rightW, h int) string {
+	t := m.blTicketIn(rows)
+	var lit blLit
+	if r, ok := blSelectedRow(rows, m.backlogCursor); ok {
+		lit = m.blFoundNow().lit(r.at)
+	}
 	innerW := rightW - 2*pad
 
 	wrapL := func(inner string) string {
@@ -288,22 +508,20 @@ func (m model) backlogRight(pickedCount, rightW, h int) string {
 		takenLine = fg(cAmber, "◆ already dispatched as \""+t.taken+"\" — enter would double up")
 	}
 
-	pri := t.pri
-	if t.age != "" {
-		pri += " · " + t.age + " old"
-	}
-
 	var top []string
 	top = append(top, backlogSpread(
 		fg(cDim, t.id+" · "+sourceMeta[t.src].label),
-		fg(priColor[t.pri], pri),
+		fg(priColor[t.pri], t.pri),
 		rightW,
 	))
-	top = append(top, wrapL(fg(cWhite, t.title)))
+	top = append(top, wrapL(paintRuns(cWhite, cSearchHit, "", t.title, lit.title)))
 	top = append(top, wrapL(fg(cDim, backlogWhere(t))))
+	if d := blDates(t); d != "" {
+		top = append(top, wrapL(fg(cFaint, d)))
+	}
 	top = append(top, blank)
-	for _, ln := range backlogWrap(t.body, innerW) {
-		top = append(top, wrapL(fg(cMid, ln)))
+	for _, ln := range decWrapLit(t.body, innerW, lit.prose[blProseBody], cMid) {
+		top = append(top, wrapL(ln))
 	}
 	top = append(top, blank)
 	top = append(top, wrapL(takenLine))
@@ -357,18 +575,68 @@ func backlogFeature(t ticket) string {
 
 // updateBacklog mirrors handleKey('backlog'), with the dispatching keys wired
 // to real launches.
+//
+// The list keys and the backlog's own are one layered screen: the pressed key
+// is asked of both (keymap.ResolveLayered), and the keymap refuses a key bound
+// in both. Every key that moves the cursor keys it to the ticket it lands on,
+// and every key that re-sorts or narrows the table finds that ticket again
+// (blSync): enter dispatches what the cursor is on, and a cursor held by index
+// alone would be on a different ticket after every `o`.
 func (m model) updateBacklog(k string) (model, tea.Cmd) {
-	if k = m.keys.Resolve(keymap.List, k); k == "" {
+	// A query being typed takes the key as it was pressed: every letter is text,
+	// so none may be resolved into something else first.
+	if m.blTyping {
+		return m.updateBlSearch(k)
+	}
+	if k = m.keys.ResolveLayered(k, keymap.List, keymap.Backlog); k == "" {
 		return m, nil
 	}
-	l := m.backlogList()
-	t := m.ticketSelected()
+	rows := m.blRows()
+	t := m.blTicketIn(rows)
 	switch k {
 	case "j", "down":
-		m.backlogCursor = mini(m.backlogCursor+1, len(l)-1)
+		return m.blToIn(rows, m.backlogCursor+1), nil
 	case "k", "up":
-		m.backlogCursor = maxi(m.backlogCursor-1, 0)
+		return m.blToIn(rows, m.backlogCursor-1), nil
+	case "g", "home":
+		return m.blToIn(rows, 0), nil
+	case "G", "end":
+		return m.blToIn(rows, len(rows)-1), nil
+	case "pgdown":
+		return m.blToIn(rows, m.blPaged(rows, 1)), nil
+	case "pgup":
+		return m.blToIn(rows, m.blPaged(rows, -1)), nil
+	case "/":
+		// What was typed before is kept, so `/` on a search already up edits it.
+		m.blTyping = true
+		return m, nil
+	case "esc":
+		if m.blSearchShown() {
+			return m.blSearchClear(), nil
+		}
+		return m, nil
+	case "o":
+		return m.blSetOrder(blNextOrder(m.blOrderNow(), m.blSearching())).blSync(), nil
+	case "O":
+		o := m.blOrderNow()
+		o.rev = !o.rev
+		return m.blSetOrder(o).blSync(), nil
+	case "p":
+		// A product that has since left the backlog is not in the list, so
+		// the next press starts it again from the first.
+		ps := blProducts()
+		if i := slices.Index(ps, m.blProduct); i+1 < len(ps) {
+			m.blProduct = ps[i+1]
+		} else {
+			m.blProduct = ""
+		}
+		return m.blSync(), nil
 	case " ", "space":
+		// An empty table has no ticket under the cursor, only the placeholder
+		// that says why it is empty — and a pick of that is a pick of "".
+		if len(rows) == 0 {
+			return m, nil
+		}
 		if m.picked == nil {
 			m.picked = map[string]bool{}
 		}
@@ -379,6 +647,8 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 		}
 	case "enter":
 		switch {
+		case len(rows) == 0:
+			return m, nil
 		case t.taken != "":
 			m.notice = t.id + " already has a dispatcher — \"" + t.taken + "\""
 		case t.repo == "":
@@ -451,7 +721,7 @@ func (m model) updateBacklog(k string) (model, tea.Cmd) {
 			}
 		}
 		m.srcFilter = order[(idx+1)%len(order)]
-		m.backlogCursor = 0
+		return m.blSync(), nil
 	}
 	return m, nil
 }

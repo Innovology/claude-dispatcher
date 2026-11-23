@@ -2,6 +2,7 @@ package cockpit
 
 import (
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -30,11 +31,48 @@ func typedText(raw tea.KeyMsg) (string, bool) {
 	return "", false
 }
 
-// typedTextFor resolves the text for a key, preferring the untouched message.
-// raw is trusted only when it is the message k was derived from; the key-name
-// fallback keeps the cockpit drivable by name (as the tests do), where a real
-// terminal always supplies raw.
+// typedTextFor is what a key types into a ONE-LINE field: the key's text with
+// every line break folded into a space and every other control character
+// dropped (oneLine). Every hand-rolled field in the cockpit is one line except
+// the dx form's WHAT, which asks typedBlockFor instead.
+//
+// The fold is what a paste needs. Typing cannot put a line break into a field —
+// enter is a key of its own — but a bracketed paste arrives as one message
+// carrying every rune, newlines included, and a field drawn as one row then
+// draws as many: a pasted email in the dx form's TITLE pushed WHAT, the
+// switches and the caret off the screen, and backspace went on eating the end
+// of a title nobody could see. bubbles' textinput, which the `+` overlay uses,
+// has always folded the same way; the hand-rolled fields never did.
 func typedTextFor(raw tea.KeyMsg, k string) (string, bool) {
+	s, ok := keyText(raw, k)
+	if !ok {
+		return "", false
+	}
+	s = oneLine(s)
+	return s, s != ""
+}
+
+// typedBlockFor is what a key types into a field that holds a paragraph — the
+// dx form's WHAT, the brief. A pasted brief keeps its line breaks, because they
+// are its structure (a list, a quoted message) and the session reads them; they
+// are only made one kind (\n), since a terminal may deliver a paste's line
+// breaks as \r. Other control characters are dropped as they are on one line:
+// an escape character in a field is a byte written raw to the terminal on every
+// redraw.
+func typedBlockFor(raw tea.KeyMsg, k string) (string, bool) {
+	s, ok := keyText(raw, k)
+	if !ok {
+		return "", false
+	}
+	s = blockText(s)
+	return s, s != ""
+}
+
+// keyText resolves the text for a key, preferring the untouched message. raw is
+// trusted only when it is the message k was derived from; the key-name fallback
+// keeps the cockpit drivable by name (as the tests do), where a real terminal
+// always supplies raw.
+func keyText(raw tea.KeyMsg, k string) (string, bool) {
 	if s, ok := typedText(raw); ok && raw.String() == k {
 		return s, true
 	}
@@ -45,6 +83,50 @@ func typedTextFor(raw tea.KeyMsg, k string) (string, bool) {
 		return k, true
 	}
 	return "", false
+}
+
+// isLineBreak reports the runes a terminal or a clipboard uses to end a line.
+// \v and \f are in it because strings.Fields splits on them too, and NEL and
+// the Unicode separators because a paste from a word processor can carry them.
+func isLineBreak(r rune) bool {
+	switch r {
+	case '\n', '\r', '\v', '\f', '\u0085', '\u2028', '\u2029':
+		return true
+	}
+	return false
+}
+
+// oneLine folds s onto one line: \r\n is one break, each break and each tab is
+// a space, and any other control character is dropped. Spaces the human typed
+// are theirs and are left as they are.
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || isLineBreak(r):
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// blockText keeps s's line breaks, as \n, and drops every other control
+// character but the tab.
+func blockText(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.Map(func(r rune) rune {
+		switch {
+		case isLineBreak(r):
+			return '\n'
+		case r == '\t':
+			return r
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // inputMsg is the message to feed a bubbles textinput: the untouched key
@@ -79,6 +161,31 @@ func applyEdit(cur, k string, raw tea.KeyMsg) (next string, submit, cancel bool)
 		return cur + s, false, false
 	}
 	return cur, false, false
+}
+
+// editQuery applies one key to a `/` query being typed, for the searches that
+// filter a list (decisions, the backlog). backspace takes a rune back, ctrl+u
+// the whole query and ctrl+w its last word, and a key that types text adds it —
+// read from the key message, never the key's name, because a paste arrives as
+// one multi-rune message. ok is false for a key that is no edit, which the
+// search it belongs to decides about.
+func editQuery(q, k string, raw tea.KeyMsg) (string, bool) {
+	switch k {
+	case "backspace":
+		if r := []rune(q); len(r) > 0 {
+			return string(r[:len(r)-1]), true
+		}
+		return q, true
+	case "ctrl+u":
+		return "", true
+	case "ctrl+w":
+		q = strings.TrimRight(q, " ")
+		return q[:strings.LastIndex(q, " ")+1], true
+	}
+	if s, ok := typedTextFor(raw, k); ok {
+		return q + s, true
+	}
+	return q, false
 }
 
 // filteredCommands narrows the palette to what matches the typed query, name
@@ -161,6 +268,12 @@ func (m model) runCommand() (model, tea.Cmd) {
 	}
 	m.paletteOpen = false
 	m.paletteText = ""
+	// Leaving a lens leaves its search, as a digit does: a query kept here came
+	// back on the next visit, still narrowing the table, by one route and not
+	// the other.
+	if lens != m.lens {
+		m = m.decSearchClear().blSearchClear()
+	}
 	m.lens = lens
 	m.notice = ":" + c.name
 	return m, nil
@@ -182,6 +295,32 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		mm, cmd := m.updateDispatchForm(k)
 		return mm, cmd
 	}
+	// Naming a product, or typing its Linear token, is text entry, so it belongs
+	// with the other modes that own the keyboard — settings, the dispatch form,
+	// the palette. Without this guard the global keys resolved first: `q` killed
+	// the cockpit mid-name and a digit switched lens, both discarding what had
+	// been typed, and the footer promised only "esc cancels". A token makes that
+	// worse, not better: `lin_api_1…` would switch lens on its first digit.
+	// A `/` query is the same: it was left out, so `q` quit mid-query.
+	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
+		mm, cmd := m.updateProducts(k)
+		return mm, cmd
+	}
+	// A decisions query is text entry for the same reason: "q" and "0004" are
+	// what someone searching decisions types.
+	if m.lens == "decisions" && m.decTyping {
+		mm, cmd := m.updateDecisions(k)
+		return mm, cmd
+	}
+	if m.lens == "backlog" && m.blTyping {
+		mm, cmd := m.updateBacklog(k)
+		return mm, cmd
+	}
+	// All of the above come before the confirm bar for the reason settings and
+	// the dispatch form do: whoever is typing has the keyboard. A confirm can
+	// land on its own — a tidy's plan is read in the background — and here it
+	// took the "y" or the enter of whatever was being typed, and acted on it.
+	// It waits, drawn, until the typing is done.
 	if m.confirm != nil {
 		switch k {
 		case "y", "enter":
@@ -263,23 +402,6 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		}
 		m = mm
 	}
-	// Naming a product, or typing its Linear token, is text entry, so it belongs
-	// with the other modes that own the keyboard — settings, the dispatch form,
-	// the palette. Without this guard the global keys resolved first: `q` killed
-	// the cockpit mid-name and a digit switched lens, both discarding what had
-	// been typed, and the footer promised only "esc cancels". A token makes that
-	// worse, not better: `lin_api_1…` would switch lens on its first digit.
-	// A `/` query is the same: it was left out, so `q` quit mid-query.
-	if m.clNaming || m.clKeying || m.clSockOpen || m.searchOpen {
-		mm, cmd := m.updateProducts(k)
-		return mm, cmd
-	}
-	// A decisions query is text entry for the same reason: "q" and "0004" are
-	// what someone searching decisions types.
-	if m.lens == "decisions" && m.decTyping {
-		mm, cmd := m.updateDecisions(k)
-		return mm, cmd
-	}
 
 	// From here down the key is whatever the human bound it to. Resolving
 	// translates it back to the action's canonical spelling, which is what the
@@ -348,6 +470,7 @@ func (m model) handleKey(k string) (tea.Model, tea.Cmd) {
 		m.clMarked = map[string]bool{}
 		m.clExpanded, m.clFoldRow = map[string]bool{}, ""
 		m = m.decSearchClear()
+		m = m.blSearchClear()
 		return m, nil
 	}
 

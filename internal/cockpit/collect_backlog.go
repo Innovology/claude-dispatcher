@@ -22,6 +22,13 @@ import (
 
 // collectBacklog merges GitHub, Linear and Azure backlog items into
 // s.backlogTickets.
+// linearAssigned is the Linear read collectBacklog makes, once per token. It is
+// a var so a test can stand in for Linear: the read is an HTTP call to
+// api.linear.app, and a test that made it would be a test of the network. Its
+// one caller was covered only by accident, through a token another test leaked
+// into the environment (isolateIntegrationEnv).
+var linearAssigned = linear.Assigned
+
 func collectBacklog(ctx *collectCtx, s *snapshot) {
 	tickets := []ticket{}
 
@@ -30,7 +37,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	// main reason a refresh could exhaust the hourly API quota. Issues for
 	// repos the user has not checked out are ignored, keeping the backlog
 	// scoped to the configured scan roots exactly as before.
-	assigned, searched := gh.AssignedIssues()
+	assigned, searched, ghCut := gh.AssignedIssues()
 	for _, r := range ctx.repos {
 		if !searched {
 			break
@@ -44,8 +51,10 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 				repo:    r.Name,
 				product: r.Product,
 				pri:     blkPriFromLabels(is.Labels),
-				age:     blkAge(is.UpdatedAt),
+				filed:   is.CreatedAt,
+				touched: is.UpdatedAt,
 				labels:  strings.Join(is.Labels, " · "),
+				tags:    is.Labels,
 				body:    is.Body,
 				prompt:  blkPrompt("GitHub issue", id, is.Title, is.Body),
 				taken:   blkTakenBy(ctx.records, id, is.Title),
@@ -78,7 +87,7 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 	reads := linearReads(ctx.cfg)
 	readIssues := make([][]linear.Issue, len(reads))
 	forEach(reads, func(i int, r linearRead) {
-		if issues, err := linear.Assigned(r.key); err == nil {
+		if issues, err := linearAssigned(r.key); err == nil {
 			readIssues[i] = issues
 		}
 	})
@@ -90,20 +99,23 @@ func collectBacklog(ctx *collectCtx, s *snapshot) {
 			for _, w := range items {
 				id := "AB#" + strconv.Itoa(w.ID)
 				tickets = append(tickets, ticket{
-					id:     id,
-					src:    "ado",
-					title:  w.Title,
-					pri:    blkNormalizePri(w.Priority),
-					labels: w.State,
-					body:   "",
-					prompt: blkPrompt("Azure Boards work item", id, w.Title, ""),
-					taken:  blkTakenBy(ctx.records, id, w.Title),
+					id:      id,
+					src:     "ado",
+					title:   w.Title,
+					pri:     blkNormalizePri(w.Priority),
+					filed:   w.Created,
+					touched: w.Changed,
+					labels:  w.State,
+					body:    "",
+					prompt:  blkPrompt("Azure Boards work item", id, w.Title, ""),
+					taken:   blkTakenBy(ctx.records, id, w.Title),
 				})
 			}
 		}
 	}
 
 	s.backlogTickets = tickets
+	s.backlogCut = blCut(ghCut, readIssues)
 }
 
 // linearTickets merges what the reads returned into backlog rows: readIssues[i]
@@ -137,8 +149,10 @@ func linearTickets(reads []linearRead, readIssues [][]linear.Issue, records []*s
 				title:   is.Title,
 				product: r.product,
 				pri:     blkPriFromLinear(is.Priority),
-				age:     blkAge(is.UpdatedAt),
-				labels:  is.State,
+				filed:   is.CreatedAt,
+				touched: is.UpdatedAt,
+				labels:  strings.Join(append([]string{is.State}, is.Labels...), " · "),
+				tags:    is.Labels,
 				body:    is.Description,
 				prompt:  blkPrompt("Linear issue", is.Identifier, is.Title, is.Description),
 				taken:   blkTakenBy(records, is.Identifier, is.Title),
@@ -350,4 +364,23 @@ func blkAge(t time.Time) string {
 	default:
 		return strconv.Itoa(int(d/(24*time.Hour))) + "d"
 	}
+}
+
+// blCut names the sources whose read came back full: a search or a page that
+// returned as many as it asked for may have stopped short of the backlog, and
+// the lens says so rather than letting its count read as the whole of it. The
+// GitHub search stopped at 100 for months while 141 issues were open and
+// assigned, and nothing on screen could have told anyone.
+func blCut(ghCapped bool, linearReads [][]linear.Issue) []string {
+	var cut []string
+	if ghCapped {
+		cut = append(cut, "github stops at "+strconv.Itoa(gh.AssignedLimit))
+	}
+	for _, issues := range linearReads {
+		if len(issues) >= linear.Limit {
+			cut = append(cut, "linear stops at "+strconv.Itoa(linear.Limit)+" a token")
+			break
+		}
+	}
+	return cut
 }

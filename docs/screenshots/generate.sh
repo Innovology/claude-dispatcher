@@ -23,8 +23,10 @@ echo "building…"
 go build -o "$work.bin" "$repo"
 python3 "$here/fixture.py" "$work"
 
+# The fixture's gh goes first on PATH: it answers the backlog's issue search
+# and nothing else, so no screenshot ever reads a real forge.
 tmux new-session -d -s "$sess" -x 176 -y 40 \
-  "HOME=$work/home CLAUDE_DISPATCHER_STATE=$work/state $work.bin"
+  "PATH=$work/bin:$PATH HOME=$work/home CLAUDE_DISPATCHER_STATE=$work/state $work.bin"
 
 # The first snapshot reads git and the forges; wait for it rather than
 # screenshotting the loading state.
@@ -48,6 +50,8 @@ shoot working   "The running filter"               w
 shoot products  "The products lens"                w 2
 shoot assign    "Assigning repos to products"      a
 shoot backlog   "The backlog lens"                 3
+shoot backlog-search "Searching the backlog"       / billing
+tmux send-keys -t "$sess" Escape; sleep 1
 shoot usage     "The usage lens"                   4
 shoot velocity  "The velocity lens"                6
 shoot dispatch  "Dispatching from the fleet"       1 d

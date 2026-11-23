@@ -118,21 +118,33 @@ func (m model) headerView() string {
 }
 
 func (m model) footerView() string {
+	inner := m.width - 2*pad
 	left := fg(cDim, m.footerHelp())
-	notice := m.notice
+	notice := noticeLine(m.notice)
 	if m.undo != "" {
 		notice += "  ·  ctrl+z to undo"
 	}
-	right := ""
+	// A notice that does not fit beside the help takes a line of its own,
+	// above it, and the body gives up that row for as long as it stands.
+	// spread alone keeps the help and throws the notice away, and on a
+	// laptop-width terminal that was every failure this cockpit reported — gone
+	// without a trace while a wider screen showed it. Giving the notice the
+	// help's room instead is no better: a notice stands until the next one
+	// replaces it, so the keys were hidden for as long, and a failed launch's
+	// row lost the very key that reads its error.
+	above, right := "", ""
 	if notice != "" {
-		right = fg(cAmber, notice)
+		if dispWidth(left)+2+dispWidth(notice) <= inner {
+			right = fg(cAmber, notice)
+		} else {
+			above = strings.Repeat(" ", pad) + fg(cAmber, truncate(notice, inner))
+		}
 	}
 
 	// The build version shares the bottom-right corner with the notice. They
 	// compete for the same space, so the version yields first — a notice is
 	// about what just happened, the version is ambient — and yields in stages,
 	// shedding the upgrade command before the version number itself.
-	inner := m.width - 2*pad
 	for _, v := range m.versionForms() {
 		cand := v
 		if right != "" {
@@ -143,7 +155,30 @@ func (m model) footerView() string {
 			break
 		}
 	}
-	return spread(left, right, m.width)
+	line := spread(left, right, m.width)
+	if above != "" {
+		return above + "\n" + line
+	}
+	return line
+}
+
+// noticeLine is a notice as the footer can hold it: one line. A notice that
+// carries a command's output — a failed resume once held all of what nix
+// develop printed — would otherwise make the footer as tall as that output and
+// push the body off the top of the screen. Its lines are run together rather
+// than cut to the first, because the first line of a command's output is
+// rarely the one that says what went wrong.
+func noticeLine(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	var parts []string
+	for _, ln := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			parts = append(parts, ln)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m model) footerHelp() string {
@@ -210,9 +245,18 @@ func (m model) footerFromKeys(lens string) (string, bool) {
 			m.keyHint("panel.history", "history"), m.keyHint("panel.sessions", "your sessions"),
 			"esc close", "1 triage"}
 	case "backlog":
+		// What to do with a ticket. The keys that change what the table shows
+		// are on the table pane's own line (blPaneHelp).
+		if m.blTyping {
+			return "type to search · ↑/↓ move · enter keeps the matches · ctrl+u clears · esc cancels", true
+		}
 		parts = []string{m.pairHint("list.down", "list.up", "move"), m.keyHint("list.pick", "pick"),
 			m.keyHint("list.open", "dispatch"), m.keyHint("list.dispatch", "dispatch picked"),
-			"s source", "1 triage"}
+			m.keyHint("search.open", "search")}
+		if m.blSearching() {
+			parts = append(parts, "esc clears the search")
+		}
+		parts = append(parts, "1 triage")
 	default:
 		return "", false
 	}

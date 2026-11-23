@@ -1,0 +1,13 @@
+unpacking 'github:NixOS/nixpkgs/c03198f6a5855dabe5bd4bd2fa8e14a05e5cca93' into the Git cache...
+error:
+       … while updating the lock file of flake 'path:/home/user/src/app?lastModified=1794486406&narHash=sha256-2bVZWIQpwGEryyZJg%2BL/VS0p/1lUu%2B7qi1pEyaWPoDE%3D'
+
+       … while updating the flake input 'nixpkgs'
+
+       … while fetching the input 'github:NixOS/nixpkgs/c03198f6a5855dabe5bd4bd2fa8e14a05e5cca93'
+
+       error: Failed to open archive (Source threw exception: error: unable to download 'https://github.com/NixOS/nixpkgs/archive/c03198f6a5855dabe5bd4bd2fa8e14a05e5cca93.tar.gz': HTTP error 404
+
+              response body:
+
+              404: Not Found)

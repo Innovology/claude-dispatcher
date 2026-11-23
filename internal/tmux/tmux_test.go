@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"claude-dispatcher/internal/cause"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -314,5 +316,38 @@ func TestALaunchDoesNotRideTheHumansDefaultShell(t *testing.T) {
 	eventually(t, func() bool { idle, known := srv.SessionIdle("s"); return known && !idle })
 	if !srv.HasSession("s") {
 		t.Fatal("the session died: its command went through the server's default-shell")
+	}
+}
+
+// What the record kept of a dispatch whose `nix develop` could not build its
+// shell was the first line nix printed: a path being copied from
+// cache.nixos.org. The prefix here prints that shape and fails, so the test is
+// about which line the error says, not about nix — and the whole of what it
+// printed is still there behind the line.
+func TestAFailedEnvironmentSaysWhyNotWhatItFetchedFirst(t *testing.T) {
+	tmp := t.TempDir()
+	prefix := filepath.Join(tmp, "fake-nix-develop")
+	script := `#!/bin/sh
+echo "copying path '/nix/store/m65dckzfgr1lr90g5v6jx0iynnz38nsk-nss-cacert-3.115' from 'https://cache.nixos.org'..." >&2
+echo "building '/nix/store/83cg2b1bhanmg31ixndnvxj8cgp4hmvl-chrome.deb.drv'..." >&2
+echo "error: Cannot build '/nix/store/83cg2b1bhanmg31ixndnvxj8cgp4hmvl-chrome.deb.drv'." >&2
+echo "       Reason: builder failed with exit code 1." >&2
+echo "       > error: cannot download chrome.deb from any mirror" >&2
+exit 1
+`
+	if err := os.WriteFile(prefix, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv := Server{Socket: "disp-test-cause-" + itoa(os.Getpid())}
+	err := srv.NewSession("s", tmp, "sleep 30", prefix)
+	if err == nil {
+		t.Fatal("the session started under an environment that failed")
+	}
+	want := "tmux new-session: error: Cannot build 'chrome.deb.drv' — cannot download chrome.deb from any mirror"
+	if err.Error() != want {
+		t.Errorf("error =\n%q\nwant\n%q", err.Error(), want)
+	}
+	if out, ok := cause.Output(err); !ok || !strings.Contains(out, "copying path") {
+		t.Errorf("the rest of what it printed is gone: %q", out)
 	}
 }

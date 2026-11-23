@@ -482,6 +482,30 @@
   The `+` form's `CharLimit = 500` went with it: a silent truncation and a loud
   refusal are not two settings of one dial. Full record:
   `docs/adr/0009-a-dispatch-that-did-not-happen-is-a-thing-that-happened.md`.
+- **A failure is read for its cause, and the rest is kept.** Reported as "on
+  macos build i could see more errors … not so here on nixos". Two causes,
+  neither about NixOS. The footer `spread` the help and the notice, and spread
+  drops the right side when both do not fit, so on a laptop-width terminal
+  every "launch failed" and "resume failed" vanished while a wide screen
+  showed them (a multi-line one spilled down it). And a failure was its first
+  line: a dispatch whose `nix develop` could not build printed 883 lines,
+  measured, and the record kept "copying path '…-nss-cacert-3.115' from
+  'https://cache.nixos.org'...", the one line that says nothing went wrong;
+  `git worktree add` leads with "Preparing worktree" the same way. So **a
+  notice never drops and never hides the keys**: one that does not fit beside
+  the help takes its own line above it (the first try gave it the help's room,
+  and a notice stands until the next, so the keys, `l` among them, were gone
+  for as long). **A command's error is its cause** (`internal/cause`): the
+  first top-level `error:`/`fatal:` line, the deepest error in the indented
+  block under it (a builder's `> ` complaint, the bottom of an eval trace),
+  else the last line that is not progress; store hashes dropped, 300 runes at
+  most. `tmux new-session` and both worktree git calls return a `cause.Error`,
+  so every `err.Error()` is that line and the output rides behind it. **The
+  rest is kept**: a failed launch, relaunch or resume writes cause and output
+  to `state/output/<id>.txt` (`StartOutput`), and `l` (`fleet.output`) opens it
+  in `$EDITOR` at the error, offered only where there is more than the line.
+  The audit keeps all of it (`cause.Full`). Full record:
+  `docs/adr/0031-a-failure-is-read-for-its-cause.md`.
 - **`origin/HEAD` is a cache, not an answer — and the root branch is a
   choice.** Reported as "the dispatcher attempts to fork a dead branch", with
   the launch that did it sitting in the event log 0009 had just added:
@@ -705,6 +729,55 @@
   means retyping one exactly, in another file, with a silent read under a
   product that groups nowhere as the failure. The full record is
   `docs/adr/0006-a-linear-token-is-the-scope.md`.
+- **A backlog is read by product and found by its number.** Reported as "the
+  backlog … doesn't scroll through the issues as the list outgrows the height
+  of the page. there's no filtering". The table was drawn from the top until
+  the pane ran out, so a long backlog read as the whole of it and `j` walked
+  the cursor off into rows nobody could see, with `enter` dispatching one of
+  them. Now it is **windowed on the cursor**. The top line of a cut table
+  counts what is above and names the product on screen once that product's
+  divider has scrolled away; the bottom line counts what is below. `g`/`G` and
+  `pgdown`/`pgup` move through it, a page being a screen of drawn lines (less
+  the cut lines), never that many tickets, so a page skips nothing undrawn. Tickets are **grouped by product in the
+  products lens's order**, so lens 2 and lens 3 agree, with `unassigned` last.
+  `p` narrows to one product, and the header reads "12 of 340 open" while
+  anything narrows the table. The view (order · product · source) takes a line
+  of its own where it does not fit beside the title, so no width hides it.
+  **`o` orders each group** (priority, the default;
+  newest filed; stalest; label; repo) and `O` turns the order round. The header
+  names which end comes first, and the last column shows the figure being
+  sorted by (FILED, LABELS, otherwise IDLE). Ties go to the more urgent ticket,
+  then the one waiting longest. **A ticket missing an order's figure is last
+  whichever way round**, so reversing never fills the top with what the order
+  cannot place. The sources carry what that needs: `createdAt` in the same one
+  GitHub search, Linear's `createdAt` and labels, and Azure's created and
+  changed dates. **The sources read to their own ceilings**: the reported
+  backlog read "100 open" with 141 assigned, because the GitHub search asked
+  for `--limit 100`. It asks for 1000 (`gh.AssignedLimit`, the search API's
+  most; a request per hundred the account has), Linear for 250 a token (one
+  page), and a read that comes back full names its source in the header.
+  A ticket's `tags` are kept apart from the labels line, which
+  for Linear leads with the state. **`/` filters**, using the decisions matcher
+  lifted into `textsearch.go` rather than copied. `#123`/`123` name GitHub issue
+  123, and `eng-124`/`124` name ENG-124. An exact number outranks everything,
+  and a number a ticket's begins with ranks next, because a query is typed a
+  digit at a time. **A word starting with `#` is a number and nothing else**
+  (`textIDs.only`), since the reader typed the sign that means "issue number".
+  Otherwise a word matches the id and title as fzf matches a line, and the body
+  and labels within one word. A hit found in its body quotes the matching words
+  on the line under it. Hits stay grouped, best first, and **the groups go by
+  their best hit**, so `#123` cannot put the 1230s of the first product above
+  the ticket it names. The search has an order of its own, so esc hands back the
+  browsing order, and that order ends with the search: every search starts
+  best first. **The cursor is held by the ticket's id** through every re-sort,
+  filter, search, load and lens switch, as triage's is. The backlog's keys are
+  a keymap scope **layered on `list`**. The keymap refuses a key bound in both,
+  as it does for a global key, and `keymap.ResolveLayered` asks both scopes
+  about the key as pressed, never one scope's answer again in the next.
+  A query being typed comes ahead of the confirm bar, as settings and the
+  dispatch form do: a confirm can land on its own (`:tidy` reads its plan in
+  the background) and took the "y" typed into a query. Full record:
+  `docs/adr/0032-a-backlog-is-read-by-product-and-found-by-number.md`.
 - **A key sheet that can lie is worse than none, and `/` is fzf itself.**
   Every key was a literal in a switch with `?` hand-written beside it — merely
   duplicated while keys are fixed, and the central problem the moment they are
@@ -907,6 +980,39 @@
   session or an adopted one; stamped (`ColorAt`) under the hook lock before
   the keys go, so it is sent once. A value `/color` would refuse is no colour.
   Full record: `docs/adr/0028-a-projects-colour-is-typed-in.md`.
+- **A field is the shape it is drawn, and every key has a way out.** Reported
+  as "need to have an escape from a bad state": a brief pasted into the dx
+  form's TITLE left a title that could not be deleted, a cockpit that would not
+  quit and a terminal that had to be closed. Three faults, reproduced against
+  the real binary. A bracketed paste is one key message with its newlines in
+  it, and `typedTextFor` passed them through, so TITLE (budgeted one row) drew
+  as ninety and pushed WHAT, the switches and the caret off screen.
+  `dxValue`'s scroll dropped a rune from the front and re-measured the rest on
+  every redraw, quadratic, and Bubble Tea redraws after every message, so each
+  queued key paid it again: after a 9,163-character paste and twenty
+  backspaces, **ctrl+c quit 122 seconds later** (it was resolved first all
+  along, but queued behind the backspaces). And between backspace (one
+  character, at an end that was off screen) and esc (the whole form) there was
+  nothing. So: **`typedTextFor` is one-line text** — breaks and tabs fold to a
+  space, other control characters drop — for every hand-rolled field, which is
+  what bubbles' textinput (the `+` overlay) always did, and WHAT, the one
+  paragraph, takes `typedBlockFor` (breaks kept as `\n`); **`tailFit`** keeps a
+  row's end in one pass (200,000 characters in ~20ms, ctrl+c in 0.2s);
+  **ctrl+u** deletes before the caret (the whole field, with it at the end),
+  **ctrl+w** the word before it and **ctrl+k** after it, named in the footer;
+  and **`featureNameMax` (80)** is a title's ceiling on both forms — the `+`
+  textinput stops there, the dx form refuses at submit, on TITLE and before
+  WHAT, and says so under TITLE as it grows: the length, that the brief goes in
+  WHAT, and ctrl+u. A refusal, not a cut, as with `MaxPromptBytes`. Nothing
+  moves the brief to WHAT for the human. **The caret moves** in the one-line
+  fields (`dxcaret.go`): arrows by grapheme, alt/ctrl+arrows and alt+b/alt+f by
+  word, home/end, delete, every edit at the caret; held as the bytes after it,
+  tagged with its field, so edits before it never move it and the zero value is
+  the end. WHAT keeps its caret at the end, because its wrap is not a layout a
+  position survives; **ctrl+g** on WHAT or DONE WHEN (`dxeditor.go`) opens the
+  text in the human's editor as Claude Code does, reads it back on exit, and on
+  an editor error (`:cq`) leaves the field and keeps the private file, named.
+  Full record: `docs/adr/0030-a-field-is-the-shape-it-is-drawn.md`.
 - **A question is a wait, and it is the one wait no hook reported.** A
   dispatcher sat on a Claude Code question menu — four options, asking before
   it wrote to another repo — while the table read `1 in flight · 0 want you ·
@@ -1237,7 +1343,8 @@
   and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit), `prompts/<id>.txt`, the prompt each dispatch is launched
-  with, and `branchless/<slug>-<id>/`, a branchless dispatch's folder, under
+  with, `output/<id>.txt`, what a session start that failed printed, and
+  `branchless/<slug>-<id>/`, a branchless dispatch's folder, under
   `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
 - `internal/keymap` — every action the cockpit has (id, scope, default key,
   help line), `[keys]` overrides, and the collision rules. `?` is built from it.
@@ -1262,6 +1369,9 @@
   the record's `Said` (the last message, whole) and `Failure` (StopFailure).
 - `internal/ask` — the question a stopped session closed on, quoted; shared by
   the triage row and `status`.
+- `internal/cause` — the line of a failed command's output that says why, and
+  the error type that carries that line with the whole output behind it
+  (ADR 0031).
 - `internal/fleetcmd` — the triage table's reading and hand-acts on the command
   line, for a session stewarding the fleet: `status [--json|--next]`, `reply`,
   `note`, `park`, `unpark`.
@@ -1313,7 +1423,9 @@
   the records: the sessions on it that no dispatch claims, and `adopt.go` is
   the key that adopts one. `swap.go` is `a`, the account picker (ADR 0027).
   `search.go` is `/`; `editconfig.go` opens
-  `config.toml` in the human's editor (`e` in settings, `:config`).
+  `config.toml` in the human's editor (`e` in settings, `:config`), and
+  `dxeditor.go` the dispatch form's WHAT or DONE WHEN (ctrl+g); `dxcaret.go`
+  is the caret in the form's one-line fields (ADR 0030).
   `boot.go`/`boot_view.go` are the opening screen: a console-boot sequence over
   the first `loadSnapshot`, which reports each stage as it runs. Every line is
   a real stage and every figure is what it found — the list is a description of
@@ -1326,7 +1438,10 @@
   `prodDay` normalises to **local** before truncating: forge timestamps are UTC
   and the clock's are local, and a day compared across the two is never equal.
   `decsearch.go` is `/` on the decisions lens: every repo's decisions, cut up
-  for matching once per load.
+  for matching once per load. `textsearch.go` is the matcher it and the
+  backlog share (id, head, prose within a word); `blsearch.go` is `/` on the
+  backlog, and `backlog_order.go` is what the backlog's table holds — its
+  product groups, its order and its filters.
 - `internal/effort` — the hand-coding equivalent: how long a senior developer
   would have taken to write a diff by hand. The ONLY figure in the product
   that is a model rather than a measurement, so every screen showing it says
