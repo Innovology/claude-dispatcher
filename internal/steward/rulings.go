@@ -113,16 +113,27 @@ func Rulings(product string) []Ruling { return rulingsIn(ProductDir(product)) }
 // folder rather than by product name wherever it is walked, because a folder's
 // name is a product's slug and a slug is not always its own slug again.
 func rulingsIn(dir string) []Ruling {
+	rs, _ := readRulings(dir)
+	return rs
+}
+
+// readRulings is rulingsIn saying when the file is there and cannot be read,
+// which a reader can take as no rulings and a writer must not: writing over it
+// would replace every ruling in it with the one being added.
+func readRulings(dir string) ([]Ruling, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "rulings.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var rs []Ruling
-	if json.Unmarshal(raw, &rs) != nil {
-		return nil
+	if err := json.Unmarshal(raw, &rs); err != nil {
+		return nil, err
 	}
 	sort.SliceStable(rs, func(i, j int) bool { return rs[i].GivenAt.After(rs[j].GivenAt) })
-	return rs
+	return rs, nil
 }
 
 // ActiveRulings is the rulings standing at t, newest first.
@@ -185,7 +196,11 @@ func AddRuling(product string, r Ruling) (Ruling, error) {
 	release := state.Lock()
 	defer release()
 	dir := ProductDir(product)
-	return r, saveRulingsIn(dir, append(rulingsIn(dir), r))
+	rs, err := readRulings(dir)
+	if err != nil {
+		return r, fmt.Errorf("%s cannot be read (%v): fix or move it first, since recording over it would drop every ruling in it", filepath.Join(dir, "rulings.json"), err)
+	}
+	return r, saveRulingsIn(dir, append(rs, r))
 }
 
 // EndRuling ends a ruling early, wherever it is, and says which product's

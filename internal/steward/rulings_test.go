@@ -1,6 +1,9 @@
 package steward
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -130,5 +133,36 @@ func TestAMergeGrantReachesWhatItNames(t *testing.T) {
 		if _, _, err := ParsePRs(bad); err == nil {
 			t.Errorf("ParsePRs(%q) accepted", bad)
 		}
+	}
+}
+
+// Found in review: a rulings file that would not parse was read as no rulings
+// and then written over with the one being added, dropping every other.
+func TestAddRulingLeavesAnUnreadableFileAlone(t *testing.T) {
+	withFakes(t, &fakeSup{trusted: true}, exePath(t))
+	dir := ProductDir("player")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rulings.json")
+	broken := []byte(`[{"id":"r1","text":"merge greens","allow":["merge"],"any_pr":true,` + "\n")
+	if err := os.WriteFile(path, broken, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddRuling("player", Ruling{Text: "one deploy at a time"}); err == nil || !strings.Contains(err.Error(), "fix or move it first") {
+		t.Fatalf("err = %v", err)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, broken) {
+		t.Fatalf("the file was rewritten: %s", got)
+	}
+	// Readers still take it as no rulings, which grants nothing.
+	if rs := Rulings("player"); rs != nil {
+		t.Errorf("rulings = %+v", rs)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddRuling("player", Ruling{Text: "one deploy at a time"}); err != nil {
+		t.Fatalf("no file at all is no rulings yet: %v", err)
 	}
 }
