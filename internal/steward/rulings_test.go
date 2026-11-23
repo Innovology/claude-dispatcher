@@ -1,6 +1,7 @@
 package steward
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,30 +18,33 @@ func TestRulings(t *testing.T) {
 	if guide.Text != "#931 waits for my goldens" || guide.Until.Sub(guide.GivenAt) != DefaultRulingFor {
 		t.Fatalf("ruling = %+v", guide)
 	}
-	merge, err := AddRuling("player", Ruling{Text: "merge greens", Allow: []string{AllowMerge}, Repo: "player-app", Until: t0.Add(time.Hour)})
+	merge, err := AddRuling("player", Ruling{Text: "merge #931", Allow: []string{AllowMerge}, PRs: []int{931}, Repo: "player-app", Until: t0.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := ActiveRulings("player", t0); len(got) != 2 {
 		t.Fatalf("active = %+v", got)
 	}
-	if r, ok := MergeRuling("player", "player-app", t0); !ok || r.ID != merge.ID {
+	if r, ok := MergeRuling("player", "player-app", 931, t0); !ok || r.ID != merge.ID {
 		t.Fatal("a merge ruling must grant the merge")
 	}
-	if _, ok := MergeRuling("player", "design-system", t0); ok {
+	if _, ok := MergeRuling("player", "player-app", 99, t0); ok {
+		t.Fatal("a ruling for #931 granted #99")
+	}
+	if _, ok := MergeRuling("player", "design-system", 931, t0); ok {
 		t.Fatal("a ruling for one repo granted another")
 	}
-	if _, ok := MergeRuling("player", "player-app", t0.Add(2*time.Hour)); ok {
+	if _, ok := MergeRuling("player", "player-app", 931, t0.Add(2*time.Hour)); ok {
 		t.Fatal("a ruling past its time granted a merge")
 	}
-	if _, ok := MergeRuling("tools", "player-app", t0); ok {
+	if _, ok := MergeRuling("tools", "player-app", 931, t0); ok {
 		t.Fatal("one product's ruling granted another's")
 	}
 	product, ended, err := EndRuling(merge.ID)
 	if err != nil || product != "player" || ended.EndedAt == nil {
 		t.Fatalf("end: %v %s %+v", err, product, ended)
 	}
-	if _, ok := MergeRuling("player", "player-app", t0); ok {
+	if _, ok := MergeRuling("player", "player-app", 931, t0); ok {
 		t.Fatal("an ended ruling granted a merge")
 	}
 	if _, _, err := EndRuling(merge.ID); err == nil {
@@ -57,6 +61,10 @@ func TestAddRulingRefuses(t *testing.T) {
 		"empty":   {Text: "  "},
 		"unknown": {Text: "deploy it", Allow: []string{"deploy"}},
 		"over":    {Text: "merge", Until: time.Now().Add(-time.Minute)},
+		// Found in review: a merge grant's reach was only ever its prose.
+		"merge with no reach":   {Text: "merge ONLY #12", Allow: []string{AllowMerge}},
+		"reach with no merge":   {Text: "#12 waits", PRs: []int{12}},
+		"both any and numbered": {Text: "merge", Allow: []string{AllowMerge}, AnyPR: true, PRs: []int{12}},
 	} {
 		if _, err := AddRuling("player", r); err == nil {
 			t.Errorf("%s: accepted %+v", name, r)
@@ -83,5 +91,44 @@ func TestParseUntil(t *testing.T) {
 	}
 	if _, err := ParseUntil("monday-ish", t0); err == nil || !strings.Contains(err.Error(), "duration") {
 		t.Errorf("an unreadable time must say what it takes: %v", err)
+	}
+}
+
+// A merge grant's reach is the pull requests it names, or any; one written
+// before the field (neither) grants no merge at all.
+func TestAMergeGrantReachesWhatItNames(t *testing.T) {
+	t0 := time.Now()
+	until := t0.Add(time.Hour)
+	for _, c := range []struct {
+		r     Ruling
+		pr    int
+		ok    bool
+		reach string
+	}{
+		{Ruling{Allow: []string{AllowMerge}, PRs: []int{12, 14}, Until: until}, 14, true, "#12, #14"},
+		{Ruling{Allow: []string{AllowMerge}, PRs: []int{12, 14}, Until: until}, 99, false, "#12, #14"},
+		{Ruling{Allow: []string{AllowMerge}, AnyPR: true, Until: until}, 99, true, "any pull request"},
+		{Ruling{Allow: []string{AllowMerge}, Until: until}, 12, false, "no pull request"},
+	} {
+		if got := c.r.Grants(AllowMerge, "app", c.pr, t0); got != c.ok {
+			t.Errorf("%+v grants #%d = %v, want %v", c.r, c.pr, got, c.ok)
+		}
+		if got := c.r.Reach(); got != c.reach {
+			t.Errorf("reach = %q, want %q", got, c.reach)
+		}
+	}
+	for in, want := range map[string][]int{"12": {12}, "#12, 14,12": {12, 14}} {
+		got, anyPR, err := ParsePRs(in)
+		if err != nil || anyPR || !slices.Equal(got, want) {
+			t.Errorf("ParsePRs(%q) = %v %v %v", in, got, anyPR, err)
+		}
+	}
+	if _, anyPR, err := ParsePRs("ANY"); err != nil || !anyPR {
+		t.Errorf("any: %v %v", anyPR, err)
+	}
+	for _, bad := range []string{"", "twelve", "12,", "-3", "0"} {
+		if _, _, err := ParsePRs(bad); err == nil {
+			t.Errorf("ParsePRs(%q) accepted", bad)
+		}
 	}
 }

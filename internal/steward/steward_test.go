@@ -387,10 +387,10 @@ func TestProductNamesThatSlugAlikeStayApart(t *testing.T) {
 			t.Errorf("%q and %q share %q", pair[0], pair[1], slug(pair[0]))
 		}
 	}
-	if _, err := AddRuling("Player App", Ruling{Text: "merge greens", Allow: []string{AllowMerge}}); err != nil {
+	if _, err := AddRuling("Player App", Ruling{Text: "merge greens", Allow: []string{AllowMerge}, AnyPR: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := MergeRuling("player-app", "app", time.Now()); ok {
+	if _, ok := MergeRuling("player-app", "app", 1, time.Now()); ok {
 		t.Fatal("one product's merge ruling granted another's")
 	}
 	// A ruling found by walking the folders is ended where it is, whatever

@@ -401,7 +401,7 @@ func rulingsLine(rs []steward.Ruling) string {
 			if r.Repo != "" {
 				where = " in " + r.Repo
 			}
-			return line + " · may merge" + where + " until " + r.Until.Local().Format("Mon 15:04")
+			return line + " · may merge " + r.Reach() + where + " until " + r.Until.Local().Format("Mon 15:04")
 		}
 	}
 	return line

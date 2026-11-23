@@ -52,6 +52,7 @@ func rulingAdd(args []string, out io.Writer) error {
 	product := fs.String("product", "", "the product it is for (required)")
 	allow := fs.String("allow", "", "what it lets the steward do itself: "+strings.Join(steward.Allows, ", "))
 	repo := fs.String("repo", "", "narrow it to one repo of the product")
+	prs := fs.String("pr", "", "with --allow merge, the pull requests it may merge: 12,14, or any")
 	until := fs.String("until", "", "when it ends: 6h, 3d, 2026-11-16T09:00 (default 24h)")
 	// The flags end where the text begins. Lifting them out of it wherever they
 	// sat read "do not --allow merge yet" as a ruling that allows merge, with
@@ -96,6 +97,11 @@ func rulingAdd(args []string, out io.Writer) error {
 	if *allow != "" {
 		r.Allow = strings.Split(*allow, ",")
 	}
+	if *prs != "" {
+		if r.PRs, r.AnyPR, err = steward.ParsePRs(*prs); err != nil {
+			return err
+		}
+	}
 	r, err = steward.AddRuling(steward.Key(*product), r)
 	if err != nil {
 		return err
@@ -137,7 +143,7 @@ func rulingList(args []string, out io.Writer) error {
 func describe(r steward.Ruling) string {
 	var parts []string
 	if len(r.Allow) > 0 {
-		grant := "allows " + strings.Join(r.Allow, ", ")
+		grant := "allows " + strings.Join(r.Allow, ", ") + " of " + r.Reach()
 		if r.Repo != "" {
 			grant += " in " + r.Repo
 		}
@@ -204,9 +210,9 @@ func runMerge(args []string, out io.Writer) error {
 		cfg = &config.Config{}
 	}
 	product := steward.Key(cfg.ProductFor(repoName))
-	ruling, ok := steward.MergeRuling(product, repoName, time.Now())
+	ruling, ok := steward.MergeRuling(product, repoName, pr, time.Now())
 	if !ok {
-		return fmt.Errorf("no ruling lets the steward merge in %s (%s) — note it for the human, or ask them for one", repoName, product)
+		return fmt.Errorf("no ruling lets the steward merge #%d in %s (%s) — note it for the human, or ask them for one", pr, repoName, product)
 	}
 	dir := ""
 	for _, r := range discoverRepos(cfg) {

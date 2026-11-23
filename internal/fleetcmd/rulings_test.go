@@ -34,10 +34,10 @@ func withMerge(t *testing.T) *[]string {
 func TestRulingVerbs(t *testing.T) {
 	withStore(t)
 	var out, errOut bytes.Buffer
-	if code := Run("ruling", []string{"add", "--product", "player", "--allow", "merge", "--until", "6h", "merge", "greens"}, &out, &errOut); code != 0 {
+	if code := Run("ruling", []string{"add", "--product", "player", "--allow", "merge", "--pr", "any", "--until", "6h", "merge", "greens"}, &out, &errOut); code != 0 {
 		t.Fatalf("add: %s", errOut.String())
 	}
-	if !strings.Contains(out.String(), "allows merge · merge greens") {
+	if !strings.Contains(out.String(), "allows merge of any pull request · merge greens") {
 		t.Fatalf("add said %q", out.String())
 	}
 	id := strings.Fields(out.String())[1]
@@ -71,12 +71,16 @@ func TestMergeNeedsARuling(t *testing.T) {
 	if code := Run("merge", []string{"player-app", "931", "--head", head}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "no ruling") {
 		t.Fatalf("merged without a ruling: %q", errOut.String())
 	}
-	if _, err := steward.AddRuling("player", steward.Ruling{Text: "merge greens in the app", Allow: []string{steward.AllowMerge}, Repo: "player-app"}); err != nil {
+	if _, err := steward.AddRuling("player", steward.Ruling{Text: "merge #931 in the app", Allow: []string{steward.AllowMerge}, PRs: []int{931}, Repo: "player-app"}); err != nil {
 		t.Fatal(err)
 	}
 	errOut.Reset()
 	if code := Run("merge", []string{"design-system", "12", "--head", head}, &out, &errOut); code == 0 {
 		t.Fatal("a ruling for player-app merged in design-system")
+	}
+	// Found in review: a grant whose words said "only #931" merged #99.
+	if code := Run("merge", []string{"player-app", "99", "--head", head}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "no ruling lets the steward merge #99") {
+		t.Fatalf("a ruling for #931 merged #99: %q", errOut.String())
 	}
 	for _, bad := range [][]string{
 		{"player-app", "931", "--head", "0123abc"},
@@ -100,7 +104,7 @@ func TestMergeNeedsARuling(t *testing.T) {
 	}
 	var logged bool
 	for _, ev := range state.LoadEvents() {
-		if ev.Event == state.EventStewardMerged && ev.Repo == "player-app" && ev.Feature == "#931" && strings.Contains(ev.Reason, "merge greens") {
+		if ev.Event == state.EventStewardMerged && ev.Repo == "player-app" && ev.Feature == "#931" && strings.Contains(ev.Reason, "merge #931") {
 			logged = true
 		}
 	}
@@ -116,7 +120,7 @@ func TestMergeSaysWhyGhRefused(t *testing.T) {
 	ghMerge = func(string, ...string) (string, error) {
 		return "GraphQL: Head branch was modified. Review and try the merge again.\nmore", errors.New("exit 1")
 	}
-	if _, err := steward.AddRuling("player", steward.Ruling{Text: "merge greens", Allow: []string{steward.AllowMerge}}); err != nil {
+	if _, err := steward.AddRuling("player", steward.Ruling{Text: "merge greens", Allow: []string{steward.AllowMerge}, AnyPR: true}); err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
@@ -133,7 +137,7 @@ func TestRulingAddReadsWhatWasMeant(t *testing.T) {
 	// and a ruling that would already be over is refused.
 	day := time.Now().AddDate(0, 0, 7)
 	var out, errOut bytes.Buffer
-	if code := Run("ruling", []string{"add", "--product", "player", "--allow", "merge", "--until", day.Format("2006-01-02"), "09:00", "merge", "greens"}, &out, &errOut); code != 0 {
+	if code := Run("ruling", []string{"add", "--product", "player", "--allow", "merge", "--pr", "any", "--until", day.Format("2006-01-02"), "09:00", "merge", "greens"}, &out, &errOut); code != 0 {
 		t.Fatalf("add: %s", errOut.String())
 	}
 	rs := steward.Rulings("player")
@@ -172,6 +176,31 @@ func TestARulingsFlagsEndWhereItsTextBegins(t *testing.T) {
 	// A word that only looks like a flag is text.
 	if code := Run("ruling", []string{"add", "--product", "tools", "hold", "--force-pushes", "and", "-1", "days"}, &out, &errOut); code != 0 {
 		t.Fatalf("add: %s", errOut.String())
+	}
+}
+
+// A merge grant says which pull requests it is for in the command the human
+// confirms, and the line it prints back says the same.
+func TestAMergeRulingNamesItsPullRequests(t *testing.T) {
+	withStore(t)
+	var out, errOut bytes.Buffer
+	if code := Run("ruling", []string{"add", "--product", "player", "--allow", "merge", "merge", "ONLY", "#12"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "--pr 12,14, or --pr any") {
+		t.Fatalf("an unscoped merge grant was accepted: %q", errOut.String())
+	}
+	for _, bad := range [][]string{
+		{"add", "--product", "player", "--allow", "merge", "--pr", "twelve", "merge"},
+		{"add", "--product", "player", "--pr", "12", "#12 waits for goldens"},
+	} {
+		if code := Run("ruling", bad, &out, &errOut); code == 0 {
+			t.Errorf("accepted %v", bad)
+		}
+	}
+	out.Reset()
+	if code := Run("ruling", []string{"add", "--product", "player", "--allow", "merge", "--pr", "#12,14", "--repo", "player-app", "merge", "these", "two"}, &out, &errOut); code != 0 {
+		t.Fatalf("add: %s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "allows merge of #12, #14 in player-app · merge these two") {
+		t.Fatalf("add said %q", out.String())
 	}
 }
 

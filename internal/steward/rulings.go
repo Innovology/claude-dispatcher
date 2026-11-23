@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +35,15 @@ type Ruling struct {
 	// there is. Empty is guidance only.
 	Allow []string `json:"allow,omitempty"`
 	// Repo narrows the ruling to one repo of the product; "" is all of them.
-	Repo    string     `json:"repo,omitempty"`
+	Repo string `json:"repo,omitempty"`
+	// PRs are the pull requests a merge grant is for, and AnyPR is every one
+	// in its repos while it stands. A merge grant names one or the other
+	// (`--pr 12,14` or `--pr any`), because what the human confirms is the
+	// command: a reach written only in the prose — "merge ONLY #12" — is not
+	// one the code can hold, and a grant that read wider than its words merged
+	// #99 under it. One that names neither grants no merge at all.
+	PRs     []int      `json:"prs,omitempty"`
+	AnyPR   bool       `json:"any_pr,omitempty"`
 	GivenAt time.Time  `json:"given_at"`
 	Until   time.Time  `json:"until"`
 	EndedAt *time.Time `json:"ended_at,omitempty"`
@@ -55,10 +64,46 @@ const DefaultRulingFor = 24 * time.Hour
 // Active reports whether the ruling stands at t.
 func (r Ruling) Active(t time.Time) bool { return r.EndedAt == nil && t.Before(r.Until) }
 
-// Grants reports whether the ruling, standing at t, lets the steward do kind in
-// repo.
-func (r Ruling) Grants(kind, repo string, t time.Time) bool {
-	return r.Active(t) && slices.Contains(r.Allow, kind) && (r.Repo == "" || r.Repo == repo)
+// Grants reports whether the ruling, standing at t, lets the steward do kind to
+// pull request pr in repo.
+func (r Ruling) Grants(kind, repo string, pr int, t time.Time) bool {
+	return r.Active(t) && slices.Contains(r.Allow, kind) && (r.Repo == "" || r.Repo == repo) &&
+		(r.AnyPR || slices.Contains(r.PRs, pr))
+}
+
+// Reach is which pull requests a grant is for, in words: "#12, #14", "any pull
+// request", or "no pull request" for a grant that names neither.
+func (r Ruling) Reach() string {
+	if r.AnyPR {
+		return "any pull request"
+	}
+	if len(r.PRs) == 0 {
+		return "no pull request"
+	}
+	nums := make([]string, len(r.PRs))
+	for i, n := range r.PRs {
+		nums[i] = fmt.Sprintf("#%d", n)
+	}
+	return strings.Join(nums, ", ")
+}
+
+// ParsePRs reads `--pr`: "any", or pull request numbers separated by commas,
+// with or without their #.
+func ParsePRs(s string) (prs []int, anyPR bool, err error) {
+	s = strings.TrimSpace(s)
+	if strings.EqualFold(s, "any") {
+		return nil, true, nil
+	}
+	for _, f := range strings.Split(s, ",") {
+		n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(f), "#"))
+		if err != nil || n <= 0 {
+			return nil, false, fmt.Errorf("--pr %q: pull request numbers (12,14) or any", s)
+		}
+		if !slices.Contains(prs, n) {
+			prs = append(prs, n)
+		}
+	}
+	return prs, false, nil
 }
 
 // Rulings is every ruling ever given for product, newest first.
@@ -117,6 +162,15 @@ func AddRuling(product string, r Ruling) (Ruling, error) {
 			return r, fmt.Errorf("a ruling cannot allow %q (it can allow: %s)", a, strings.Join(Allows, ", "))
 		}
 	}
+	scoped := r.AnyPR || len(r.PRs) > 0
+	switch {
+	case slices.Contains(r.Allow, AllowMerge) && !scoped:
+		return r, errors.New("a merge ruling names the pull requests it is for: --pr 12,14, or --pr any for every one in its repos while it stands")
+	case !slices.Contains(r.Allow, AllowMerge) && scoped:
+		return r, errors.New("--pr scopes a merge grant, and this ruling grants none (--allow merge)")
+	case r.AnyPR && len(r.PRs) > 0:
+		return r, errors.New("--pr is either pull request numbers or any, not both")
+	}
 	t := now()
 	if r.GivenAt.IsZero() {
 		r.GivenAt = t
@@ -156,11 +210,11 @@ func EndRuling(id string) (product string, r Ruling, err error) {
 	return "", Ruling{}, fmt.Errorf("no ruling %q", id)
 }
 
-// MergeRuling is the ruling that lets the steward merge in repo of product at
-// t, if one does.
-func MergeRuling(product, repo string, t time.Time) (Ruling, bool) {
+// MergeRuling is the ruling that lets the steward merge pull request pr in repo
+// of product at t, if one does.
+func MergeRuling(product, repo string, pr int, t time.Time) (Ruling, bool) {
 	for _, r := range ActiveRulings(product, t) {
-		if r.Grants(AllowMerge, repo, t) {
+		if r.Grants(AllowMerge, repo, pr, t) {
 			return r, true
 		}
 	}

@@ -45,7 +45,7 @@ func withStewards(t *testing.T, rows ...stewardRow) *[]string {
 		}
 		return []steward.Ruling{
 			{ID: "r1", Text: "one deploy at a time"},
-			{ID: "r2", Text: "merge greens", Allow: []string{steward.AllowMerge}, Repo: "alpha-api", Until: time.Date(2026, 11, 16, 9, 0, 0, 0, time.Local)},
+			{ID: "r2", Text: "merge greens", Allow: []string{steward.AllowMerge}, AnyPR: true, Repo: "alpha-api", Until: time.Date(2026, 11, 16, 9, 0, 0, 0, time.Local)},
 		}
 	}
 	stewardsNow = rows
@@ -113,7 +113,7 @@ func TestStewardPickerLists(t *testing.T) {
 		t.Errorf("opened on %q, the row is %q", it.product, mm.stewardPickProduct())
 	}
 	view := mm.viewStewardPick(100, 30)
-	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended", "2 rulings standing · may merge in alpha-api until Mon 09:00"} {
+	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended", "2 rulings standing · may merge any pull request in alpha-api until Mon 09:00"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("picker lacks %q:\n%s", want, view)
 		}
