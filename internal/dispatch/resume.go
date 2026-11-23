@@ -126,6 +126,22 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		// — the same reason x releases one rather than killing it.
 	}
 
+	// The conversation itself, wherever on this server it is running. The
+	// check above can only find it in the session the record names, and the
+	// record may be a copy from before the resume that started it — which is
+	// how one conversation came to run in `disp-x` and `disp-x-2` at once (see
+	// conversation.go). Found, it is the dispatcher's own claude: the human is
+	// sent to it, and the record is pointed at it when the session carries the
+	// name a launch would have given it.
+	if !relaunch {
+		if at, ok := runningConversation(d); ok {
+			if at.Name != d.TmuxSession && d.AdoptedAt == nil && ownSessionName(d, at.Name) {
+				claimSession(d, at)
+			}
+			return ResumeLive, at.Name, nil
+		}
+	}
+
 	// The worktree may have been reclaimed when the dispatcher was killed
 	// (CleanupWorktree removes a clean one). Put it back at the same path —
 	// which is what makes the transcript findable again — reusing the feature

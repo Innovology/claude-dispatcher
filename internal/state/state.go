@@ -804,6 +804,25 @@ func Save(d *Dispatch) error {
 	return os.Rename(tmp.Name(), final)
 }
 
+// Load reads the record with this id as it stands on disk, or nil when there is
+// none to read. It is the copy to act on: a screen's copy of a record is as old
+// as the load that read it, and an act decided on a stale copy decides on a
+// session that may since have been started, or saved back over the hooks.
+func Load(id string) *Dispatch {
+	if id == "" || strings.ContainsAny(id, `/\`) {
+		return nil
+	}
+	b, err := os.ReadFile(filepath.Join(DispatchesDir(), id+".json"))
+	if err != nil {
+		return nil
+	}
+	var d Dispatch
+	if json.Unmarshal(b, &d) != nil || d.ID != id {
+		return nil
+	}
+	return &d
+}
+
 // LoadAll returns every dispatch record, most urgent first, most recent within
 // equal urgency.
 func LoadAll() []*Dispatch {

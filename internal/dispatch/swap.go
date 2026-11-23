@@ -109,6 +109,13 @@ func SwapAccount(d *state.Dispatch, to account.Account, prompt string) (ResumeMo
 	if err != nil {
 		return mode, name, err
 	}
+	// Resume found the conversation still running — the old claude did not
+	// end, or another session runs it too — and started nothing. Nothing moved:
+	// the record was never saved onto the new account, and a claude on it
+	// beside the old one would be two on one piece of work.
+	if mode == ResumeLive {
+		return "", "", fmt.Errorf("%q is still running in %s — end it there and switch again", d.Feature, name)
+	}
 	state.AppendEvent(state.Event{
 		Event: state.EventAccountSwapped, DispatcherID: d.ID, Feature: d.Feature,
 		Repo: d.RepoName, Cwd: worktreeOrRepo(d), Reason: from + " → " + to.Name,

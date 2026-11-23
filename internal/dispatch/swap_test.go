@@ -111,6 +111,29 @@ func TestSwapContinuesOnlyAFailedTurn(t *testing.T) {
 	}
 }
 
+// A conversation still running after the old claude was asked to end — a twin
+// in a session the record does not name — is not moved: no new claude starts
+// beside it, the swap says where it is still running, and the record stays on
+// the account it was on.
+func TestSwapRefusesAConversationStillRunning(t *testing.T) {
+	d, _ := onDefault(t)
+	sup := &stubSupervisor{alive: map[string]bool{}}
+	stubSessions(t, sup)
+	stubProbe(t, account.Auth{Known: true, LoggedIn: true})
+	claudeIn(t, sup, "disp-payment-retry-2", 4242, "sess-abc")
+
+	_, _, err := SwapAccount(d, readyAccount(t), "")
+	if err == nil || !strings.Contains(err.Error(), "still running in disp-payment-retry-2") {
+		t.Fatalf("SwapAccount = %v, want a refusal naming where it runs", err)
+	}
+	if sup.started.name != "" {
+		t.Errorf("started %q beside the running conversation", sup.started.name)
+	}
+	if got := recordByIDForTest(t, d.ID); got.Account != "" || got.ConfigDir != "" {
+		t.Errorf("record moved to %q (%q) though nothing was", got.Account, got.ConfigDir)
+	}
+}
+
 // A claude still at its prompt is ended before the new one starts; two
 // sessions writing one conversation under two logins would fork it.
 func TestSwapEndsTheOldClaudeAtItsPrompt(t *testing.T) {
