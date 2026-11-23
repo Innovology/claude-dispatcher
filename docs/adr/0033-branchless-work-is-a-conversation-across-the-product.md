@@ -116,6 +116,13 @@ unchanged) or `no branch`. With none:
     checkout (a conversation's `Checkout`, a dispatch's `WorktreePath`), and
     Launch and Resume ask it too, since a conversation's slug is not the
     work's. `CheckoutCut` is set only where the call ran `git worktree add`.
+    Resume narrows it (`liveBeside`) to a checkout either record may remove.
+    Two sessions on one branch are two sessions, and the harm here is a kill
+    taking a checkout away from under the other. Shipped as liveIn's whole
+    rule, it told the second of two orchestrators adopted in player-app's
+    main checkout, which had run side by side for days, "kill it first" when
+    it came back after a reboot. A checkout neither may remove is the
+    human's to share.
   - **The branch its repo's work merges into**: the repo's root branch, the
     default origin names, the one `origin/HEAD` caches, `main` and `master`,
     whichever checkout it is on. Taken, it was committed to directly, and the

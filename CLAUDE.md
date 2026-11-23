@@ -420,7 +420,10 @@
   reproduced first): not the canonical checkout's branch; not a checkout or
   branch a live dispatcher has (`liveIn`, liveDispatch's three facts matched on
   branch and checkout as well as slug, which Launch and Resume ask too, since a
-  conversation's slug is not its work's) — it once reused a live dispatcher's
+  conversation's slug is not its work's; Resume refuses only where either
+  record may remove the checkout, `liveBeside`, since two orchestrators adopted
+  in the human's main checkout refused each other after a reboot) — it once
+  reused a live dispatcher's
   worktree, called it cut, and kill removed it, so `CheckoutCut` is set only
   where the call ran `git worktree add`; not a trunk (root branch, origin's
   default, the one `origin/HEAD` caches, main, master), which it would commit

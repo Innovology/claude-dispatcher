@@ -310,6 +310,57 @@ func TestResumeNeverKillsAnAdoptedSession(t *testing.T) {
 	}
 }
 
+// The report: two orchestrators adopted in the human's main checkout, on main,
+// ran side by side until a reboot, and the second one back was refused "kill
+// it first". Two sessions on one branch are two sessions; what is refused is
+// sharing a checkout one of them may remove.
+func TestResumeSharesACheckoutNeitherMayRemove(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	sup := &stubSupervisor{alive: map[string]bool{"disp-tenancy": true}, known: true} // busy
+	stubSessions(t, sup)
+	repo := initRepo(t)
+	held := time.Date(2026, 11, 20, 14, 2, 45, 0, time.Local)
+
+	d := finished(t, repo)
+	d.Feature, d.Slug, d.TmuxSession = "formulas SoT", "formulas-sot", "disp-formulas-sot"
+	d.Branch, d.WorktreePath, d.AdoptedAt = "main", repo, &held
+	if err := state.Save(d); err != nil {
+		t.Fatal(err)
+	}
+	other := &state.Dispatch{
+		ID: state.NewID(), Feature: "tenancy", Slug: "tenancy", RepoPath: repo, RepoName: d.RepoName,
+		Branch: "main", WorktreePath: repo, TmuxSession: "disp-tenancy", SessionID: "sess-other",
+		Status: state.StatusWorking, AdoptedAt: &held,
+	}
+	if err := state.Save(other); err != nil {
+		t.Fatal(err)
+	}
+
+	mode, name, err := Resume(d, "")
+	if err != nil {
+		t.Fatalf("refused beside another session in the human's checkout: %v", err)
+	}
+	if mode != ResumeStarted || name != "disp-formulas-sot" || !samePath(sup.started.dir, repo) {
+		t.Errorf("mode %q in %q, started in %q — want a new session in the checkout", mode, name, sup.started.dir)
+	}
+	if len(sup.killed) != 0 {
+		t.Errorf("killed %v", sup.killed)
+	}
+
+	// The same pair where the live one is a dispatch whose worktree that is:
+	// its kill would remove the checkout from under the resumed session.
+	d.Status = state.StatusExited
+	other.AdoptedAt = nil
+	for _, r := range []*state.Dispatch{d, other} {
+		if err := state.Save(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := Resume(d, ""); err == nil || !strings.Contains(err.Error(), `"tenancy" is live in the same worktree`) {
+		t.Errorf("resumed into a checkout a live dispatch may remove: %v", err)
+	}
+}
+
 // Nothing is invented: with no session id, or with the transcript gone, there
 // is nothing to resume and the human is told so rather than handed a fresh
 // session wearing the old one's name.
