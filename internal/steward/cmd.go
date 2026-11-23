@@ -65,23 +65,40 @@ func run(args []string, out io.Writer) error {
 	return fmt.Errorf("unknown argument %q (list | new | open | end)", args[0])
 }
 
-// endByName ends the steward a name means: one whose id it is, else the
-// current steward of a product by that name, else one whose id it begins. In
-// that order because a product name can look like an id's start — "cafe",
-// "2026" — and ending another product's steward for it is the wrong answer.
+// endByName ends the steward a name means: one whose id it is, else a product's
+// current steward, else one whose id it begins. In that order because a product
+// name can look like an id's start — "cafe", "2026" — and ending another
+// product's steward for it is the wrong answer. A name that is a product never
+// reaches the id prefixes, even when that product has no steward running: it
+// says so instead of ending whichever steward's id happened to begin with it.
 func endByName(name string) (*Steward, error) {
 	for _, s := range All() {
 		if s.ID == name {
 			return End(s.ID)
 		}
 	}
-	if Current(name) != nil {
+	if isProduct(name) {
 		return EndProduct(name)
 	}
 	if s, err := Find(name); err == nil {
 		return End(s.ID)
 	}
 	return EndProduct(name)
+}
+
+// isProduct reports whether name means a product: one the config names, the
+// unassigned bucket, or one a steward has been started for (a product since
+// renamed in the config still has its stewards).
+func isProduct(name string) bool {
+	if Key(name) == Unassigned || len(Of(name)) > 0 {
+		return true
+	}
+	cfg, err := loadConfig()
+	if err != nil || cfg == nil {
+		return false
+	}
+	_, ok := cfg.Products[Key(name)]
+	return ok
 }
 
 func report(out io.Writer, s *Steward, err error, verb string) error {

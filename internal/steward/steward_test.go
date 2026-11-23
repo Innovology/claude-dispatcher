@@ -463,6 +463,22 @@ func TestEndPrefersTheProductToAnIDPrefix(t *testing.T) {
 	if s, _ := Find(other.ID); s.EndedAt != nil {
 		t.Fatal("another product's steward was ended for an id prefix")
 	}
+	// Found in review: with the product's own steward already ended, the name
+	// fell through to the id prefixes and ended the other product's.
+	errOut.Reset()
+	if code := Run([]string{"end", "a"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "a has no steward") {
+		t.Fatalf("end a again: code %d, %q", code, errOut.String())
+	}
+	if s, _ := Find(other.ID); s.EndedAt != nil {
+		t.Fatal("a product with no steward running ended another product's by its id prefix")
+	}
+	// A name that is no product still reaches an id by its start.
+	if code := Run([]string{"end", "a1b2"}, &out, &errOut); code != 0 {
+		t.Fatalf("end by id prefix: %q", errOut.String())
+	}
+	if s, _ := Find(other.ID); s.EndedAt == nil {
+		t.Fatal("an id prefix that names no product ended nothing")
+	}
 }
 
 // Every act that reads a steward's record and then touches its session holds
