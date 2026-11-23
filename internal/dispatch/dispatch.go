@@ -672,11 +672,31 @@ func within(dir, path string) bool {
 
 func samePath(a, b string) bool { return resolved(a) == resolved(b) }
 
+// resolved is p with every symlink in it resolved, so that two spellings of
+// one place compare equal. A path that does not exist yet — a worktree about to
+// be cut, a folder about to be made — is resolved through the deepest part of
+// it that does exist, with the rest put back on. Falling back to p as written
+// made within(existing, not-yet-existing) false whenever the two crossed a
+// symlink, which on macOS is every temp and state path (/var is /private/var):
+// a checkout inside a folder the session was given stopped counting as
+// covered, and our own worktrees folder was not made before claude was given it.
 func resolved(p string) string {
+	p = filepath.Clean(p)
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
 	}
-	return filepath.Clean(p)
+	var rest []string
+	for dir := p; ; {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return p
+		}
+		rest = append([]string{filepath.Base(dir)}, rest...)
+		if r, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(append([]string{r}, rest...)...)
+		}
+		dir = parent
+	}
 }
 
 // ensureWorktreeFrom is ensureWorktree for a repo with a root branch of its own
