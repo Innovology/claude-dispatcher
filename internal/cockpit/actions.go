@@ -299,6 +299,7 @@ func resumeCmd(id, prompt string) tea.Cmd {
 			if strings.TrimSpace(prompt) != "" {
 				notice += " · say it there, it was not sent"
 			}
+			notice += twinNotice(rec, session)
 			return resumedMsg{id: id, notice: notice, session: resumedAt(rec, session), env: rec.EnvCommand}
 		}
 		if mode == dispatchpkg.ResumeRelaunched {
@@ -326,9 +327,32 @@ func resumedAt(rec *state.Dispatch, name string) supervisor.Session {
 	return supervisor.Session{Name: name, Socket: rec.TmuxSocket}
 }
 
-// resumeDispatch is the seam resumeCmd reaches dispatch.Resume through, so a
-// test can see which copy of the record a resume was handed.
-var resumeDispatch = dispatchpkg.Resume
+// twinNotice names the other sessions running rec's conversation besides the
+// one the human is being sent to — "" when there are none, which is every time
+// but one. That one is two claudes on one transcript, left by a resume from
+// before Resume asked the machine, or by a human resuming it by hand: each
+// takes the other for a separate session, and only the human can say which
+// goes. So the notice says where the other is, and nothing ends it.
+func twinNotice(rec *state.Dispatch, attached string) string {
+	var others []string
+	for _, s := range conversationSessions(rec) {
+		if s.Name != attached {
+			others = append(others, s.Name)
+		}
+	}
+	if len(others) == 0 {
+		return ""
+	}
+	return " · its conversation is also running in " + strings.Join(others, ", ") + " — end the one you do not want"
+}
+
+// resumeDispatch and conversationSessions are the seams resumeCmd reaches the
+// machine through, so a test can see which record a resume was handed and
+// say where a conversation runs without a tmux server of its own.
+var (
+	resumeDispatch       = dispatchpkg.Resume
+	conversationSessions = dispatchpkg.ConversationSessions
+)
 
 // launchCmd dispatches a new feature into repoName with prompt, in the
 // permission mode the form chose, on the model it chose, cut from the root

@@ -26,6 +26,19 @@ func stubResume(t *testing.T, mode dispatchpkg.ResumeMode, session string, err e
 	return &handed
 }
 
+func stubConversation(t *testing.T, names ...string) {
+	t.Helper()
+	prev := conversationSessions
+	conversationSessions = func(d *state.Dispatch) []supervisor.Session {
+		var out []supervisor.Session
+		for _, n := range names {
+			out = append(out, supervisor.Session{Name: n, Socket: d.TmuxSocket})
+		}
+		return out
+	}
+	t.Cleanup(func() { conversationSessions = prev })
+}
+
 // The report, from the cockpit's side: the snapshot still held the record from
 // before the first resume, and the second ⏎ resumed that copy. A resume is
 // handed the record as it is on disk.
@@ -110,5 +123,32 @@ func TestAResumeThatDidNotStartSaysWhy(t *testing.T) {
 		if msg.id != "abc" || !strings.HasPrefix(msg.notice, tc.want) || msg.session.Name != "" {
 			t.Errorf("resumedMsg = %+v, want %q and nothing to attach", msg, tc.want)
 		}
+	}
+}
+
+// Sent to a conversation that is still running, the human is told so — and
+// where it is running a second time, which only they can settle.
+func TestAttachingToARunningConversationNamesItsTwin(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	if err := state.Save(&state.Dispatch{ID: "abc", Feature: "retry", TmuxSocket: "shop"}); err != nil {
+		t.Fatal(err)
+	}
+	stubResume(t, dispatchpkg.ResumeLive, "disp-retry-2", nil)
+
+	stubConversation(t, "disp-retry-2")
+	msg := resumeCmd("abc", "")().(resumedMsg)
+	if msg.notice != "\"retry\" is still running — attaching to it" {
+		t.Errorf("one session: notice = %q", msg.notice)
+	}
+
+	stubConversation(t, "disp-retry", "disp-retry-2")
+	msg = resumeCmd("abc", "say this")().(resumedMsg)
+	want := "\"retry\" is still running — attaching to it · say it there, it was not sent" +
+		" · its conversation is also running in disp-retry — end the one you do not want"
+	if msg.notice != want {
+		t.Errorf("twins: notice = %q\nwant %q", msg.notice, want)
+	}
+	if msg.session != (supervisor.Session{Name: "disp-retry-2", Socket: "shop"}) {
+		t.Errorf("attaching to %+v", msg.session)
 	}
 }
