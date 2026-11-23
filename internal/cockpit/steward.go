@@ -268,6 +268,14 @@ func (m model) updateStewardPick(k string) (model, tea.Cmd) {
 			m.notice = "nothing to end here · x ends a live or interrupted steward"
 			return m, nil
 		}
+		if it.st.state == steward.Live {
+			// A live steward is a conversation the human may be in the middle of,
+			// and x is one key from j and k: ask first, as kill does. One that is
+			// interrupted has nothing running to lose, so it ends on the key.
+			m.confirm = &confirmState{kind: "steward-end", feature: it.st.id,
+				label: "end " + it.product + "'s live steward? it stays reopenable · y/n"}
+			return m, nil
+		}
 		m.stewardPickOpen = false
 		return m, stewardEndCmd(it.st.id)
 	}

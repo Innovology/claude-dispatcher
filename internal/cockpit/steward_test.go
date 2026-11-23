@@ -123,6 +123,22 @@ func TestStewardPickerLists(t *testing.T) {
 	}
 }
 
+// An interrupted steward has nothing running to lose, so x ends it on the key.
+func TestStewardPickerEndsAnInterruptedOneOnTheKey(t *testing.T) {
+	installFleetFixture(t)
+	acts := withStewards(t, stewardRow{id: "int1", product: "alpha", state: steward.Interrupted})
+	m := newModel()
+	m.stewardPickOpen = true
+	mm, cmd := m.updateStewardPick("x")
+	if cmd == nil || mm.confirm != nil || mm.stewardPickOpen {
+		t.Fatalf("x on an interrupted steward: confirm %+v", mm.confirm)
+	}
+	cmd()
+	if strings.Join(*acts, ",") != "end int1" {
+		t.Fatalf("acts = %v", *acts)
+	}
+}
+
 // enter reopens an older steward, starts a new one where the product has none
 // live, refuses to start one over a live steward (x ends it on purpose), and x
 // ends one.
@@ -155,9 +171,18 @@ func TestStewardPickerActs(t *testing.T) {
 	}
 	cmd()
 
-	_, cmd = at(0).updateStewardPick("x")
-	if cmd == nil {
-		t.Fatal("x on a live steward must end it")
+	// Found in review: x ended a live steward on the key. It asks first now,
+	// and only y ends it.
+	mm, cmd = at(0).updateStewardPick("x")
+	if cmd != nil || mm.confirm == nil || mm.confirm.kind != "steward-end" || !strings.Contains(mm.confirm.label, "end alpha's live steward?") {
+		t.Fatalf("x on a live steward must ask first: %+v", mm.confirm)
+	}
+	if tm, _ := mm.handleKey("n"); tm.(model).confirm != nil || !tm.(model).stewardPickOpen || len(*acts) != 2 {
+		t.Fatalf("n must leave the steward running and the picker open: %v", *acts)
+	}
+	tm, cmd := mm.handleKey("y")
+	if mm = tm.(model); cmd == nil || mm.stewardPickOpen {
+		t.Fatal("y must end the live steward")
 	}
 	if msg := cmd().(actionMsg); !strings.Contains(msg.notice, "ended") {
 		t.Errorf("end notice %q", msg.notice)
