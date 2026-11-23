@@ -7,6 +7,7 @@ package cockpit
 // a demo row) it degrades to an honest notice instead of touching anything.
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -235,6 +236,30 @@ type resumedMsg struct {
 	notice  string
 	session supervisor.Session
 	env     string
+	// id is the record the resume was for, so the screen lets go of it: until
+	// this arrives a second ⏎ on its row starts nothing (startResume). A
+	// failure comes back the same way, with no session to hand over.
+	id string
+}
+
+// startResume fires a resume of record id unless one is already on its way,
+// and says which.
+//
+// A resume can take as long as `nix develop` does — twenty seconds on the
+// machine that reported this, a minute cold — and for all of it the row still
+// reads "finished · ⏎ resume", because nothing has changed on disk yet. A
+// second ⏎ in that time used to fire a second resume, and the two together
+// could put two claudes on one conversation. Resume itself refuses that now
+// (dispatch.ConversationSessions, and its lock); this is the screen not asking
+// twice, and saying the first is still coming instead of saying nothing.
+func (m model) startResume(id, feature, prompt string) (model, tea.Cmd) {
+	if m.resuming[id] {
+		m.notice = "still resuming \"" + feature + "\" — it opens as soon as its session is up"
+		return m, nil
+	}
+	m.resuming[id] = true
+	m.notice = "resuming \"" + feature + "\"…"
+	return m, resumeCmd(id, prompt)
 }
 
 // resumeCmd reopens a finished dispatcher's Claude session, with prompt as the
@@ -243,15 +268,26 @@ type resumedMsg struct {
 // The record is addressed by id, not by feature: a feature name can belong to
 // several finished dispatchers (re-dispatching a shipped feature is normal, and
 // deliberately reuses the name), so the feature map would resolve the wrong one.
+//
+// And it is read from disk, not from the snapshot (recordByID): a snapshot is
+// as old as the load that read it, and Resume decides from the record whether
+// its session is still there. A copy from before an earlier resume names a
+// session that resume has since replaced — the copy that put a second claude on
+// one conversation — and Resume then saves that copy back over everything the
+// hooks have written since. swapCmd reads from disk for the same reason.
 func resumeCmd(id, prompt string) tea.Cmd {
 	return func() tea.Msg {
-		rec := recordByID(id)
+		rec := state.Load(id)
 		if rec == nil {
-			return actionMsg{notice: "no dispatch record to resume"}
+			return resumedMsg{id: id, notice: "no dispatch record to resume"}
 		}
-		mode, session, err := dispatchpkg.Resume(rec, strings.TrimSpace(prompt))
+		mode, session, err := resumeDispatch(rec, strings.TrimSpace(prompt))
+		if errors.Is(err, dispatchpkg.ErrResuming) {
+			// Another process — a second cockpit, a swap — is starting it.
+			return resumedMsg{id: id, notice: "\"" + rec.Feature + "\" is already being resumed — it opens as soon as its session is up"}
+		}
 		if err != nil {
-			return actionMsg{notice: "resume failed: " + err.Error()}
+			return resumedMsg{id: id, notice: "resume failed: " + err.Error()}
 		}
 		if mode == dispatchpkg.ResumeLive {
 			// Its claude is still up, so the human lands in the conversation
@@ -263,16 +299,18 @@ func resumeCmd(id, prompt string) tea.Cmd {
 			if strings.TrimSpace(prompt) != "" {
 				notice += " · say it there, it was not sent"
 			}
-			return resumedMsg{notice: notice, session: resumedAt(rec, session), env: rec.EnvCommand}
+			return resumedMsg{id: id, notice: notice, session: resumedAt(rec, session), env: rec.EnvCommand}
 		}
 		if mode == dispatchpkg.ResumeRelaunched {
 			return resumedMsg{
+				id:      id,
 				notice:  "started \"" + rec.Feature + "\" again in " + rec.RepoName + " · it never ran, so there was nothing to resume",
 				session: resumedAt(rec, session),
 				env:     rec.EnvCommand,
 			}
 		}
 		return resumedMsg{
+			id:      id,
 			notice:  "resumed \"" + rec.Feature + "\" in " + rec.RepoName,
 			session: resumedAt(rec, session),
 			env:     rec.EnvCommand,
@@ -287,6 +325,10 @@ func resumeCmd(id, prompt string) tea.Cmd {
 func resumedAt(rec *state.Dispatch, name string) supervisor.Session {
 	return supervisor.Session{Name: name, Socket: rec.TmuxSocket}
 }
+
+// resumeDispatch is the seam resumeCmd reaches dispatch.Resume through, so a
+// test can see which copy of the record a resume was handed.
+var resumeDispatch = dispatchpkg.Resume
 
 // launchCmd dispatches a new feature into repoName with prompt, in the
 // permission mode the form chose, on the model it chose, cut from the root

@@ -153,6 +153,7 @@ func TestHistoryIsReachableWithNothingInFlight(t *testing.T) {
 // ended. With no record behind the fixture row, the command reports that
 // rather than doing nothing.
 func TestEnterOnAHistoryRowResumes(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 	m := cqModel(t)
 	m = press(m, "h")
 	r, ok := m.fleetSel()
@@ -169,9 +170,9 @@ func TestEnterOnAHistoryRowResumes(t *testing.T) {
 	if strings.Contains(mm.notice, "no live") {
 		t.Errorf("⏎ tried to attach to a finished session: %q", mm.notice)
 	}
-	msg, _ := cmd().(actionMsg)
-	if !strings.Contains(msg.notice, "resume") {
-		t.Errorf("resume notice = %q", msg.notice)
+	msg, _ := cmd().(resumedMsg)
+	if !strings.Contains(msg.notice, "resume") || msg.id != r.id {
+		t.Errorf("resume answered %+v, want a notice naming the resume, for %q", msg, r.id)
 	}
 }
 
