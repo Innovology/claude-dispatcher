@@ -325,3 +325,29 @@ func TestSwap(t *testing.T) {
 		t.Errorf("unknown account: %v", err)
 	}
 }
+
+// A conversation that has taken a branch is branch work like any other: its
+// stops wake the steward, and the listing says where its checkout is, since
+// its worktree field is still the conversation's own folder.
+func TestNextWakesForAConversationThatTookABranch(t *testing.T) {
+	now := time.Now()
+	withStore(t,
+		&state.Dispatch{ID: "c", Feature: "sitrep", Product: "pp", Branchless: true, RepoName: "app",
+			Branch: "feature/fix", Checkout: "/wt/app/fix", WorktreePath: "/state/branchless/sitrep-c",
+			Status: state.StatusNeedsInput, WaitingSince: &now, Said: "Want me to open the PR?"},
+	)
+	var out bytes.Buffer
+	if err := runNext(&out, time.Hour, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	var n Next
+	if err := json.Unmarshal(out.Bytes(), &n); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Waiting) != 1 || n.Waiting[0].ID != "c" || n.Waiting[0].Checkout != "/wt/app/fix" {
+		t.Fatalf("waiting = %+v; want the conversation that took a branch, with its checkout", n.Waiting)
+	}
+	if !strings.Contains(out.String(), `"checkout": "/wt/app/fix"`) {
+		t.Errorf("--json does not carry the checkout:\n%s", out.String())
+	}
+}

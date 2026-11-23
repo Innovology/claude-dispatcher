@@ -101,9 +101,11 @@ diff touches):
     yours: scope — asks to also migrate the admin app, not in the brief
     yours: permission prompt — attach to see what it wants to run
 
-A row with ` + "`\"branchless\": true`" + ` is not work you push: it is a conversation the
-human is having about a product, and every stop it makes is their turn to talk.
-` + "`{{cd}} status --next`" + ` never wakes you for one. Leave it alone — no reply, no note.
+A row with ` + "`\"branchless\": true`" + ` and no branch is not work you push: it is a
+conversation the human is having about a product, and every stop it makes is
+their turn to talk. ` + "`{{cd}} status --next`" + ` never wakes you for one. Leave it
+alone — no reply, no note. One that has a branch has taken it for work, and is
+work like any other row: its checkout is its ` + "`checkout`" + `.
 
 When unsure whether something is settled, note it. A needless note costs the
 human a glance; a wrong push can cost them a production incident.
