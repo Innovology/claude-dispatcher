@@ -14,6 +14,7 @@ package dispatch
 // told so rather than handed a fresh session dressed up as the old one.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,6 +62,43 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	if d == nil {
 		return "", "", fmt.Errorf("no dispatch record")
 	}
+	// One resume of a record at a time, across every process that can resume
+	// one (the cockpit, `swap`, a second cockpit). The guard below asks the
+	// machine whether the conversation is running, and for as long as the first
+	// resume is inside `nix develop` it is not running anywhere yet — so a second
+	// resume in that window would pass the guard and start a second claude. It
+	// is refused rather than queued: waiting its turn would only start that
+	// claude a minute later.
+	release, ok := state.TryLock("resume-" + d.ID)
+	if !ok {
+		return "", "", fmt.Errorf("%w: %q opens as soon as its session is up", ErrResuming, d.Feature)
+	}
+	defer release()
+	mode, name, err := resume(d, prompt)
+	auditResume(d, mode, name, err)
+	return mode, name, err
+}
+
+// ErrResuming is a resume refused because another is still starting the same
+// record's session.
+var ErrResuming = errors.New("already being resumed")
+
+// auditResume writes what a resume did to the event log — every attempt, as
+// every dispatch is (ADR 0009), because a resume that went wrong leaves
+// nothing else that says it happened, and two that each went right leave two
+// sessions and no account of why.
+func auditResume(d *state.Dispatch, mode ResumeMode, name string, err error) {
+	reason := string(mode) + " in " + name
+	if err != nil {
+		reason = "failed: " + err.Error()
+	}
+	audit(state.Event{
+		Event: state.EventResumed, DispatcherID: d.ID, SessionID: SessionIDOf(d),
+		Feature: d.Feature, Repo: d.RepoName, Cwd: worktreeOrRepo(d), Reason: reason,
+	})
+}
+
+func resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	sid := SessionIDOf(d)
 	// No conversation is a launch that never got as far as claude — the row ADR
 	// 0009 keeps, "did not start". There is nothing to resume, and ⏎ used to
@@ -124,6 +162,22 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		// an adopted session's, idle or not: the human started it, it may hold
 		// other windows, and claude exiting in it does not make it ours to end
 		// — the same reason x releases one rather than killing it.
+	}
+
+	// The conversation itself, wherever on this server it is running. The
+	// check above can only find it in the session the record names, and the
+	// record may be a copy from before the resume that started it — which is
+	// how one conversation came to run in `disp-x` and `disp-x-2` at once (see
+	// conversation.go). Found, it is the dispatcher's own claude: the human is
+	// sent to it, and the record is pointed at it when the session carries the
+	// name a launch would have given it.
+	if !relaunch {
+		if at, ok := runningConversation(d); ok {
+			if at.Name != d.TmuxSession && d.AdoptedAt == nil && ownSessionName(d, at.Name) {
+				claimSession(d, at)
+			}
+			return ResumeLive, at.Name, nil
+		}
 	}
 
 	// The worktree may have been reclaimed when the dispatcher was killed

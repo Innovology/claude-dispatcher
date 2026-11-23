@@ -804,6 +804,25 @@ func Save(d *Dispatch) error {
 	return os.Rename(tmp.Name(), final)
 }
 
+// Load reads the record with this id as it stands on disk, or nil when there is
+// none to read. It is the copy to act on: a screen's copy of a record is as old
+// as the load that read it, and an act decided on a stale copy decides on a
+// session that may since have been started, or saved back over the hooks.
+func Load(id string) *Dispatch {
+	if id == "" || strings.ContainsAny(id, `/\`) {
+		return nil
+	}
+	b, err := os.ReadFile(filepath.Join(DispatchesDir(), id+".json"))
+	if err != nil {
+		return nil
+	}
+	var d Dispatch
+	if json.Unmarshal(b, &d) != nil || d.ID != id {
+		return nil
+	}
+	return &d
+}
+
 // LoadAll returns every dispatch record, most urgent first, most recent within
 // equal urgency.
 func LoadAll() []*Dispatch {
@@ -884,6 +903,15 @@ const (
 	// to" as the reason. Not a lifecycle event: the resumed session's
 	// SessionStart is what says it is running again.
 	EventAccountSwapped = "AccountSwapped"
+	// EventResumed is a finished dispatcher reopened (dispatch.Resume), with
+	// what the resume did as the reason: "started" a claude, found its
+	// conversation still "live" and attached, or "relaunched" a launch that
+	// never ran, each "in <session>"; or "failed: " and why. Not a lifecycle
+	// event: the session's own SessionStart says it is running. It exists
+	// because two resumes of one record used to leave nothing behind but two
+	// tmux sessions, and telling that apart from one resume took their
+	// creation times.
+	EventResumed = "Resumed"
 )
 
 // AppendEvent appends one line to events.jsonl; failures are swallowed because

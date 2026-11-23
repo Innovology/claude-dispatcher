@@ -216,7 +216,26 @@ var paneChildren = func(sess supervisor.Session) []int {
 // written for an earlier process of the same pid carries another one.
 func sessionIDFromRegistry(pids []int) string {
 	for _, pid := range pids {
-		raw, err := os.ReadFile(filepath.Join(claudeConfigDir(pid), "sessions", itoa(pid)+".json"))
+		if id := registrySessionID(pid); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// registrySessionID is the conversation Claude Code's registry says pid is
+// running, or "". The registry is looked for under the process's own config
+// dir first, then under each of dirs: where a process's environment cannot be
+// read (macOS has no /proc), claudeConfigDir can only guess ~/.claude, and a
+// claude on another account keeps its registry under that account's dir.
+func registrySessionID(pid int, dirs ...string) string {
+	seen := map[string]bool{}
+	for _, dir := range append([]string{claudeConfigDir(pid)}, dirs...) {
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		raw, err := os.ReadFile(filepath.Join(dir, "sessions", itoa(pid)+".json"))
 		if err != nil {
 			continue
 		}
@@ -277,21 +296,31 @@ func procStartTime(pid int) string {
 // skipped: another user's process, a kernel thread, a race with exit.
 func sessionIDFromProc(pids []int) string {
 	for _, pid := range pids {
-		fds, err := os.ReadDir(filepath.Join(procRoot, itoa(pid), "fd"))
-		if err != nil {
-			continue
-		}
-		for _, fd := range fds {
-			target, err := os.Readlink(filepath.Join(procRoot, itoa(pid), "fd", fd.Name()))
-			if err != nil {
-				continue
-			}
-			if id := transcriptSessionID(target); id != "" {
-				return id
-			}
+		if ids := openTranscripts(pid); len(ids) > 0 {
+			return ids[0]
 		}
 	}
 	return ""
+}
+
+// openTranscripts is the session id of every Claude Code transcript pid has
+// open, in descriptor order; nothing for a pid that cannot be read.
+func openTranscripts(pid int) []string {
+	fds, err := os.ReadDir(filepath.Join(procRoot, itoa(pid), "fd"))
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, fd := range fds {
+		target, err := os.Readlink(filepath.Join(procRoot, itoa(pid), "fd", fd.Name()))
+		if err != nil {
+			continue
+		}
+		if id := transcriptSessionID(target); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // procRoot is /proc, as a var so a test can hand it a directory of its own.

@@ -714,8 +714,7 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			// the same feature — which does need a prompt, and says so rather
 			// than announcing a dispatch it did not make.
 			if t.resumable() {
-				m.notice = "resuming \"" + t.feature + "\"…"
-				return m, resumeCmd(t.id, text)
+				return m.startResume(t.id, t.feature, text)
 			}
 			if text == "" {
 				m.notice = "nothing to dispatch — type what to change"
