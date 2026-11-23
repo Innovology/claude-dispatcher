@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 )
 
 // Run is `claude-dispatcher steward …`; it returns the exit code.
@@ -20,9 +21,15 @@ func Run(args []string, out, errOut io.Writer) int {
 	return 0
 }
 
+// stdin is where `steward guard` reads its hook payload.
+var stdin io.Reader = os.Stdin
+
 func run(args []string, out io.Writer) error {
 	if len(args) == 0 || args[0] == "list" {
 		return list(out)
+	}
+	if len(args) == 1 && args[0] == "guard" {
+		return guard(stdin, out)
 	}
 	if len(args) == 1 && (args[0] == "stop" || args[0] == "end") {
 		// What `steward stop` meant before stewards were per product: the one
