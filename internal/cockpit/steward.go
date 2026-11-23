@@ -383,6 +383,12 @@ func (m model) viewStewardPick(w, h int) string {
 				out = append(out, "")
 			}
 			out = append(out, fg(cMid, it.product))
+			// A product renamed or removed in the config keeps its stewards,
+			// which can see none of its work any more: said here, where the
+			// key that ends one is.
+			if m.cfg != nil && steward.CheckProduct(m.cfg, it.product) != nil {
+				out = append(out, fg(cAmber, "  not in your config any more · its steward sees none of its work: x ends it"))
+			}
 			if rs := m.stewardPickRulings[it.product]; len(rs) > 0 {
 				out = append(out, fg(cDim, "  "+rulingsLine(rs)))
 			}

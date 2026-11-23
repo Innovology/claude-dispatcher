@@ -295,3 +295,23 @@ func TestUnknownProductRefusedByTheVerbs(t *testing.T) {
 		t.Fatal("a question for an unknown product was saved")
 	}
 }
+
+// Found in review: a steward left running after its product was renamed slept
+// on `status --next --product <old name>` for ever, which read as a quiet
+// product. A product the config no longer names is refused, so its wait ends
+// and the steward can say so.
+func TestStatusRefusesAProductTheConfigNoLongerNames(t *testing.T) {
+	withStore(t)
+	var out, errOut bytes.Buffer
+	for _, args := range [][]string{{"--product", "plyer"}, {"--product", "plyer", "--next", "--timeout", "1ms"}} {
+		errOut.Reset()
+		if code := Run("status", args, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "no longer names") {
+			t.Errorf("%v: code %d, %q", args, code, errOut.String())
+		}
+	}
+	for _, args := range [][]string{{"--product", "player"}, {}} {
+		if code := Run("status", args, &out, &errOut); code != 0 {
+			t.Errorf("%v: %q", args, errOut.String())
+		}
+	}
+}

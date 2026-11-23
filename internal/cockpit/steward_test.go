@@ -405,3 +405,24 @@ func TestThePickerSaysWhenThePollGaveUp(t *testing.T) {
 		t.Errorf("an interrupted steward the poll has not given up on says it did:\n%s", view)
 	}
 }
+
+// Found in review: a product renamed or removed in the config kept its steward
+// running against a name nothing answered for, and the picker said nothing.
+func TestThePickerSaysAStewardsProductIsGoneFromTheConfig(t *testing.T) {
+	installFleetFixture(t)
+	withStewards(t,
+		stewardRow{id: "live1", product: "alpha", state: steward.Live},
+		stewardRow{id: "gone1", product: "renamed", state: steward.Live},
+	)
+	m := newModel()
+	m.cfg = &config.Config{Products: map[string][]string{"alpha": nil, "beta": nil}}
+	m.stewardPickOpen = true
+	view := m.viewStewardPick(140, 30)
+	if strings.Count(view, "not in your config any more") != 1 {
+		t.Fatalf("picker:\n%s", view)
+	}
+	at := strings.Index(view, "renamed")
+	if at < 0 || !strings.Contains(view[at:], "not in your config any more") {
+		t.Fatalf("the line is not under the renamed product:\n%s", view)
+	}
+}
