@@ -110,3 +110,22 @@ func TestDispatchStaysInTheSendersProduct(t *testing.T) {
 		t.Errorf("launched %v; want only the plain shell's", *launched)
 	}
 }
+
+// A mode that is not one is refused rather than read as auto: a typo for
+// manual would otherwise send the work out unattended.
+func TestDispatchRefusesAModeThatIsNotOne(t *testing.T) {
+	portfolio(t)
+	withStore(t)
+	launched := stubLaunch(t)
+	t.Setenv("CLAUDE_DISPATCHER_ID", "")
+	var out bytes.Buffer
+	if err := runDispatch([]string{"--repo", "api", "--mode", "manaul", "--title", "x", "y"}, &out); err == nil || !strings.Contains(err.Error(), "manaul") {
+		t.Errorf("--mode manaul: %v", err)
+	}
+	if err := runDispatch([]string{"--repo", "api", "--mode", "plan", "--title", "x", "y"}, &out); err != nil {
+		t.Errorf("--mode plan: %v", err)
+	}
+	if len(*launched) != 1 {
+		t.Errorf("launched %v; want only the plan one", *launched)
+	}
+}

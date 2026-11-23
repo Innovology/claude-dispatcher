@@ -44,6 +44,10 @@ func runDispatch(args []string, out io.Writer) error {
 		return errors.New("usage: dispatch --repo <repo> --title \"<a few words>\" [--root <branch>] [--mode auto|manual|plan] \"<the brief>\" (or - to read it from stdin)")
 	case brief == "":
 		return errors.New("say what it should do — the title alone is not a brief")
+	case !dispatch.Mode(*mode).Known():
+		// Refused, not normalised: a typo for manual or plan would otherwise
+		// send the work out unattended, which is the one mode it was not asked for.
+		return fmt.Errorf("--mode %s is not a mode: auto, manual or plan", *mode)
 	}
 	all, cfg, err := discover()
 	if err != nil {
