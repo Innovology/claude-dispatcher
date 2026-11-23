@@ -118,6 +118,11 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	}
 	branch := branchFor(r, slug)
 	worktree := worktreePath(r, slug)
+	// A conversation that took this work's branch is live in this worktree
+	// under a slug of its own, which preflight cannot see.
+	if live := liveIn(r.Name, branch, worktree, ""); live != nil {
+		return nil, heldErr(live, branch)
+	}
 	root = root.Normalize()
 	cutFrom, err := ensureWorktreeFrom(r.Path, worktree, branch, root, r.RootBranch)
 	if err != nil {
@@ -467,8 +472,43 @@ var audit = state.AppendEvent
 // console one) keeps the conservative answer rather than letting a guess put
 // two claudes in one checkout.
 func liveDispatch(slug string) *state.Dispatch {
+	return liveWhere(func(d *state.Dispatch) bool { return d.Slug == slug })
+}
+
+// liveIn is a live dispatcher — by liveDispatch's three facts — other than the
+// record except, that holds branch of repo, or works in the checkout at path.
+// The slug is not enough once a conversation can take a branch (TakeBranch):
+// its slug is the conversation's, its branch and checkout are the work's, so a
+// conversation that took "spike" and a dispatch of "spike" share a worktree
+// with no slug in common, whichever came first.
+func liveIn(repo, branch, path, except string) *state.Dispatch {
+	return liveWhere(func(d *state.Dispatch) bool {
+		if d.ID == except {
+			return false
+		}
+		if branch != "" && d.Branch == branch && d.RepoName == repo {
+			return true
+		}
+		return path != "" && workDir(d) != "" && samePath(workDir(d), path)
+	})
+}
+
+// workDir is the checkout a record's session works in: the one a conversation
+// took, else its own worktree. A conversation that has taken nothing works in
+// no checkout — its folder holds only its brief.
+func workDir(d *state.Dispatch) string {
+	switch {
+	case d.Checkout != "":
+		return d.Checkout
+	case d.Branchless:
+		return ""
+	}
+	return d.WorktreePath
+}
+
+func liveWhere(match func(*state.Dispatch) bool) *state.Dispatch {
 	for _, d := range state.LoadAll() {
-		if d.Slug != slug || d.TmuxSession == "" || !unfinished(d.Status) {
+		if d.TmuxSession == "" || !unfinished(d.Status) || !match(d) {
 			continue
 		}
 		if !sessionAlive(SessionOf(d)) {
@@ -480,6 +520,12 @@ func liveDispatch(slug string) *state.Dispatch {
 		return d
 	}
 	return nil
+}
+
+// heldErr is the refusal for a checkout or branch a live dispatcher has.
+func heldErr(live *state.Dispatch, what string) error {
+	return fmt.Errorf("%s is %q's, which is live (session %s) — two sessions in one checkout is what a worktree per dispatch prevents; name the work differently, or reply to that dispatcher",
+		what, live.Feature, live.TmuxSession)
 }
 
 // unfinished names the statuses a dispatcher can still be working under. It is

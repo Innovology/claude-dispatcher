@@ -34,7 +34,10 @@ import (
 //
 // The canonical checkout is never entered: it is the one every conversation
 // reads and the human works in, so a branch already checked out there is
-// refused with the way round it — cut a branch of its own from that one.
+// refused with the way round it — cut a branch of its own from that one. Nor is
+// a checkout or branch a live dispatcher has (liveIn), whichever name it is
+// asked for by. CheckoutCut is set only where this call ran git worktree add,
+// because it is what lets kill and tidy remove the folder.
 func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string, error) {
 	switch {
 	case d == nil:
@@ -50,33 +53,51 @@ func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string
 	}
 	root = root.Normalize()
 
-	var branch, path, cutFrom string
-	cut := true
-	if branchExists(r.Path, name) {
+	// Where the work would go, worked out before anything is made, so that a
+	// checkout or branch a live dispatcher has is refused before it is entered.
+	var branch, path, entered string
+	existing := branchExists(r.Path, name)
+	if existing {
 		if !root.IsDefault() {
 			return "", reusedRootErr(name, root)
 		}
 		branch = name
-		if at := worktreeOn(r.Path, name); at != "" {
-			if samePath(at, r.Path) {
-				return "", fmt.Errorf("%s is checked out in %s, the checkout this conversation reads — cut a branch of your own from it: --root %s and a new name",
-					name, at, name)
-			}
-			path, cut = at, false
-		} else {
-			path = worktreePath(r, Slugify(name))
-			if err := addWorktree(r.Path, path, name); err != nil {
-				return "", err
-			}
+		entered = worktreeOn(r.Path, name)
+		if entered != "" && samePath(entered, r.Path) {
+			return "", fmt.Errorf("%s is checked out in %s, the checkout this conversation reads — cut a branch of your own from it: --root %s and a new name",
+				name, entered, name)
 		}
+		path = entered
 	} else {
 		branch = branchFor(r, Slugify(name))
+	}
+	if path == "" {
 		path = worktreePath(r, Slugify(name))
+	}
+	if live := liveIn(r.Name, branch, path, d.ID); live != nil {
+		return "", heldErr(live, branch)
+	}
+
+	// Cut only when this call ran git worktree add: a checkout that was
+	// already there — a branch's own, or one an earlier dispatch of this name
+	// left behind — is entered, and kill and tidy leave it where it was.
+	var cutFrom string
+	cut := false
+	switch {
+	case entered != "":
+	case existing:
+		if err := addWorktree(r.Path, path, name); err != nil {
+			return "", err
+		}
+		cut = true
+	default:
+		_, statErr := os.Stat(path)
+		fresh := os.IsNotExist(statErr)
 		from, err := ensureWorktreeFrom(r.Path, path, branch, root, r.RootBranch)
 		if err != nil {
 			return "", err
 		}
-		cutFrom = from
+		cutFrom, cut = from, fresh
 	}
 	// A human who opens claude in it should not meet the trust dialog either.
 	InheritTrustFor(d.ConfigDir, r.Path, path)

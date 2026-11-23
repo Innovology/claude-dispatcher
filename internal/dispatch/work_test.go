@@ -9,6 +9,7 @@ import (
 
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // conversation launches a branchless dispatch over pp starting on player-app,
@@ -141,5 +142,77 @@ func TestTidyReclaimsTheWorktreeAConversationCut(t *testing.T) {
 	}
 	if !found {
 		t.Error("tidy did not plan to remove the clean worktree the conversation cut")
+	}
+}
+
+// aliveAll makes every session look alive and busy, so every unfinished record
+// is a live dispatcher.
+func aliveAll(t *testing.T) {
+	t.Helper()
+	prevAlive, prevIdle := sessionAlive, sessionIdle
+	sessionAlive = func(supervisor.Session) bool { return true }
+	sessionIdle = func(supervisor.Session) (bool, bool) { return false, true }
+	t.Cleanup(func() { sessionAlive, sessionIdle = prevAlive, prevIdle })
+}
+
+// A conversation never goes into a checkout a live dispatcher is working in,
+// by the work's name or by the branch's, and a dispatch never goes into one a
+// conversation took: two sessions in one checkout is what a worktree per
+// dispatch exists to prevent, and kill on the conversation removed the other
+// dispatcher's worktree from under it.
+func TestALiveCheckoutIsNeverShared(t *testing.T) {
+	d, all := conversation(t)
+	app := all[1]
+	live, err := Launch(app, "pricing fix", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliveAll(t)
+	for _, name := range []string{"pricing fix", live.Branch} {
+		if _, err := TakeBranch(d, app, name, DefaultRoot); err == nil || !strings.Contains(err.Error(), `"pricing fix"`) {
+			t.Errorf("TakeBranch(%q) into a live dispatcher's checkout: %v", name, err)
+		}
+	}
+	if d.Branch != "" || d.Checkout != "" {
+		t.Errorf("a refused take changed the record: branch %q checkout %q", d.Branch, d.Checkout)
+	}
+
+	// The other way round: the conversation has the work, and a dispatch of
+	// the same name is refused, though their slugs differ.
+	path, err := TakeBranch(d, app, "spike", DefaultRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Launch(app, "spike", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount); err == nil ||
+		!strings.Contains(err.Error(), `"talk"`) {
+		t.Errorf("a dispatch went into the checkout a live conversation took (%s): %v", path, err)
+	}
+}
+
+// A checkout that was already there when the conversation took it — one a
+// finished dispatch of the same name left behind — is entered and not cut, so
+// killing the conversation leaves it; and resuming that finished dispatch while
+// the conversation works in it is refused.
+func TestACheckoutAlreadyThereIsEnteredNotCut(t *testing.T) {
+	d, all := conversation(t)
+	app := all[1]
+	old, err := Launch(app, "old work", "go", ModeAuto, DefaultModel, DefaultRoot, false, ownAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old.Stop(state.StatusExited, "session ended", old.CreatedAt)
+	if err := state.Save(old); err != nil {
+		t.Fatal(err)
+	}
+	path, err := TakeBranch(d, app, "old work", DefaultRoot)
+	if err != nil {
+		t.Fatalf("TakeBranch into a finished dispatch's worktree: %v", err)
+	}
+	if !samePath(path, old.WorktreePath) || d.CheckoutCut || d.RemovableCheckout() != "" {
+		t.Errorf("entered %q (want %q), cut %v, removable %q — this call cut nothing", path, old.WorktreePath, d.CheckoutCut, d.RemovableCheckout())
+	}
+	aliveAll(t)
+	if _, _, err := Resume(old, ""); err == nil || !strings.Contains(err.Error(), "live in the same worktree") {
+		t.Errorf("resumed a dispatch into the checkout a live conversation works in: %v", err)
 	}
 }

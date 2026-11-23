@@ -90,7 +90,14 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// Same guard as Launch: one live dispatcher per slug, because the worktree
 	// path is keyed by it. Resuming into a checkout another session is working
 	// in is the collision per-dispatch worktrees exist to prevent.
-	if live := liveDispatch(d.Slug); live != nil && live.ID != d.ID {
+	live := liveDispatch(d.Slug)
+	if live != nil && live.ID == d.ID {
+		live = nil
+	}
+	if live == nil {
+		live = liveIn(d.RepoName, d.Branch, workDir(d), d.ID)
+	}
+	if live != nil {
 		return "", "", fmt.Errorf("%q is live in the same worktree (session %s) — kill it first",
 			live.Feature, live.TmuxSession)
 	}
