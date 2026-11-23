@@ -361,6 +361,32 @@ func TestThePollReopensInterruptedStewardsOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+// Found in review: the poll retired the machine-wide steward the human had
+// switched on with no word about it. It says so now, and says when it could
+// not, beside whatever else the poll has to say.
+func TestThePollSaysItRetiredTheMachineWideSteward(t *testing.T) {
+	fakeGHOnPath(t, "SUCCESS")
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	prevRetire, prevReopen := stewardRetireLegacy, stewardReopenInterrupted
+	t.Cleanup(func() { stewardRetireLegacy, stewardReopenInterrupted = prevRetire, prevReopen })
+	retired, failed := true, error(nil)
+	stewardRetireLegacy = func() (bool, error) { return retired, failed }
+	stewardReopenInterrupted = func() ([]*steward.Steward, error) {
+		return []*steward.Steward{{ID: "s1", Product: "alpha"}}, nil
+	}
+	if msg := trackRefreshCmd(&config.Config{})().(trackedMsg); msg.notice != "the machine-wide steward is retired · stewards are per product now: t starts one" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+	on := &config.Config{StewardReopen: config.StewardReopenInterrupted}
+	if msg := trackRefreshCmd(on)().(trackedMsg); msg.notice != "the machine-wide steward is retired · stewards are per product now: t starts one · reopened alpha's steward (it was interrupted)" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+	retired, failed = false, errors.New("kill-session: no server")
+	if msg := trackRefreshCmd(&config.Config{})().(trackedMsg); msg.notice != "steward: the machine-wide steward could not be retired: kill-session: no server" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+}
+
 // A steward the poll gave up on says so in the picker, since it is the one
 // interrupted steward that will not come back unless the human reopens it.
 func TestThePickerSaysWhenThePollGaveUp(t *testing.T) {

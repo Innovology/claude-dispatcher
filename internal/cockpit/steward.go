@@ -80,6 +80,29 @@ func collectStewards() []stewardRow {
 // stewardReopenNotice is the footer's word on what the poll reopened, and on
 // any reopen that failed: a steward coming back by itself is news the human
 // did not ask for at that moment, and a failed one is the reason it did not.
+// legacyRetiredNotice is what the poll says when it retires the machine-wide
+// steward an earlier build ran, or could not.
+func legacyRetiredNotice(retired bool, err error) string {
+	switch {
+	case err != nil:
+		return "steward: the machine-wide steward could not be retired: " + strings.ReplaceAll(err.Error(), "\n", "; ")
+	case retired:
+		return "the machine-wide steward is retired · stewards are per product now: t starts one"
+	}
+	return ""
+}
+
+// joinNotices is the non-empty notices as one line.
+func joinNotices(ns []string) string {
+	var out []string
+	for _, n := range ns {
+		if n != "" {
+			out = append(out, n)
+		}
+	}
+	return strings.Join(out, " · ")
+}
+
 func stewardReopenNotice(reopened []*steward.Steward, err error) string {
 	var names []string
 	for _, s := range reopened {

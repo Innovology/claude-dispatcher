@@ -181,15 +181,16 @@ func trackRefreshCmd(cfg *config.Config) tea.Cmd {
 		// The machine-wide steward an earlier build ran is retired here, at
 		// startup and on every poll, so one left running across the upgrade
 		// does not go on answering waits beside the product stewards
-		// (steward.RetireLegacy).
-		_, _ = stewardRetireLegacy()
+		// (steward.RetireLegacy). It says so when it does: that steward was
+		// switched on by the human, and going without a word looked like a crash.
+		notices := []string{legacyRetiredNotice(stewardRetireLegacy())}
 		// And where a steward a reboot or a crash took down is reopened, when
 		// steward_reopen says so: the poll is the one loop that runs while the
 		// human is away, which is when it matters (steward.ReopenInterrupted).
-		notice := ""
 		if cfg.ReopensInterruptedStewards() {
-			notice = stewardReopenNotice(stewardReopenInterrupted())
+			notices = append(notices, stewardReopenNotice(stewardReopenInterrupted()))
 		}
+		notice := joinNotices(notices)
 		track.Refresh(state.LoadAll(), cfg)
 		return trackedMsg{notice: notice}
 	}
