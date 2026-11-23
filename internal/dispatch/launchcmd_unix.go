@@ -49,12 +49,12 @@ func launchCommand(dispatcherID, promptPath, shell string, mode Mode, model Mode
 // It ends in the same exit shell a dispatch does, naming none of its own: the
 // steward's pane is a pane like any other, and the human who jumps into it
 // should land where they land everywhere else.
-func StewardCommand(stateDir, opening string) string {
+func StewardCommand(stateDir string, l StewardLaunch) string {
 	env := ""
 	if stateDir != "" {
 		env = "CLAUDE_DISPATCHER_STATE=" + shellQuote(stateDir) + " "
 	}
-	return fmt.Sprintf("%sclaude%s %s%s", env, modeArgs(ModeAuto), shellQuote(opening), exitShell(""))
+	return fmt.Sprintf("%sclaude%s%s %s%s", env, modeArgs(ModeAuto), stewardArgs(l, shellQuote), shellQuote(l.Opening), exitShell(""))
 }
 
 // exitShell is the tail of the launch line: what the pane becomes once claude

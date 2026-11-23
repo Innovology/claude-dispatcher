@@ -9,6 +9,7 @@ import (
 	"claude-dispatcher/internal/config"
 	dispatchpkg "claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/keymap"
+	"claude-dispatcher/internal/steward"
 	"claude-dispatcher/internal/version"
 )
 
@@ -29,8 +30,8 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship" | "tidy" | "act"
-	feature, repo string
+	kind          string                 // "kill" | "ship" | "tidy" | "act" | "steward-end"
+	feature, repo string                 // a steward-end's steward id rides in feature
 	features      []string               // kill targets (marked set, or the one selected)
 	tidy          []dispatchpkg.TidyItem // the plan a tidy confirms
 	row           fleetRow               // the triage row an "act" was asked on
@@ -121,6 +122,13 @@ type model struct {
 	swapOpen   bool
 	swapAt     *swapTarget
 	swapCursor int
+	// The steward picker over the triage lens (steward.go): every product's
+	// stewards, to jump into, reopen or start.
+	stewardPickOpen   bool
+	stewardPickCursor int
+	// stewardPickRulings is each product's standing rulings, read when the
+	// picker opens rather than on every frame it is drawn.
+	stewardPickRulings map[string][]steward.Ruling
 
 	backlogCursor int
 	picked        map[string]bool
@@ -566,6 +574,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, upgradeTick()
 
 	case trackedMsg:
+		if msg.notice != "" {
+			m.notice = msg.notice
+		}
 		return m.requestLoad(loadPlain)
 
 	case actionMsg:
@@ -633,12 +644,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
 
-	case stewardToggledMsg:
-		mm, cmd := m.onStewardToggled(msg)
-		return mm, cmd
-
-	case stewardStartedMsg:
-		mm, cmd := m.onStewardStarted(msg)
+	case stewardOpenedMsg:
+		mm, cmd := m.onStewardOpened(msg)
 		return mm, cmd
 
 	case tidyPlannedMsg:
@@ -772,6 +779,9 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		// deletion already running would be the screen lying.
 		m.notice = "tidying…"
 		return m, tidyRunCmd(c.tidy)
+	case "steward-end":
+		m.stewardPickOpen = false
+		return m, stewardEndCmd(c.feature)
 	case "act":
 		// A triage act that asked first runs exactly as it would have without
 		// asking: the flash, then the row leaves with ctrl+z able to bring it

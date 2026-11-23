@@ -169,6 +169,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		WorktreePath: worktree,
 		BaseSHA:      baseSHA,
 		Prompt:       prompt,
+		Goal:         GoalOf(prompt),
 		Mode:         string(mode),
 		Model:        string(model),
 		FanOut:       fanOut,

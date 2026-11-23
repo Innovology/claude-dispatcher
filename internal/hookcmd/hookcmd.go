@@ -280,23 +280,44 @@ func apply(d *state.Dispatch, event string, in hookInput) bool {
 // someone, and cleared while it works. Every Stop and StopFailure is a new wait
 // even from needs-input — a turn that ended again has said something new —
 // while the idle prompt that trails a stop a minute later is the same wait.
-// The steward's note is cleared with the wait it was written in.
+//
+// The steward's note outlives the work between two waits — Note() hides it
+// while the session works — because the next wait may be the same one asked
+// again: a dispatcher watching CI ends a turn on every tick, closing each on
+// the same question, and a note cleared by the tick woke the steward to write
+// it again (72 times on one record in one night). So a new wait that closes on
+// the question the note was about keeps it, re-stamped to this wait; any other
+// clears it. The answer does not carry: a reply that was typed and then asked
+// again did not settle anything, and the steward should look.
 func stampWait(d *state.Dispatch, event string, wasWaiting bool) bool {
 	switch {
 	case !d.Waiting():
-		if d.WaitingSince == nil && d.StewardNote == "" && d.Answer == "" {
+		if d.WaitingSince == nil && d.Answer == "" {
 			return false
 		}
 		d.WaitingSince = nil
-		d.StewardNote, d.StewardNoteAt = "", nil
 		d.Answer, d.AnsweredAt = "", nil
 		return true
 	case !wasWaiting || event == "Stop" || event == "StopFailure":
 		now := time.Now()
 		d.WaitingSince = &now
+		carryNote(d, now)
 		return true
 	}
 	return false
+}
+
+// carryNote keeps the steward's note on a new wait that asks what it was
+// written about, and drops it from any other.
+func carryNote(d *state.Dispatch, now time.Time) {
+	if d.StewardNote == "" {
+		return
+	}
+	if q := ask.Of(d.Said); q != "" && q == d.NotedAsk {
+		d.StewardNoteAt = &now
+		return
+	}
+	d.StewardNote, d.StewardNoteAt, d.NotedAsk = "", nil, ""
 }
 
 // applyFanOut keeps the Subagents annotation current. Every path a session

@@ -375,8 +375,8 @@ func dxPrompt(title, what, goal string) string {
 	if what != "" {
 		lines = append(lines, "", what)
 	}
-	if goal != "" {
-		lines = append(lines, "", "done when: "+goal, "Keep working until that is true.")
+	if s := dispatchpkg.GoalSentence(goal); s != "" {
+		lines = append(lines, "", s)
 	}
 	return strings.Join(lines, "\n")
 }
