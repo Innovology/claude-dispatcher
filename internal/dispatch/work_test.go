@@ -3,6 +3,7 @@
 package dispatch
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -251,5 +252,35 @@ func TestAConversationDoesNotTakeTheTrunk(t *testing.T) {
 	}
 	if _, err := TakeBranch(d, r, "trunk work", DefaultRoot); err != nil {
 		t.Errorf("new work in the same repo: %v", err)
+	}
+}
+
+// Whether a record may take a branch is read from the store under the lock,
+// not from the copy the caller holds: a conversation that has finished is
+// resumed first, and one a second `worktree` already moved onto a branch does
+// not take another.
+func TestTakingABranchReadsTheRecordAsStored(t *testing.T) {
+	d, all := conversation(t)
+	app := all[1]
+	stale := *d
+	if _, err := TakeBranch(d, app, "first", DefaultRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := TakeBranch(&stale, app, "second", DefaultRoot); err == nil || !strings.Contains(err.Error(), "already working") {
+		t.Errorf("a stale copy with no branch took a second one: %v", err)
+	}
+
+	done, all := conversation(t)
+	done.Stop(state.StatusExited, "session ended", done.CreatedAt)
+	if err := state.Save(done); err != nil {
+		t.Fatal(err)
+	}
+	live := *done
+	live.Status = state.StatusWorking // what a caller holding an old copy believes
+	if _, err := TakeBranch(&live, all[1], "late", DefaultRoot); err == nil || !strings.Contains(err.Error(), "finished") {
+		t.Errorf("a finished conversation took a branch: %v", err)
+	}
+	if _, err := os.Stat(worktreePath(all[1], "late")); err == nil {
+		t.Error("a refused take left a worktree behind")
 	}
 }

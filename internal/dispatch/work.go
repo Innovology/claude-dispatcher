@@ -39,13 +39,15 @@ import (
 // asked for by. CheckoutCut is set only where this call ran git worktree add,
 // because it is what lets kill and tidy remove the folder.
 func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string, error) {
-	switch {
-	case d == nil:
+	if d == nil {
 		return "", fmt.Errorf("no dispatch record")
-	case !d.Branchless:
-		return "", fmt.Errorf("%q was dispatched on %s; only a dispatch that started with no branch takes one", d.Feature, d.Branch)
-	case d.Branch != "":
-		return "", fmt.Errorf("%q is already working on %s in %s — send further work out with dispatch", d.Feature, d.Branch, d.Checkout)
+	}
+	if err := func() error {
+		release := state.Lock()
+		defer release()
+		return canTake(stored(d))
+	}(); err != nil {
+		return "", err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" || Slugify(name) == "" {
@@ -108,12 +110,15 @@ func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string
 
 	release := state.Lock()
 	defer release()
-	cur := d
-	for _, rec := range state.LoadAll() {
-		if rec.ID == d.ID {
-			cur = rec
-			break
+	cur := stored(d)
+	// Asked again under the lock that the write is made under: between the
+	// first look and this one, a second `worktree` for the same record may
+	// have taken a branch, or the session may have ended.
+	if err := canTake(cur); err != nil {
+		if cut {
+			CleanupWorktree(r.Path, path)
 		}
+		return "", err
 	}
 	cur.RepoName, cur.RepoPath = r.Name, r.Path
 	cur.Branch, cur.Root = branch, cutFrom
@@ -124,6 +129,32 @@ func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string
 	}
 	*d = *cur
 	return path, nil
+}
+
+// stored is d as the store has it now, or d itself when it is not stored. The
+// caller holds the hook lock.
+func stored(d *state.Dispatch) *state.Dispatch {
+	for _, rec := range state.LoadAll() {
+		if rec.ID == d.ID {
+			return rec
+		}
+	}
+	return d
+}
+
+// canTake says why d cannot take a branch, or nil. Only a conversation that is
+// still going does: a finished one is resumed first, so that whatever runs
+// `worktree --id` cannot turn a record nobody is working under into a branch's.
+func canTake(d *state.Dispatch) error {
+	switch {
+	case !d.Branchless:
+		return fmt.Errorf("%q was dispatched on %s; only a dispatch that started with no branch takes one", d.Feature, d.Branch)
+	case d.Branch != "":
+		return fmt.Errorf("%q is already working on %s in %s — send further work out with dispatch", d.Feature, d.Branch, d.Checkout)
+	case !unfinished(d.Status):
+		return fmt.Errorf("%q has finished (%s) — resume it, and take the branch from its session", d.Feature, d.Status)
+	}
+	return nil
 }
 
 // isTrunk reports whether name is a branch r's work merges into: its own root
