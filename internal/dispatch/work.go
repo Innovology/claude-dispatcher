@@ -58,7 +58,10 @@ func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string
 	// Where the work would go, worked out before anything is made, so that a
 	// checkout or branch a live dispatcher has is refused before it is entered.
 	var branch, path, entered string
-	existing := branchExists(r.Path, name)
+	existing, err := branchExists(r.Path, name)
+	if err != nil {
+		return "", err
+	}
 	if existing {
 		if !root.IsDefault() {
 			return "", reusedRootErr(name, root)
@@ -174,14 +177,25 @@ func isTrunk(r repos.Repo, name string) bool {
 	return err == nil && strings.TrimPrefix(cached, "origin/") == name
 }
 
-// branchExists reports whether name is a branch here or on origin.
-func branchExists(repoPath, name string) bool {
-	for _, ref := range []string{"refs/heads/" + name, "refs/remotes/origin/" + name} {
-		if exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", ref).Run() == nil {
-			return true
-		}
+// branchExists reports whether name is a branch to go into: one of this
+// clone's own, or one origin has. A remote-tracking ref alone is not proof of
+// the second — a plain fetch never deletes one, so a branch origin retired
+// months ago is still there (the quiet failure ADR 0010 is about) — so origin
+// is asked, and a branch it no longer has is refused by name rather than
+// entered as live work or quietly read as the name of new work. Unreachable,
+// the ref is taken at its word, as it was: offline is not a refusal.
+func branchExists(repoPath, name string) (bool, error) {
+	if resolves(repoPath, "refs/heads/"+name) {
+		return true, nil
 	}
-	return false
+	if !resolves(repoPath, "refs/remotes/origin/"+name) {
+		return false, nil
+	}
+	out, err := gitOut(repoPath, fetchTimeout, "ls-remote", "--heads", "origin", "refs/heads/"+name)
+	if err == nil && out == "" {
+		return false, fmt.Errorf("origin no longer has %s — the origin/%s here is what a fetch left behind; name another branch, or the work to cut one for", name, name)
+	}
+	return true, nil
 }
 
 // worktreeOn is the checkout git's registry has on branch, or "".

@@ -284,3 +284,29 @@ func TestTakingABranchReadsTheRecordAsStored(t *testing.T) {
 		t.Error("a refused take left a worktree behind")
 	}
 }
+
+// A branch this clone knows only by its remote-tracking ref is entered when
+// origin still has it, and refused by name when origin retired it: a fetch
+// never deletes the ref, so it alone would have the conversation working on a
+// branch that is gone.
+func TestABranchOriginRetiredIsNotEntered(t *testing.T) {
+	d, _ := conversation(t)
+	clone, remote := clonedRepo(t, "main")
+	r := repos.Repo{Name: "svc", Path: clone}
+	for _, b := range []string{"spike/old", "spike/live"} {
+		gitIn(t, remote, "branch", b, "main")
+	}
+	gitIn(t, clone, "fetch", "-q", "origin")
+	gitIn(t, remote, "branch", "-D", "spike/old")
+
+	if _, err := TakeBranch(d, r, "spike/old", DefaultRoot); err == nil || !strings.Contains(err.Error(), "no longer has spike/old") {
+		t.Errorf("entered a branch origin retired: %v", err)
+	}
+	path, err := TakeBranch(d, r, "spike/live", DefaultRoot)
+	if err != nil {
+		t.Fatalf("a branch origin still has: %v", err)
+	}
+	if worktreeBranch(t, path) != "spike/live" || !d.CheckoutCut {
+		t.Errorf("checkout %q on %q, cut %v", path, worktreeBranch(t, path), d.CheckoutCut)
+	}
+}
