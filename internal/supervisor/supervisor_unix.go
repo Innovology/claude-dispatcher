@@ -69,6 +69,13 @@ func SessionIdle(s Session) (idle, known bool) { return server(s).SessionIdle(s.
 // not start is running; an empty list means we could not tell.
 func SessionPIDs(s Session) []int { return server(s).SessionPIDs(s.Name) }
 
+// ServerPIDs is every session on one server, each with the processes running in
+// its panes: SessionPIDs for the whole server in one read. Resume asks it
+// whether the conversation it is about to reopen is already running there.
+func ServerPIDs(socket string) map[string][]int {
+	return (tmux.Server{Socket: socket}).PIDsBySession()
+}
+
 // EnsureBackKey binds the prefix-free "back to the cockpit" key (Ctrl-\) on
 // every server a dispatch may live on. It is bound server-wide, so a server
 // this cockpit has never started a session on has never been told about it.
