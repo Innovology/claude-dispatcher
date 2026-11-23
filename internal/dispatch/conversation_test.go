@@ -4,7 +4,9 @@ package dispatch
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -256,5 +258,38 @@ func TestASecondResumeIsRefusedWhileTheFirstStarts(t *testing.T) {
 	}
 	if starts != 1 {
 		t.Errorf("%d sessions started, want 1", starts)
+	}
+}
+
+// Every resume leaves a line in the log saying what it did, and where — the
+// line that was missing when two resumes of one record had to be told apart by
+// the creation times of their tmux sessions.
+func TestEveryResumeIsAudited(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	sup := &stubSupervisor{alive: map[string]bool{}}
+	stubSessions(t, sup)
+	var got []state.Event
+	prev := audit
+	audit = func(e state.Event) { got = append(got, e) }
+	t.Cleanup(func() { audit = prev })
+
+	d := finished(t, initRepo(t))
+	if _, _, err := Resume(d, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Event != state.EventResumed || got[0].DispatcherID != d.ID ||
+		got[0].Reason != "started in disp-payment-retry" || got[0].Cwd != d.WorktreePath {
+		t.Errorf("audit = %+v, want one Resumed saying it started in disp-payment-retry", got)
+	}
+
+	got = nil
+	if err := os.Remove(d.TranscriptPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Resume(d, ""); err == nil {
+		t.Fatal("resumed a conversation whose transcript is gone")
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0].Reason, "failed: the transcript") {
+		t.Errorf("audit = %+v, want the failure and its reason", got)
 	}
 }

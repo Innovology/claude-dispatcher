@@ -74,12 +74,29 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		return "", "", fmt.Errorf("%w: %q opens as soon as its session is up", ErrResuming, d.Feature)
 	}
 	defer release()
-	return resume(d, prompt)
+	mode, name, err := resume(d, prompt)
+	auditResume(d, mode, name, err)
+	return mode, name, err
 }
 
 // ErrResuming is a resume refused because another is still starting the same
 // record's session.
 var ErrResuming = errors.New("already being resumed")
+
+// auditResume writes what a resume did to the event log — every attempt, as
+// every dispatch is (ADR 0009), because a resume that went wrong leaves
+// nothing else that says it happened, and two that each went right leave two
+// sessions and no account of why.
+func auditResume(d *state.Dispatch, mode ResumeMode, name string, err error) {
+	reason := string(mode) + " in " + name
+	if err != nil {
+		reason = "failed: " + err.Error()
+	}
+	audit(state.Event{
+		Event: state.EventResumed, DispatcherID: d.ID, SessionID: SessionIDOf(d),
+		Feature: d.Feature, Repo: d.RepoName, Cwd: worktreeOrRepo(d), Reason: reason,
+	})
+}
 
 func resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	sid := SessionIDOf(d)
