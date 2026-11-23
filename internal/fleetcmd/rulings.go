@@ -52,13 +52,26 @@ func rulingAdd(args []string, out io.Writer) error {
 	product := fs.String("product", "", "the product it is for (required)")
 	allow := fs.String("allow", "", "what it lets the steward do itself: "+strings.Join(steward.Allows, ", "))
 	repo := fs.String("repo", "", "narrow it to one repo of the product")
+	prs := fs.String("pr", "", "with --allow merge, the pull requests it may merge: 12,14, or any")
 	until := fs.String("until", "", "when it ends: 6h, 3d, 2026-11-16T09:00 (default 24h)")
-	// Flags may come after the text, as merge's may: unordered, the first word
-	// of the text ended the flags and every later --allow became part of it.
-	if err := fs.Parse(reorder(args)); err != nil {
+	// The flags end where the text begins. Lifting them out of it wherever they
+	// sat read "do not --allow merge yet" as a ruling that allows merge, with
+	// "do not yet" for its text: the words said no and the grant said yes. A
+	// flag written after the text began is refused instead of read either way —
+	// read, it inverts the sentence; folded into the text, it is a grant the
+	// human meant and did not get — unless `--` says the text means it.
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	words := fs.Args()
+	literal := len(words) < len(args) && args[len(args)-len(words)-1] == "--"
+	if !literal {
+		for _, w := range words {
+			if isFlag(fs, w) {
+				return fmt.Errorf("%s comes after the ruling's text began (%q), so it is not read as a flag: put every flag before the text, or put -- before a text that means to say %s", w, words[0], w)
+			}
+		}
+	}
 	// A day and a time unquoted are two words, and the flag takes only the
 	// first: "--until 2026-11-16 09:00" stood until the END of the 16th — 15
 	// hours past what was said, for a ruling that may grant merges — with
@@ -83,6 +96,11 @@ func rulingAdd(args []string, out io.Writer) error {
 	r := steward.Ruling{Text: strings.Join(words, " "), Repo: *repo, GivenAt: t, Until: end}
 	if *allow != "" {
 		r.Allow = strings.Split(*allow, ",")
+	}
+	if *prs != "" {
+		if r.PRs, r.AnyPR, err = steward.ParsePRs(*prs); err != nil {
+			return err
+		}
 	}
 	r, err = steward.AddRuling(steward.Key(*product), r)
 	if err != nil {
@@ -125,7 +143,7 @@ func rulingList(args []string, out io.Writer) error {
 func describe(r steward.Ruling) string {
 	var parts []string
 	if len(r.Allow) > 0 {
-		grant := "allows " + strings.Join(r.Allow, ", ")
+		grant := "allows " + strings.Join(r.Allow, ", ") + " of " + r.Reach()
 		if r.Repo != "" {
 			grant += " in " + r.Repo
 		}
@@ -192,9 +210,9 @@ func runMerge(args []string, out io.Writer) error {
 		cfg = &config.Config{}
 	}
 	product := steward.Key(cfg.ProductFor(repoName))
-	ruling, ok := steward.MergeRuling(product, repoName, time.Now())
+	ruling, ok := steward.MergeRuling(product, repoName, pr, time.Now())
 	if !ok {
-		return fmt.Errorf("no ruling lets the steward merge in %s (%s) — note it for the human, or ask them for one", repoName, product)
+		return fmt.Errorf("no ruling lets the steward merge #%d in %s (%s) — note it for the human, or ask them for one", pr, repoName, product)
 	}
 	dir := ""
 	for _, r := range discoverRepos(cfg) {
@@ -204,6 +222,9 @@ func runMerge(args []string, out io.Writer) error {
 	}
 	if dir == "" {
 		return fmt.Errorf("no repo %q under the configured roots", repoName)
+	}
+	if err := readyToMerge(dir, pr, *head); err != nil {
+		return fmt.Errorf("not merging: %w", err)
 	}
 	msg, err := ghMerge(dir, "pr", "merge", strconv.Itoa(pr), "--"+*method, "--match-head-commit", *head)
 	if err != nil {
@@ -215,8 +236,20 @@ func runMerge(args []string, out io.Writer) error {
 	return nil
 }
 
+// isFlag reports whether w spells one of fs's flags, in either dash form and
+// with or without its value attached.
+func isFlag(fs *flag.FlagSet, w string) bool {
+	if len(w) < 2 || w[0] != '-' {
+		return false
+	}
+	name, _, _ := strings.Cut(strings.TrimLeft(w, "-"), "=")
+	return name != "" && fs.Lookup(name) != nil
+}
+
 // reorder puts flags ahead of the positional arguments, so `merge app 12
-// --head …` parses the way it reads.
+// --head …` parses the way it reads. It is for merge, whose positionals are a
+// repo and a number; never for a verb that takes free text, where it would lift
+// a flag out of a sentence.
 func reorder(args []string) []string {
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {

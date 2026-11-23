@@ -1237,10 +1237,15 @@
   the dispatcher's **goal** — DONE WHEN, read back off the prompt into the
   record's `Goal`. **The same question asked again keeps its note**
   (`NotedAsk`); a reply does not carry. **Rulings** are written down, dated and
-  end (`ruling add|end|list`, 24h unless said); recording one is the one verb
-  under `ask` in the steward's settings, so the human confirms each and the
-  steward cannot widen its own hands; `merge <repo> <pr> --head <sha>` refuses
-  without a ruling allowing it there, is pinned to the checked head and logs
+  end (`ruling add|end|list`, 24h unless said), their flags before their text
+  (one after it is refused, not read, since "do not --allow merge yet" read as
+  a grant); a merge grant names its reach in the command the human confirms
+  (`--pr 12,14` or `--pr any`), because prose binds nothing;
+  `merge <repo> <pr> --head <sha>` refuses without a ruling allowing that pull
+  request there, then a draft, a moved head, and anything short of every check
+  passed in **one complete run** of each workflow — a run made green by
+  re-running only its failed jobs is caught by its carried-over jobs starting
+  before the attempt did — and is pinned to the checked head and logs
   `StewardMerged`. **Questions are saved, never waited on, and asked all at
   once on recap**: every question goes through `ask` (2–4 options for a
   choice, context for someone gone for hours); the steward keeps what does not
@@ -1251,8 +1256,17 @@
   `recap_keyword` (`recap`) gets every choice as menus and the rest in prose,
   and `answer` records each. Both settings are on the settings screen; the
   headline counts saved questions. The machine-wide steward an earlier build
-  ran is retired by the cockpit's poll, and the steward's settings deny
-  `gh pr merge` and `git push`, so the ruling-checked verb is its only merge.
+  ran is retired by the cockpit's poll, which says so. **What holds the
+  steward to its hands is a guard, not a sandbox**: permission rules match
+  spellings, so the steward's settings also install its own PreToolUse hook
+  (`steward guard`), which reads every command a tool would run — quotes and
+  escapes dropped, cut at the shell's separators — and asks the human about
+  `ruling add` by any path, refuses any naming of the rulings file or its own
+  settings, and refuses gh's merges (any flags, REST, GraphQL) and `git push`
+  (a hook's ask stops auto mode for the human even over an allow rule; both
+  measured on 2.1.326). It holds a steward to its brief; one that builds a
+  command at run time to get round it is the same user as the human and is not
+  stopped, and `merge` would accept a hand-written rulings.json.
   Verified live against a real steward on a scratch store. Full record:
   `docs/adr/0029-a-steward-is-a-conversation-per-product.md`.
 - **A finished dispatcher leaves the disk when asked, and takes only what it

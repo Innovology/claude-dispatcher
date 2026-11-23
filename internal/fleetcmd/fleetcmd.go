@@ -176,6 +176,17 @@ func runStatus(args []string, out io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// A product the config no longer names answered with nothing, for ever: its
+	// steward, left running after a rename, slept on a wait that could not wake
+	// and looked like a quiet product. Said out loud, its wait ends and it can
+	// tell the human (ADR 0029).
+	if *product != "" {
+		if cfg, err := loadConfig(); err == nil && cfg != nil {
+			if err := steward.CheckProduct(cfg, *product); err != nil {
+				return fmt.Errorf("%v · a steward for %q is stewarding a product the config no longer names: tell the human, who can name it again or end you", err, *product)
+			}
+		}
+	}
 	if *next {
 		return runNext(out, *product, *timeout, time.Now)
 	}

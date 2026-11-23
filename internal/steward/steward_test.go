@@ -119,6 +119,12 @@ func TestStartWritesTheBriefAndStartsTheSession(t *testing.T) {
 	}
 	var st struct {
 		Permissions struct{ Allow, Ask, Deny []string } `json:"permissions"`
+		Hooks       struct {
+			PreToolUse []struct {
+				Matcher string
+				Hooks   []struct{ Type, Command string }
+			}
+		} `json:"hooks"`
 	}
 	if err := json.Unmarshal(raw, &st); err != nil {
 		t.Fatal(err)
@@ -142,6 +148,12 @@ func TestStartWritesTheBriefAndStartsTheSession(t *testing.T) {
 	}
 	if !strings.Contains(allowed, "Bash("+exe+" merge:*)") || strings.Contains(allowed, "ruling add") {
 		t.Errorf("allow = %v", st.Permissions.Allow)
+	}
+	// The rules match spellings, so the guard reads every tool call beside
+	// them: no matcher, the binary that wrote the settings.
+	if h := st.Hooks.PreToolUse; len(h) != 1 || h[0].Matcher != "" || len(h[0].Hooks) != 1 ||
+		h[0].Hooks[0].Type != "command" || h[0].Hooks[0].Command != shellWord(exe)+" steward guard" {
+		t.Errorf("hooks = %+v", st.Hooks)
 	}
 	if got := StateOf(s); got != Live {
 		t.Errorf("state = %s", got)
@@ -387,10 +399,10 @@ func TestProductNamesThatSlugAlikeStayApart(t *testing.T) {
 			t.Errorf("%q and %q share %q", pair[0], pair[1], slug(pair[0]))
 		}
 	}
-	if _, err := AddRuling("Player App", Ruling{Text: "merge greens", Allow: []string{AllowMerge}}); err != nil {
+	if _, err := AddRuling("Player App", Ruling{Text: "merge greens", Allow: []string{AllowMerge}, AnyPR: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := MergeRuling("player-app", "app", time.Now()); ok {
+	if _, ok := MergeRuling("player-app", "app", 1, time.Now()); ok {
 		t.Fatal("one product's merge ruling granted another's")
 	}
 	// A ruling found by walking the folders is ended where it is, whatever
@@ -450,6 +462,22 @@ func TestEndPrefersTheProductToAnIDPrefix(t *testing.T) {
 	}
 	if s, _ := Find(other.ID); s.EndedAt != nil {
 		t.Fatal("another product's steward was ended for an id prefix")
+	}
+	// Found in review: with the product's own steward already ended, the name
+	// fell through to the id prefixes and ended the other product's.
+	errOut.Reset()
+	if code := Run([]string{"end", "a"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "a has no steward") {
+		t.Fatalf("end a again: code %d, %q", code, errOut.String())
+	}
+	if s, _ := Find(other.ID); s.EndedAt != nil {
+		t.Fatal("a product with no steward running ended another product's by its id prefix")
+	}
+	// A name that is no product still reaches an id by its start.
+	if code := Run([]string{"end", "a1b2"}, &out, &errOut); code != 0 {
+		t.Fatalf("end by id prefix: %q", errOut.String())
+	}
+	if s, _ := Find(other.ID); s.EndedAt == nil {
+		t.Fatal("an id prefix that names no product ended nothing")
 	}
 }
 

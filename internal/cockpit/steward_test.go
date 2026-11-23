@@ -45,7 +45,7 @@ func withStewards(t *testing.T, rows ...stewardRow) *[]string {
 		}
 		return []steward.Ruling{
 			{ID: "r1", Text: "one deploy at a time"},
-			{ID: "r2", Text: "merge greens", Allow: []string{steward.AllowMerge}, Repo: "alpha-api", Until: time.Date(2026, 11, 16, 9, 0, 0, 0, time.Local)},
+			{ID: "r2", Text: "merge greens", Allow: []string{steward.AllowMerge}, AnyPR: true, Repo: "alpha-api", Until: time.Date(2026, 11, 16, 9, 0, 0, 0, time.Local)},
 		}
 	}
 	stewardsNow = rows
@@ -113,13 +113,29 @@ func TestStewardPickerLists(t *testing.T) {
 		t.Errorf("opened on %q, the row is %q", it.product, mm.stewardPickProduct())
 	}
 	view := mm.viewStewardPick(100, 30)
-	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended", "2 rulings standing · may merge in alpha-api until Mon 09:00"} {
+	for _, want := range []string{"alpha", "beta", "live1", "old1", "new steward", "live", "ended", "2 rulings standing · may merge any pull request in alpha-api until Mon 09:00"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("picker lacks %q:\n%s", want, view)
 		}
 	}
 	if h := m.cqFooterHelp(); !strings.Contains(h, "t stewards") {
 		t.Errorf("footer = %q", h)
+	}
+}
+
+// An interrupted steward has nothing running to lose, so x ends it on the key.
+func TestStewardPickerEndsAnInterruptedOneOnTheKey(t *testing.T) {
+	installFleetFixture(t)
+	acts := withStewards(t, stewardRow{id: "int1", product: "alpha", state: steward.Interrupted})
+	m := newModel()
+	m.stewardPickOpen = true
+	mm, cmd := m.updateStewardPick("x")
+	if cmd == nil || mm.confirm != nil || mm.stewardPickOpen {
+		t.Fatalf("x on an interrupted steward: confirm %+v", mm.confirm)
+	}
+	cmd()
+	if strings.Join(*acts, ",") != "end int1" {
+		t.Fatalf("acts = %v", *acts)
 	}
 }
 
@@ -155,9 +171,18 @@ func TestStewardPickerActs(t *testing.T) {
 	}
 	cmd()
 
-	_, cmd = at(0).updateStewardPick("x")
-	if cmd == nil {
-		t.Fatal("x on a live steward must end it")
+	// Found in review: x ended a live steward on the key. It asks first now,
+	// and only y ends it.
+	mm, cmd = at(0).updateStewardPick("x")
+	if cmd != nil || mm.confirm == nil || mm.confirm.kind != "steward-end" || !strings.Contains(mm.confirm.label, "end alpha's live steward?") {
+		t.Fatalf("x on a live steward must ask first: %+v", mm.confirm)
+	}
+	if tm, _ := mm.handleKey("n"); tm.(model).confirm != nil || !tm.(model).stewardPickOpen || len(*acts) != 2 {
+		t.Fatalf("n must leave the steward running and the picker open: %v", *acts)
+	}
+	tm, cmd := mm.handleKey("y")
+	if mm = tm.(model); cmd == nil || mm.stewardPickOpen {
+		t.Fatal("y must end the live steward")
 	}
 	if msg := cmd().(actionMsg); !strings.Contains(msg.notice, "ended") {
 		t.Errorf("end notice %q", msg.notice)
@@ -336,6 +361,32 @@ func TestThePollReopensInterruptedStewardsOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+// Found in review: the poll retired the machine-wide steward the human had
+// switched on with no word about it. It says so now, and says when it could
+// not, beside whatever else the poll has to say.
+func TestThePollSaysItRetiredTheMachineWideSteward(t *testing.T) {
+	fakeGHOnPath(t, "SUCCESS")
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	prevRetire, prevReopen := stewardRetireLegacy, stewardReopenInterrupted
+	t.Cleanup(func() { stewardRetireLegacy, stewardReopenInterrupted = prevRetire, prevReopen })
+	retired, failed := true, error(nil)
+	stewardRetireLegacy = func() (bool, error) { return retired, failed }
+	stewardReopenInterrupted = func() ([]*steward.Steward, error) {
+		return []*steward.Steward{{ID: "s1", Product: "alpha"}}, nil
+	}
+	if msg := trackRefreshCmd(&config.Config{})().(trackedMsg); msg.notice != "the machine-wide steward is retired · stewards are per product now: t starts one" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+	on := &config.Config{StewardReopen: config.StewardReopenInterrupted}
+	if msg := trackRefreshCmd(on)().(trackedMsg); msg.notice != "the machine-wide steward is retired · stewards are per product now: t starts one · reopened alpha's steward (it was interrupted)" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+	retired, failed = false, errors.New("kill-session: no server")
+	if msg := trackRefreshCmd(&config.Config{})().(trackedMsg); msg.notice != "steward: the machine-wide steward could not be retired: kill-session: no server" {
+		t.Errorf("notice = %q", msg.notice)
+	}
+}
+
 // A steward the poll gave up on says so in the picker, since it is the one
 // interrupted steward that will not come back unless the human reopens it.
 func TestThePickerSaysWhenThePollGaveUp(t *testing.T) {
@@ -352,5 +403,26 @@ func TestThePickerSaysWhenThePollGaveUp(t *testing.T) {
 	}
 	if strings.Count(view, "did not stay up") != 1 {
 		t.Errorf("an interrupted steward the poll has not given up on says it did:\n%s", view)
+	}
+}
+
+// Found in review: a product renamed or removed in the config kept its steward
+// running against a name nothing answered for, and the picker said nothing.
+func TestThePickerSaysAStewardsProductIsGoneFromTheConfig(t *testing.T) {
+	installFleetFixture(t)
+	withStewards(t,
+		stewardRow{id: "live1", product: "alpha", state: steward.Live},
+		stewardRow{id: "gone1", product: "renamed", state: steward.Live},
+	)
+	m := newModel()
+	m.cfg = &config.Config{Products: map[string][]string{"alpha": nil, "beta": nil}}
+	m.stewardPickOpen = true
+	view := m.viewStewardPick(140, 30)
+	if strings.Count(view, "not in your config any more") != 1 {
+		t.Fatalf("picker:\n%s", view)
+	}
+	at := strings.Index(view, "renamed")
+	if at < 0 || !strings.Contains(view[at:], "not in your config any more") {
+		t.Fatalf("the line is not under the renamed product:\n%s", view)
 	}
 }

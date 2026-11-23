@@ -30,8 +30,8 @@ type shipFxState struct {
 // stored a closure, but a value-receiver model cannot, so we switch on kind.
 type confirmState struct {
 	label         string
-	kind          string // "kill" | "ship" | "tidy" | "act"
-	feature, repo string
+	kind          string                 // "kill" | "ship" | "tidy" | "act" | "steward-end"
+	feature, repo string                 // a steward-end's steward id rides in feature
 	features      []string               // kill targets (marked set, or the one selected)
 	tidy          []dispatchpkg.TidyItem // the plan a tidy confirms
 	row           fleetRow               // the triage row an "act" was asked on
@@ -782,6 +782,9 @@ func (m model) doConfirm() (model, tea.Cmd) {
 		// deletion already running would be the screen lying.
 		m.notice = "tidying…"
 		return m, tidyRunCmd(c.tidy)
+	case "steward-end":
+		m.stewardPickOpen = false
+		return m, stewardEndCmd(c.feature)
 	case "act":
 		// A triage act that asked first runs exactly as it would have without
 		// asking: the flash, then the row leaves with ctrl+z able to bring it

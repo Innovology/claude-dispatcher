@@ -127,14 +127,42 @@ wait drops it. A reply does not carry: one typed and asked again settled
 nothing.
 
 **Rulings are written down, dated, and end.** `ruling add --product P
-[--allow merge] [--repo R] --until <when> <text>` records one; 24 hours
-unless said. It is the one verb the steward's settings put under `ask`, so the
-human confirms every ruling it records and the steward cannot widen its own
-hands. Most rulings are guidance. One that allows merging is the only way the
-steward merges: `merge <repo> <pr> --head <full sha>` refuses without a ruling
-that allows it there, merges in the repo's own checkout pinned to the head
-whose checks the steward read, and logs a `StewardMerged` event naming the
-ruling. Deploys, messages and deletions stay the human's whatever a ruling
+[--allow merge --pr <12,14|any>] [--repo R] --until <when> <text>` records
+one; 24 hours unless said. Its flags come before its text, and one written
+after the text began is refused rather than read: read, "do not --allow merge
+yet" was a grant; folded into the words, a grant the human meant would be
+lost. Recording one asks the human, every time and in any spelling (below).
+Most rulings are guidance. One that allows merging names **which pull
+requests** in the command the human confirms — numbers, or `any` — because
+its prose binds nothing: "merge ONLY #12" with no scope let #99 through.
+`merge <repo> <pr> --head <full sha>` refuses without a ruling allowing that
+pull request there; then refuses a draft, a head other than the one read, and
+anything short of **every check passed in one complete run** of each
+workflow. The rollup keeps each check's latest result, so re-running only a
+workflow's failed jobs turns it green without any one run having passed;
+GitHub copies the jobs it did not re-run into the new attempt under its
+number, and they give themselves away by starting before the attempt did
+(measured on this repo's run 35229216768). A read it cannot make refuses too.
+It merges in the repo's own checkout pinned to the head whose checks the
+steward read, and logs a `StewardMerged` event naming the ruling.
+
+**What holds the steward to that is a guard, not a sandbox.** Permission
+rules match spellings: `ask: Bash(<exe> ruling add:*)` asked about that
+command only, and in auto mode a command matching no rule goes to the
+classifier, not the human — the same verb from PATH or behind `env`, a shell
+writing `rulings.json`, `gh -R o/r pr merge`, `gh api …/pulls/N/merge`, `git
+-C <repo> push` all walked past the rules meant for them. So the steward's
+settings also install its own PreToolUse hook, `steward guard`, on every tool.
+It reads the command a tool would run with quotes and escapes dropped, cut at
+the shell's separators: `ruling add` by any path **asks**; naming the rulings
+file or the steward's own settings, gh merging by any route, and `git push` are
+**refused**. Measured on claude 2.1.326: a hook's ask stops an auto-mode
+session for the human even where an allow rule matches, and a real session
+asked to run `gh -R octo/none pr merge 1` was refused by it. What it is not is
+a boundary against a steward that sets out to get round it: the steward runs
+as the human's user, a command built at run time is not one any rule can read,
+and `merge` accepts a hand-written `rulings.json`. It keeps a steward to its
+brief, which is the failure this design has seen. Deploys, messages and deletions stay the human's whatever a ruling
 says. The picker shows each product's standing rulings and when a merge one
 ends.
 
@@ -245,3 +273,22 @@ An independent review of the branch found these, each fixed on its own:
   the config does not name is refused;
 - `steward end <name>` took a hex-looking product name as an id prefix;
 - the steward's settings did not deny `gh pr merge` or `git push`.
+
+Alex's review found these, each fixed on its own:
+
+- a ruling's flags were lifted out of its text wherever they sat, so "do not
+  --allow merge yet" granted merge;
+- a merge grant's reach was only its prose — `--pr` names it now;
+- the gate on recording rulings and on merging round the verb matched
+  spellings — the guard reads commands, and the docs say what it is not;
+- `merge` checked nothing about the pull request — it holds it to green, in
+  one complete run;
+- `AddRuling` wrote over a `rulings.json` it could not parse;
+- `steward end <product>` with no steward running fell through to another
+  product's id;
+- `x` ended a live steward in the picker without asking;
+- the poll retired the machine-wide steward without a word;
+- a steward whose product left the config slept on a wait that could not
+  wake — `status --product` refuses the name now, and the picker says so;
+- `TestRulingAddReadsWhatWasMeant` fixed its ruling's end on a date that has
+  since passed.

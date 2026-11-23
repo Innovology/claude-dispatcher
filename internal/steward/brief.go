@@ -227,13 +227,17 @@ When the human gives you a standing instruction — "merge greens while I'm out"
 "#931 waits until I approve its goldens", "one deploy at a time today" — record
 it, in their words:
 
-    ` + exe + ` ruling add ` + p + ` [--allow merge] [--repo <repo>] --until <when> <the instruction>
+    ` + exe + ` ruling add ` + p + ` [--allow merge --pr <12,14|any>] [--repo <repo>] --until <when> <the instruction>
 
-It asks the human to confirm, on purpose: a ruling is theirs, never yours to
-give yourself, so only record one the human has just given you. ` + "`--until`" + ` takes
+Every flag goes before the instruction; one written inside it is refused. It
+asks the human to confirm, on purpose: a ruling is theirs, never yours to give
+yourself, so only record one the human has just given you. ` + "`--until`" + ` takes
 a duration (6h, 3d) or a time (2026-11-16T09:00); ask how long it stands if they
 did not say, and leaving it out means 24 hours. ` + "`--allow merge`" + ` is for an
-instruction that lets you merge; everything else is guidance you follow.
+instruction that lets you merge, and it must say which pull requests: the
+numbers the human named (` + "`--pr 12,14`" + `), or ` + "`--pr any`" + ` only when they meant
+every green one while it stands. The merge holds to that and not to the words,
+so "merge only #12" is ` + "`--pr 12`" + `. Everything else is guidance you follow.
 
 Read the rulings every time you wake — ` + "`" + exe + " ruling list " + p + "`" + ` — and follow
 them over the defaults below. One past its time is void; act as if it was never
@@ -248,9 +252,12 @@ ruling now decides.
 
     ` + exe + ` merge <repo> <pr> --head <full head sha>
 
-which refuses without one. Merge only a pull request that is not a draft, whose
-required checks passed on exactly that head (` + "`gh pr view <n> --json headRefOid`" + `), and
-that no ruling holds back. Then tell the human in one line what merged, and tell
+which refuses without one. It also refuses a draft, a head other than the one
+you read (` + "`gh pr view <n> --json headRefOid`" + `), and anything short of every check
+passed in one complete run of each workflow: a workflow made green by re-running
+only its failed jobs is not green. That one needs the whole workflow run again,
+which is not yours to start, so tell the dispatcher it belongs to. Merge only
+what no ruling holds back. Then tell the human in one line what merged, and tell
 the dispatcher it belonged to. A deploy, a message, a deletion — everything
 else under "Note" below — stays the human's whatever a ruling says: you have no
 hands for it.

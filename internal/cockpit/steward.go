@@ -80,6 +80,29 @@ func collectStewards() []stewardRow {
 // stewardReopenNotice is the footer's word on what the poll reopened, and on
 // any reopen that failed: a steward coming back by itself is news the human
 // did not ask for at that moment, and a failed one is the reason it did not.
+// legacyRetiredNotice is what the poll says when it retires the machine-wide
+// steward an earlier build ran, or could not.
+func legacyRetiredNotice(retired bool, err error) string {
+	switch {
+	case err != nil:
+		return "steward: the machine-wide steward could not be retired: " + strings.ReplaceAll(err.Error(), "\n", "; ")
+	case retired:
+		return "the machine-wide steward is retired · stewards are per product now: t starts one"
+	}
+	return ""
+}
+
+// joinNotices is the non-empty notices as one line.
+func joinNotices(ns []string) string {
+	var out []string
+	for _, n := range ns {
+		if n != "" {
+			out = append(out, n)
+		}
+	}
+	return strings.Join(out, " · ")
+}
+
 func stewardReopenNotice(reopened []*steward.Steward, err error) string {
 	var names []string
 	for _, s := range reopened {
@@ -268,6 +291,14 @@ func (m model) updateStewardPick(k string) (model, tea.Cmd) {
 			m.notice = "nothing to end here · x ends a live or interrupted steward"
 			return m, nil
 		}
+		if it.st.state == steward.Live {
+			// A live steward is a conversation the human may be in the middle of,
+			// and x is one key from j and k: ask first, as kill does. One that is
+			// interrupted has nothing running to lose, so it ends on the key.
+			m.confirm = &confirmState{kind: "steward-end", feature: it.st.id,
+				label: "end " + it.product + "'s live steward? it stays reopenable · y/n"}
+			return m, nil
+		}
 		m.stewardPickOpen = false
 		return m, stewardEndCmd(it.st.id)
 	}
@@ -352,6 +383,12 @@ func (m model) viewStewardPick(w, h int) string {
 				out = append(out, "")
 			}
 			out = append(out, fg(cMid, it.product))
+			// A product renamed or removed in the config keeps its stewards,
+			// which can see none of its work any more: said here, where the
+			// key that ends one is.
+			if m.cfg != nil && steward.CheckProduct(m.cfg, it.product) != nil {
+				out = append(out, fg(cAmber, "  not in your config any more · its steward sees none of its work: x ends it"))
+			}
 			if rs := m.stewardPickRulings[it.product]; len(rs) > 0 {
 				out = append(out, fg(cDim, "  "+rulingsLine(rs)))
 			}
@@ -401,7 +438,7 @@ func rulingsLine(rs []steward.Ruling) string {
 			if r.Repo != "" {
 				where = " in " + r.Repo
 			}
-			return line + " · may merge" + where + " until " + r.Until.Local().Format("Mon 15:04")
+			return line + " · may merge " + r.Reach() + where + " until " + r.Until.Local().Format("Mon 15:04")
 		}
 	}
 	return line

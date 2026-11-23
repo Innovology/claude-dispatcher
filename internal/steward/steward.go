@@ -667,6 +667,14 @@ func Settings(exe string) map[string]any {
 			// no rule of claude's reaches.
 			"deny": []string{"Edit", "Write", "NotebookEdit", "Bash(gh pr merge:*)", "Bash(git push:*)"},
 		},
+		// The rules above match spellings; the guard reads what a command does
+		// (guard.go), for every tool that runs one — no matcher, so a tool added
+		// later is read too.
+		"hooks": map[string]any{
+			"PreToolUse": []any{map[string]any{
+				"hooks": []any{map[string]any{"type": "command", "command": shellWord(exe) + " steward guard"}},
+			}},
+		},
 	}
 }
 
