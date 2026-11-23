@@ -129,3 +129,34 @@ func TestDispatchRefusesAModeThatIsNotOne(t *testing.T) {
 		t.Errorf("launched %v; want only the plan one", *launched)
 	}
 }
+
+// A sender whose account config no longer names sends on the directory its
+// record says it runs under, and says so, rather than quietly moving the work
+// onto the human's own login; with no directory either, it sends nothing.
+func TestDispatchKeepsTheSendersAccountAndSaysWhenConfigLostIt(t *testing.T) {
+	portfolio(t)
+	withStore(t,
+		&state.Dispatch{ID: "c1", Feature: "talk", Product: "pp", Account: "gone", ConfigDir: "/cfg/gone", Status: state.StatusWorking},
+		&state.Dispatch{ID: "c2", Feature: "lost", Product: "pp", Account: "gone", Status: state.StatusWorking})
+	var acct account.Account
+	prev := launch
+	launch = func(r repos.Repo, feature, _ string, _ dispatch.Mode, _ dispatch.Model, _ dispatch.Root, _ bool, a account.Account) (*state.Dispatch, error) {
+		acct = a
+		d := &state.Dispatch{ID: "w1", Feature: feature, RepoName: r.Name}
+		return d, state.Save(d)
+	}
+	t.Cleanup(func() { launch = prev })
+
+	t.Setenv("CLAUDE_DISPATCHER_ID", "c1")
+	var out bytes.Buffer
+	if err := runDispatch([]string{"--repo", "api", "--title", "x", "y"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if acct.Name != "gone" || acct.Dir != "/cfg/gone" || !strings.Contains(out.String(), "not in config.toml") {
+		t.Errorf("sent on %+v, said:\n%s", acct, out.String())
+	}
+	t.Setenv("CLAUDE_DISPATCHER_ID", "c2")
+	if err := runDispatch([]string{"--repo", "api", "--title", "z", "y"}, &out); err == nil || !strings.Contains(err.Error(), "no longer has") {
+		t.Errorf("a sender with no account to send on: %v", err)
+	}
+}

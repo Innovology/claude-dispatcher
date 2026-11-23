@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"claude-dispatcher/internal/account"
+	"claude-dispatcher/internal/config"
 	"claude-dispatcher/internal/dispatch"
 	"claude-dispatcher/internal/repos"
 	"claude-dispatcher/internal/state"
@@ -73,11 +74,9 @@ func runDispatch(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	acct := account.Account{Name: account.Default}
-	if p != nil && p.Account != "" && cfg != nil {
-		if a, ok := account.Find(cfg, p.Account); ok {
-			acct = a
-		}
+	acct, err := senderAccount(p, cfg, out)
+	if err != nil {
+		return err
 	}
 	// What this process carries from the session it runs in, a pane started
 	// from it would carry too (ADR 0014): it goes before the launch.
@@ -93,4 +92,26 @@ func runDispatch(args []string, out io.Writer) error {
 	}
 	_, _ = fmt.Fprintf(out, "dispatched %s → %s on %s · id %s · session %s\n", quote(d.Feature), d.RepoName, d.Branch, d.ID, d.TmuxSession)
 	return nil
+}
+
+// senderAccount is the subscription work sent from p runs on: p's own, as
+// config names it now, else the directory p's record says it runs under —
+// said, because config no longer knowing the name is something the human
+// should hear about, and falling back to their own login without a word moved
+// the work onto a subscription nobody chose. A plain shell's (no p) is the
+// human's own login.
+func senderAccount(p *state.Dispatch, cfg *config.Config, out io.Writer) (account.Account, error) {
+	if p == nil || p.Account == "" || p.Account == account.Default {
+		return account.Account{Name: account.Default}, nil
+	}
+	if a, ok := account.Find(cfg, p.Account); ok {
+		return a, nil
+	}
+	if p.ConfigDir == "" {
+		return account.Account{}, fmt.Errorf("%s runs on the account %q, which config.toml no longer has, and its record names no directory — add the account back, or dispatch from a plain shell",
+			quote(p.Feature), p.Account)
+	}
+	_, _ = fmt.Fprintf(out, "the account %q is not in config.toml any more; sending this on the directory %s runs under, %s\n",
+		p.Account, quote(p.Feature), p.ConfigDir)
+	return account.Account{Name: p.Account, Dir: p.ConfigDir}, nil
 }
