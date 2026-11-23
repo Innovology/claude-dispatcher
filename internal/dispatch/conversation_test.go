@@ -3,11 +3,14 @@
 package dispatch
 
 import (
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"claude-dispatcher/internal/state"
+	"claude-dispatcher/internal/supervisor"
 )
 
 // claudeIn says that pid, a claude running conversation sid, is in session on
@@ -212,5 +215,46 @@ func TestOwnSessionNames(t *testing.T) {
 	}
 	if !ownSessionName(&state.Dispatch{ID: "abc123"}, "disp-abc123-2") {
 		t.Error("a record with no slug is named by its id")
+	}
+}
+
+// One resume of a record at a time. While the first is still starting its
+// session — inside `nix develop`, where the conversation is not running
+// anywhere yet for the scan to find — a second is refused, not queued behind
+// it to start a second claude a minute later.
+func TestASecondResumeIsRefusedWhileTheFirstStarts(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	sup := &stubSupervisor{alive: map[string]bool{}}
+	stubSessions(t, sup)
+	d := finished(t, initRepo(t))
+
+	inside, release := make(chan struct{}), make(chan struct{})
+	var starts int
+	var mu sync.Mutex
+	newSession = func(sess supervisor.Session, dir, cmd, env string) error {
+		mu.Lock()
+		starts++
+		mu.Unlock()
+		close(inside)
+		<-release
+		return nil
+	}
+	first := make(chan error, 1)
+	go func() {
+		_, _, err := Resume(d, "")
+		first <- err
+	}()
+	<-inside
+
+	again := *d
+	if _, _, err := Resume(&again, ""); !errors.Is(err, ErrResuming) {
+		t.Errorf("second Resume = %v, want it refused while the first starts", err)
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatalf("first Resume: %v", err)
+	}
+	if starts != 1 {
+		t.Errorf("%d sessions started, want 1", starts)
 	}
 }

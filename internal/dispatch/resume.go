@@ -14,6 +14,7 @@ package dispatch
 // told so rather than handed a fresh session dressed up as the old one.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,6 +62,26 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	if d == nil {
 		return "", "", fmt.Errorf("no dispatch record")
 	}
+	// One resume of a record at a time, across every process that can resume
+	// one (the cockpit, `swap`, a second cockpit). The guard below asks the
+	// machine whether the conversation is running, and for as long as the first
+	// resume is inside `nix develop` it is not running anywhere yet — so a second
+	// resume in that window would pass the guard and start a second claude. It
+	// is refused rather than queued: waiting its turn would only start that
+	// claude a minute later.
+	release, ok := state.TryLock("resume-" + d.ID)
+	if !ok {
+		return "", "", fmt.Errorf("%w: %q opens as soon as its session is up", ErrResuming, d.Feature)
+	}
+	defer release()
+	return resume(d, prompt)
+}
+
+// ErrResuming is a resume refused because another is still starting the same
+// record's session.
+var ErrResuming = errors.New("already being resumed")
+
+func resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	sid := SessionIDOf(d)
 	// No conversation is a launch that never got as far as claude — the row ADR
 	// 0009 keeps, "did not start". There is nothing to resume, and ⏎ used to
