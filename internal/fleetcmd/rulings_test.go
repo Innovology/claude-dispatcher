@@ -125,9 +125,8 @@ func TestMergeSaysWhyGhRefused(t *testing.T) {
 	}
 }
 
-// Found in review, both measured: an unquoted "--until 2026-11-16 09:00" stood
-// until the end of the 16th with "09:00" leading its text, and flags after the
-// text were swallowed into it — a merge ruling recorded as guidance for 24h.
+// Found in review, measured: an unquoted "--until 2026-11-16 09:00" stood
+// until the end of the 16th with "09:00" leading its text.
 func TestRulingAddReadsWhatWasMeant(t *testing.T) {
 	withStore(t)
 	// A day that is still ahead whenever this runs: a fixed date stops being one,
@@ -141,12 +140,38 @@ func TestRulingAddReadsWhatWasMeant(t *testing.T) {
 	if len(rs) != 1 || rs[0].Text != "merge greens" || !rs[0].Until.Equal(time.Date(day.Year(), day.Month(), day.Day(), 9, 0, 0, 0, time.Local)) {
 		t.Fatalf("ruling = %+v", rs)
 	}
-	if code := Run("ruling", []string{"add", "--product", "tools", "merge", "greens", "--allow", "merge", "--until", "2h"}, &out, &errOut); code != 0 {
-		t.Fatalf("add: %s", errOut.String())
+}
+
+// Found in review: flags were lifted out of a ruling's text wherever they sat,
+// so "do not --allow merge yet" recorded a ruling that allows merge, with "do
+// not yet" for its text. A flag after the text began is refused — neither read
+// as a grant nor swallowed as words — unless `--` says the text means it.
+func TestARulingsFlagsEndWhereItsTextBegins(t *testing.T) {
+	withStore(t)
+	var out, errOut bytes.Buffer
+	for _, args := range [][]string{
+		{"add", "--product", "tools", "--until", "1h", "do", "not", "--allow", "merge", "yet"},
+		{"add", "--product", "tools", "merge", "greens", "--allow", "merge", "--until", "2h"},
+		{"add", "--product", "tools", "merge", "greens", "-allow=merge"},
+	} {
+		errOut.Reset()
+		if code := Run("ruling", args, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "put every flag before the text") {
+			t.Errorf("%v: code %d, %q", args, code, errOut.String())
+		}
 	}
-	rs = steward.Rulings("tools")
-	if len(rs) != 1 || rs[0].Text != "merge greens" || len(rs[0].Allow) != 1 || rs[0].Until.Sub(rs[0].GivenAt) != 2*time.Hour {
-		t.Fatalf("flags after the text were not read as flags: %+v", rs)
+	if rs := steward.Rulings("tools"); len(rs) != 0 {
+		t.Fatalf("a refused ruling was recorded: %+v", rs)
+	}
+	if code := Run("ruling", []string{"add", "--product", "tools", "--", "do", "not", "--allow", "merge", "yet"}, &out, &errOut); code != 0 {
+		t.Fatalf("add after --: %s", errOut.String())
+	}
+	rs := steward.Rulings("tools")
+	if len(rs) != 1 || rs[0].Text != "do not --allow merge yet" || len(rs[0].Allow) != 0 {
+		t.Fatalf("after --, the words are text and grant nothing: %+v", rs)
+	}
+	// A word that only looks like a flag is text.
+	if code := Run("ruling", []string{"add", "--product", "tools", "hold", "--force-pushes", "and", "-1", "days"}, &out, &errOut); code != 0 {
+		t.Fatalf("add: %s", errOut.String())
 	}
 }
 
