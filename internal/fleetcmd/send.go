@@ -74,6 +74,9 @@ func runDispatch(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if n := sentOut(parent); n >= MaxSentOut {
+		return fmt.Errorf("%s already has %d dispatchers out, the most one may have at once — wait for one to finish, or ask the human", quote(p.Feature), n)
+	}
 	acct, err := senderAccount(p, cfg, out)
 	if err != nil {
 		return err
@@ -114,4 +117,23 @@ func senderAccount(p *state.Dispatch, cfg *config.Config, out io.Writer) (accoun
 	_, _ = fmt.Fprintf(out, "the account %q is not in config.toml any more; sending this on the directory %s runs under, %s\n",
 		p.Account, quote(p.Feature), p.ConfigDir)
 	return account.Account{Name: p.Account, Dir: p.ConfigDir}, nil
+}
+
+// MaxSentOut is how many dispatchers one dispatcher may have out at once. Each
+// is a claude session, a worktree and a share of one subscription's window,
+// started with nobody asked: a conversation sends one per independent piece
+// and rarely needs more, and a session that keeps sending — a loop, a
+// misread brief — would otherwise fill the machine and spend the window
+// before anyone looked at the table.
+const MaxSentOut = 8
+
+// sentOut is how many of the dispatchers parent sent are still going.
+func sentOut(parent string) int {
+	n := 0
+	for _, d := range state.LoadAll() {
+		if parent != "" && d.DispatchedBy == parent && !d.Finished() {
+			n++
+		}
+	}
+	return n
 }

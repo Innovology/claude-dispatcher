@@ -4,9 +4,11 @@ package fleetcmd
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/dispatch"
@@ -158,5 +160,33 @@ func TestDispatchKeepsTheSendersAccountAndSaysWhenConfigLostIt(t *testing.T) {
 	t.Setenv("CLAUDE_DISPATCHER_ID", "c2")
 	if err := runDispatch([]string{"--repo", "api", "--title", "z", "y"}, &out); err == nil || !strings.Contains(err.Error(), "no longer has") {
 		t.Errorf("a sender with no account to send on: %v", err)
+	}
+}
+
+// A dispatcher has at most MaxSentOut dispatchers out at once; one that
+// finished frees its place, and a plain shell is not counted against anyone.
+func TestDispatchBoundsWhatOneDispatcherHasOut(t *testing.T) {
+	portfolio(t)
+	recs := []*state.Dispatch{{ID: "c1", Feature: "talk", Product: "pp", Status: state.StatusWorking}}
+	for i := 0; i < MaxSentOut; i++ {
+		recs = append(recs, &state.Dispatch{ID: fmt.Sprintf("s%d", i), Feature: fmt.Sprintf("sent %d", i),
+			DispatchedBy: "c1", Status: state.StatusWorking})
+	}
+	withStore(t, recs...)
+	launched := stubLaunch(t)
+	t.Setenv("CLAUDE_DISPATCHER_ID", "c1")
+	var out bytes.Buffer
+	if err := runDispatch([]string{"--repo", "api", "--title", "one more", "y"}, &out); err == nil || !strings.Contains(err.Error(), "already has 8") {
+		t.Errorf("past the bound: %v", err)
+	}
+	recs[1].Stop(state.StatusExited, "done", time.Now())
+	if err := state.Save(recs[1]); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDispatch([]string{"--repo", "api", "--title", "one more", "y"}, &out); err != nil {
+		t.Errorf("with a place freed: %v", err)
+	}
+	if len(*launched) != 1 {
+		t.Errorf("launched %v", *launched)
 	}
 }
