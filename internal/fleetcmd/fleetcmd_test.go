@@ -250,6 +250,49 @@ func TestReplyMarksTheWaitAnswered(t *testing.T) {
 	}
 }
 
+// A branchless dispatcher is a conversation the human is having, so every stop
+// it makes is their turn to talk. --next must not wake the steward for one — a
+// "steward: yes, carry on" typed into somebody's conversation is the steward
+// speaking for them — and the listing says it cut no branch and what it was
+// given, so a steward reading the whole fleet knows what the row is.
+func TestNextLeavesAConversationToTheHuman(t *testing.T) {
+	now := time.Now()
+	withStore(t,
+		&state.Dispatch{ID: "c", Feature: "sitrep", Product: "pp", Branchless: true, AddDirs: []string{"/src/a"},
+			Status: state.StatusNeedsInput, WaitingSince: &now, Said: "Want me to dig into the sync tests?"},
+		&state.Dispatch{ID: "a", Feature: "asks", Status: state.StatusNeedsInput, WaitingSince: &now, Said: "Want me to?"},
+	)
+	var out bytes.Buffer
+	if err := runNext(&out, time.Hour, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	var n Next
+	if err := json.Unmarshal(out.Bytes(), &n); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Waiting) != 1 || n.Waiting[0].ID != "a" {
+		t.Fatalf("waiting = %+v; want only the dispatcher, never the conversation", n.Waiting)
+	}
+
+	all := Fleet(state.LoadAll(), now)
+	var conv *Entry
+	for i := range all {
+		if all[i].ID == "c" {
+			conv = &all[i]
+		}
+	}
+	if conv == nil || !conv.Branchless || len(conv.Dirs) != 1 {
+		t.Fatalf("the listing does not say the row is branchless: %+v", conv)
+	}
+	var text bytes.Buffer
+	if err := runStatus(nil, &text); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text.String(), "pp (all repos)") {
+		t.Errorf("a whole-product row has a blank repo column:\n%s", text.String())
+	}
+}
+
 // swap names the account from the config and the dispatcher by id — a
 // finished one included, since running out is often why it finished.
 func TestSwap(t *testing.T) {
@@ -280,5 +323,31 @@ func TestSwap(t *testing.T) {
 	}
 	if err := runSwap([]string{"d1", "nobody"}, &out); err == nil || !strings.Contains(err.Error(), `no account "nobody"`) {
 		t.Errorf("unknown account: %v", err)
+	}
+}
+
+// A conversation that has taken a branch is branch work like any other: its
+// stops wake the steward, and the listing says where its checkout is, since
+// its worktree field is still the conversation's own folder.
+func TestNextWakesForAConversationThatTookABranch(t *testing.T) {
+	now := time.Now()
+	withStore(t,
+		&state.Dispatch{ID: "c", Feature: "sitrep", Product: "pp", Branchless: true, RepoName: "app",
+			Branch: "feature/fix", Checkout: "/wt/app/fix", WorktreePath: "/state/branchless/sitrep-c",
+			Status: state.StatusNeedsInput, WaitingSince: &now, Said: "Want me to open the PR?"},
+	)
+	var out bytes.Buffer
+	if err := runNext(&out, time.Hour, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	var n Next
+	if err := json.Unmarshal(out.Bytes(), &n); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Waiting) != 1 || n.Waiting[0].ID != "c" || n.Waiting[0].Checkout != "/wt/app/fix" {
+		t.Fatalf("waiting = %+v; want the conversation that took a branch, with its checkout", n.Waiting)
+	}
+	if !strings.Contains(out.String(), `"checkout": "/wt/app/fix"`) {
+		t.Errorf("--json does not carry the checkout:\n%s", out.String())
 	}
 }

@@ -89,14 +89,17 @@ type ownerOf struct {
 func worktreeOwners(ds []*state.Dispatch) []*ownerOf {
 	var out []*ownerOf
 	for _, d := range ds {
-		// OwnsWorktree, not WorktreePath: an adopted dispatcher names the
+		// RemovableCheckout, not WorktreePath: an adopted dispatcher names the
 		// human's own checkout, which this cockpit did not cut and will not
-		// reclaim. Reclaiming disk must never be how somebody loses a working
-		// copy they had open.
-		if !d.OwnsWorktree() {
+		// reclaim, and a branchless one names its own folder, which is not a
+		// checkout at all — the worktree it cut when its conversation turned
+		// into work is the one there is to reclaim. Reclaiming disk must never
+		// be how somebody loses a working copy they had open.
+		path := d.RemovableCheckout()
+		if path == "" {
 			continue
 		}
-		info, err := os.Stat(d.WorktreePath)
+		info, err := os.Stat(path)
 		if err != nil || !info.IsDir() {
 			continue // already gone, which is tidy
 		}
@@ -108,7 +111,7 @@ func worktreeOwners(ds []*state.Dispatch) []*ownerOf {
 			}
 		}
 		if into == nil {
-			into = &ownerOf{path: d.WorktreePath, info: info}
+			into = &ownerOf{path: path, info: info}
 			out = append(out, into)
 		}
 		into.recs = append(into.recs, d)

@@ -1,6 +1,7 @@
 // Package dispatch launches a dispatcher: a feature branch materialised in a
 // dedicated git worktree, plus an interactive claude session inside a
-// dedicated tmux session.
+// dedicated tmux session — or, for a dispatch that cuts no branch, a session
+// over a product's own checkouts, in a folder of its own (branchless.go).
 package dispatch
 
 import (
@@ -111,27 +112,17 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 		}
 	}()
 
-	slug := Slugify(feature)
-	if slug == "" {
-		return nil, fmt.Errorf("feature name %q produces an empty slug", feature)
-	}
-	if n := len(prompt); n > MaxPromptBytes {
-		// Refused up front and by name, because the alternative is a session
-		// that starts and never gets its prompt: the shell would fail the exec
-		// with E2BIG, no hook would ever fire for it, and the record would sit
-		// at launching until a sweep retired it hours later.
-		return nil, fmt.Errorf("the prompt is %d bytes and the limit is %d — put the detail in a file in the repo and point the prompt at it",
-			n, MaxPromptBytes)
-	}
-	if problems := account.Problems(acct, probeAccount(acct)); len(problems) > 0 {
-		return nil, fmt.Errorf("the %s account cannot run a dispatch: %s", acct.Name, strings.Join(problems, "; "))
-	}
-	if live := liveDispatch(slug); live != nil {
-		return nil, fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
-			live.Feature, live.RepoName, live.TmuxSession)
+	slug, err := preflight(feature, prompt, acct)
+	if err != nil {
+		return nil, err
 	}
 	branch := branchFor(r, slug)
 	worktree := worktreePath(r, slug)
+	// A conversation that took this work's branch is live in this worktree
+	// under a slug of its own, which preflight cannot see.
+	if live := liveIn(r.Name, branch, worktree, ""); live != nil {
+		return nil, heldErr(live, branch)
+	}
 	root = root.Normalize()
 	cutFrom, err := ensureWorktreeFrom(r.Path, worktree, branch, root, r.RootBranch)
 	if err != nil {
@@ -151,7 +142,7 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	model = model.Normalize()
 	// The working contract for the mode, then FAN OUT's sentence: how far to
 	// take it, then how widely. See contract.go.
-	prompt = withFanOut(withContract(prompt, mode), fanOut)
+	prompt = withFanOut(withContract(prompt, mode, BranchNew), fanOut)
 	// Trailing newlines are dropped here rather than by the shell, so the two
 	// platforms send the same bytes and the record says exactly what the
 	// session was given: `$(cat …)` strips them and PowerShell's ReadAllText
@@ -186,24 +177,57 @@ func Launch(r repos.Repo, feature, prompt string, mode Mode, model Model, root R
 	if err := state.Save(d); err != nil {
 		return nil, err
 	}
+	return d, start(d, prompt, worktree, mode, model)
+}
 
-	// The prompt goes to disk and the session reads it there. It is written
-	// before the session starts and never removed: it is the transport, and it
-	// is also the only copy the session itself can be pointed back at.
+// preflight is what every launch refuses before anything is created, and the
+// slug the feature's name produces: an empty slug, a prompt past the ceiling,
+// an account that would leave the session sitting there, a name already live.
+func preflight(feature, prompt string, acct account.Account) (string, error) {
+	slug := Slugify(feature)
+	if slug == "" {
+		return "", fmt.Errorf("feature name %q produces an empty slug", feature)
+	}
+	if n := len(prompt); n > MaxPromptBytes {
+		// Refused up front and by name, because the alternative is a session
+		// that starts and never gets its prompt: the shell would fail the exec
+		// with E2BIG, no hook would ever fire for it, and the record would sit
+		// at launching until a sweep retired it hours later.
+		return "", fmt.Errorf("the prompt is %d bytes and the limit is %d — put the detail in a file in the repo and point the prompt at it",
+			n, MaxPromptBytes)
+	}
+	if problems := account.Problems(acct, probeAccount(acct)); len(problems) > 0 {
+		return "", fmt.Errorf("the %s account cannot run a dispatch: %s", acct.Name, strings.Join(problems, "; "))
+	}
+	if live := liveDispatch(slug); live != nil {
+		where := live.RepoName
+		if where == "" {
+			where = live.Product
+		}
+		return "", fmt.Errorf("%q is already live in %s (session %s) — kill it, or dispatch under a different feature name",
+			live.Feature, where, live.TmuxSession)
+	}
+	return slug, nil
+}
+
+// start writes the prompt and starts the session for a record already saved,
+// in dir. The prompt goes to disk and the session reads it there: it is the
+// transport, and it is also the only copy the session itself can be pointed
+// back at. A failure is recorded on the record (failLaunch), never lost.
+func start(d *state.Dispatch, prompt, dir string, mode Mode, model Model) error {
 	promptPath, err := state.WritePrompt(d.ID, prompt)
 	if err != nil {
-		return d, failLaunch(d, fmt.Errorf("could not write the prompt file: %w", err))
+		return failLaunch(d, fmt.Errorf("could not write the prompt file: %w", err))
 	}
-
 	// launchCommand is OS-specific (/bin/sh on Unix, cmd.exe on Windows); it keeps
 	// the session's window open after claude exits so it stays available for
 	// inspection instead of vanishing.
-	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir)
-	if err := newSession(SessionOf(d), worktree, cmd, d.EnvCommand); err != nil {
-		return d, failLaunch(d, err)
+	cmd := launchCommand(d.ID, promptPath, d.PaneShell, mode, model, d.ConfigDir, d.AddDirs...)
+	if err := newSession(SessionOf(d), dir, cmd, d.EnvCommand); err != nil {
+		return failLaunch(d, err)
 	}
 	markSessionStarted(d, time.Now())
-	return d, nil
+	return nil
 }
 
 // markSessionStarted stamps SessionStartedAt on the record as it stands on disk,
@@ -448,8 +472,65 @@ var audit = state.AppendEvent
 // console one) keeps the conservative answer rather than letting a guess put
 // two claudes in one checkout.
 func liveDispatch(slug string) *state.Dispatch {
+	return liveWhere(func(d *state.Dispatch) bool { return d.Slug == slug })
+}
+
+// liveIn is a live dispatcher — by liveDispatch's three facts — other than the
+// record except, that holds branch of repo, or works in the checkout at path.
+// The slug is not enough once a conversation can take a branch (TakeBranch):
+// its slug is the conversation's, its branch and checkout are the work's, so a
+// conversation that took "spike" and a dispatch of "spike" share a worktree
+// with no slug in common, whichever came first.
+func liveIn(repo, branch, path, except string) *state.Dispatch {
+	return liveWhere(func(d *state.Dispatch) bool {
+		return d.ID != except && holds(d, repo, branch, path)
+	})
+}
+
+// holds says whether d holds branch of repo, or works in the checkout at path.
+func holds(d *state.Dispatch, repo, branch, path string) bool {
+	if branch != "" && d.Branch == branch && d.RepoName == repo {
+		return true
+	}
+	return path != "" && workDir(d) != "" && samePath(workDir(d), path)
+}
+
+// liveBeside is what refuses a resume of d: a live dispatcher other than d on
+// d's branch or in d's checkout, where either of the two may remove that
+// checkout.
+//
+// Two sessions on one branch are two sessions. The harm in sharing is the one
+// this tool causes: x or tidy on one record taking away a checkout it cut
+// while the other works in it (#89's review). A checkout neither may remove
+// (RemovableCheckout) is the human's, whether the checkout an adopted session
+// runs in or a branch's own worktree a conversation entered, and theirs to
+// share. Reported after a reboot: two orchestrators adopted in player-app's
+// main checkout, on main, had run side by side for days, and ⏎ on the second
+// one back said "kill it first", ending one conversation to reopen the other.
+func liveBeside(d *state.Dispatch) *state.Dispatch {
+	removable := d.RemovableCheckout() != ""
+	return liveWhere(func(o *state.Dispatch) bool {
+		return o.ID != d.ID && holds(o, d.RepoName, d.Branch, workDir(d)) &&
+			(removable || o.RemovableCheckout() != "")
+	})
+}
+
+// workDir is the checkout a record's session works in: the one a conversation
+// took, else its own worktree. A conversation that has taken nothing works in
+// no checkout — its folder holds only its brief.
+func workDir(d *state.Dispatch) string {
+	switch {
+	case d.Checkout != "":
+		return d.Checkout
+	case d.Branchless:
+		return ""
+	}
+	return d.WorktreePath
+}
+
+func liveWhere(match func(*state.Dispatch) bool) *state.Dispatch {
 	for _, d := range state.LoadAll() {
-		if d.Slug != slug || d.TmuxSession == "" || !unfinished(d.Status) {
+		if d.TmuxSession == "" || !unfinished(d.Status) || !match(d) {
 			continue
 		}
 		if !sessionAlive(SessionOf(d)) {
@@ -461,6 +542,12 @@ func liveDispatch(slug string) *state.Dispatch {
 		return d
 	}
 	return nil
+}
+
+// heldErr is the refusal for a checkout or branch a live dispatcher has.
+func heldErr(live *state.Dispatch, what string) error {
+	return fmt.Errorf("%s is %q's, which is live (session %s) — two sessions in one checkout is what a worktree per dispatch prevents; name the work differently, or reply to that dispatcher",
+		what, live.Feature, live.TmuxSession)
 }
 
 // unfinished names the statuses a dispatcher can still be working under. It is
@@ -625,7 +712,7 @@ func cutByUs(path string) bool {
 		return true
 	}
 	for _, d := range state.LoadAll() {
-		if d.OwnsWorktree() && samePath(d.WorktreePath, path) {
+		if p := d.RemovableCheckout(); p != "" && samePath(p, path) {
 			return true
 		}
 	}
@@ -653,11 +740,31 @@ func within(dir, path string) bool {
 
 func samePath(a, b string) bool { return resolved(a) == resolved(b) }
 
+// resolved is p with every symlink in it resolved, so that two spellings of
+// one place compare equal. A path that does not exist yet — a worktree about to
+// be cut, a folder about to be made — is resolved through the deepest part of
+// it that does exist, with the rest put back on. Falling back to p as written
+// made within(existing, not-yet-existing) false whenever the two crossed a
+// symlink, which on macOS is every temp and state path (/var is /private/var):
+// a checkout inside a folder the session was given stopped counting as
+// covered, and our own worktrees folder was not made before claude was given it.
 func resolved(p string) string {
+	p = filepath.Clean(p)
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
 	}
-	return filepath.Clean(p)
+	var rest []string
+	for dir := p; ; {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return p
+		}
+		rest = append([]string{filepath.Base(dir)}, rest...)
+		if r, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(append([]string{r}, rest...)...)
+		}
+		dir = parent
+	}
 }
 
 // ensureWorktreeFrom is ensureWorktree for a repo with a root branch of its own
@@ -754,6 +861,12 @@ func reusedRootErr(branch string, root Root) error {
 // modified or untracked files); a dirty worktree is kept for inspection so
 // killing a dispatcher never discards unshipped work.
 //
+// Clean is not the whole of safe. A detached HEAD holding commits no branch,
+// tag or remote-tracking ref contains is the only copy of them, and `git
+// worktree remove` does not ask about that: it takes the HEAD with the folder.
+// So that worktree is kept too, by the rule the disk reclaim already applies
+// (unreachableHead) — a branch outlives its worktree, a detached HEAD does not.
+//
 // It reports whether the worktree is gone, not whether this call removed it:
 // an absent path (never had a worktree, or already cleaned up) is "gone", so
 // callers can report "kept" on false without special-casing.
@@ -763,6 +876,9 @@ func CleanupWorktree(repoPath, worktreePath string) bool {
 	}
 	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
 		return true
+	}
+	if unreachableHead(worktreePath) != "" {
+		return false
 	}
 	_ = exec.Command("git", "-C", repoPath, "worktree", "remove", worktreePath).Run()
 	_, err := os.Stat(worktreePath)

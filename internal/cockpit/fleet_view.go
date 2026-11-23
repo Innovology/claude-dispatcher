@@ -454,7 +454,7 @@ func fleetMeta(r fleetRow) string {
 	parts := make([]string, 0, 8)
 	for _, p := range []string{
 		cqPassLine(r.pass), cqCtxLine(r), fleetModeLine(r.mode),
-		fleetRootLine(r.root), fleetAccountLine(r.account), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
+		fleetRootLine(r.root), fleetAccountLine(r.account), fleetSenderLine(r.sender), fleetFanLine(r.fanOut), cqAgentsLine(r), cqCodedLine(r),
 	} {
 		if p != "" {
 			parts = append(parts, p)
@@ -496,6 +496,16 @@ func fleetAccountLine(acct string) string {
 		return ""
 	}
 	return "on " + acct
+}
+
+// fleetSenderLine names the conversation that sent this dispatcher out, which
+// is how a human reading the table tells what an orchestrator sent from what
+// they sent themselves.
+func fleetSenderLine(sender string) string {
+	if sender == "" {
+		return ""
+	}
+	return "sent by \"" + sender + "\""
 }
 
 // fleetFanLine says the dispatch went out with the FAN OUT switch on. It sits

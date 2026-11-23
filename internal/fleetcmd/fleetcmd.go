@@ -47,6 +47,14 @@ type Entry struct {
 	Repo    string `json:"repo"`
 	Product string `json:"product,omitempty"`
 	Branch  string `json:"branch,omitempty"`
+	// Branchless says it cut no branch: a conversation about its product (or a
+	// repo in it) that the human is having, with Dirs the checkouts it reads.
+	// Repo is empty when it is about the whole product.
+	Branchless bool     `json:"branchless,omitempty"`
+	Dirs       []string `json:"dirs,omitempty"`
+	// DispatchedBy is the id of the dispatcher that sent this one out — a
+	// conversation turned orchestrator — so it can find the ones it sent.
+	DispatchedBy string `json:"dispatched_by,omitempty"`
 	// RepoPath is the repo on disk — where gh and git read its PR and history.
 	RepoPath string `json:"repo_path,omitempty"`
 	// Prompt is the brief it was dispatched with — what "inside the brief"
@@ -82,6 +90,10 @@ type Entry struct {
 	Started      time.Time `json:"started"`
 	Session      string    `json:"session,omitempty"`
 	Worktree     string    `json:"worktree,omitempty"`
+	// Checkout is where a conversation that took a branch works: the worktree
+	// on its branch. Worktree stays its own folder, where its transcript is
+	// keyed, so without this the one place its work is on disk was unsaid.
+	Checkout string `json:"checkout,omitempty"`
 	// WaitingSince is when it stopped to wait; Note is the steward's note on
 	// that wait, if it has written one. Handled is a wait with a note: it has
 	// been looked at, and waking the steward for it again would be noise.
@@ -113,6 +125,10 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runTidy(args, out)
 	case "swap":
 		err = runSwap(args, out)
+	case "worktree":
+		err = runWorktree(args, out)
+	case "dispatch":
+		err = runDispatch(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}
@@ -145,7 +161,7 @@ func runStatus(args []string, out io.Writer) error {
 		return nil
 	}
 	for _, e := range entries {
-		_, _ = fmt.Fprintf(out, "%-10s %-28s %-22s %s\n", e.State, clip(e.Feature, 28), clip(e.Repo, 22), e.headline())
+		_, _ = fmt.Fprintf(out, "%-10s %-28s %-22s %s\n", e.State, clip(e.Feature, 28), clip(e.where(), 22), e.headline())
 	}
 	return nil
 }
@@ -176,7 +192,11 @@ func runNext(out io.Writer, timeout time.Duration, now func() time.Time) error {
 	for {
 		var waiting []Entry
 		for _, e := range Fleet(state.LoadAll(), now()) {
-			if e.State == "wants-you" && !e.Handled {
+			// A conversation is the human's own: every stop is their turn to
+			// talk, and a reply typed there would be the steward speaking for
+			// them. One that has taken a branch is branch work like any other,
+			// and its stops are the steward's to look at.
+			if e.State == "wants-you" && !e.Handled && !e.conversation() {
 				waiting = append(waiting, e)
 			}
 		}
@@ -188,6 +208,19 @@ func runNext(out io.Writer, timeout time.Duration, now func() time.Time) error {
 		}
 		time.Sleep(NextPoll)
 	}
+}
+
+// conversation reports a dispatcher that started with no branch and has not
+// taken one (state.Dispatch.Conversation).
+func (e Entry) conversation() bool { return e.Branchless && e.Branch == "" }
+
+// where is the text form's repo column: the repo, or for a conversation about
+// a whole product, which names none, the product and that it spans all of it.
+func (e Entry) where() string {
+	if e.Repo == "" && e.Branchless {
+		return e.Product + " (all repos)"
+	}
+	return e.Repo
 }
 
 // headline is the text form's last column: the ask, else the failure, else the
@@ -219,12 +252,12 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 		}
 		e := Entry{
 			ID: d.ID, Feature: d.Feature, Repo: d.RepoName, Product: d.Product,
-			Branch: d.Branch, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
+			Branch: d.Branch, Branchless: d.Branchless, Dirs: d.AddDirs, DispatchedBy: d.DispatchedBy, RepoPath: d.RepoPath, Prompt: d.Prompt, State: st, Status: string(d.Status), Reason: d.StatusReason,
 			Failure: d.Failure, Retrying: dispatch.RetryPending(d, now),
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
 			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
-			Session: d.TmuxSession, Worktree: d.WorktreePath,
+			Session: d.TmuxSession, Worktree: d.WorktreePath, Checkout: d.Checkout,
 			failure:      dispatch.FailureSummary(d, now),
 			WaitingSince: d.WaitingSince,
 			Note:         d.Note(),

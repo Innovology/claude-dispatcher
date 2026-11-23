@@ -72,6 +72,9 @@ type pendingDispatch struct {
 	// until the human takes it off (see prunePending).
 	failed bool
 	reason string
+	// branchless says it cuts nothing, so the note does not claim a worktree
+	// is being made.
+	branchless bool
 }
 
 // pendingID is the row id a pending dispatch carries. It is namespaced so it
@@ -109,6 +112,21 @@ func (m model) pendingFor(repo, feature, prompt string) pendingDispatch {
 		prompt:  prompt,
 		since:   time.Now(),
 	}
+}
+
+// pendingBranchless is pendingFor for a dispatch that cuts no branch: filed
+// under the product it spans, which for a whole product is the only product
+// there is to file it by, and saying "no branch" where the branch would be.
+func (m model) pendingBranchless(product, repo, feature, prompt string) pendingDispatch {
+	p := m.pendingFor(repo, feature, prompt)
+	if product != "" && product != dxUnassigned {
+		p.product = product
+	}
+	if repo == "" {
+		p.repo = "all repos"
+	}
+	p.branch, p.branchless = "no branch", true
+	return p
 }
 
 // markPending records an ask. A second ask under a name already pending
@@ -282,6 +300,9 @@ func pendingRow(p pendingDispatch) fleetRow {
 	}
 	signal, tone, why := startingSignal, "normal",
 		"Starting: its worktree and session are being made. Nothing has reported back yet."
+	if p.branchless {
+		why = "Starting: its session is being made, with no branch. Nothing has reported back yet."
+	}
 	rank := fleetRank("run", "normal")
 	var acts []cqAct
 	if p.failed {

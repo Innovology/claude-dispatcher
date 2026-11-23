@@ -108,8 +108,18 @@ func InheritTrustFor(configDir, repoPath, worktree string) bool {
 // (the steward's): InheritTrustFor will not invent trust for a human's repo, and
 // nothing should — but a folder we made, holding nothing but our own brief, has
 // no one else to ask.
-func TrustOwnDir(dir string) bool {
+func TrustOwnDir(dir string) bool { return TrustOwnDirFor("", dir) }
+
+// TrustOwnDirFor is TrustOwnDir in the config directory a session runs under
+// ("" is the human's own login): trust lives in that directory's .claude.json,
+// so a folder trusted for one subscription is a stranger to every other. A
+// branchless dispatch's folder (branchless.go) is the second folder of our own,
+// and it can run on any account.
+func TrustOwnDirFor(configDir, dir string) bool {
 	path := claudeConfigPath()
+	if configDir != "" {
+		path = filepath.Join(configDir, ".claude.json")
+	}
 	if path == "" || dir == "" {
 		return false
 	}

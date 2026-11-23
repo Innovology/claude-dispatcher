@@ -88,9 +88,17 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		return "", "", fmt.Errorf("%q recorded no directory to resume in", d.Feature)
 	}
 	// Same guard as Launch: one live dispatcher per slug, because the worktree
-	// path is keyed by it. Resuming into a checkout another session is working
-	// in is the collision per-dispatch worktrees exist to prevent.
-	if live := liveDispatch(d.Slug); live != nil && live.ID != d.ID {
+	// path is keyed by it. Resuming into a checkout of ours another session is
+	// working in is the collision per-dispatch worktrees exist to prevent; a
+	// checkout of the human's is theirs to share (liveBeside).
+	live := liveDispatch(d.Slug)
+	if live != nil && live.ID == d.ID {
+		live = nil
+	}
+	if live == nil {
+		live = liveBeside(d)
+	}
+	if live != nil {
 		return "", "", fmt.Errorf("%q is live in the same worktree (session %s) — kill it first",
 			live.Feature, live.TmuxSession)
 	}
@@ -130,7 +138,25 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// (CleanupWorktree removes a clean one). Put it back at the same path —
 	// which is what makes the transcript findable again — reusing the feature
 	// branch when it still exists.
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
+	//
+	// A branchless dispatcher's own folder is not a worktree: it holds the brief
+	// and is where the transcript is keyed, so it is put back where it was and
+	// trusted again, with its brief: nothing removes it, so it is missing only
+	// when somebody deleted it, and the launch kept a copy for that. The
+	// checkout it cut when it took a branch is a worktree like any dispatch's,
+	// and kill and tidy remove it like one, so it is rebuilt like one — or the
+	// session reopens on work whose folder is gone. One it went into without
+	// cutting is somebody else's, and not ours to put back.
+	if d.Branchless {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", "", fmt.Errorf("recreate %s: %w", dir, err)
+		}
+		restoreBrief(d.ID, dir)
+		trustOwnDir(d.ConfigDir, dir)
+		if err := rebuildTaken(d); err != nil {
+			return "", "", err
+		}
+	} else if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if d.RepoPath == "" || d.Branch == "" {
 			return "", "", fmt.Errorf("%s is gone and there is not enough on the record to rebuild it", dir)
 		}
@@ -196,9 +222,12 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// server, under another login — is a different session.
 	name := uniqueName(supervisor.Session{Name: base, Socket: d.TmuxSocket})
 	sess := supervisor.Session{Name: name, Socket: d.TmuxSocket}
-	cmd := resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model), d.ConfigDir)
+	// The directories a branchless session reads go again too: they are a
+	// property of the session, and a resumed one without them would be a
+	// conversation about repositories it can no longer open.
+	cmd := resumeCommand(d.ID, sid, promptPath, d.PaneShell, Mode(d.Mode), Model(d.Model), d.ConfigDir, d.AddDirs...)
 	if relaunch {
-		cmd = launchCommand(d.ID, promptPath, d.PaneShell, Mode(d.Mode).Normalize(), Model(d.Model).Normalize(), d.ConfigDir)
+		cmd = launchCommand(d.ID, promptPath, d.PaneShell, Mode(d.Mode).Normalize(), Model(d.Model).Normalize(), d.ConfigDir, d.AddDirs...)
 	}
 	// The environment is the record's, made to work where the session now
 	// stands (repos.EnvIn): a record cut before that rule carries a bare
@@ -272,4 +301,22 @@ func SessionIDOf(d *state.Dispatch) string {
 	}
 	base := filepath.Base(d.TranscriptPath)
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// rebuildTaken puts back the checkout a conversation cut when it took a branch
+// (TakeBranch), if kill or tidy has removed it, on the branch it took — which
+// outlives its worktree. Nothing to do for a conversation that took nothing,
+// or for a checkout it went into rather than cut.
+func rebuildTaken(d *state.Dispatch) error {
+	if !d.CheckoutCut || d.Checkout == "" || d.Branch == "" || d.RepoPath == "" {
+		return nil
+	}
+	if _, err := os.Stat(d.Checkout); !os.IsNotExist(err) {
+		return nil
+	}
+	if _, err := ensureWorktree(d.RepoPath, d.Checkout, d.Branch, RootDefault); err != nil {
+		return fmt.Errorf("rebuild %s: %w", d.Checkout, err)
+	}
+	InheritTrustFor(d.ConfigDir, d.RepoPath, d.Checkout)
+	return nil
 }

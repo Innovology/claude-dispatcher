@@ -6,7 +6,7 @@ import (
 )
 
 func TestWithContractClosesWithTheModesContract(t *testing.T) {
-	got := withContract("fix the flaky upload", ModeAuto)
+	got := withContract("fix the flaky upload", ModeAuto, BranchNew)
 	if !strings.HasPrefix(got, "fix the flaky upload\n\n") || !strings.HasSuffix(got, strings.Join(contractSentences[ModeAuto], " ")) {
 		t.Fatalf("got\n%s", got)
 	}
@@ -18,10 +18,10 @@ func TestWithContractClosesWithTheModesContract(t *testing.T) {
 		}
 	}
 	// Plan mode must never be told to commit: it cannot.
-	if p := withContract("x", ModePlan); strings.Contains(p, "Commit") || !strings.Contains(p, "put the plan up") {
+	if p := withContract("x", ModePlan, BranchNew); strings.Contains(p, "Commit") || !strings.Contains(p, "put the plan up") {
 		t.Errorf("plan contract:\n%s", p)
 	}
-	if m := withContract("x", ModeManual); !strings.Contains(m, "check in before committing") {
+	if m := withContract("x", ModeManual, BranchNew); !strings.Contains(m, "check in before committing") {
 		t.Errorf("manual contract:\n%s", m)
 	}
 }
@@ -31,14 +31,14 @@ func TestWithContractClosesWithTheModesContract(t *testing.T) {
 // all of it is left alone.
 func TestWithContractSaysNothingTwice(t *testing.T) {
 	old := "fix it\n\nCommit as you go, open the PR, and fix your own CI failures without stopping to ask."
-	got := withContract(old, ModeAuto)
+	got := withContract(old, ModeAuto, BranchNew)
 	if strings.Count(got, "Commit as you go") != 1 {
 		t.Fatalf("said twice:\n%s", got)
 	}
 	if !strings.Contains(got, "background task or Monitor") {
 		t.Fatalf("the missing sentences were not added:\n%s", got)
 	}
-	if again := withContract(got, ModeAuto); again != got {
+	if again := withContract(got, ModeAuto, BranchNew); again != got {
 		t.Fatalf("a complete contract was added to again:\n%s", again)
 	}
 }
