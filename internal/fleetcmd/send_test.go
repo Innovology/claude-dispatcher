@@ -70,3 +70,43 @@ func TestDispatchSendsAWorkerOfTheConversationsOwn(t *testing.T) {
 		t.Error("a repo that is not there was dispatched into")
 	}
 }
+
+// stubLaunch records each launch `dispatch` asks for and saves a record for it.
+func stubLaunch(t *testing.T) *[]string {
+	t.Helper()
+	var launched []string
+	prev := launch
+	launch = func(r repos.Repo, feature, _ string, _ dispatch.Mode, _ dispatch.Model, _ dispatch.Root, _ bool, _ account.Account) (*state.Dispatch, error) {
+		launched = append(launched, r.Name+":"+feature)
+		d := &state.Dispatch{ID: "w-" + dispatch.Slugify(feature), Feature: feature, RepoName: r.Name, Status: state.StatusLaunching}
+		return d, state.Save(d)
+	}
+	t.Cleanup(func() { launch = prev })
+	return &launched
+}
+
+// Sent from a dispatcher's session, work goes to a repo of the product it was
+// dispatched over — the repos `worktree` would let it take a branch in — and
+// a session whose record is gone sends nothing. From a plain shell, any repo.
+func TestDispatchStaysInTheSendersProduct(t *testing.T) {
+	portfolio(t)
+	withStore(t, &state.Dispatch{ID: "c1", Feature: "talk", Product: "pp", Branchless: true, Status: state.StatusWorking})
+	launched := stubLaunch(t)
+	var out bytes.Buffer
+
+	t.Setenv("CLAUDE_DISPATCHER_ID", "c1")
+	if err := runDispatch([]string{"--repo", "other", "--title", "x", "y"}, &out); err == nil || !strings.Contains(err.Error(), "api, app") {
+		t.Errorf("sent work outside its product: %v", err)
+	}
+	t.Setenv("CLAUDE_DISPATCHER_ID", "gone")
+	if err := runDispatch([]string{"--repo", "api", "--title", "x", "y"}, &out); err == nil || !strings.Contains(err.Error(), "gone") {
+		t.Errorf("a session with no record sent work: %v", err)
+	}
+	t.Setenv("CLAUDE_DISPATCHER_ID", "")
+	if err := runDispatch([]string{"--repo", "other", "--title", "x", "y"}, &out); err != nil {
+		t.Errorf("from a plain shell: %v", err)
+	}
+	if strings.Join(*launched, ",") != "other:x" {
+		t.Errorf("launched %v; want only the plain shell's", *launched)
+	}
+}

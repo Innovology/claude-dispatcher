@@ -13,6 +13,8 @@ import (
 
 	"claude-dispatcher/internal/account"
 	"claude-dispatcher/internal/dispatch"
+	"claude-dispatcher/internal/repos"
+	"claude-dispatcher/internal/state"
 )
 
 // launch is dispatch.Launch, as a seam, so a test can read what `dispatch`
@@ -47,20 +49,30 @@ func runDispatch(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	r, err := pickRepo(all, *repoName)
-	if err != nil {
-		return fmt.Errorf("no repo %s", *repoName)
-	}
-	// Sent from a dispatcher's session, the worker is that dispatcher's, and
-	// runs on the subscription it runs on; sent from a plain shell, it is the
-	// human's, on their own login.
+	// Sent from a dispatcher's session, the work is that dispatcher's: it goes
+	// to a repo of the product it was dispatched over, as `worktree` does, and
+	// runs on the subscription it runs on. Sent from a plain shell, it is the
+	// human's, into any repo, on their own login.
 	parent := os.Getenv("CLAUDE_DISPATCHER_ID")
-	acct := account.Account{Name: account.Default}
+	var p *state.Dispatch
 	if parent != "" {
-		if p, err := find(parent); err == nil && p.Account != "" && cfg != nil {
-			if a, ok := account.Find(cfg, p.Account); ok {
-				acct = a
-			}
+		if p, err = find(parent); err != nil {
+			return fmt.Errorf("this session's dispatcher %s: %w", parent, err)
+		}
+	}
+	var r repos.Repo
+	if p != nil {
+		r, err = pickRepoOf(p, all, *repoName)
+	} else if r, err = pickRepo(all, *repoName); err != nil {
+		err = fmt.Errorf("no repo %s", *repoName)
+	}
+	if err != nil {
+		return err
+	}
+	acct := account.Account{Name: account.Default}
+	if p != nil && p.Account != "" && cfg != nil {
+		if a, ok := account.Find(cfg, p.Account); ok {
+			acct = a
 		}
 	}
 	// What this process carries from the session it runs in, a pane started
