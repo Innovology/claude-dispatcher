@@ -62,6 +62,10 @@ func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string
 			return "", reusedRootErr(name, root)
 		}
 		branch = name
+		if isTrunk(r, name) {
+			return "", fmt.Errorf("%s is where %s's work merges, and a dispatcher's work goes on a branch of its own — cut one from it: --root %s and a new name",
+				name, r.Name, name)
+		}
 		entered = worktreeOn(r.Path, name)
 		if entered != "" && samePath(entered, r.Path) {
 			return "", fmt.Errorf("%s is checked out in %s, the checkout this conversation reads — cut a branch of your own from it: --root %s and a new name",
@@ -120,6 +124,23 @@ func TakeBranch(d *state.Dispatch, r repos.Repo, name string, root Root) (string
 	}
 	*d = *cur
 	return path, nil
+}
+
+// isTrunk reports whether name is a branch r's work merges into: its own root
+// branch (config's [root_branches]), the default origin names now, the one
+// origin/HEAD still remembers, or main or master. Work taken on one of them
+// would be committed straight to it, and the tracker, which prefers a merged
+// pull request for a branch, would hand the record the last merge into it and
+// call the work live at its first stop.
+func isTrunk(r repos.Repo, name string) bool {
+	if name == "main" || name == "master" || (r.RootBranch != "" && name == r.RootBranch) {
+		return true
+	}
+	if name == remoteDefaultBranch(r.Path) {
+		return true
+	}
+	cached, err := gitOut(r.Path, fetchTimeout, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	return err == nil && strings.TrimPrefix(cached, "origin/") == name
 }
 
 // branchExists reports whether name is a branch here or on origin.

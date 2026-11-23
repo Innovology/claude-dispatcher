@@ -216,3 +216,40 @@ func TestACheckoutAlreadyThereIsEnteredNotCut(t *testing.T) {
 		t.Errorf("resumed a dispatch into the checkout a live conversation works in: %v", err)
 	}
 }
+
+// A conversation does not take the branch its repo's work merges into, even
+// with the canonical checkout on another branch: not main, not the repo's own
+// root branch, not the default origin names, nor the one origin/HEAD still
+// remembers.
+func TestAConversationDoesNotTakeTheTrunk(t *testing.T) {
+	d, all := conversation(t)
+	app, pulse := all[1], all[0]
+	gitIn(t, app.Path, "checkout", "-q", "-b", "elsewhere")
+	if _, err := TakeBranch(d, app, "main", DefaultRoot); err == nil || !strings.Contains(err.Error(), "merges") {
+		t.Errorf("took main with the canonical checkout elsewhere: %v", err)
+	}
+	gitIn(t, pulse.Path, "branch", "dev") // playerpulse's [root_branches] entry
+	if _, err := TakeBranch(d, pulse, "dev", DefaultRoot); err == nil || !strings.Contains(err.Error(), "merges") {
+		t.Errorf("took the repo's own root branch: %v", err)
+	}
+
+	clone, _ := clonedRepo(t, "trunk")
+	r := repos.Repo{Name: "svc", Path: clone}
+	gitIn(t, clone, "checkout", "-q", "-b", "elsewhere")
+	if _, err := TakeBranch(d, r, "trunk", DefaultRoot); err == nil || !strings.Contains(err.Error(), "--root trunk") {
+		t.Errorf("took the branch origin names its default: %v", err)
+	}
+	// origin moved its default; the clone's cache still names the old one.
+	gitIn(t, clone, "branch", "old-trunk")
+	gitIn(t, clone, "push", "-q", "origin", "old-trunk")
+	gitIn(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/old-trunk")
+	if _, err := TakeBranch(d, r, "old-trunk", DefaultRoot); err == nil || !strings.Contains(err.Error(), "merges") {
+		t.Errorf("took the branch origin/HEAD remembers: %v", err)
+	}
+	if d.Branch != "" {
+		t.Errorf("a refused take left the record on %q", d.Branch)
+	}
+	if _, err := TakeBranch(d, r, "trunk work", DefaultRoot); err != nil {
+		t.Errorf("new work in the same repo: %v", err)
+	}
+}

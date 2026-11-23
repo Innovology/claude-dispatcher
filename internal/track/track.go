@@ -37,7 +37,7 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 		// answer far longer than a live dispatcher's — see PRForBranch. It is
 		// the difference between asking about a feature that shipped last week
 		// every minute for ever and asking occasionally.
-		if pr := gh.PRForBranch(d.RepoPath, d.Branch, finished(d)); pr != nil &&
+		if pr := gh.PRForBranch(d.RepoPath, d.Branch, finished(d)); pr != nil && !predates(pr, d) &&
 			(pr.Number != d.PRNumber || pr.State != d.PRState) {
 			d.PRNumber = pr.Number
 			d.PRState = pr.State
@@ -76,6 +76,16 @@ func Refresh(ds []*state.Dispatch, cfg *config.Config) int {
 		}
 	}
 	return updated
+}
+
+// predates reports a pull request merged before a conversation that went into
+// its branch had even begun. A conversation can take a branch that already
+// exists (dispatch.TakeBranch) — somebody's, with a history — and gh prefers a
+// merged pull request for a branch over an open one, so the last merge from it
+// would be taken as this conversation's work and the record called live at its
+// first stop, before it had shipped anything.
+func predates(pr *gh.PR, d *state.Dispatch) bool {
+	return d.Branchless && pr.State == "MERGED" && pr.MergedAt != nil && pr.MergedAt.Before(d.CreatedAt)
 }
 
 // finished reports whether the session behind a dispatch has stopped for good.
