@@ -313,7 +313,7 @@ func BranchlessBrief(s Scope, feature string) string {
 		"and carry the work through as any dispatch would — commit as you go, open the PR, fix your own CI "+
 		"failures. The cockpit tracks the branch as this conversation's from then on; a conversation takes one branch, and sends any further work out.\n"+
 		"- **Send it out.** `%[1]s dispatch --repo <repo> --title \"<a few words>\" \"<the brief>\"` starts a "+
-		"worker of its own, in its own worktree, on the human's table. Send one per independent piece. "+
+		"dispatcher of its own, in its own worktree, on the human's table. Send one per independent piece. "+
 		"`%[1]s status --json` shows them (their `dispatched_by` is this conversation), and "+
 		"`%[1]s reply <id> \"<one line>\"` answers one that is waiting.\n\n"+
 		"The folders a repo's worktrees are cut in are among the directories this session was given, so a "+

@@ -21,7 +21,8 @@ and, once a read-only version was up for review:
 
 > a conversation might end up going into a worktree/branch or creating one.
 > the point of the feature is to allow us to start a conversation about the
-> project but then evolve into either a worker or an orchestrator.
+> project but then evolve into either a [dispatcher on a branch] or an
+> orchestrator.
 
 Every dispatch cut `<prefix><slug>` in a worktree of its own, because every
 dispatch was assumed to end in a pull request, and the auto contract said so:
@@ -81,17 +82,21 @@ unchanged) or `no branch`. With none:
   When the talk turns into work, it goes onto a branch of its own or is sent
   out, and its CLAUDE.md names the two verbs, with the command that reaches
   this build:
-  - **A worker:** `claude-dispatcher worktree --repo <repo> <name>`
-    (`dispatch.TakeBranch`). Given an existing branch, it goes into that
-    branch's worktree, or cuts one for it. Given anything else, it cuts the
-    repo's prefix and the name's slug from the root, where the repo's layout
-    puts a dispatch's worktree. The record becomes a worker's: branch, repo and
-    base set, so the PR, provenance and done-means-live all come back, while
-    its folder stays where the transcript is keyed. One branch per
-    conversation, and never the canonical checkout's own.
+  - **A dispatcher on a branch:** `claude-dispatcher worktree --repo <repo>
+    <name>` (`dispatch.TakeBranch`). Given an existing branch, it goes into
+    that branch's worktree, or cuts one for it. Given anything else, it cuts
+    the repo's prefix and the name's slug from the root, where the repo's
+    layout puts a dispatch's worktree. The record becomes branch work: branch,
+    repo and base set, so the PR, provenance and done-means-live all come back,
+    while its folder stays where the transcript is keyed. One branch per
+    conversation, never the canonical checkout's own, taken only while the
+    conversation is still going, and read from the store under the hook lock
+    so two calls cannot both take one.
   - **An orchestrator:** `claude-dispatcher dispatch --repo <repo> --title …`.
-    Each worker is an ordinary dispatcher, on the conversation's subscription,
-    recorded as sent by it (`DispatchedBy`), steered with `status` and `reply`.
+    Each one it sends is an ordinary dispatcher in a repo of the same product,
+    on the conversation's subscription, recorded as sent by it
+    (`DispatchedBy`), steered with `status` and `reply`. At most `MaxSentOut`
+    (8) of them are out at once.
 
   Both run from the conversation's own shell and find its record by the
   `CLAUDE_DISPATCHER_ID` its launch line set. A session cannot move its own
@@ -101,6 +106,24 @@ unchanged) or `no branch`. With none:
   no branch to commit to yet; the brief says it for when there is. The
   isolation decision stands: work happens in a worktree, never in the shared
   checkout.
+- **What it will not take** (from Alex's review of the first version, each
+  reproduced before it was fixed):
+  - **A checkout a live dispatcher works in, or a branch one has.** The name
+    alone did not say: a conversation that took "pricing fix" reused a live
+    dispatcher's worktree on `feature/pricing-fix`, called it cut, and kill
+    on the conversation then removed it. `liveIn` asks liveDispatch's three
+    facts of every record holding that branch of the repo or working in that
+    checkout (a conversation's `Checkout`, a dispatch's `WorktreePath`), and
+    Launch and Resume ask it too, since a conversation's slug is not the
+    work's. `CheckoutCut` is set only where the call ran `git worktree add`.
+  - **The branch its repo's work merges into**: the repo's root branch, the
+    default origin names, the one `origin/HEAD` caches, `main` and `master`,
+    whichever checkout it is on. Taken, it was committed to directly, and the
+    tracker, which prefers a merged pull request for a branch, handed it the
+    last merge and called it live. The tracker also leaves alone any merge
+    older than the conversation, for the colleague's branch it may go into.
+  - **A branch origin retired.** A fetch never deletes a remote-tracking ref,
+    so one known only that way is checked with `ls-remote` first (ADR 0010).
 - **It borrows from its focus.** One that starts on a repo takes that repo's
   tmux server, shell and toolchain (`repos.EnvIn` names the checkout's flake,
   since the folder has none). One about the whole product runs in the plain
@@ -134,8 +157,10 @@ with a space in its path, and a directory not given was denied.
   off.
 - Kill and tidy leave the folder alone: it is not a checkout
   (`OwnsWorktree` is false), and resuming needs it.
-- The steward leaves these alone. Every stop is the human's turn to talk, so
-  `status --next` never wakes it for one, and its brief says so.
+- The steward leaves a conversation alone. Every stop is the human's turn to
+  talk, so `status --next` never wakes it for one, and its brief says so. One
+  that has taken a branch is branch work, and wakes it like any other;
+  `status --json` names its `checkout`, since `worktree` is still its folder.
 - The product panel's resume overlay starts a never-run conversation again
   through Resume rather than dispatching it afresh with a branch.
 - Each repo's worktree folder is given with `--add-dir` beside its checkout, so
@@ -144,11 +169,20 @@ with a space in its path, and a directory not given was denied.
   are writable too, and "change nothing in them" is a convention, as the rest
   of the contract is.
 - Kill and tidy remove the worktree a conversation cut (`RemovableCheckout`),
-  never one it only went into, and never its folder.
-- A worker sent from inside a session is launched with nothing of that
+  never one it only went into, and never its folder. Resume rebuilds the one
+  it cut, on its branch, as it rebuilds any dispatch's worktree.
+- A dispatcher sent from inside a session is launched with nothing of that
   session in its environment (`ScrubSessionEnv`). A pane takes its environment
   from the client that asks for it, and Claude Code puts its session id,
   messaging socket and token, `CLAUDECODE` and the dispatcher id in its tools'
-  environment. Checked end to end: the worker's claude carried only its own id.
-- A conversation that took a branch is a worker. Its row shows the branch, `y`
-  is "mark shipped" once it has commits, and a done one is the ship it is.
+  environment. Checked end to end: the sent dispatcher's claude carried only
+  its own id. It runs on the sender's account as config names it, else on the
+  directory the sender's record runs under, said; `--mode` refuses a mode that
+  is not one rather than reading a typo as auto.
+- A conversation that took a branch is branch work like any other. Its row
+  shows the branch, `y` is "mark shipped" once it has commits, and a done one
+  is the ship it is.
+- Paths are compared with every symlink resolved, through the deepest part
+  that exists for one not made yet: on macOS every temp and state path crosses
+  `/var` → `/private/var`, and a folder about to be made stopped counting as
+  inside the one above it.

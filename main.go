@@ -37,7 +37,7 @@ Usage:
   claude-dispatcher worktree --repo <repo> <branch|name>
                                from a branchless conversation: take a branch for its work
   claude-dispatcher dispatch --repo <repo> --title <words> <brief>
-                               send a worker out (from a conversation: one of its own)
+                               send a dispatcher out (from a conversation: one of its own)
   claude-dispatcher steward    every product steward and its state · steward new <product>
                                starts one, steward open <id> reopens an older one,
                                steward end <product|id> ends one (t in the cockpit)

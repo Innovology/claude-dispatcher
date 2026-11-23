@@ -374,37 +374,55 @@
   has a key of its own. It is trusted like the steward's folder, in its
   account (`TrustOwnDirFor`); the launch keeps a copy of the brief that Resume
   restores. **It starts as a conversation and can turn into work** — "start a
-  conversation about the project but then evolve into either a worker or an
-  orchestrator". The contract says the human's checkouts are read and never
-  changed, and that work goes onto a branch first. Two verbs, run from the
-  session's shell and finding its record by `CLAUDE_DISPATCHER_ID`, are named in
-  its CLAUDE.md. `worktree --repo <repo> <name>` (`dispatch.TakeBranch`) makes it a
-  **worker**: it goes into an existing branch's worktree, or cuts one the
-  dispatcher's way, and the record takes the branch, repo and base, so the PR,
-  provenance and done-means-live return. One branch, never the canonical
-  checkout's own. `dispatch --repo … --title …` makes it an **orchestrator**: an
-  ordinary worker on its subscription, `DispatchedBy` it, "sent by" on its row,
-  launched with the session's own variables scrubbed (`ScrubSessionEnv`),
-  because a pane inherits its client's environment and Claude Code's session
-  id, socket and `CLAUDECODE` would make the worker its child. A session cannot
-  move its launch directory, and claude's EnterWorktree only enters its launch
-  repo's worktrees, which is why these are our verbs. Every repo's worktree
-  folder is given beside its checkout, so a cut worktree is workable without
-  asking; kill and tidy remove what it cut (`RemovableCheckout`), never what it
-  went into. `Conversation()` (branchless, no branch yet) is what "mark done"
-  and the not-a-ship rules key on; a conversation that took a branch is a
-  worker. It
-  borrows server, shell and toolchain from its focus repo. A whole-product one
-  gets a server **named for the product**, because no `-L` follows `$TMUX` and it
-  landed on the cockpit's own server. `--add-dir` goes **after** the prompt: it is
-  variadic, and measured on 2.1.317 it read a following prompt as a directory.
-  The record carries `Branchless`, `AddDirs` and the product; `OwnsWorktree` is false,
-  so kill and tidy leave the folder; the row says `no branch` / `all repos`, and
-  `y` is **mark done** with nothing shipped, and nothing counts a done one as a
-  ship (history, velocity, the floor). The steward never wakes for one
-  (`status --next` skips it), because every stop is the human's turn to talk. An
-  empty branch asks the forge nothing, since `gh` reads an empty `--head` as every
-  PR. Full record:
+  conversation about the project but then evolve into either a [dispatcher on a
+  branch] or an orchestrator". The contract says the human's checkouts are read
+  and never changed, and that work goes onto a branch first. Two verbs, run from
+  the session's shell and finding its record by `CLAUDE_DISPATCHER_ID`, are
+  named in its CLAUDE.md. `worktree --repo <repo> <name>` (`dispatch.TakeBranch`)
+  makes it a **dispatcher on a branch**: it goes into an existing branch's
+  worktree, or cuts one the dispatcher's way, and the record takes the branch,
+  repo and base, so the PR, provenance and done-means-live return. One branch,
+  taken only while the conversation is going, read from the store under the hook
+  lock. **It takes nothing that is somebody else's** (Alex's review, each case
+  reproduced first): not the canonical checkout's branch; not a checkout or
+  branch a live dispatcher has (`liveIn`, liveDispatch's three facts matched on
+  branch and checkout as well as slug, which Launch and Resume ask too, since a
+  conversation's slug is not its work's) — it once reused a live dispatcher's
+  worktree, called it cut, and kill removed it, so `CheckoutCut` is set only
+  where the call ran `git worktree add`; not a trunk (root branch, origin's
+  default, the one `origin/HEAD` caches, main, master), which it would commit
+  to and the tracker, preferring a merged PR, would call live — the tracker
+  also ignores a merge older than the conversation; and not a branch origin
+  retired, checked with `ls-remote` because a fetch never deletes the ref.
+  `dispatch --repo … --title …` makes it an **orchestrator**: an ordinary
+  dispatcher in a repo of its product, at most `MaxSentOut` (8) out at once, on
+  its account (as config names it, else the directory its record runs under,
+  said), `DispatchedBy` it, "sent by" on its row; an unknown `--mode` is
+  refused, not read as auto. It is launched with the session's own variables
+  scrubbed (`ScrubSessionEnv`), because a pane inherits its client's
+  environment and Claude Code's session id, socket and `CLAUDECODE` would make
+  the one it sends its child. A session cannot move its launch directory, and
+  claude's EnterWorktree only enters its launch repo's worktrees, which is why
+  these are our verbs. Every repo's worktree folder is given beside its
+  checkout, so a cut worktree is workable without asking; kill and tidy remove
+  what it cut (`RemovableCheckout`), never what it went into, and Resume
+  rebuilds what it cut. Paths compare with symlinks resolved through the
+  deepest part that exists, since on macOS a folder not made yet otherwise
+  fell outside the one above it. `Conversation()` (branchless, no branch yet)
+  is what "mark done", the not-a-ship rules and the steward key on; a
+  conversation that took a branch is branch work like any other. It borrows
+  server, shell and toolchain from its focus repo. A whole-product one gets a
+  server **named for the product**, because no `-L` follows `$TMUX` and it
+  landed on the cockpit's own server. `--add-dir` goes **after** the prompt: it
+  is variadic, and measured on 2.1.317 it read a following prompt as a
+  directory. The record carries `Branchless`, `AddDirs` and the product;
+  `OwnsWorktree` is false, so kill and tidy leave the folder; the row says `no
+  branch` / `all repos`, and `y` is **mark done** with nothing shipped, and
+  nothing counts a done one as a ship (history, velocity, the floor). The
+  steward never wakes for a conversation (`status --next` skips it), because
+  every stop is the human's turn to talk; it does for one that took a branch,
+  and `status --json` names its `checkout`. An empty branch asks the forge
+  nothing, since `gh` reads an empty `--head` as every PR. Full record:
   `docs/adr/0033-branchless-work-is-a-conversation-across-the-product.md`.
 - **A colour is a role, and the switch is news.** The cockpit paints only
   foregrounds onto the terminal's own ground, and it painted the dark design's
@@ -1473,7 +1491,7 @@
   the name each live Claude session goes by, from Claude Code's registry.
   `branching.go` is BRANCH, and `branchless.go` the dispatch that cuts
   none: a conversation across a product, in a folder of its own (ADR 0033);
-  `work.go` is how it takes a branch and `send.go` how it sends workers out.
+  `work.go` is how it takes a branch and `send.go` how it sends dispatchers out.
   `handoff.go` is a dispatcher handing its work on to another repo of its
   product, and the sentence a launch is told it can with (ADR 0034).
 - `internal/binpath` — the durable path to name this binary by in anything

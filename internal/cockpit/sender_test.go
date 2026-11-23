@@ -7,16 +7,16 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
-// A worker a conversation sent out says so where a dispatcher's setup is
-// described, so a human reading the table can tell an orchestrator's workers
+// A dispatcher a conversation sent out says so where a dispatcher's setup is
+// described, so a human reading the table can tell what an orchestrator sent
 // from their own dispatches. A sender no longer on the store is said by id,
 // and a dispatch nobody sent says nothing.
-func TestAWorkerSaysWhichConversationSentIt(t *testing.T) {
+func TestASentDispatcherSaysWhichConversationSentIt(t *testing.T) {
 	conv := &state.Dispatch{ID: "c1", Feature: "shop roadmap", Branchless: true}
-	worker := &state.Dispatch{ID: "w1", Feature: "cart totals", DispatchedBy: "c1"}
-	ctx := &collectCtx{records: []*state.Dispatch{conv, worker}}
+	sent := &state.Dispatch{ID: "w1", Feature: "cart totals", DispatchedBy: "c1"}
+	ctx := &collectCtx{records: []*state.Dispatch{conv, sent}}
 
-	if got := ctx.senderOf(worker); got != "shop roadmap" {
+	if got := ctx.senderOf(sent); got != "shop roadmap" {
 		t.Errorf("sender = %q, want the conversation's name", got)
 	}
 	if got := ctx.senderOf(&state.Dispatch{DispatchedBy: "gone"}); got != "gone" {

@@ -167,11 +167,11 @@ func TestAWholeProductConversationIsNamedInSentences(t *testing.T) {
 	}
 }
 
-// A conversation that took a branch is a worker from then on: its row shows
+// A conversation that took a branch is branch work from then on: its row shows
 // the branch, y is "mark shipped" once it has commits and not before, and a
 // done one counts as the ship it is. Only a dispatcher still talking is the
 // conversation "mark done" was made for.
-func TestAConversationThatTookABranchIsAWorker(t *testing.T) {
+func TestAConversationThatTookABranchIsBranchWork(t *testing.T) {
 	rec := branchlessRec("sync")
 	rec.Branch, rec.RepoName, rec.Checkout, rec.CheckoutCut = "feature/sync", "playerpulse", "/wt/sync", true
 	if got := cqRef("gh", rec); got != "feature/sync" {
@@ -195,17 +195,17 @@ func TestAConversationThatTookABranchIsAWorker(t *testing.T) {
 	}
 	rec.Status, rec.PRState = state.StatusDone, ""
 	if cqEnded(rec) != "marked shipped" || floorState(rec) != "live" {
-		t.Errorf("a shipped worker reads %q / %q", cqEnded(rec), floorState(rec))
+		t.Errorf("a shipped conversation on a branch reads %q / %q", cqEnded(rec), floorState(rec))
 	}
 	if _, live := velLiveTime(rec); !live {
-		t.Error("a shipped worker is not counted live")
+		t.Error("a shipped conversation on a branch is not counted live")
 	}
 }
 
 // Killing a conversation that cut a worktree for its work removes that
 // worktree, as a kill removes any dispatch's clean one — and never its own
 // folder, and never a worktree it only went into.
-func TestKillingAWorkerConversationRemovesTheWorktreeItCut(t *testing.T) {
+func TestKillingAConversationOnABranchRemovesTheWorktreeItCut(t *testing.T) {
 	saved := captureVars()
 	defer restoreVars(saved)
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())

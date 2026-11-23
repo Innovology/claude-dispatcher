@@ -57,7 +57,7 @@ type Entry struct {
 	Branchless bool     `json:"branchless,omitempty"`
 	Dirs       []string `json:"dirs,omitempty"`
 	// DispatchedBy is the id of the dispatcher that sent this one out — a
-	// conversation turned orchestrator — so it can find its own workers.
+	// conversation turned orchestrator — so it can find the ones it sent.
 	DispatchedBy string `json:"dispatched_by,omitempty"`
 	// RepoPath is the repo on disk — where gh and git read its PR and history.
 	RepoPath string `json:"repo_path,omitempty"`
@@ -101,6 +101,10 @@ type Entry struct {
 	// reply cannot reach. "" when Claude Code's registry does not list it.
 	Peer     string `json:"peer,omitempty"`
 	Worktree string `json:"worktree,omitempty"`
+	// Checkout is where a conversation that took a branch works: the worktree
+	// on its branch. Worktree stays its own folder, where its transcript is
+	// keyed, so without this the one place its work is on disk was unsaid.
+	Checkout string `json:"checkout,omitempty"`
 	// WaitingSince is when it stopped to wait; Note is the steward's note on
 	// that wait, if it has written one. Handled is a wait with a note: it has
 	// been looked at, and waking the steward for it again would be noise.
@@ -240,10 +244,11 @@ func runNext(out io.Writer, product string, timeout time.Duration, now func() ti
 		t := now()
 		var waiting []Entry
 		for _, e := range inProduct(Fleet(state.LoadAll(), t), product) {
-			// A branchless dispatcher is a conversation the human is having:
-			// every stop is their turn to talk, and a reply typed there would be
-			// the steward speaking for them.
-			if e.State == "wants-you" && !e.Handled && !e.Branchless {
+			// A conversation is the human's own: every stop is their turn to
+			// talk, and a reply typed there would be the steward speaking for
+			// them. One that has taken a branch is branch work like any other,
+			// and its stops are the steward's to look at.
+			if e.State == "wants-you" && !e.Handled && !e.conversation() {
 				waiting = append(waiting, e)
 			}
 		}
@@ -267,6 +272,10 @@ func runNext(out io.Writer, product string, timeout time.Duration, now func() ti
 		time.Sleep(NextPoll)
 	}
 }
+
+// conversation reports a dispatcher that started with no branch and has not
+// taken one (state.Dispatch.Conversation).
+func (e Entry) conversation() bool { return e.Branchless && e.Branch == "" }
 
 // where is the text form's repo column: the repo, or for a conversation about
 // a whole product, which names none, the product and that it spans all of it.
@@ -344,7 +353,7 @@ func Fleet(ds []*state.Dispatch, now time.Time) []Entry {
 			Parked: d.ParkedReason, PR: d.PRNumber, PRState: d.PRState, PRURL: d.PRURL,
 			Mode: d.Mode, Account: d.Account, SubagentsLive: d.SubagentsLive(),
 			LastActivity: lastActivity(d), Started: d.CreatedAt,
-			Session: d.TmuxSession, Worktree: d.WorktreePath,
+			Session: d.TmuxSession, Worktree: d.WorktreePath, Checkout: d.Checkout,
 			Peer:          peers[d.SessionID],
 			failure:       dispatch.FailureSummary(d, now),
 			WaitingSince:  d.WaitingSince,

@@ -1,7 +1,7 @@
 package fleetcmd
 
 // work.go is the two verbs a branchless conversation turns into work with
-// (dispatch/work.go): `worktree`, to become a worker on a branch of its own,
+// (dispatch/work.go): `worktree`, to go onto a branch of its own,
 // and `dispatch`, to send work out as an orchestrator. Both are run from inside
 // the conversation's own session, which is why they find their dispatcher by
 // CLAUDE_DISPATCHER_ID — the variable its launch line set — rather than asking.
@@ -62,16 +62,7 @@ func runWorktree(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// The repos it may take a branch in are the ones it was dispatched over.
-	product, focus := d.Product, ""
-	if product == "" {
-		focus = d.RepoName
-	}
-	scope, err := dispatch.ScopeOf(all, product, focus)
-	if err != nil {
-		return err
-	}
-	r, err := pickRepo(scope.Repos, *repoName)
+	r, err := pickRepoOf(d, all, *repoName)
 	if err != nil {
 		return err
 	}
@@ -83,6 +74,22 @@ func runWorktree(args []string, out io.Writer) error {
 	_, _ = fmt.Fprintf(out, "cd there: the cockpit tracks %s as %s's from now on. Commit as you go, open the PR, and fix your own CI failures.\n",
 		d.Branch, quote(d.Feature))
 	return nil
+}
+
+// pickRepoOf is the repo named among the ones d was dispatched over: its
+// product's, or, for a repo the config files under no product, that repo
+// alone. Both verbs a dispatcher runs from inside its session ask it — the
+// repos it may take a branch in, and the ones it may send work to.
+func pickRepoOf(d *state.Dispatch, all []repos.Repo, name string) (repos.Repo, error) {
+	product, focus := d.Product, ""
+	if product == "" {
+		focus = d.RepoName
+	}
+	scope, err := dispatch.ScopeOf(all, product, focus)
+	if err != nil {
+		return repos.Repo{}, err
+	}
+	return pickRepo(scope.Repos, name)
 }
 
 // pickRepo is the repo named among rs, or the only one when nothing is named.

@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,7 +61,7 @@ func TestBranchingNormalizesOntoTheDefault(t *testing.T) {
 	}
 }
 
-// A conversation starts as one and may become a worker or an orchestrator, so
+// A conversation starts as one and may go onto a branch or become an orchestrator, so
 // its contract does not forbid work: it forbids changing the human's own
 // checkouts, and sends work onto a branch first, by the verbs its CLAUDE.md
 // names. Auto's "commit as you go, open the PR" is how to carry work through
@@ -118,5 +119,38 @@ func TestAProjectFolderCoversTheCheckoutInIt(t *testing.T) {
 	want := []string{project, "/src/lib", filepath.Join(state.WorktreesDir(), "lib")}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("dirs = %v, want %v", got, want)
+	}
+}
+
+// A path that does not exist yet still resolves through the symlinks above it,
+// the way macOS reaches every temp and state dir (/var → /private/var): a
+// worktree folder not yet made inside a state dir reached through a link is
+// within it, and a checkout under a project reached through one is covered.
+func TestAPathNotMadeYetResolvesThroughTheLinkAboveIt(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	notYet := filepath.Join(real, "worktrees", "lib")
+	if !within(link, notYet) || !within(real, filepath.Join(link, "worktrees", "lib")) {
+		t.Errorf("a folder not made yet is not within the dir above it once a link is crossed")
+	}
+	if !samePath(filepath.Join(link, "worktrees", "lib"), notYet) {
+		t.Errorf("two spellings of a path not made yet are not the same path")
+	}
+	if within(link, filepath.Join(t.TempDir(), "elsewhere")) {
+		t.Errorf("a path outside the dir counts as within it")
+	}
+
+	project := filepath.Join(real, "project")
+	if err := os.MkdirAll(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := Scope{Repos: []repos.Repo{
+		{Name: "app", Path: filepath.Join(link, "project", "main"), WorktreeRoot: project},
+	}}
+	if got := s.dirs(); len(got) != 1 || got[0] != project {
+		t.Errorf("dirs = %v, want only the project folder, which holds the checkout", got)
 	}
 }

@@ -509,8 +509,9 @@ func fleetAccountLine(acct string) string {
 	return "on " + acct
 }
 
-// fleetSenderLine names the conversation that sent this worker out, which is
-// how a human reading the table tells an orchestrator's workers from their own.
+// fleetSenderLine names the conversation that sent this dispatcher out, which
+// is how a human reading the table tells what an orchestrator sent from what
+// they sent themselves.
 func fleetSenderLine(sender string) string {
 	if sender == "" {
 		return ""
