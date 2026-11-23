@@ -88,14 +88,15 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		return "", "", fmt.Errorf("%q recorded no directory to resume in", d.Feature)
 	}
 	// Same guard as Launch: one live dispatcher per slug, because the worktree
-	// path is keyed by it. Resuming into a checkout another session is working
-	// in is the collision per-dispatch worktrees exist to prevent.
+	// path is keyed by it. Resuming into a checkout of ours another session is
+	// working in is the collision per-dispatch worktrees exist to prevent; a
+	// checkout of the human's is theirs to share (liveBeside).
 	live := liveDispatch(d.Slug)
 	if live != nil && live.ID == d.ID {
 		live = nil
 	}
 	if live == nil {
-		live = liveIn(d.RepoName, d.Branch, workDir(d), d.ID)
+		live = liveBeside(d)
 	}
 	if live != nil {
 		return "", "", fmt.Errorf("%q is live in the same worktree (session %s) — kill it first",

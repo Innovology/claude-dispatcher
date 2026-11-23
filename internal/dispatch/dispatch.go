@@ -483,13 +483,35 @@ func liveDispatch(slug string) *state.Dispatch {
 // with no slug in common, whichever came first.
 func liveIn(repo, branch, path, except string) *state.Dispatch {
 	return liveWhere(func(d *state.Dispatch) bool {
-		if d.ID == except {
-			return false
-		}
-		if branch != "" && d.Branch == branch && d.RepoName == repo {
-			return true
-		}
-		return path != "" && workDir(d) != "" && samePath(workDir(d), path)
+		return d.ID != except && holds(d, repo, branch, path)
+	})
+}
+
+// holds says whether d holds branch of repo, or works in the checkout at path.
+func holds(d *state.Dispatch, repo, branch, path string) bool {
+	if branch != "" && d.Branch == branch && d.RepoName == repo {
+		return true
+	}
+	return path != "" && workDir(d) != "" && samePath(workDir(d), path)
+}
+
+// liveBeside is what refuses a resume of d: a live dispatcher other than d on
+// d's branch or in d's checkout, where either of the two may remove that
+// checkout.
+//
+// Two sessions on one branch are two sessions. The harm in sharing is the one
+// this tool causes: x or tidy on one record taking away a checkout it cut
+// while the other works in it (#89's review). A checkout neither may remove
+// (RemovableCheckout) is the human's, whether the checkout an adopted session
+// runs in or a branch's own worktree a conversation entered, and theirs to
+// share. Reported after a reboot: two orchestrators adopted in player-app's
+// main checkout, on main, had run side by side for days, and ⏎ on the second
+// one back said "kill it first", ending one conversation to reopen the other.
+func liveBeside(d *state.Dispatch) *state.Dispatch {
+	removable := d.RemovableCheckout() != ""
+	return liveWhere(func(o *state.Dispatch) bool {
+		return o.ID != d.ID && holds(o, d.RepoName, d.Branch, workDir(d)) &&
+			(removable || o.RemovableCheckout() != "")
 	})
 }
 
