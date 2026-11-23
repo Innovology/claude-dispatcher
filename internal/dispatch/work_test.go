@@ -310,3 +310,47 @@ func TestABranchOriginRetiredIsNotEntered(t *testing.T) {
 		t.Errorf("checkout %q on %q, cut %v", path, worktreeBranch(t, path), d.CheckoutCut)
 	}
 }
+
+// Killed and reopened, a conversation that cut a checkout gets it back, on the
+// branch it took, as any dispatch's worktree is rebuilt; one it went into
+// without cutting is not put back in somebody else's folder.
+func TestResumingAConversationRebuildsTheCheckoutItCut(t *testing.T) {
+	d, all := conversation(t)
+	app := all[1]
+	path, err := TakeBranch(d, app, "spike", DefaultRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, path, "commit", "--allow-empty", "-q", "-m", "work")
+	head := gitIn(t, path, "rev-parse", "HEAD")
+	d.Stop(state.StatusExited, "killed", d.CreatedAt)
+	if err := state.Save(d); err != nil {
+		t.Fatal(err)
+	}
+	if !CleanupWorktree(app.Path, path) {
+		t.Fatal("the clean worktree was not removed")
+	}
+	if _, _, err := Resume(d, ""); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if worktreeBranch(t, path) != d.Branch || gitIn(t, path, "rev-parse", "HEAD") != head {
+		t.Errorf("rebuilt %s on %q at another commit; want %s with its work", path, worktreeBranch(t, path), d.Branch)
+	}
+
+	entered := &state.Dispatch{Branchless: true, Branch: "theirs", RepoPath: app.Path, Checkout: filepath.Join(t.TempDir(), "gone")}
+	if err := rebuildTaken(entered); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(entered.Checkout); err == nil {
+		t.Error("a checkout the conversation went into was put back")
+	}
+}
+
+// A checkout that cannot be rebuilt is said, not resumed past.
+func TestACheckoutThatCannotBeRebuiltIsSaid(t *testing.T) {
+	d := &state.Dispatch{Branchless: true, CheckoutCut: true, Branch: "feature/x",
+		RepoPath: t.TempDir(), Checkout: filepath.Join(t.TempDir(), "gone")}
+	if err := rebuildTaken(d); err == nil || !strings.Contains(err.Error(), "rebuild") {
+		t.Errorf("rebuilding in a folder that is no repo: %v", err)
+	}
+}

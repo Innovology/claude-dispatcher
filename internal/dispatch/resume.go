@@ -138,16 +138,23 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// which is what makes the transcript findable again — reusing the feature
 	// branch when it still exists.
 	//
-	// A branchless dispatcher has no worktree to rebuild: its folder holds the
-	// brief and is where the transcript is keyed, so it is put back where it was
-	// and trusted again, with its brief: nothing removes it, so it is missing only
-	// when somebody deleted it, and the launch kept a copy for that.
+	// A branchless dispatcher's own folder is not a worktree: it holds the brief
+	// and is where the transcript is keyed, so it is put back where it was and
+	// trusted again, with its brief: nothing removes it, so it is missing only
+	// when somebody deleted it, and the launch kept a copy for that. The
+	// checkout it cut when it took a branch is a worktree like any dispatch's,
+	// and kill and tidy remove it like one, so it is rebuilt like one — or the
+	// session reopens on work whose folder is gone. One it went into without
+	// cutting is somebody else's, and not ours to put back.
 	if d.Branchless {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return "", "", fmt.Errorf("recreate %s: %w", dir, err)
 		}
 		restoreBrief(d.ID, dir)
 		trustOwnDir(d.ConfigDir, dir)
+		if err := rebuildTaken(d); err != nil {
+			return "", "", err
+		}
 	} else if _, err := os.Stat(dir); os.IsNotExist(err) {
 		if d.RepoPath == "" || d.Branch == "" {
 			return "", "", fmt.Errorf("%s is gone and there is not enough on the record to rebuild it", dir)
@@ -293,4 +300,22 @@ func SessionIDOf(d *state.Dispatch) string {
 	}
 	base := filepath.Base(d.TranscriptPath)
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// rebuildTaken puts back the checkout a conversation cut when it took a branch
+// (TakeBranch), if kill or tidy has removed it, on the branch it took — which
+// outlives its worktree. Nothing to do for a conversation that took nothing,
+// or for a checkout it went into rather than cut.
+func rebuildTaken(d *state.Dispatch) error {
+	if !d.CheckoutCut || d.Checkout == "" || d.Branch == "" || d.RepoPath == "" {
+		return nil
+	}
+	if _, err := os.Stat(d.Checkout); !os.IsNotExist(err) {
+		return nil
+	}
+	if _, err := ensureWorktree(d.RepoPath, d.Checkout, d.Branch, RootDefault); err != nil {
+		return fmt.Errorf("rebuild %s: %w", d.Checkout, err)
+	}
+	InheritTrustFor(d.ConfigDir, d.RepoPath, d.Checkout)
+	return nil
 }
