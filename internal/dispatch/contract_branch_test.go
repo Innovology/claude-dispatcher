@@ -61,7 +61,7 @@ func TestBranchingNormalizesOntoTheDefault(t *testing.T) {
 	}
 }
 
-// A conversation starts as one and may become a worker or an orchestrator, so
+// A conversation starts as one and may go onto a branch or become an orchestrator, so
 // its contract does not forbid work: it forbids changing the human's own
 // checkouts, and sends work onto a branch first, by the verbs its CLAUDE.md
 // names. Auto's "commit as you go, open the PR" is how to carry work through

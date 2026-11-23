@@ -1,6 +1,6 @@
 package fleetcmd
 
-// send.go is `dispatch`: a worker sent out from inside a conversation turned
+// send.go is `dispatch`: a dispatcher sent out from inside a conversation turned
 // orchestrator — or from any shell — as an ordinary dispatcher of its own.
 
 import (

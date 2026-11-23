@@ -117,7 +117,7 @@ type fleetRow struct {
 	// record: "" for the human's own login, which is every record from
 	// before accounts existed too, and says nothing.
 	account string
-	// sender is the name of the conversation that sent this worker out
+	// sender is the name of the conversation that sent this dispatcher out
 	// (state.Dispatch.DispatchedBy), or "" for one a human dispatched.
 	sender string
 	// fanOut is the dispatch form's FAN OUT switch, straight off the record:

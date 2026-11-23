@@ -114,7 +114,7 @@ type Dispatch struct {
 	Checkout    string `json:"checkout,omitempty"`
 	CheckoutCut bool   `json:"checkout_cut,omitempty"`
 	// DispatchedBy is the record id of the dispatcher that sent this one — a
-	// conversation turned orchestrator, sending out workers with
+	// conversation turned orchestrator, sending out dispatchers with
 	// `claude-dispatcher dispatch`. Empty for everything a human dispatched.
 	DispatchedBy string `json:"dispatched_by,omitempty"`
 	// WorktreePath is the dispatch's own checkout of Branch (a git worktree
@@ -391,7 +391,7 @@ func (d *Dispatch) WholeProduct() bool { return d != nil && d.Branchless && d.Re
 
 // Conversation reports a dispatcher that started with no branch and is still
 // only talking: it has not taken one (dispatch.TakeBranch). Once it has, it is
-// a worker like any other — tracked by its branch, shipped by its PR.
+// branch work like any other — tracked by its branch, shipped by its PR.
 func (d *Dispatch) Conversation() bool { return d != nil && d.Branchless && d.Branch == "" }
 
 // HoldsSessionBorn reports whether a session found at this record's address

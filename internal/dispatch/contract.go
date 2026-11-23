@@ -53,7 +53,7 @@ var contractSentences = map[Mode][]string{
 //
 // A conversation is where it starts, not where it has to stay: the point is to
 // talk about a product and then, when the talk arrives somewhere, become a
-// worker on a branch of its own or an orchestrator sending work out. So the
+// dispatcher on a branch of its own or an orchestrator sending work out. So the
 // sentence says where it is — in the human's own checkouts, shared with them and
 // with any session they started there, which it reads and never changes — and
 // that work goes onto a branch first, by the two verbs its CLAUDE.md names

@@ -2,7 +2,7 @@ package dispatch
 
 // work.go is how a conversation turns into work: the point of a branchless
 // dispatch is to start talking about a product and then, when the talk arrives
-// somewhere, become either a worker — this same session, its context intact,
+// somewhere, become either a dispatcher on a branch — this same session, its context intact,
 // on a branch of its own — or an orchestrator, sending the pieces out as
 // dispatchers of their own. A session cannot move its own launch directory,
 // and claude's EnterWorktree only enters a worktree of the repository it was
@@ -27,7 +27,7 @@ import (
 // of new work, cut as Launch cuts a feature: the repo's prefix and the name's
 // slug, from root, where the repo's layout puts a dispatch's worktree.
 //
-// From then on the record is a worker's. Branch, repo and base are set, so the
+// From then on the record is branch work. Branch, repo and base are set, so the
 // tracker finds its pull request, provenance counts its commits from here, and
 // done means live again. WorktreePath is left alone, because the transcript is
 // keyed by where the session started and Resume reopens it there.

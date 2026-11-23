@@ -53,7 +53,7 @@ type Entry struct {
 	Branchless bool     `json:"branchless,omitempty"`
 	Dirs       []string `json:"dirs,omitempty"`
 	// DispatchedBy is the id of the dispatcher that sent this one out — a
-	// conversation turned orchestrator — so it can find its own workers.
+	// conversation turned orchestrator — so it can find the ones it sent.
 	DispatchedBy string `json:"dispatched_by,omitempty"`
 	// RepoPath is the repo on disk — where gh and git read its PR and history.
 	RepoPath string `json:"repo_path,omitempty"`

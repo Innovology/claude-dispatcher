@@ -21,7 +21,8 @@ and, once a read-only version was up for review:
 
 > a conversation might end up going into a worktree/branch or creating one.
 > the point of the feature is to allow us to start a conversation about the
-> project but then evolve into either a worker or an orchestrator.
+> project but then evolve into either a [dispatcher on a branch] or an
+> orchestrator.
 
 Every dispatch cut `<prefix><slug>` in a worktree of its own, because every
 dispatch was assumed to end in a pull request, and the auto contract said so:
@@ -81,16 +82,16 @@ unchanged) or `no branch`. With none:
   When the talk turns into work, it goes onto a branch of its own or is sent
   out, and its CLAUDE.md names the two verbs, with the command that reaches
   this build:
-  - **A worker:** `claude-dispatcher worktree --repo <repo> <name>`
+  - **A dispatcher on a branch:** `claude-dispatcher worktree --repo <repo> <name>`
     (`dispatch.TakeBranch`). Given an existing branch, it goes into that
     branch's worktree, or cuts one for it. Given anything else, it cuts the
     repo's prefix and the name's slug from the root, where the repo's layout
-    puts a dispatch's worktree. The record becomes a worker's: branch, repo and
+    puts a dispatch's worktree. The record becomes branch work: branch, repo and
     base set, so the PR, provenance and done-means-live all come back, while
     its folder stays where the transcript is keyed. One branch per
     conversation, and never the canonical checkout's own.
   - **An orchestrator:** `claude-dispatcher dispatch --repo <repo> --title …`.
-    Each worker is an ordinary dispatcher, on the conversation's subscription,
+    Each one it sends is an ordinary dispatcher, on the conversation's subscription,
     recorded as sent by it (`DispatchedBy`), steered with `status` and `reply`.
 
   Both run from the conversation's own shell and find its record by the
@@ -145,10 +146,10 @@ with a space in its path, and a directory not given was denied.
   of the contract is.
 - Kill and tidy remove the worktree a conversation cut (`RemovableCheckout`),
   never one it only went into, and never its folder.
-- A worker sent from inside a session is launched with nothing of that
+- A dispatcher sent from inside a session is launched with nothing of that
   session in its environment (`ScrubSessionEnv`). A pane takes its environment
   from the client that asks for it, and Claude Code puts its session id,
   messaging socket and token, `CLAUDECODE` and the dispatcher id in its tools'
-  environment. Checked end to end: the worker's claude carried only its own id.
-- A conversation that took a branch is a worker. Its row shows the branch, `y`
+  environment. Checked end to end: the sent dispatcher's claude carried only its own id.
+- A conversation that took a branch is branch work like any other. Its row shows the branch, `y`
   is "mark shipped" once it has commits, and a done one is the ship it is.

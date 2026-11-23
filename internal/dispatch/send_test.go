@@ -8,7 +8,7 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
-// A worker sent out from inside a conversation must not start as that
+// A dispatcher sent out from inside a conversation must not start as that
 // conversation's child: every variable claude puts in its tools' environment
 // goes, and the store it was sent from stays.
 func TestScrubSessionEnvLeavesNoTraceOfTheSessionItRunsIn(t *testing.T) {

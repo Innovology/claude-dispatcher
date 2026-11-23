@@ -38,7 +38,7 @@ Usage:
   claude-dispatcher worktree --repo <repo> <branch|name>
                                from a branchless conversation: take a branch for its work
   claude-dispatcher dispatch --repo <repo> --title <words> <brief>
-                               send a worker out (from a conversation: one of its own)
+                               send a dispatcher out (from a conversation: one of its own)
   claude-dispatcher steward    switch the fleet's steward on · steward stop switches it off
                                (t on the triage table does the same)
   claude-dispatcher account    the Claude subscriptions a dispatch can run under, and what

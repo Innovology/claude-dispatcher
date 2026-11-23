@@ -374,26 +374,28 @@
   has a key of its own. It is trusted like the steward's folder, in its
   account (`TrustOwnDirFor`); the launch keeps a copy of the brief that Resume
   restores. **It starts as a conversation and can turn into work** — "start a
-  conversation about the project but then evolve into either a worker or an
-  orchestrator". The contract says the human's checkouts are read and never
-  changed, and that work goes onto a branch first. Two verbs, run from the
+  conversation about the project but then evolve into either a [dispatcher on a
+  branch] or an orchestrator". The contract says the human's checkouts are read
+  and never changed, and that work goes onto a branch first. Two verbs, run from the
   session's shell and finding its record by `CLAUDE_DISPATCHER_ID`, are named in
   its CLAUDE.md. `worktree --repo <repo> <name>` (`dispatch.TakeBranch`) makes it a
-  **worker**: it goes into an existing branch's worktree, or cuts one the
-  dispatcher's way, and the record takes the branch, repo and base, so the PR,
+  **dispatcher on a branch**: it goes into an existing branch's worktree, or cuts
+  one the dispatcher's way, and the record takes the branch, repo and base, so the PR,
   provenance and done-means-live return. One branch, never the canonical
   checkout's own. `dispatch --repo … --title …` makes it an **orchestrator**: an
-  ordinary worker on its subscription, `DispatchedBy` it, "sent by" on its row,
+  ordinary dispatcher on its subscription, `DispatchedBy` it, "sent by" on its
+  row,
   launched with the session's own variables scrubbed (`ScrubSessionEnv`),
   because a pane inherits its client's environment and Claude Code's session
-  id, socket and `CLAUDECODE` would make the worker its child. A session cannot
+  id, socket and `CLAUDECODE` would make the one it sends its child. A session
+  cannot
   move its launch directory, and claude's EnterWorktree only enters its launch
   repo's worktrees, which is why these are our verbs. Every repo's worktree
   folder is given beside its checkout, so a cut worktree is workable without
   asking; kill and tidy remove what it cut (`RemovableCheckout`), never what it
   went into. `Conversation()` (branchless, no branch yet) is what "mark done"
-  and the not-a-ship rules key on; a conversation that took a branch is a
-  worker. It
+  and the not-a-ship rules key on; a conversation that took a branch is
+  branch work like any other. It
   borrows server, shell and toolchain from its focus repo. A whole-product one
   gets a server **named for the product**, because no `-L` follows `$TMUX` and it
   landed on the cockpit's own server. `--add-dir` goes **after** the prompt: it is
@@ -1394,7 +1396,7 @@
   prompt; `trust.go` copies a repo's trust onto its worktree.
   `branching.go` is BRANCH, and `branchless.go` the dispatch that cuts
   none: a conversation across a product, in a folder of its own (ADR 0033);
-  `work.go` is how it takes a branch and `send.go` how it sends workers out.
+  `work.go` is how it takes a branch and `send.go` how it sends dispatchers out.
 - `internal/supervisor` — the session backend behind one interface: tmux on
   Unix, a console window per session on Windows. A session is addressed by
   `Session` (socket + name), never by name alone.

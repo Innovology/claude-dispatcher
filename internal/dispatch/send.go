@@ -1,7 +1,7 @@
 package dispatch
 
 // send.go is the orchestrator half of a conversation turning into work (see
-// work.go): what `claude-dispatcher dispatch` needs to send a worker out from
+// work.go): what `claude-dispatcher dispatch` needs to send a dispatcher out from
 // inside a session and leave the cockpit knowing who sent it.
 
 import (
@@ -12,8 +12,8 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
-// MarkDispatchedBy records on the worker id that parent sent it, under the
-// hook lock, for the reason markSessionStarted reloads: the worker's own hooks
+// MarkDispatchedBy records on the dispatcher id that parent sent it, under the
+// hook lock, for the reason markSessionStarted reloads: the sent one's own hooks
 // may already have written its record.
 func MarkDispatchedBy(id, parent string) error {
 	if id == "" || parent == "" {
@@ -33,7 +33,7 @@ func MarkDispatchedBy(id, parent string) error {
 // ScrubSessionEnv removes from this process the variables a Claude Code
 // session puts in its tools' environment, before this process starts another
 // session. A pane takes its environment from the client that asked for it (ADR
-// 0014), and a worker sent out from inside a conversation would otherwise start
+// 0014), and a dispatcher sent out from inside a conversation would otherwise start
 // as that conversation's child — its session id, its messaging socket, its
 // dispatcher id, its account (CLAUDE_CONFIG_DIR, which the launch line sets
 // only when the account is not the default). CLAUDE_DISPATCHER_STATE is kept:

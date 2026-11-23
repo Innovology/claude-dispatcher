@@ -1,7 +1,7 @@
 package fleetcmd
 
 // work.go is the two verbs a branchless conversation turns into work with
-// (dispatch/work.go): `worktree`, to become a worker on a branch of its own,
+// (dispatch/work.go): `worktree`, to go onto a branch of its own,
 // and `dispatch`, to send work out as an orchestrator. Both are run from inside
 // the conversation's own session, which is why they find their dispatcher by
 // CLAUDE_DISPATCHER_ID — the variable its launch line set — rather than asking.

@@ -44,7 +44,7 @@ func portfolio(t *testing.T) []repos.Repo {
 
 // From inside a conversation, `worktree` takes a branch in one of its repos
 // and says where to go: the session finds its own record by the variable its
-// launch line set, and the record is a worker's from then on.
+// launch line set, and the record is branch work from then on.
 func TestWorktreeTakesABranchFromInsideTheConversation(t *testing.T) {
 	all := portfolio(t)
 	t.Setenv("HOME", t.TempDir())

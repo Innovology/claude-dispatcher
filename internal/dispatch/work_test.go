@@ -29,8 +29,8 @@ func conversation(t *testing.T) (*state.Dispatch, []repos.Repo) {
 }
 
 // The conversation arrives at work and takes a branch for it: cut the way a
-// dispatch's is, where the repo's layout puts one, and the record becomes a
-// worker's — its branch, repo and base set so the tracker and provenance find
+// dispatch's is, where the repo's layout puts one, and the record becomes
+// branch work — its branch, repo and base set so the tracker and provenance find
 // it — while its folder, where the transcript is keyed, stays put.
 func TestAConversationTakesABranchForNewWork(t *testing.T) {
 	d, all := conversation(t)
@@ -55,7 +55,7 @@ func TestAConversationTakesABranchForNewWork(t *testing.T) {
 	if d.WorktreePath != home || d.Conversation() || d.RemovableCheckout() != path {
 		t.Errorf("folder %q (want %q), conversation %v, removable %q", d.WorktreePath, home, d.Conversation(), d.RemovableCheckout())
 	}
-	// It is on disk, not just in memory: the next load sees the worker.
+	// It is on disk, not just in memory: the next load sees the branch.
 	for _, rec := range state.LoadAll() {
 		if rec.ID == d.ID && rec.Branch != d.Branch {
 			t.Errorf("saved branch %q, want %q", rec.Branch, d.Branch)

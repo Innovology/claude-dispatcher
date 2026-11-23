@@ -16,11 +16,11 @@ import (
 	"claude-dispatcher/internal/state"
 )
 
-// `dispatch` from inside a conversation sends a worker of its own: on the
+// `dispatch` from inside a conversation sends a dispatcher of its own: on the
 // conversation's subscription, recorded as sent by it, and launched with
 // nothing of the conversation's session left in its environment — a pane takes
 // its environment from whoever asks for it.
-func TestDispatchSendsAWorkerOfTheConversationsOwn(t *testing.T) {
+func TestDispatchSendsADispatcherOfTheConversationsOwn(t *testing.T) {
 	portfolio(t)
 	withStore(t, &state.Dispatch{ID: "c1", Feature: "talk", Product: "pp", Branchless: true, Account: "work",
 		Status: state.StatusWorking})
@@ -51,15 +51,15 @@ func TestDispatchSendsAWorkerOfTheConversationsOwn(t *testing.T) {
 		t.Errorf("launched %+v", asked)
 	}
 	if asked.acct.Name != "work" {
-		t.Errorf("worker runs on %q, want the conversation's account", asked.acct.Name)
+		t.Errorf("the sent dispatcher runs on %q, want the conversation's account", asked.acct.Name)
 	}
 	for _, kv := range asked.env {
 		if strings.HasPrefix(kv, "CLAUDECODE=") || strings.HasPrefix(kv, "CLAUDE_CODE_SESSION_ID=") || strings.HasPrefix(kv, "CLAUDE_DISPATCHER_ID=") {
-			t.Errorf("the worker was launched carrying the conversation's %s", kv)
+			t.Errorf("the sent dispatcher was launched carrying the conversation's %s", kv)
 		}
 	}
 	if w, _ := find("w1"); w == nil || w.DispatchedBy != "c1" {
-		t.Errorf("worker = %+v, want it recorded as sent by c1", w)
+		t.Errorf("sent = %+v, want it recorded as sent by c1", w)
 	}
 	if !strings.Contains(out.String(), `dispatched "sync" → api on feature/sync · id w1`) {
 		t.Errorf("output: %s", out.String())
