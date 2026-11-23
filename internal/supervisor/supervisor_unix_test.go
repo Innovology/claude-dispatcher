@@ -67,6 +67,9 @@ func TestNonMutatingCallsAreSafe(t *testing.T) {
 	if got := Sessions("definitely-not-a-real-socket-xyz"); len(got) != 0 {
 		t.Errorf("Sessions(dead socket) = %v, want none", got)
 	}
+	if got := ServerPIDs("definitely-not-a-real-socket-xyz"); got != nil {
+		t.Errorf("ServerPIDs(dead socket) = %v, want nothing", got)
+	}
 	// EnsureBackKey and EnsureFocusEvents are left out on purpose: they bind a
 	// key and set an option on the default server, which on a developer's
 	// machine is their own tmux.
@@ -184,6 +187,11 @@ func TestASessionsLifeOnItsOwnServer(t *testing.T) {
 	}
 	if pids := SessionPIDs(s); len(pids) == 0 || pids[0] <= 0 {
 		t.Errorf("SessionPIDs = %v, want the pane's process first", pids)
+	}
+	// And the whole server answers with the same list, keyed by the session's
+	// name: Resume asks every session at once whether one runs its conversation.
+	if byName := ServerPIDs(sock); !slices.Equal(byName[s.Name], SessionPIDs(s)) {
+		t.Errorf("ServerPIDs(%q)[%s] = %v, SessionPIDs says %v", sock, s.Name, byName[s.Name], SessionPIDs(s))
 	}
 	// A taken name gets a suffix, on the server that has it.
 	if got := UniqueName(s); got != s.Name+"-2" {

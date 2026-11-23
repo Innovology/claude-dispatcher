@@ -264,6 +264,9 @@ type model struct {
 	// in a load's time. Every entry is retired by the snapshot that reads it
 	// back — see fleetNow and cqReconcile.
 	fleetDismissed map[string]bool
+	// resuming is the records a resume has been fired for and not yet come
+	// back from (startResume): a second ⏎ on one of them starts nothing.
+	resuming map[string]bool
 
 	cqFlash     string // an act's confirmation, held on screen for cqFlashLinger
 	cqFlashKeep bool   // the flashing act did not clear the item (attach)
@@ -348,6 +351,7 @@ func newModel() model {
 		clExpanded:     map[string]bool{},
 		cqSuppressed:   map[string]bool{},
 		fleetDismissed: map[string]bool{},
+		resuming:       map[string]bool{},
 		sessionMarked:  map[string]bool{},
 		// How this build was installed cannot change while it runs, so it is
 		// read once here rather than from the footer, which redraws on every
@@ -635,6 +639,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return mm, load
 
 	case resumedMsg:
+		delete(m.resuming, msg.id)
 		// The resumed session is the thing the human asked for, so they land in
 		// it — the same handover "jump in" does.
 		if mm, cmd := m.attachSession(msg.session, msg.env); cmd != nil {

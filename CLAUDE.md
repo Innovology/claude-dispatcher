@@ -185,6 +185,39 @@
   distro shuts down with its last console and takes tmux with it; a suspended
   laptop or a reboot makes the same row anywhere. The full record is
   `docs/adr/0004-a-ghost-cannot-clear-itself.md`.
+- **A conversation runs in one session, and the machine says where.**
+  Reported after a hard reboot as "a mismatch between what the sessions think
+  and what i see", with a socket mismatch as the guess. The socket was right:
+  `tmux -L player-app` held `disp-one-button-production-publish` and its `-2`,
+  each running `claude --resume 7c4eb271…` in the same worktree, 23 seconds
+  apart. The record followed the `-2`, both claudes reported to it and wrote
+  the one transcript, and they found each other over Claude Code's messaging
+  and settled between them which one ran the CI. Resume judged "still
+  running?" by the session the record names, and the cockpit handed it the
+  snapshot's copy. The first ⏎ resumed under `nix develop` (~20s); a cold
+  load that had read the records before that resume saved landed after it
+  and put the row back to "finished · ⏎ resume"; the second ⏎ resumed the
+  pre-resume copy, to which the new session was "a younger one that has
+  taken the name", so it took `-2`. So **Resume asks the machine**:
+  `dispatch.ConversationSessions` lists every session on the record's server
+  whose processes include a claude on its conversation (one
+  `list-panes -a` and one process-table read, `supervisor.ServerPIDs`; Claude
+  Code's registry as adoption reads it, also under the record's account dir,
+  else the transcript held open). Found, it starts nothing and returns
+  `ResumeLive` there. The record is pointed at that session when its name is
+  one a launch would give (`disp-<slug>[-N]`), its address only, on disk
+  under the hook lock (`state.Load`), so a stale copy is never saved back over
+  the hooks; a human's session on the same server is attached to and left
+  theirs. **One resume per record at a time** (`state.TryLock`, a flock under
+  `state/locks/`), refused with `ErrResuming` rather than queued, because the
+  scan cannot see a claude that `nix develop` has not started yet. The
+  cockpit resumes the record **on disk** (`resumeCmd`, as `swapCmd` already
+  did), a second ⏎ while one is in flight starts nothing (`startResume`), and
+  attaching names any twin ("also running in … — end the one you do not
+  want") without ending either. Every resume is audited (`Resumed`: started,
+  live, relaunched, or failed, and where). The scan covers the record's own
+  server only; the Windows console backend has no process tree for it. Full
+  record: `docs/adr/0035-a-conversation-runs-in-one-session.md`.
 - **The newest answer wins, not the last one back.** A dispatch went on the
   table and vanished seconds later — sometimes returning, sometimes not, and
   on an empty fleet leaving the blank dispatch form, which reads as "that did
@@ -1448,8 +1481,9 @@
   and `statusline` (the usage recorder every account runs).
 - `internal/state` — dispatch records, the event log (lifecycle hooks plus the
   dispatch audit), `prompts/<id>.txt`, the prompt each dispatch is launched
-  with, `output/<id>.txt`, what a session start that failed printed, and
-  `branchless/<slug>-<id>/`, a branchless dispatch's folder, under
+  with, `output/<id>.txt`, what a session start that failed printed,
+  `branchless/<slug>-<id>/`, a branchless dispatch's folder, and `locks/`, one
+  per record ever resumed (`TryLock`, ADR 0035), under
   `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
 - `internal/keymap` — every action the cockpit has (id, scope, default key,
   help line), `[keys]` overrides, and the collision rules. `?` is built from it.
@@ -1500,7 +1534,9 @@
   the human started (ADR 0026) and `brief.go` is the convention it is then
   sent; `swap.go` moves a conversation to another
   account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup
-  prompt; `trust.go` copies a repo's trust onto its worktree. `goal.go`
+  prompt; `trust.go` copies a repo's trust onto its worktree; `conversation.go`
+  is where on its server a record's conversation is running, which Resume
+  asks before it starts a claude (ADR 0035). `goal.go`
   is DONE WHEN as the prompt says it and the record reads it back; `peer.go` is
   the name each live Claude session goes by, from Claude Code's registry.
   `branching.go` is BRANCH, and `branchless.go` the dispatch that cuts

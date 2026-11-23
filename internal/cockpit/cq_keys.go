@@ -179,7 +179,7 @@ func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
 		// decided which from the record, so the act's own verb is the answer.
 		if r.kind == "past" || r.kind == "done" ||
 			(r.kind == "parked" && a.d == "resume") {
-			return m, resumeCmd(r.id, "")
+			return m.startResume(r.id, r.feature, "")
 		}
 		return m.attach(r.feature)
 	case "p":

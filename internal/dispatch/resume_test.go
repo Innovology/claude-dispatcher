@@ -20,19 +20,26 @@ type stubSupervisor struct {
 	alive map[string]bool
 	// born is when each live session was created, where a test says; a
 	// session with none listed is one whose creation the backend cannot say.
-	born    map[string]time.Time
-	idle    bool
-	known   bool
+	born  map[string]time.Time
+	idle  bool
+	known bool
+	// pids is what runs in each session, for the scan that asks whether a
+	// conversation is already running; nil is a server running nothing.
+	pids map[string][]int
+	// home is the HOME and /proc of the test's own that claudeIn puts the
+	// registry under, made on first use.
+	home    string
 	killed  []string
 	started struct{ name, socket, dir, cmd, env string }
 }
 
 func stubSessions(t *testing.T, s *stubSupervisor) {
 	t.Helper()
-	pAlive, pIdle, pKill, pUniq, pNew, pList := sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList
+	pAlive, pIdle, pKill, pUniq, pNew, pList, pPIDs := sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList, serverPIDs
 	t.Cleanup(func() {
-		sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList = pAlive, pIdle, pKill, pUniq, pNew, pList
+		sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList, serverPIDs = pAlive, pIdle, pKill, pUniq, pNew, pList, pPIDs
 	})
+	serverPIDs = func(string) map[string][]int { return s.pids }
 	sessionAlive = func(sess supervisor.Session) bool { return s.alive[sess.Name] }
 	sessionList = func(socket string) []supervisor.SessionInfo {
 		var out []supervisor.SessionInfo

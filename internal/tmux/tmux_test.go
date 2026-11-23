@@ -282,6 +282,48 @@ func TestASessionListCarriesWhenEachSessionWasMade(t *testing.T) {
 	}
 }
 
+// Every pane of every session, grouped by the session it is in: a session with
+// two windows is two roots, and a name holding a tab is read whole because the
+// pid is taken off the end.
+func TestPanePIDsAreGroupedBySession(t *testing.T) {
+	got := parsePanePIDs("disp-a\t101\ndisp-a\t102\r\ndisp-a-2\t201\nodd\tname\t301\n\nno-pid\t\nbad\tx\n\t401\n")
+	want := map[string][]int{
+		"disp-a":    {101, 102},
+		"disp-a-2":  {201},
+		"odd\tname": {301},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("parsePanePIDs = %v, want %v", got, want)
+	}
+}
+
+// Asked of a real server, every session answers with its pane's own process
+// first and what runs under it after: the same list SessionPIDs gives for one.
+func TestARealServerListsWhatRunsInEachSession(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	srv := Server{Socket: "disp-test-pids-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	for _, name := range []string{"one", "two"} {
+		if err := srv.NewSession(name, t.TempDir(), "sleep 30", ""); err != nil {
+			t.Fatalf("NewSession %s: %v", name, err)
+		}
+	}
+	got := srv.PIDsBySession()
+	if len(got) != 2 {
+		t.Fatalf("PIDsBySession = %v, want both sessions", got)
+	}
+	for _, name := range []string{"one", "two"} {
+		if want := srv.SessionPIDs(name); len(want) == 0 || !reflect.DeepEqual(got[name], want) {
+			t.Errorf("%s: PIDsBySession has %v, SessionPIDs says %v", name, got[name], want)
+		}
+	}
+	if (Server{Socket: "disp-test-pids-none-" + itoa(os.Getpid())}).PIDsBySession() != nil {
+		t.Error("a server that is not running answered with sessions")
+	}
+}
+
 // The report: on a machine whose tmux.conf makes nu the default shell, every
 // dispatch sat at "starting session" for good. Handed one argument, tmux runs a
 // pane's command through default-shell, nu could not parse the POSIX launch

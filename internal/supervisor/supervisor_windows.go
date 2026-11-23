@@ -266,6 +266,9 @@ func KnowShell(shell string) {}
 // log, which is platform-independent.
 func SessionPIDs(sess Session) []int { return nil }
 
+// ServerPIDs has no console-window answer either, for the same reason.
+func ServerPIDs(socket string) map[string][]int { return nil }
+
 // AttachSwitches is true here for the same reason it is true inside tmux: the
 // Windows handover raises the session's own console window and returns at once,
 // so the human is over there and this command's exit is not their return. The

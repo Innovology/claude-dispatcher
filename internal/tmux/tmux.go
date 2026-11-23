@@ -389,6 +389,51 @@ func (s Server) SessionPIDs(name string) []int {
 	return append(roots, descendants(roots, childTable())...)
 }
 
+// PIDsBySession is SessionPIDs for every session on the server at once: each
+// session's name, with every process running in its panes. One list-panes and
+// one read of the process table, however many sessions there are, because the
+// question it serves — "is this conversation already running somewhere on
+// this server?" — has to ask all of them.
+//
+// A server that is not running answers nothing, and so does an unreadable
+// process table past the panes' own processes: the same best-effort rule.
+func (s Server) PIDsBySession() map[string][]int {
+	out, err := s.cmd("list-panes", "-a", "-F", "#{session_name}\t#{pane_pid}").Output()
+	if err != nil {
+		return nil
+	}
+	roots := parsePanePIDs(string(out))
+	if len(roots) == 0 {
+		return nil
+	}
+	kids := childTable()
+	all := make(map[string][]int, len(roots))
+	for name, pids := range roots {
+		all[name] = append(pids, descendants(pids, kids)...)
+	}
+	return all
+}
+
+// parsePanePIDs reads list-panes -a output of name<TAB>pane_pid into each
+// session's pane processes. The pid is taken off the END, so a session name
+// holding a tab of its own is still read whole.
+func parsePanePIDs(out string) map[string][]int {
+	roots := map[string][]int{}
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimRight(ln, "\r")
+		i := strings.LastIndexByte(ln, '\t')
+		if i <= 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(ln[i+1:]))
+		if err != nil || pid <= 0 {
+			continue
+		}
+		roots[ln[:i]] = append(roots[ln[:i]], pid)
+	}
+	return roots
+}
+
 // childTable is the process table as parent → children, nil when it could not
 // be read. One read, because a session's panes are asked about together.
 //

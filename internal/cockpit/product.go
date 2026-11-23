@@ -714,16 +714,18 @@ func (m model) updateProduct(k string) (model, tea.Cmd) {
 			// the same feature — which does need a prompt, and says so rather
 			// than announcing a dispatch it did not make.
 			if t.resumable() {
-				m.notice = "resuming \"" + t.feature + "\"…"
-				return m, resumeCmd(t.id, text)
+				return m.startResume(t.id, t.feature, text)
 			}
 			// A branchless record is a conversation, and a fresh dispatch
 			// would cut a branch for it — or, about a whole product, fail on a
 			// repo it never had. Resume starts one that never ran again from
 			// its own prompt, in its own folder, with this line after it.
 			if rec := recordByID(t.id); rec != nil && rec.Branchless {
-				m.notice = "starting \"" + t.feature + "\" again…"
-				return m, resumeCmd(t.id, text)
+				mm, cmd := m.startResume(t.id, t.feature, text)
+				if cmd != nil {
+					mm.notice = "starting \"" + t.feature + "\" again…"
+				}
+				return mm, cmd
 			}
 			if text == "" {
 				m.notice = "nothing to dispatch — type what to change"
