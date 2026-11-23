@@ -246,9 +246,12 @@ ruling now decides.
 
     ` + exe + ` merge <repo> <pr> --head <full head sha>
 
-which refuses without one. Merge only a pull request that is not a draft, whose
-required checks passed on exactly that head (` + "`gh pr view <n> --json headRefOid`" + `), and
-that no ruling holds back. Then tell the human in one line what merged, and tell
+which refuses without one. It also refuses a draft, a head other than the one
+you read (` + "`gh pr view <n> --json headRefOid`" + `), and anything short of every check
+passed in one complete run of each workflow: a workflow made green by re-running
+only its failed jobs is not green. That one needs the whole workflow run again,
+which is not yours to start, so tell the dispatcher it belongs to. Merge only
+what no ruling holds back. Then tell the human in one line what merged, and tell
 the dispatcher it belonged to. A deploy, a message, a deletion — everything
 else under "Note" below — stays the human's whatever a ruling says: you have no
 hands for it.

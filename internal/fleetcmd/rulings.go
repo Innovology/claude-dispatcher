@@ -223,6 +223,9 @@ func runMerge(args []string, out io.Writer) error {
 	if dir == "" {
 		return fmt.Errorf("no repo %q under the configured roots", repoName)
 	}
+	if err := readyToMerge(dir, pr, *head); err != nil {
+		return fmt.Errorf("not merging: %w", err)
+	}
 	msg, err := ghMerge(dir, "pr", "merge", strconv.Itoa(pr), "--"+*method, "--match-head-commit", *head)
 	if err != nil {
 		return fmt.Errorf("gh refused the merge: %s", firstLine(msg, err))

@@ -15,8 +15,32 @@ import (
 
 const head = "0123456789abcdef0123456789abcdef01234567"
 
+// greenView is gh's account of a pull request on head with every check passed.
+func greenView(head string) string {
+	return `{"isDraft":false,"headRefOid":"` + head + `","statusCheckRollup":[` +
+		`{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"SUCCESS"},` +
+		`{"__typename":"CheckRun","name":"upload","status":"COMPLETED","conclusion":"SKIPPED"},` +
+		`{"__typename":"StatusContext","context":"ci/legacy","state":"SUCCESS"}]}`
+}
+
+// withForge answers merge's reads from a table keyed by gh's first two words
+// (and the api path for an api call).
+func withForge(t *testing.T, answers map[string]string) {
+	t.Helper()
+	pr := ghRead
+	t.Cleanup(func() { ghRead = pr })
+	ghRead = func(_ string, args ...string) (string, error) {
+		key := args[0] + " " + args[1]
+		if out, ok := answers[key]; ok {
+			return out, nil
+		}
+		return "gh: not stubbed: " + key, errors.New("exit 1")
+	}
+}
+
 func withMerge(t *testing.T) *[]string {
 	t.Helper()
+	withForge(t, map[string]string{"pr view": greenView(head), "run list": "[]"})
 	pd, pg := discoverRepos, ghMerge
 	t.Cleanup(func() { discoverRepos, ghMerge = pd, pg })
 	discoverRepos = func(*config.Config) []repos.Repo {
@@ -176,6 +200,62 @@ func TestARulingsFlagsEndWhereItsTextBegins(t *testing.T) {
 	// A word that only looks like a flag is text.
 	if code := Run("ruling", []string{"add", "--product", "tools", "hold", "--force-pushes", "and", "-1", "days"}, &out, &errOut); code != 0 {
 		t.Fatalf("add: %s", errOut.String())
+	}
+}
+
+// Found in review: merge checked nothing about the pull request, so under a
+// standing ruling a red one merged in a repo with no required checks. It is held
+// to green now — and green is one complete run, not one stitched together from
+// re-running only the failed jobs.
+func TestMergeHoldsThePullRequestToGreen(t *testing.T) {
+	withStore(t)
+	calls := withMerge(t)
+	if _, err := steward.AddRuling("player", steward.Ruling{Text: "merge greens", Allow: []string{steward.AllowMerge}, AnyPR: true}); err != nil {
+		t.Fatal(err)
+	}
+	moved := strings.Repeat("f", 40)
+	view := func(rollup string) string {
+		return `{"isDraft":false,"headRefOid":"` + head + `","statusCheckRollup":[` + rollup + `]}`
+	}
+	const run = `[{"databaseId":7,"attempt":2,"workflowName":"CI"},{"databaseId":5,"attempt":1,"workflowName":"CodeQL"},{"databaseId":3,"attempt":1,"workflowName":"CI"}]`
+	partial := map[string]string{"pr view": greenView(head), "run list": run,
+		"api repos/{owner}/{repo}/actions/runs/7/attempts/2":                   "2026-09-17T13:50:18Z",
+		"api repos/{owner}/{repo}/actions/runs/7/attempts/2/jobs?per_page=100": `{"jobs":[{"name":"test","started_at":"2026-09-17T13:50:22Z"},{"name":"lint","started_at":"2026-09-17T13:46:36Z"}]}`}
+	for name, c := range map[string]struct {
+		answers map[string]string
+		says    string
+	}{
+		"draft":        {map[string]string{"pr view": `{"isDraft":true,"headRefOid":"` + head + `"}`}, "is a draft"},
+		"head moved":   {map[string]string{"pr view": `{"isDraft":false,"headRefOid":"` + moved + `"}`}, "read them again"},
+		"no checks":    {map[string]string{"pr view": view("")}, "no checks ran"},
+		"failing":      {map[string]string{"pr view": view(`{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"FAILURE"}`)}, "test on #931 is failure"},
+		"running":      {map[string]string{"pr view": view(`{"__typename":"CheckRun","name":"test","status":"IN_PROGRESS"}`)}, "has not finished (in_progress)"},
+		"red status":   {map[string]string{"pr view": view(`{"__typename":"StatusContext","context":"ci/legacy","state":"PENDING"}`)}, "ci/legacy on #931 is pending"},
+		"unreadable":   {map[string]string{}, "could not read #931"},
+		"partial":      {partial, "re-ran only some jobs and kept lint"},
+		"runs unknown": {map[string]string{"pr view": greenView(head)}, "could not read #931's workflow runs"},
+	} {
+		withForge(t, c.answers)
+		var out, errOut bytes.Buffer
+		if code := Run("merge", []string{"player-app", "931", "--head", head}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), c.says) {
+			t.Errorf("%s: code %d, said %q", name, code, errOut.String())
+		}
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("gh merged what was not green: %v", *calls)
+	}
+	// The same workflow run again in full: every job started in the attempt
+	// that passed, and an older partial run of it no longer decides anything.
+	whole := map[string]string{"pr view": greenView(head), "run list": run,
+		"api repos/{owner}/{repo}/actions/runs/7/attempts/2":                   "2026-09-17T13:50:18Z",
+		"api repos/{owner}/{repo}/actions/runs/7/attempts/2/jobs?per_page=100": `{"jobs":[{"name":"test","started_at":"2026-09-17T13:50:22Z"},{"name":"lint","started_at":"2026-09-17T13:50:18Z"}]}`}
+	withForge(t, whole)
+	var out, errOut bytes.Buffer
+	if code := Run("merge", []string{"player-app", "931", "--head", head}, &out, &errOut); code != 0 {
+		t.Fatalf("a whole re-run that passed was refused: %s", errOut.String())
+	}
+	if len(*calls) != 1 {
+		t.Fatalf("calls = %v", *calls)
 	}
 }
 
