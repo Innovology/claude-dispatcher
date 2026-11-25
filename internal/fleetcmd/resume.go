@@ -102,7 +102,7 @@ func resumeArgs(args []string) (keys []string, say string, err error) {
 func resumeLine(r dispatch.ResumeResult, say string) (string, bool) {
 	switch {
 	case r.Err != nil:
-		return quote(r.Feature) + " did not resume: " + firstLine(r.Err.Error()), false
+		return quote(r.Feature) + " did not resume: " + reasonLine(r.Err.Error()), false
 	case r.Mode == dispatch.ResumeLive:
 		line := quote(r.Feature) + " is still running · session " + r.Session
 		if say != "" {
@@ -146,7 +146,8 @@ func findAny(all []*state.Dispatch, key string) (*state.Dispatch, error) {
 	return nil, fmt.Errorf("%q names %d dispatchers — use an id: %s", key, len(hits), strings.Join(ids, ", "))
 }
 
-func firstLine(s string) string {
+// reasonLine is the first line of an error, which is its cause (internal/cause).
+func reasonLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i]
 	}
