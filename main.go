@@ -42,6 +42,9 @@ Usage:
   claude-dispatcher swap <id|feature> <account>
                                move a dispatcher onto another subscription and resume
                                its conversation there (a on its row in the cockpit)
+  claude-dispatcher resume <id|feature>... [--say "message"]
+                               reopen finished dispatchers, several at once, nothing
+                               attached (space marks rows in the cockpit, R resumes them)
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -70,7 +73,7 @@ func main() {
 		}
 	case "steward":
 		os.Exit(runSteward(args[1:]))
-	case "status", "reply", "park", "unpark", "note", "tidy", "swap":
+	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "resume":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet — see internal/fleetcmd.
 		os.Exit(fleetcmd.Run(args[0], args[1:], os.Stdout, os.Stderr))
