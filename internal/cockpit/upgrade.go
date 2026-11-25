@@ -318,6 +318,7 @@ func (m model) inputPending() bool {
 		m.confirm != nil ||
 		m.parkOpen ||
 		m.replyOpen ||
+		m.manyOpen ||
 		m.swapOpen ||
 		m.adoptOpenInput ||
 		m.paletteOpen ||

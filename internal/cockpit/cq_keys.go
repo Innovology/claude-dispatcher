@@ -151,7 +151,9 @@ func (m model) cqReconcile() model {
 	if m.cqUndo != nil && !m.cqSuppressed[m.cqUndo.id] {
 		m.cqUndo = nil
 	}
-	return m
+	// A mark is for R, and R resumes; a row that can no longer be resumed —
+	// brought back some other way, or gone — has nothing left to mark.
+	return m.manyPrune()
 }
 
 // ---- acting -----------------------------------------------------------------
@@ -177,8 +179,7 @@ func (m model) cqRun(r fleetRow, a cqAct) (model, tea.Cmd) {
 		// belong to several finished dispatchers. A parked row can be either —
 		// its session survives a park but not a reboot — and cqActs already
 		// decided which from the record, so the act's own verb is the answer.
-		if r.kind == "past" || r.kind == "done" ||
-			(r.kind == "parked" && a.d == "resume") {
+		if cqResumesOn(r, a) {
 			return m, resumeCmd(r.id, "")
 		}
 		return m.attach(r.feature)
@@ -266,7 +267,7 @@ func isLensDigit(k string) bool { return len(k) == 1 && k[0] >= '1' && k[0] <= '
 // updateFloorQueue is the triage lens's whole key surface. handled is false only
 // for the keys allowed to leave this screen (the lens digits, ':', ctrl+z, '?',
 // 'q'), which handleKey then routes as usual; nothing else escapes, because the
-// v2 list keys (/, space, F, D, tab, r, t, M, p) went with the list.
+// v2 list keys (/, F, D, tab, r, t, M, p) went with the list.
 func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 	// A flash is a promise that something happened. Nothing gets through it —
 	// including undo, which would otherwise race the cqUndo the flash is about
@@ -356,6 +357,15 @@ func (m model) updateFloorQueue(k string) (model, tea.Cmd, bool) {
 			m = m.fleetSetFilter(fleetFilters[0])
 		}
 		return m.dxOpen(""), accountsCmd(m.cfg), true
+	case "space":
+		// Marks are for R (resumemany.go), and like it they are about the
+		// table rather than one row's act: R reads them wherever they are,
+		// here or in history.
+		return m.fleetMark(), nil, true
+	case "R":
+		return m.manyOpenFor(), nil, true
+	case "esc":
+		return m.fleetUnmarkAll(), nil, true
 	}
 
 	if r, ok := m.fleetSel(); ok {

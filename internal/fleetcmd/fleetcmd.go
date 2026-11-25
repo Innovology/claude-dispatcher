@@ -113,6 +113,8 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runTidy(args, out)
 	case "swap":
 		err = runSwap(args, out)
+	case "resume":
+		err = runResume(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}

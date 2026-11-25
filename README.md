@@ -108,6 +108,7 @@ Every act the table offers is wired to the live session — the key hints show o
 - **`p`** park an ask you cannot answer right now — say why, and it drops to a **parked** group at the bottom of the fleet, out of the counts, with your reason on the row. `p` again brings it back, and so does answering it: the shelf clears itself the moment a prompt reaches the session. It survives reboots — a parked dispatcher whose session died resumes from its own row
 - **`d`** open the prompt · **`f`** filter the table · **`enter` on a backlog ticket** dispatches it
 - **`h`** the dispatchers that have ended and left the table, **newest-worked first**, and **`enter`** on one resumes its session — `claude --resume` on the same transcript, in the same worktree, so it comes back knowing what it already did. The order is when each was last *worked*, read from its own transcript, never when its record was last written: a finished record goes on being rewritten for the rest of its life by sweeps and forge reconciliation, and ordering by that puts whatever we last touched at the top
+- **`space`** marks a dispatcher whose session is over — on the table or in history — and **`R`** resumes every marked one at once without jumping into any (with nothing marked, the row under the cursor): after a reboot, that is the fleet back in one go instead of one jump-in each. Type one line to say to each of them — `continue`, say — or nothing to just reopen them. Each comes back in its own worktree on the account it ran on, the rows turn as they land, and one that would not come back keeps its mark and says why on its row; `esc` clears the marks. From a shell: `claude-dispatcher resume <id|feature>… [--say "…"]`
 
 ## Install
 
@@ -348,6 +349,7 @@ Anything unmapped is grouped under `unassigned`, which is what a fresh install s
 | `j` / `k` · `g` / `G` | move · first row · last row |
 | `f` | cycle the triage filter (all · wants you · running · history) |
 | `h` | history — every dispatcher that has ended and left the table, newest-worked first; `enter` resumes one |
+| `space` · `R` | on triage or in history: mark dispatchers whose session is over · resume every marked one (or the selected one) at once, without attaching — `esc` clears the marks |
 | `enter` | attach the selected dispatcher's tmux session · open what is selected |
 | `y` · `x` · `s` | ship (squash-merge) · kill — dismiss, on a finished row; release, on an adopted one · skip to the back |
 | `o` | open the selected dispatcher's pull request |
@@ -374,7 +376,7 @@ To rebind one, name its action in `[keys]` — `"products.new" = "N"`. A key alr
 | screen | ids |
 |---|---|
 | anywhere | `quit` `help` `palette` `settings` `dispatch.new` `upgrade` `undo` `redraw` (`quit.now`, ctrl+c, is fixed) |
-| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.account` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` `fleet.output` |
+| triage | `fleet.down` `fleet.up` `fleet.first` `fleet.last` `fleet.filter` `fleet.attach` `fleet.reply` `fleet.account` `fleet.approve` `fleet.kill` `fleet.skip` `fleet.park` `fleet.dispatch` `fleet.steward` `fleet.history` `fleet.openpr` `fleet.output` `fleet.mark` `fleet.resume` `fleet.unmark` |
 | products | `products.down` `products.up` `products.open` `products.assign` `products.new` `search.open` |
 | assignment editor | `editor.down` `editor.up` `editor.close` `editor.pane` `editor.mark` `editor.move` `editor.linear` `editor.unassign` `editor.reset` `editor.where` `editor.server` |
 | an unfolded row | `fold.down` `fold.up` `fold.pick` `fold.leave` |
