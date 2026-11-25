@@ -144,3 +144,13 @@ func TestResumeSaysWhatHappenedToEach(t *testing.T) {
 		t.Errorf("a failure printed past its first line:\n%s", out.String())
 	}
 }
+
+// The verb is reachable the way main reaches it, and a bare one is refused
+// with its usage rather than resuming nothing quietly.
+func TestRunRoutesResume(t *testing.T) {
+	withStore(t)
+	var out, errOut bytes.Buffer
+	if code := Run("resume", nil, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "usage: resume") {
+		t.Errorf("bare resume: exit %d, said %q", code, errOut.String())
+	}
+}

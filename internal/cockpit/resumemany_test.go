@@ -67,18 +67,20 @@ func stubManyRun(t *testing.T, fail map[string]error) (asked *[]string, said *st
 	return &ids, &msg
 }
 
-// drainMany runs a batch's commands to the end, the way the program would.
+// drainMany runs a batch's commands to the end, through Update, the way the
+// program would.
 func drainMany(t *testing.T, m model, cmd func() any) model {
 	t.Helper()
 	msg := cmd()
 	for i := 0; i < 50; i++ {
 		switch v := msg.(type) {
 		case manyResultMsg:
-			m, _ = m.onManyResult(v)
+			next, _ := m.Update(v)
+			m = next.(model)
 			msg = manyNext(v.seq, v.ch)()
 		case manyDoneMsg:
-			m, _ = m.onManyDone(v)
-			return m
+			next, _ := m.Update(v)
+			return next.(model)
 		default:
 			t.Fatalf("the batch sent %T", msg)
 		}
@@ -297,5 +299,38 @@ func TestARecordGoneFromDiskDoesNotResumeAndKeepsItsMark(t *testing.T) {
 	}
 	if !strings.Contains(m.notice, "resumed 1 of 2") {
 		t.Errorf("summary = %q", m.notice)
+	}
+}
+
+// Through the program's own key path and screen, as the human meets it: R on
+// the triage lens opens the input over the table, its footer says what enter
+// does, an upgrade holds while a line is half typed, and esc lets it go.
+func TestTheResumeInputIsTheScreenWhileItIsOpen(t *testing.T) {
+	manyFleet(t)
+	m := newModel()
+	m.lens = "floor"
+	m.width, m.height = 160, 40
+	m = m.fleetTo(1)
+
+	next, _ := m.handleKey("R")
+	mm := next.(model)
+	if !mm.manyOpen {
+		t.Fatal("R on a held row did not open the input")
+	}
+	v := stripAnsi(mm.View())
+	for _, want := range []string{"resume this dispatcher", "alpha", "enter resumes them"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("the input is not on screen: missing %q", want)
+		}
+	}
+	if f := mm.cqFooterHelp(); !strings.Contains(f, "enter resumes them") {
+		t.Errorf("footer while the input is open = %q", f)
+	}
+	if !mm.inputPending() {
+		t.Error("an upgrade could re-exec over a half-typed line")
+	}
+	next, _ = mm.handleKey("esc")
+	if mm = next.(model); mm.manyOpen || strings.Contains(stripAnsi(mm.View()), "resume this dispatcher") {
+		t.Error("esc did not close the input")
 	}
 }
