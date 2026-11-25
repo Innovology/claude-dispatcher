@@ -334,3 +334,36 @@ func TestTheResumeInputIsTheScreenWhileItIsOpen(t *testing.T) {
 		t.Error("esc did not close the input")
 	}
 }
+
+// One resume of a record at a time on this screen: R leaves a dispatcher
+// whose ⏎ resume is still on its way, the batch's own are on their way until
+// each lands, and ⏎ on one of them meanwhile fires nothing.
+func TestTheBatchKeepsToOneResumeOfARecordAtATime(t *testing.T) {
+	manyFleet(t)
+	stubManyRun(t, nil)
+	m := newModel()
+	m.resuming = map[string]bool{"a": true}
+	m.fleetMarked = map[string]bool{"a": true, "b": true}
+	m = m.press("R")
+	if len(m.manyAt) != 1 || m.manyAt[0].id != "b" {
+		t.Fatalf("targets = %+v, want only b: a's resume is on its way", m.manyAt)
+	}
+	m, cmd := m.updateMany("enter")
+	if !m.resuming["b"] {
+		t.Fatal("the batch did not say b is on its way")
+	}
+	if mm, again := m.fleetTo(2).startResume("b", "beta", ""); again != nil || !strings.Contains(mm.notice, "still resuming") {
+		t.Errorf("⏎ during the batch fired again: notice %q", mm.notice)
+	}
+	m = drainMany(t, m, func() any { return cmd() })
+	if m.resuming["b"] || !m.resuming["a"] {
+		t.Errorf("after the batch, resuming = %v: b's outcome landed, a's has not", m.resuming)
+	}
+
+	// Everything marked already on its way: nothing starts, and it says so.
+	m.fleetMarked = map[string]bool{"a": true}
+	m.manyAt, m.manyOpen = []manyTarget{{id: "a", feature: "alpha"}}, true
+	if m, cmd = m.updateMany("enter"); cmd != nil || !strings.Contains(m.notice, "still resuming them") {
+		t.Errorf("a batch of only in-flight resumes: cmd %v, notice %q", cmd != nil, m.notice)
+	}
+}

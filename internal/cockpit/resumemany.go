@@ -139,14 +139,14 @@ func (m model) manyTargets() []manyTarget {
 	if len(m.fleetMarked) > 0 {
 		for _, rows := range [][]fleetRow{m.fleetAll(), m.fleetPast()} {
 			for _, r := range rows {
-				if m.fleetMarked[r.id] && cqResumable(r) {
+				if m.fleetMarked[r.id] && cqResumable(r) && !m.resuming[r.id] {
 					add(r)
 				}
 			}
 		}
 		return out
 	}
-	if r, ok := m.fleetSel(); ok && cqResumable(r) {
+	if r, ok := m.fleetSel(); ok && cqResumable(r) && !m.resuming[r.id] {
 		add(r)
 	}
 	return out
@@ -184,6 +184,27 @@ func (m model) updateMany(k string) (model, tea.Cmd) {
 	m.manyOpen, m.manyText, m.manyAt = false, "", nil
 	if len(targets) == 0 {
 		return m, nil
+	}
+	// One resume of a record at a time on this screen, as ⏎ keeps it
+	// (startResume): a dispatcher whose resume is already on its way is left
+	// to it, and the ones this batch starts are on their way until each
+	// outcome lands, so ⏎ on one of them says so rather than firing again.
+	kept := targets[:0:0]
+	for _, t := range targets {
+		if !m.resuming[t.id] {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) == 0 {
+		m.notice = "still resuming them — each opens as soon as its session is up"
+		return m, nil
+	}
+	targets = kept
+	if m.resuming == nil {
+		m.resuming = map[string]bool{}
+	}
+	for _, t := range targets {
+		m.resuming[t.id] = true
 	}
 	m.manySeq++
 	m.manyRun = &manyRun{seq: m.manySeq, total: len(targets), said: text != ""}
@@ -246,6 +267,7 @@ func manyNext(seq int, ch <-chan dispatchpkg.ResumeResult) tea.Cmd {
 // requests, so ten outcomes are not ten loads.
 func (m model) onManyResult(msg manyResultMsg) (model, tea.Cmd) {
 	next := manyNext(msg.seq, msg.ch)
+	delete(m.resuming, msg.res.ID)
 	run := m.manyRun
 	if run == nil || run.seq != msg.seq {
 		return m, next
