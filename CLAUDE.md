@@ -668,6 +668,29 @@
   which is the record catching up, the thing it was always waiting for. Full
   record:
   `docs/adr/0013-the-record-is-the-truth-the-screen-must-not-wait-for-it.md`.
+- **What went down together comes back together.** Asked for as "can i
+  relaunch multiple cockpit sessions at once?", over a screenshot of ten rows
+  under `finished`, every one last seen 15h ago: a reboot. ⏎ resumes one and
+  hands the terminal to it, so ten were ten jump-ins and ten ways back, and a
+  resume with nothing said to it sits at its prompt. `space` marks a row, on the
+  triage table or in history, exactly where its own ⏎ would resume it
+  (`cqResumesOn`, the one rule `cqRun` and the marks both ask); `esc` clears the
+  marks; and `R` resumes every mark (or the row under the cursor) with nothing
+  attached, after one line said to each (`continue`, or nothing). The batch is
+  `dispatch.ResumeMany`: Resume per record, plus two rules only a batch needs.
+  **One record per feature**: two finished records of a reused name share a
+  worktree, and Resume's live guard cannot see a first that is only just
+  starting. **One lane per session server and per repository, transitively**:
+  starting a server and rebuilding a worktree both race when doubled, while
+  separate lanes go at once. Outcomes land one by one and turn their rows. One
+  that came back, or whose claude was still running (`ResumeLive`, not sent the
+  line), loses its mark. One that did not keeps it, with the cause on its own
+  row, because the footer is one line and a batch fails more ways than that.
+  `claude-dispatcher resume <id|feature>… [--say "…"]` is the same from a
+  shell: it resolves every name before resuming any, and refuses a feature that
+  several records carry, listing their ids. It is not on the steward's list,
+  because starting work spends a subscription. Full record:
+  `docs/adr/0036-what-went-down-together-comes-back-together.md`.
 - **Coming back from a jump-in rechecks, it does not redraw.** The human has
   just spent minutes driving the session by hand, so `cockpit.recheckCmd`
   drops the gh cache, sweeps session liveness, reconciles PR/deploy and only
@@ -1476,7 +1499,7 @@
 
 ## Architecture map
 - `main.go` — subcommand dispatch: cockpit (default), `init`, `hook`, and the
-  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap`/`ruling`/
+  fleet verbs `status`/`reply`/`park`/`unpark`/`note`/`tidy`/`swap`/`resume`/`ruling`/
   `merge`/`ask`/`questions`/`answer`, the two a branchless conversation turns
   into work with, `worktree`/`dispatch`, and a dispatcher's own `handoff`
   (`internal/fleetcmd`) and `steward [list|new|open|end]` (`internal/steward`),
@@ -1519,6 +1542,8 @@
   `reply`, `note`, `park`, `unpark`; a steward's own `ruling` and `merge`
   (`rulings.go`) and `ask`, `questions`, `answer` (`questions.go`); and
   `handoff`, a dispatcher's own, run from inside its session (ADR 0034).
+  `resume.go` is `resume`: several finished dispatchers reopened at once
+  (ADR 0036).
 - `internal/steward` — the product stewards (ADR 0029): each one's record,
   folder, brief (`brief.go`) and settings, start/reopen/end (`steward.go`),
   the CLI (`cmd.go`), and the product's rulings (`rulings.go`) and questions
@@ -1547,6 +1572,8 @@
   `work.go` is how it takes a branch and `send.go` how it sends dispatchers out.
   `handoff.go` is a dispatcher handing its work on to another repo of its
   product, and the sentence a launch is told it can with (ADR 0034).
+  `resumemany.go` resumes several finished dispatchers at once, a lane per
+  session server and repository (ADR 0036).
 - `internal/binpath` — the durable path to name this binary by in anything
   that outlives the process: the hooks `init` bakes, and the command a
   dispatch's prompt names.
@@ -1577,6 +1604,8 @@
   `collect_sessions.go` is the one collector that reads the machine rather than
   the records: the sessions on it that no dispatch claims, and `adopt.go` is
   the key that adopts one. `swap.go` is `a`, the account picker (ADR 0027).
+  `resumemany.go` is `space` and `R` on triage: marking finished rows and
+  resuming them all at once, nothing attached (ADR 0036).
   `search.go` is `/`; `editconfig.go` opens
   `config.toml` in the human's editor (`e` in settings, `:config`), and
   `dxeditor.go` the dispatch form's WHAT or DONE WHEN (ctrl+g); `dxcaret.go`

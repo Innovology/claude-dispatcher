@@ -55,6 +55,9 @@ Usage:
   claude-dispatcher handoff --repo <repo> --title <words> <brief>
                                from inside a dispatcher: hand its work on to another repo
                                of its product, and finish
+  claude-dispatcher resume <id|feature>... [--say "message"]
+                               reopen finished dispatchers, several at once, nothing
+                               attached (space marks rows in the cockpit, R resumes them)
   claude-dispatcher hook <ev>  (internal) invoked by Claude Code lifecycle hooks
   claude-dispatcher version    print the version
   claude-dispatcher help       show this help
@@ -84,7 +87,7 @@ func main() {
 	case "steward":
 		os.Exit(steward.Run(args[1:], os.Stdout, os.Stderr))
 	case "status", "reply", "park", "unpark", "note", "tidy", "swap", "worktree", "dispatch",
-		"ruling", "merge", "ask", "questions", "answer", "handoff":
+		"ruling", "merge", "ask", "questions", "answer", "handoff", "resume":
 		// The triage table's reading and its three hands, for a session
 		// stewarding the fleet, the two verbs a branchless conversation turns
 		// into work with, and the handoff a dispatcher makes from inside its

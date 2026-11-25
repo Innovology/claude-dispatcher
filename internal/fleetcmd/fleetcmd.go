@@ -157,6 +157,8 @@ func Run(verb string, args []string, out, errOut io.Writer) int {
 		err = runAnswer(args, out)
 	case "handoff":
 		err = runHandoff(args, out)
+	case "resume":
+		err = runResume(args, out)
 	default:
 		err = fmt.Errorf("unknown command %q", verb)
 	}

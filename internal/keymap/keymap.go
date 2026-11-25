@@ -114,6 +114,9 @@ var Defaults = []Binding{
 	{Action: "fleet.history", Scope: Fleet, Key: "h", Help: "history · every dispatcher that has ended and left the table, newest worked first", Section: "what has finished"},
 	{Action: "fleet.openpr", Scope: Fleet, Key: "o", Help: "open its pull request", Section: "what has finished"},
 	{Action: "fleet.output", Scope: Fleet, Key: "l", Help: "everything a session that would not start printed · in your editor, at the error", Section: "what has finished"},
+	{Action: "fleet.mark", Scope: Fleet, Key: "space", Help: "mark a dispatcher whose session is over · R resumes every marked one", Section: "what has finished"},
+	{Action: "fleet.resume", Scope: Fleet, Key: "R", Help: "resume the marked ones, or this one, without jumping in · one line said to each, if you type one", Section: "what has finished"},
+	{Action: "fleet.unmark", Scope: Fleet, Key: "esc", Help: "clear the marks", Section: "what has finished"},
 
 	// ---- products lens ------------------------------------------------------
 	{Action: "products.down", Scope: Products, Key: "j"},

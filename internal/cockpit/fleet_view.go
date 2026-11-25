@@ -275,9 +275,16 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		turn = itoa(r.pass)
 	}
 	rank := fleetRankColor(r.rank)
+	glyph, glyphHex := fleetGlyph(r.rank), rank
+	if r.marked {
+		// The mark stands in for the glyph: the group divider above the row
+		// already says it is finished or parked, and what the row needs to say
+		// now is that R will take it. The sessions tab marks with the same one.
+		glyph, glyphHex = "◆", cAmber
+	}
 
 	v := [flCells]string{
-		flGlyph:   fleetGlyph(r.rank),
+		flGlyph:   glyph,
 		flProduct: cqLabel(r.product),
 		flFeature: r.feature,
 		flRepo:    fleetRepo(r.repo, r.product),
@@ -289,7 +296,7 @@ func fleetDataLine(w int, cols fleetCols, r fleetRow, on bool) string {
 		flAge:     cqAge(r.started),
 	}
 	hex := [flCells]string{
-		flGlyph:   rank,
+		flGlyph:   glyphHex,
 		flProduct: cFaint,
 		flFeature: featHex,
 		flRepo:    cFaint,
@@ -579,6 +586,12 @@ func (m model) fleetDetail(w int, r fleetRow) []cqRow {
 		out = append(out, cqFixed(flG(fg(cFaint, truncate(r.handoff, inner)))))
 	}
 
+	// Why R could not bring it back, the last time it tried: the footer said
+	// so in one line for the whole batch, and the row is where it stays.
+	if cause := m.manyFailed[r.id]; cause != "" {
+		out = append(out, cqFixed(flG(fg(cRed, truncate("did not resume · "+cause, inner)))))
+	}
+
 	if m.cqFlash != "" {
 		// A keep act (attach) did not clear anything, so it reports in mid grey
 		// rather than the green that means "one fewer thing wants you".
@@ -617,6 +630,9 @@ const fleetMinRows = 3
 func (m model) viewFleet(w, h int) string {
 	inner := cqInner(w)
 	rows := m.fleetRows()
+	for i := range rows {
+		rows[i].marked = m.fleetMarked[rows[i].id]
+	}
 	// Sized from the filtered rows — the ones actually on the table. The header
 	// goes through the same cols, so the two cannot drift.
 	cols := fleetColumns(w, fleetProductWidth(rows))
@@ -758,6 +774,9 @@ func (m model) cqFooterHelp() string {
 	if m.swapOpen {
 		return "j/k choose an account · enter moves it there · esc cancels"
 	}
+	if m.manyOpen {
+		return "type a line to say to each, or none · enter resumes them · esc cancels"
+	}
 	if m.cqFormOn() {
 		return m.dxFooterHelp()
 	}
@@ -770,6 +789,7 @@ func (m model) cqFooterHelp() string {
 			parts = append(parts, "a switch account")
 		}
 	}
+	parts = append(parts, m.manyFooter()...)
 	if m.fleetFilter() == fleetHistory {
 		// No f, no d, no undo: none of them act on a finished dispatcher, and the
 		// footer only names keys that work right now.

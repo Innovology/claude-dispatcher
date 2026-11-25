@@ -331,6 +331,8 @@ func (m model) overlayView(w, h int) (string, bool) {
 		return m.viewPark(w, h), true
 	case m.replyOpen:
 		return m.viewReply(w, h), true
+	case m.manyOpen:
+		return m.viewMany(w, h), true
 	case m.swapOpen:
 		return m.viewSwap(w, h), true
 	case m.stewardPickOpen:

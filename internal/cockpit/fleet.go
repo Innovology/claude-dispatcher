@@ -139,6 +139,10 @@ type fleetRow struct {
 	// swap is whether `a` may move it to another account: its turn is over,
 	// and it is ours to restart (dispatch.SwapOffered).
 	swap bool
+	// marked is `space` having marked this row for R (resumemany.go). It is
+	// the screen's, not the record's: set where the table is drawn, from the
+	// model's marks, and never by the collector.
+	marked bool
 
 	// moved is the freshest of the transcript's mtime and the record's
 	// UpdatedAt: when this dispatcher was last seen doing anything. It is the

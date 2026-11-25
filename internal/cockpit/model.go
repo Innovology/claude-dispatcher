@@ -267,6 +267,20 @@ type model struct {
 	// resuming is the records a resume has been fired for and not yet come
 	// back from (startResume): a second ⏎ on one of them starts nothing.
 	resuming map[string]bool
+	// fleetMarked is the finished dispatchers `space` has marked for R, by
+	// record id, and manyFailed is why one would not come back the last time
+	// R tried — kept on its row, because the footer has one line and a batch
+	// can fail several ways (resumemany.go).
+	fleetMarked map[string]bool
+	manyFailed  map[string]string
+	// The resume-several input over the triage lens: the dispatchers R is
+	// about, held from the moment it opened, and the line to say to each.
+	manyOpen bool
+	manyText string
+	manyAt   []manyTarget
+	// manyRun is the batch under way, nil when none is; manySeq numbers them.
+	manyRun *manyRun
+	manySeq int
 
 	cqFlash     string // an act's confirmation, held on screen for cqFlashLinger
 	cqFlashKeep bool   // the flashing act did not clear the item (attach)
@@ -651,6 +665,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// resume) and pick the record's new state up on the next load.
 		m.notice = msg.notice
 		return m.requestLoad(loadPlain)
+
+	case manyResultMsg:
+		mm, cmd := m.onManyResult(msg)
+		return mm, cmd
+
+	case manyDoneMsg:
+		mm, cmd := m.onManyDone(msg)
+		return mm, cmd
 
 	case stewardOpenedMsg:
 		mm, cmd := m.onStewardOpened(msg)
