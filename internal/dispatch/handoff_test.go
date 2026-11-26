@@ -94,11 +94,12 @@ func TestAHandoffReadsTheProductConfigGivesNow(t *testing.T) {
 }
 
 // handoffFixture is two repos of one product and a dispatcher working in the
-// first, saved, with the supervisor stubbed.
+// first, saved, with the supervisor stubbed and the new claude reporting in.
 func handoffFixture(t *testing.T) (from *state.Dispatch, to repos.Repo) {
 	t.Helper()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
 	stubLaunch(t)
+	withHandoffStart(t, StartConfirmed, "")
 	from = &state.Dispatch{
 		ID: state.NewID(), Feature: "orders endpoint", Slug: "orders-endpoint",
 		RepoName: "api", RepoPath: initRepo(t), Product: "shop", Branch: "feature/orders-endpoint",
@@ -282,5 +283,64 @@ func TestAHandoffRunsOnTheAccountItIsGiven(t *testing.T) {
 	}
 	if got != work {
 		t.Errorf("the launch ran on %+v, want %+v", got, work)
+	}
+}
+
+// withHandoffStart says what the wait on the handed-off session hears. A
+// failure is retired first, as the sweep the wait makes would retire it.
+func withHandoffStart(t *testing.T, o StartOutcome, reason string) {
+	t.Helper()
+	prev := awaitHandoff
+	t.Cleanup(func() { awaitHandoff = prev })
+	awaitHandoff = func(id string, _ time.Duration) (StartOutcome, *state.Dispatch) {
+		d := recordByID(id)
+		if d != nil && o == StartFailed {
+			d.Stop(state.StatusExited, reason, time.Now())
+			_ = state.Save(d)
+		}
+		return o, d
+	}
+}
+
+// The report: a design-system dispatcher handed its work to player-app, the
+// supervisor accepted the session, and claude died in it at once — and the
+// handoff ended the dispatcher's run and said it had worked. A handoff whose
+// claude does not report in has not happened: the work stays with the
+// dispatcher that has it, and the error is claude's own account of why.
+func TestAHandoffWhoseClaudeDiedLeavesTheRunGoing(t *testing.T) {
+	from, to := handoffFixture(t)
+	died := "claude exited before it reported in (status 1): The current directory no longer exists (it was deleted or moved). Start Claude Code from an existing directory."
+	withHandoffStart(t, StartFailed, died)
+
+	d, err := Handoff(from, to, "show orders", "list them", ModeAuto, DefaultModel, DefaultRoot, ownAccount)
+	var se *StartError
+	if !errors.As(err, &se) || se.Outcome != StartFailed || !strings.Contains(err.Error(), died) {
+		t.Fatalf("want the start's failure in claude's words, got %v", err)
+	}
+	if was := reload(t, from.ID); was.Status != state.StatusWorking || len(was.HandedOffTo) != 0 || was.HandedOff() {
+		t.Errorf("a handoff whose claude died ended the run: %s %q %v", was.Status, was.StatusReason, was.HandedOffTo)
+	}
+	if next := reload(t, d.ID); next.HandedOffFrom != from.ID || next.Status != state.StatusExited {
+		t.Errorf("the dead launch is %s and says it came from %q", next.Status, next.HandedOffFrom)
+	}
+}
+
+// A start nothing could confirm — a claude still silent at the end of the wait,
+// most likely on a startup prompt — is not a handoff either. It is said as
+// such, and the run goes on until the human has seen it.
+func TestAnUnconfirmedHandoffIsNotAHandoff(t *testing.T) {
+	from, to := handoffFixture(t)
+	withHandoffStart(t, StartUnconfirmed, "")
+
+	d, err := Handoff(from, to, "show orders", "list them", ModeAuto, DefaultModel, DefaultRoot, ownAccount)
+	var se *StartError
+	if !errors.As(err, &se) || se.Outcome != StartUnconfirmed || !strings.HasPrefix(err.Error(), "not confirmed: claude has not reported in") {
+		t.Fatalf("want an unconfirmed start, got %v", err)
+	}
+	if was := reload(t, from.ID); was.Status != state.StatusWorking || was.HandedOff() {
+		t.Errorf("an unconfirmed handoff ended the run: %s %q", was.Status, was.StatusReason)
+	}
+	if next := reload(t, d.ID); next.HandedOffFrom != from.ID || next.Status != state.StatusLaunching {
+		t.Errorf("the unconfirmed launch is %s and says it came from %q", next.Status, next.HandedOffFrom)
 	}
 }

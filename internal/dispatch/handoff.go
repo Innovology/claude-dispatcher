@@ -104,7 +104,13 @@ func HandoffTarget(from *state.Dispatch, all []repos.Repo, name string) (repos.R
 // its own work, may well take it for granted.
 //
 // from's run ends only once the launch has worked: a handoff that did not
-// happen leaves the work with the dispatcher that has it. The new record is
+// happen leaves the work with the dispatcher that has it. Worked is claude
+// reporting in, not the supervisor accepting a pane (ADR 0038): a handoff to
+// player-app was announced, and its dispatcher's run ended, over a claude that
+// had died at once in a deleted directory. So the launch is waited on
+// (AwaitStart) before anything is ended, and a start that failed, or that
+// nothing could confirm within StartWait, comes back as a *StartError with
+// from still running. The new record is
 // linked either way, since a launch that failed is kept as a row (ADR 0009)
 // and where it came from is part of what it reports. It ends exited, the word
 // for a run that is over, and not done, which is "live" — the work it handed
@@ -128,6 +134,15 @@ func Handoff(from *state.Dispatch, to repos.Repo, title, brief string, mode Mode
 		return nil, fmt.Errorf("%q is this dispatcher's own name — give the work in %s a name of its own", from.Feature, to.Name)
 	}
 	d, err := launchHandoff(to, title, handoffPrompt(from, title, brief), mode, model, root, false, acct)
+	if err == nil {
+		o, now := awaitHandoff(d.ID, StartWait)
+		if now != nil {
+			d = now
+		}
+		if o != StartConfirmed {
+			err = &StartError{Outcome: o, Report: StartReport(o, now, StartWait)}
+		}
+	}
 	if d != nil {
 		if lerr := linkHandoff(from.ID, d.ID, err == nil, ReasonHandedOffTo(title, to.Name)); lerr != nil && err == nil {
 			err = lerr
@@ -136,8 +151,22 @@ func Handoff(from *state.Dispatch, to repos.Repo, title, brief string, mode Mode
 	return d, err
 }
 
-// launchHandoff is Launch, as a seam.
-var launchHandoff = Launch
+// launchHandoff is Launch, and awaitHandoff AwaitStart, as seams.
+var (
+	launchHandoff = Launch
+	awaitHandoff  = AwaitStart
+)
+
+// StartError is a launch the supervisor accepted whose claude did not report in:
+// it died (StartFailed), or nothing could say within the wait
+// (StartUnconfirmed). Report is StartReport's clause for it, which is the
+// error's text, so a caller prints the same words every other waiter does.
+type StartError struct {
+	Outcome StartOutcome
+	Report  string
+}
+
+func (e *StartError) Error() string { return e.Report }
 
 // ReasonHandedOffTo is the reason a handoff ends its dispatcher's run with:
 // state.ReasonHandedOff, and what it handed off to.
