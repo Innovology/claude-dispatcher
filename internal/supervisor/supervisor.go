@@ -26,6 +26,7 @@
 //	SessionList(socket) []SessionInfo         — its sessions, with directories and births
 //	SessionIdle(s) (idle, known bool)         — has claude ended, leaving the shell
 //	SessionPIDs(s) []int                      — the processes running in it
+//	CapturePane(s) (string, error)            — what its pane has printed
 //	KnowShell(shell)                          — a shell name to count as idle
 package supervisor
 
