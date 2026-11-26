@@ -24,6 +24,7 @@ package dispatch
 // is no record at all on a fleet whose holds are right.
 
 import (
+	"strings"
 	"time"
 
 	"claude-dispatcher/internal/state"
@@ -69,6 +70,45 @@ func restampHold(d *state.Dispatch, born time.Time) {
 		}
 		b := born
 		cur.SessionStartedAt = &b
+		return true
+	})
+	if cur != nil {
+		*d = *cur
+	}
+}
+
+// sweptLead is how every reason the sweep writes begins, so a record retired by
+// it can be told from one that ended any other way (sweptAway). Built from the
+// backend's name, as those reasons are: a record is read on the machine that
+// wrote it.
+func sweptLead() string { return "its " + supervisor.Backend() + " session " }
+
+// sweptAway reports whether d's ending is the sweep's verdict that its session
+// was gone — the one ending a running session proves wrong. Every other ending
+// is somebody's word: a SessionEnd, a kill, a handoff, a release, a merge.
+func sweptAway(d *state.Dispatch) bool {
+	return d.Status == state.StatusExited && strings.HasPrefix(d.StatusReason, sweptLead())
+}
+
+// reasonStillRunning is the reason a record the sweep retired by mistake comes
+// back with, when its own claude is found running in its own session. Working,
+// because a running claude is the one fact in hand; the next hook says more.
+const reasonStillRunning = "its session is still running"
+
+// reviveSwept puts a record the sweep retired back to working, once its own
+// claude has been found running in its own session — on disk, as the record now
+// stands, and only while the sweep's ending is still the one it carries. d is
+// left as the record now is.
+func reviveSwept(d *state.Dispatch) {
+	if !sweptAway(d) {
+		return
+	}
+	at := SessionOf(d)
+	cur, _ := state.Edit(d.ID, func(cur *state.Dispatch) bool {
+		if !sweptAway(cur) || SessionOf(cur) != at {
+			return false
+		}
+		cur.Status, cur.StatusReason = state.StatusWorking, reasonStillRunning
 		return true
 	})
 	if cur != nil {

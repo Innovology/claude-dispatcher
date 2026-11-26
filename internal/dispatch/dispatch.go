@@ -565,7 +565,7 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 			live++
 			continue
 		}
-		reason := "its " + supervisor.Backend() + " session is gone"
+		reason := sweptLead() + "is gone"
 		if named {
 			reason += " — a newer session has its name"
 		}
@@ -580,7 +580,7 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 			if d.SessionStartedAt == nil {
 				continue
 			}
-			reason = "its " + supervisor.Backend() + " session ended before claude reported in"
+			reason = sweptLead() + "ended before claude reported in"
 		default:
 			continue
 		}
