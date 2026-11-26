@@ -185,6 +185,32 @@
   distro shuts down with its last console and takes tmux with it; a suspended
   laptop or a reboot makes the same row anywhere. The full record is
   `docs/adr/0004-a-ghost-cannot-clear-itself.md`.
+- **A copy is as old as what read it, and a hold answers to the
+  conversation.** Reported as "session is reported 'stopped' in cockpit while
+  active": the DS 3.21.2 adoption dispatcher (`7b388dcc30f3`) read finished
+  while it worked, and neither ⏎ nor space-and-R brought it back. Its relaunch
+  at 14:35:00 had made its session and stamped the hold. A copy of the record
+  read before that was then saved whole, before claude first reported in at
+  14:46:21. Nothing records which writer did it. The cockpit's keys all saved
+  the screen's copy, and ⏎ "start again" keeps its row until a load reads the
+  relaunch back. From then on the hold said 14:32:21 and the session said
+  14:35:00, so by ADR 0015 the session was a stranger's. Every load retired
+  the dispatcher and every hook revived it, for two hours, until it went quiet
+  watching CI and "finished" stuck. ⏎ asked the same hold. So: **anything that
+  is not a hook writes a record as it stands** (`state.Edit`: the hook lock, a
+  fresh read, the act, a save only if it changed). That covers every cockpit
+  key and the sweep itself (`retireSwept`, which retires only the record its
+  verdict was about: same status, address and hold). **A hold answers to the
+  conversation**: where the hold calls a named session younger, the sweep and
+  Resume ask Claude Code's registry, or a transcript a claude under the pane
+  holds open, whether that session runs the record's conversation. If it does,
+  the session is the record's and the hold moves to its birth. It is asked
+  only there, so a fleet whose holds are right pays nothing. **⏎ undoes the
+  sweep's verdict and only that** (`sweptAway`): when Resume finds the
+  record's claude busy in its own session, the record goes back to working
+  with "its session is still running". A SessionEnd, kill, handoff, release or
+  merge stays as it was. Full record:
+  `docs/adr/0040-a-copy-is-as-old-as-what-read-it.md`.
 - **The newest answer wins, not the last one back.** A dispatch went on the
   table and vanished seconds later — sometimes returning, sometimes not, and
   on an empty fleet leaving the blank dispatch form, which reads as "that did
@@ -1287,6 +1313,8 @@
   dispatch audit), `prompts/<id>.txt`, the prompt each dispatch is launched
   with, and `output/<id>.txt`, what a session start that failed printed, under
   `~/.local/state/claude-dispatcher/` (override: `CLAUDE_DISPATCHER_STATE`).
+  `state.Edit` is how anything but a hook changes a record: under the hook
+  lock, on a fresh read, never the copy a screen or a load holds (ADR 0040).
 - `internal/keymap` — every action the cockpit has (id, scope, default key,
   help line), `[keys]` overrides, and the collision rules. `?` is built from it.
 - `internal/fuzzy` — `/` search, wrapping fzf's own matcher in process; returns
@@ -1328,7 +1356,9 @@
   `tidy.go` is how a finished dispatcher's worktree leaves the disk (ADR 0021).
   `root.go` is where a feature branch starts: the remote's own default, the
   human's named `Root`, and the branch list the forms offer — and the reason
-  none of it trusts `origin/HEAD`. `adopt.go` wraps a record around a session
+  none of it trusts `origin/HEAD`. `hold.go` is when a session younger than a
+  record's hold is its own after all, asked of the conversation it runs, and
+  what ⏎ undoes of a sweep that got it wrong (ADR 0040). `adopt.go` wraps a record around a session
   the human started (ADR 0026) and `brief.go` is the convention it is then
   sent; `swap.go` moves a conversation to another
   account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup

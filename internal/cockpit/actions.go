@@ -96,6 +96,14 @@ func (m model) attachSession(sess supervisor.Session, env string) (model, tea.Cm
 	})
 }
 
+// editRecord is state.Edit, as the seam the cockpit's acts write through. Every
+// act that changes a record goes through it rather than saving the copy the
+// screen was drawn from: that copy is as old as the load that read it, and
+// saved whole it puts back whatever a hook or a resume has written since —
+// which is how a relaunched dispatcher came to hold the session its relaunch
+// had replaced, and was retired as a ghost while it worked (state.Edit).
+var editRecord = state.Edit
+
 // killCmd kills each feature's tmux session, marks the record exited, and
 // reclaims its worktree. A worktree with uncommitted changes is left alone —
 // killing a dispatcher must never discard unshipped work — and the notice
@@ -104,39 +112,51 @@ func killCmd(features []string) tea.Cmd {
 	return func() tea.Msg {
 		n, kept, released := 0, 0, 0
 		for _, f := range features {
-			rec := recordFor(f)
-			if rec == nil {
+			seen := recordFor(f)
+			if seen == nil {
 				continue
 			}
 			now := time.Now()
-			// An adopted session was the human's before the record and is
-			// theirs after it: x lets go of it and leaves it running. Killing
-			// it would end an orchestrator this cockpit never started, along
-			// with everything in its context.
-			if rec.Adopted() {
-				rec.Release(now)
-				_ = state.Save(rec)
+			adopted := false
+			// The session killed is the one the record names now, not the one
+			// the row was drawn with: a resume since may have replaced it.
+			rec, _ := editRecord(seen.ID, func(rec *state.Dispatch) bool {
+				// An adopted session was the human's before the record and is
+				// theirs after it: x lets go of it and leaves it running.
+				// Killing it would end an orchestrator this cockpit never
+				// started, along with everything in its context.
+				if rec.Adopted() {
+					rec.Release(now)
+					adopted = true
+					return true
+				}
+				_ = supervisor.KillSession(dispatchpkg.SessionOf(rec))
+				// The kill takes the session's subagents with it, and no hook
+				// will fire to say so: settle the fan-out with the record.
+				rec.SweepSubagents(now)
+				// A kill is abandonment, not shelving: clear the park so the
+				// record cannot haunt the parked group, whose whole claim is
+				// "you will come back to this".
+				rec.ParkedReason, rec.ParkedAt = "", nil
+				if rec.Status != state.StatusDone {
+					rec.Stop(state.StatusExited, "killed from cockpit", now)
+				}
+				// And it is read: the human ended this one themselves and was
+				// told so. The triage table holds a finished dispatcher because
+				// an ending nobody watched is news (see state.Dispatch.Held),
+				// which an ending they asked for is not — unheld, it would come
+				// back as an unread ✓ row asking them to dismiss the thing they
+				// just killed.
+				rec.Dismiss(now)
+				return true
+			})
+			if rec == nil {
+				continue
+			}
+			if adopted {
 				released++
 				continue
 			}
-			_ = supervisor.KillSession(dispatchpkg.SessionOf(rec))
-			// The kill takes the session's subagents with it, and no hook
-			// will fire to say so: settle the fan-out with the record.
-			rec.SweepSubagents(now)
-			// A kill is abandonment, not shelving: clear the park so the
-			// record cannot haunt the parked group, whose whole claim is
-			// "you will come back to this".
-			rec.ParkedReason, rec.ParkedAt = "", nil
-			if rec.Status != state.StatusDone {
-				rec.Stop(state.StatusExited, "killed from cockpit", now)
-			}
-			// And it is read: the human ended this one themselves and was told
-			// so. The triage table holds a finished dispatcher because an ending
-			// nobody watched is news (see state.Dispatch.Held), which an ending
-			// they asked for is not — unheld, it would come back as an unread ✓
-			// row asking them to dismiss the thing they just killed.
-			rec.Dismiss(now)
-			_ = state.Save(rec)
 			// An adopted dispatcher's directory is the human's own checkout,
 			// which existed before the record and outlives it. OwnsWorktree is
 			// the only thing standing between `x` and somebody's working copy.
@@ -181,11 +201,13 @@ func shipCmd(feature string) tea.Cmd {
 			merged = fmt.Sprintf(" · #%d squash-merged", rec.PRNumber)
 		}
 		now := time.Now()
-		rec.Stop(state.StatusDone, "shipped from cockpit", now)
-		// Shipped by the human, so it is already read — the same rule the kill
-		// follows: the held row exists for endings nobody watched.
-		rec.Dismiss(now)
-		_ = state.Save(rec)
+		_, _ = editRecord(rec.ID, func(rec *state.Dispatch) bool {
+			rec.Stop(state.StatusDone, "shipped from cockpit", now)
+			// Shipped by the human, so it is already read — the same rule the
+			// kill follows: the held row exists for endings nobody watched.
+			rec.Dismiss(now)
+			return true
+		})
 		gh.InvalidateCache() // the merge just changed what the forge would say
 		return actionMsg{notice: "✓ " + feature + " marked live" + merged}
 	}
@@ -194,14 +216,16 @@ func shipCmd(feature string) tea.Cmd {
 // markDoneCmd marks the feature's record done without merging (the d key).
 func markDoneCmd(feature string) tea.Cmd {
 	return func() tea.Msg {
-		rec := recordFor(feature)
-		if rec == nil {
+		seen := recordFor(feature)
+		if seen == nil {
 			return actionMsg{notice: "\"" + feature + "\" has no record to mark"}
 		}
 		now := time.Now()
-		rec.Stop(state.StatusDone, "marked shipped", now)
-		rec.Dismiss(now) // the human's own ending, and so already read
-		_ = state.Save(rec)
+		_, _ = editRecord(seen.ID, func(rec *state.Dispatch) bool {
+			rec.Stop(state.StatusDone, "marked shipped", now)
+			rec.Dismiss(now) // the human's own ending, and so already read
+			return true
+		})
 		return actionMsg{notice: "\"" + feature + "\" marked shipped"}
 	}
 }

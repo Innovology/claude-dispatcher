@@ -115,6 +115,11 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 		idle, known := sessionIdle(SessionOf(d))
 		switch {
 		case known && !idle:
+			// Its claude is running in its own session. A record that says it
+			// ended because the sweep took that session for gone is wrong, and
+			// ⏎ is how a human finds out: it comes back, or attaching would
+			// leave the row reading "finished" over a dispatcher that works.
+			reviveSwept(d)
 			return ResumeLive, d.TmuxSession, nil
 		case known && idle && d.AdoptedAt == nil:
 			_ = killSession(SessionOf(d))
@@ -241,10 +246,22 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 // hold of. Only a listing that names it, created after the record's hold, says
 // otherwise: one that cannot say when it was made, or does not list it at all,
 // leaves the claim the name has always carried.
+//
+// And a younger one is still d's when it is running d's own conversation: then
+// the hold is what was wrong, and it is moved to the session's birth (hold.go).
+// Read as a stranger's, a running dispatcher whose hold a stale copy had put
+// back was given a second claude on its own conversation under a new name.
 func holdsOwnSession(d *state.Dispatch) bool {
 	for _, s := range sessionList(d.TmuxSocket) {
 		if s.Name == d.TmuxSession {
-			return d.HoldsSessionBorn(s.Created)
+			if d.HoldsSessionBorn(s.Created) {
+				return true
+			}
+			if runsOwnConversation(d) {
+				restampHold(d, s.Created)
+				return true
+			}
+			return false
 		}
 	}
 	return true

@@ -804,6 +804,54 @@ func Save(d *Dispatch) error {
 	return os.Rename(tmp.Name(), final)
 }
 
+// Edit changes the record with this id as it stands on disk, under the hook
+// lock, and saves it when fn says it changed anything. It returns the record as
+// it now is, or nil when there is no record with that id.
+//
+// It is how anything that is not a hook writes a record it read some time ago.
+// A copy of a record is as old as whatever read it — a cockpit acts on the copy
+// its last load read, and a load takes seconds warm and a minute cold — and
+// Save writes the whole of whatever it is handed. So a copy saved back after a
+// resume restarted the dispatcher puts the session it had before over the one
+// it has now, along with every field a hook wrote in between. Measured on the
+// record that led here (7b388dcc30f3): a relaunch at 14:35 stamped its new
+// session's hold, a copy read before it was saved back over it, and the record
+// went on holding the session the relaunch had replaced — so the sweep took its
+// own live session for a stranger's and retired it, every load, for two hours
+// (dispatch.ReconcileSessions).
+//
+// fn decides on the fresh copy, so it must not read the caller's stale one:
+// whatever the act depends on — the status, the session it names — is asked of
+// the copy it is handed.
+func Edit(id string, fn func(d *Dispatch) bool) (*Dispatch, error) {
+	release := Lock()
+	defer release()
+	d := readRecord(id)
+	if d == nil {
+		return nil, nil
+	}
+	if !fn(d) {
+		return d, nil
+	}
+	return d, Save(d)
+}
+
+// readRecord is the record with this id as it stands on disk, or nil.
+func readRecord(id string) *Dispatch {
+	if id == "" || strings.ContainsAny(id, `/\`) {
+		return nil
+	}
+	b, err := os.ReadFile(filepath.Join(DispatchesDir(), id+".json"))
+	if err != nil {
+		return nil
+	}
+	var d Dispatch
+	if json.Unmarshal(b, &d) != nil || d.ID != id {
+		return nil
+	}
+	return &d
+}
+
 // LoadAll returns every dispatch record, most urgent first, most recent within
 // equal urgency.
 func LoadAll() []*Dispatch {

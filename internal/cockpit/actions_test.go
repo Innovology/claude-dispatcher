@@ -172,8 +172,8 @@ func TestKillCmdReal(t *testing.T) {
 	if !ok || !strings.Contains(am.notice, "killed 1 dispatcher") {
 		t.Errorf("killCmd = %#v", msg)
 	}
-	if rec.Status != state.StatusExited {
-		t.Errorf("record status = %q, want exited", rec.Status)
+	if got := loadRecord(t, "kill1").Status; got != state.StatusExited {
+		t.Errorf("record status = %q, want exited", got)
 	}
 
 	// Plural wording + a record already done is left alone (no re-save path,
@@ -192,8 +192,8 @@ func TestKillCmdReal(t *testing.T) {
 	if !ok || !strings.Contains(am.notice, "killed 2 dispatchers") {
 		t.Errorf("plural killCmd = %#v", msg)
 	}
-	if rec2.Status != state.StatusDone {
-		t.Errorf("done record should be left alone, got %q", rec2.Status)
+	if got := loadRecord(t, "kill2").Status; got != state.StatusDone {
+		t.Errorf("done record should be left alone, got %q", got)
 	}
 }
 
@@ -213,6 +213,9 @@ func TestShipCmdNoPR(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
 	rec := &state.Dispatch{ID: "ship1", Feature: "no pr feature", RepoPath: t.TempDir()}
+	if err := state.Save(rec); err != nil {
+		t.Fatal(err)
+	}
 	withFakeRecord(t, "no pr feature", rec)
 
 	msg := shipCmd("no pr feature")()
@@ -220,8 +223,8 @@ func TestShipCmdNoPR(t *testing.T) {
 	if !ok || !strings.Contains(am.notice, "marked live") || strings.Contains(am.notice, "squash-merged") {
 		t.Errorf("shipCmd(no pr) = %#v", msg)
 	}
-	if rec.Status != state.StatusDone {
-		t.Errorf("status = %q, want done", rec.Status)
+	if got := loadRecord(t, "ship1").Status; got != state.StatusDone {
+		t.Errorf("status = %q, want done", got)
 	}
 }
 
@@ -257,14 +260,17 @@ func TestMarkDoneCmd(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
 	rec := &state.Dispatch{ID: "md1", Feature: "mark me"}
+	if err := state.Save(rec); err != nil {
+		t.Fatal(err)
+	}
 	liveRecords = map[string]*state.Dispatch{"mark me": rec}
 	msg = markDoneCmd("mark me")()
 	am, ok = msg.(actionMsg)
 	if !ok || !strings.Contains(am.notice, "marked shipped") {
 		t.Errorf("markDoneCmd(real) = %#v", msg)
 	}
-	if rec.Status != state.StatusDone {
-		t.Errorf("status = %q, want done", rec.Status)
+	if got := loadRecord(t, "md1").Status; got != state.StatusDone {
+		t.Errorf("status = %q, want done", got)
 	}
 }
 

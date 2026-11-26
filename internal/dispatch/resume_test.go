@@ -20,7 +20,10 @@ type stubSupervisor struct {
 	alive map[string]bool
 	// born is when each live session was created, where a test says; a
 	// session with none listed is one whose creation the backend cannot say.
-	born    map[string]time.Time
+	born map[string]time.Time
+	// running is the conversation a claude in each session is running, by
+	// session name — what Claude Code's registry would say.
+	running map[string]string
 	idle    bool
 	known   bool
 	killed  []string
@@ -30,9 +33,14 @@ type stubSupervisor struct {
 func stubSessions(t *testing.T, s *stubSupervisor) {
 	t.Helper()
 	pAlive, pIdle, pKill, pUniq, pNew, pList := sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList
+	pRuns := sessionRunsConversation
 	t.Cleanup(func() {
 		sessionAlive, sessionIdle, killSession, uniqueName, newSession, sessionList = pAlive, pIdle, pKill, pUniq, pNew, pList
+		sessionRunsConversation = pRuns
 	})
+	sessionRunsConversation = func(sess supervisor.Session, sid string) bool {
+		return sid != "" && s.running[sess.Name] == sid
+	}
 	sessionAlive = func(sess supervisor.Session) bool { return s.alive[sess.Name] }
 	sessionList = func(socket string) []supervisor.SessionInfo {
 		var out []supervisor.SessionInfo
@@ -202,6 +210,89 @@ func TestResumeLeavesABusySessionAlone(t *testing.T) {
 	}
 	if len(sup.killed) != 0 {
 		t.Errorf("a running session was killed: %v", sup.killed)
+	}
+}
+
+// The incident's ⏎: the sweep had retired a working dispatcher because a stale
+// hold made its own session look younger than the record. Resume asked the
+// same hold, read the session as a stranger's, and on main would have started a
+// second claude on the conversation under a new name; on a build that finds the
+// running conversation it attached and left the record "finished". The session
+// is running the record's conversation, so it is the record's: ⏎ attaches, the
+// hold moves to the session's birth and the record is working again.
+func TestResumeBringsBackADispatcherTheSweepTookForAStranger(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	held := time.Date(2026, 11, 26, 14, 32, 21, 411916704, time.Local)
+	born := time.Date(2026, 11, 26, 14, 35, 0, 0, time.Local)
+	sup := &stubSupervisor{
+		alive:   map[string]bool{"disp-payment-retry": true},
+		born:    map[string]time.Time{"disp-payment-retry": born},
+		running: map[string]string{"disp-payment-retry": "sess-abc"},
+		idle:    false, known: true,
+	}
+	stubSessions(t, sup)
+
+	d := finished(t, initRepo(t))
+	d.SessionStartedAt = &held
+	d.Stop(state.StatusExited, sweptLead()+"is gone — a newer session has its name", born.Add(2*time.Hour))
+	if err := state.Save(d); err != nil {
+		t.Fatal(err)
+	}
+
+	mode, session, err := Resume(d, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != ResumeLive || session != "disp-payment-retry" {
+		t.Errorf("mode = %q session = %q, want its own running session handed back", mode, session)
+	}
+	if sup.started.name != "" || len(sup.killed) != 0 {
+		t.Errorf("started %q, killed %v — a running dispatcher must be left as it is", sup.started.name, sup.killed)
+	}
+	got := state.LoadAll()[0]
+	if got.Status != state.StatusWorking || got.StatusReason != reasonStillRunning || got.FinishedAt != nil {
+		t.Errorf("on disk: %s %q finished %v, want it working again", got.Status, got.StatusReason, got.FinishedAt)
+	}
+	if got.SessionStartedAt == nil || !got.SessionStartedAt.Equal(born) {
+		t.Errorf("hold = %v, want the session's birth %v", got.SessionStartedAt, born)
+	}
+}
+
+// The sweep's verdict can be wrong without a stale hold — a listing that came
+// back empty and a probe that failed with it. Its own session, busy, proves the
+// verdict wrong the same way.
+func TestResumeBringsBackADispatcherTheSweepTookForGone(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	sup := &stubSupervisor{alive: map[string]bool{"disp-payment-retry": true}, idle: false, known: true}
+	stubSessions(t, sup)
+
+	d := finished(t, initRepo(t))
+	d.Stop(state.StatusExited, sweptLead()+"is gone", time.Now())
+	if err := state.Save(d); err != nil {
+		t.Fatal(err)
+	}
+	if mode, _, err := Resume(d, ""); err != nil || mode != ResumeLive {
+		t.Fatalf("Resume = %q, %v, want live", mode, err)
+	}
+	if got := state.LoadAll()[0]; got.Status != state.StatusWorking {
+		t.Errorf("status = %s (%q), want working", got.Status, got.StatusReason)
+	}
+}
+
+// Only the sweep's verdict is undone. Every other ending is somebody's word —
+// a SessionEnd, a kill, a handoff, a merge — and a claude still at its prompt
+// in the session does not take it back.
+func TestResumeLeavesAnyOtherEndingAsItWas(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	sup := &stubSupervisor{alive: map[string]bool{"disp-payment-retry": true}, idle: false, known: true}
+	stubSessions(t, sup)
+
+	d := finished(t, initRepo(t)) // "session ended"
+	if mode, _, err := Resume(d, ""); err != nil || mode != ResumeLive {
+		t.Fatalf("Resume = %q, %v, want live", mode, err)
+	}
+	if got := state.LoadAll()[0]; got.Status != state.StatusExited || got.StatusReason != "session ended" {
+		t.Errorf("on disk: %s %q, want the ending left as it was", got.Status, got.StatusReason)
 	}
 }
 
