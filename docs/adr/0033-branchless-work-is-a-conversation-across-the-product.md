@@ -96,7 +96,10 @@ unchanged) or `no branch`. With none:
     Each one it sends is an ordinary dispatcher in a repo of the same product,
     on the conversation's subscription, recorded as sent by it
     (`DispatchedBy`), steered with `status` and `reply`. At most `MaxSentOut`
-    (8) of them are out at once.
+    (8) of them are out at once. The command waits for each one's claude to
+    report in (ADR 0038) and says whether it did, died, or is not yet known.
+    The conversation acts on that line, so it must not stand in for a start
+    nobody saw.
 
   Both run from the conversation's own shell and find its record by the
   `CLAUDE_DISPATCHER_ID` its launch line set. A session cannot move its own

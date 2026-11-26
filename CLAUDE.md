@@ -401,8 +401,11 @@
   dispatcher in a repo of its product, at most `MaxSentOut` (8) out at once, on
   its account (as config names it, else the directory its record runs under,
   said), `DispatchedBy` it, "sent by" on its row; an unknown `--mode` is
-  refused, not read as auto. It is launched with the session's own variables
-  scrubbed (`ScrubSessionEnv`), because a pane inherits its client's
+  refused, not read as auto. It says what claude did, not what the
+  supervisor did (`AwaitStart`, ADR 0038): `· claude reported in`, an error in
+  claude's words for one that died, or `not confirmed` for one still silent.
+  It is launched with the session's own variables scrubbed
+  (`ScrubSessionEnv`), because a pane inherits its client's
   environment and Claude Code's session id, socket and `CLAUDECODE` would make
   the one it sends its child. A session cannot move its launch directory, and
   claude's EnterWorktree only enters its launch repo's worktrees, which is why
