@@ -208,6 +208,69 @@ func TestARealSessionListsWhenItWasMade(t *testing.T) {
 	}
 }
 
+// The report: a design-system dispatcher handed its work to player-app, and
+// the new session opened on "The current directory no longer exists" in the
+// folder of a dispatch finished an hour before. player-app's server had been
+// started from that dispatch's worktree, `x` had since removed it, and tmux
+// 3.7b then ignores -c for every pane the server opens. The server here is
+// started in a folder that is then deleted, the same way; the pane must still
+// stand in the directory it was asked for.
+func TestAPaneStandsInItsDirectoryAfterTheServersHasGone(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	tmp := t.TempDir()
+	gone, want := filepath.Join(tmp, "finished-dispatch"), filepath.Join(tmp, "new-dispatch")
+	for _, d := range []string{gone, want} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := Server{Socket: "disp-test-gone-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	first := srv.cmd("new-session", "-d", "-s", "first", "sleep 30")
+	first.Dir = gone
+	if out, err := first.CombinedOutput(); err != nil {
+		t.Fatalf("starting the server in %s: %v: %s", gone, err, out)
+	}
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	marker := filepath.Join(tmp, "cwd")
+	if err := srv.NewSession("s", want, "pwd -P > "+shellQuote(marker)+"; sleep 30", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	var got []byte
+	if !eventually(t, func() bool { got, _ = os.ReadFile(marker); return len(got) > 0 }) {
+		t.Fatal("the pane never got as far as its command: it could not stand in its directory")
+	}
+	ran := strings.TrimSpace(string(got))
+	if real, _ := filepath.EvalSymlinks(want); ran != real {
+		t.Errorf("the pane started in %q, want %q", ran, real)
+	}
+}
+
+// A directory that is not there ends the pane instead of starting the command
+// wherever tmux put it.
+func TestAPaneWhoseDirectoryIsMissingRunsNothing(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "ran")
+	out, err := exec.Command("/bin/sh", "-c", standIn(filepath.Join(tmp, "gone"), "touch "+shellQuote(marker))).CombinedOutput()
+	if err == nil {
+		t.Errorf("the line exited 0 in a directory that is not there: %s", out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the command ran although its directory is missing")
+	}
+	if got := standIn("", "true"); got != "true" {
+		t.Errorf("no directory still changed the command: %q", got)
+	}
+	if got := standIn("/it's/here", "true"); got != `cd '/it'\''s/here' || exit; true` {
+		t.Errorf("a quote in the path was not escaped: %q", got)
+	}
+}
+
 // The launch that reported this: dispatching into a flake repo from a cockpit
 // started in ~ died with `path "/home/…" does not contain a 'flake.nix'`,
 // because the `nix develop` wrapping the client looked for its flake where the

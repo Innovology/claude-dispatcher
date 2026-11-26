@@ -148,14 +148,49 @@ func (s Server) ListSessions() []string {
 // it builds before the error — 883 lines, measured, of which the first was the
 // one the record kept: "copying path '…-nss-cacert-3.115' from
 // 'https://cache.nixos.org'...".
+//
+// And the command changes into dir itself (standIn): `-c dir` alone is not
+// where the pane starts once the server's own directory has gone.
 func (s Server) NewSession(name, dir, shellCommand, env string) error {
-	out, err := s.clientIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, "--", "/bin/sh", "-c", shellCommand).CombinedOutput()
+	out, err := s.clientIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, "--", "/bin/sh", "-c", standIn(dir, shellCommand)).CombinedOutput()
 	if err != nil {
 		return cause.Failed("tmux new-session", out, err)
 	}
 	s.EnsureDetachKey()
 	s.SetStatusHint(name)
 	return nil
+}
+
+// standIn is shellCommand run from dir by a cd of its own, not by -c alone.
+//
+// -c is a request the server carries out, and a server whose own working
+// directory has been deleted does not carry it out. Measured on tmux 3.7b:
+// once that directory was removed, every pane the server opened started in it,
+// whatever -c said — new-session and new-window, the argv form and the
+// one-string form alike — and `-e PWD=…` changed only what the pane was told,
+// not where it stood. Nothing reports it: new-session returns 0 and the session
+// lists the right path, while claude, which will not start anywhere it cannot
+// getcwd, prints "The current directory no longer exists" and exits to the
+// shell, and nu then complains about $PWD at every prompt. A server stands
+// wherever the client that started it stood (see clientIn), which was the
+// first dispatch's worktree — the folder that dispatch's `x` removes — so on a
+// real machine (player-app's server, 2026-11-26) every dispatch after that one
+// came up dead in the folder of a dispatch long finished.
+//
+// The cd runs inside the pane, once it exists, where the server's directory has
+// no say. `|| exit` because a directory that is not there must end the pane
+// rather than start claude wherever it happened to land; the launch sweep then
+// retires the record as a session that ended before claude reported in.
+func standIn(dir, shellCommand string) string {
+	if dir == "" {
+		return shellCommand
+	}
+	return "cd " + shellQuote(dir) + " || exit; " + shellCommand
+}
+
+// shellQuote single-quotes s for a POSIX shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // SetStatusHint puts the way home in the session's status line. Note the
