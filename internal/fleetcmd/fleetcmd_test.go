@@ -345,4 +345,18 @@ func TestSwapSaysWhatClaudeDid(t *testing.T) {
 	if !strings.Contains(out.String(), "not confirmed: claude has not reported in after 30s") {
 		t.Errorf("an unconfirmed start read %q", out.String())
 	}
+
+	// A dispatcher still busy in its own session started nothing, so there is
+	// nothing to wait for and nothing about claude to say.
+	swapAccount = func(*state.Dispatch, account.Account, string) (dispatch.ResumeMode, string, error) {
+		return dispatch.ResumeLive, "disp-pay", nil
+	}
+	awaitStart = func(string, time.Duration) (dispatch.StartOutcome, *state.Dispatch) {
+		t.Error("waited on a session nothing started")
+		return dispatch.StartUnconfirmed, nil
+	}
+	out.Reset()
+	if err := runSwap([]string{"d1", "work"}, &out); err != nil || out.String() != "\"pay\" resumed on work · session disp-pay\n" {
+		t.Errorf("a live session read %q, %v", out.String(), err)
+	}
 }
