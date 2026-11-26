@@ -69,6 +69,11 @@ func SessionIdle(s Session) (idle, known bool) { return server(s).SessionIdle(s.
 // not start is running; an empty list means we could not tell.
 func SessionPIDs(s Session) []int { return server(s).SessionPIDs(s.Name) }
 
+// CapturePane is what the session's pane has printed, history included
+// (tmux.Server.CapturePane): the only account there is of a claude that exited
+// before any hook could report it.
+func CapturePane(s Session) (string, error) { return server(s).CapturePane(s.Name) }
+
 // EnsureBackKey binds the prefix-free "back to the cockpit" key (Ctrl-\) on
 // every server a dispatch may live on. It is bound server-wide, so a server
 // this cockpit has never started a session on has never been told about it.

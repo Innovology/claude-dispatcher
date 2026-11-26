@@ -389,6 +389,27 @@ func (s Server) SessionPIDs(name string) []int {
 	return append(roots, descendants(roots, childTable())...)
 }
 
+// CapturePane is what a session's pane has printed, its history included, as
+// the text a person attached to it would read: wrapped lines joined back into
+// the lines they were printed as, colour dropped.
+//
+// It is how a launch that died is told in its own words. A claude that exits
+// before any hook fires leaves its reason on the screen and nowhere else — no
+// hook carries it and the launch line's exit shell takes over the pane — so the
+// screen is the only account of it there is.
+//
+// The target is "=name:", the session's current pane, as for SendKeys: a
+// session-level "=name" is not a pane. A dispatch session has one pane, and a
+// pane this cannot find is an error, never an empty screen, because an empty
+// screen is a claim about what was printed.
+func (s Server) CapturePane(name string) (string, error) {
+	out, err := s.cmd("capture-pane", "-p", "-J", "-S", "-", "-t", "="+name+":").CombinedOutput()
+	if err != nil {
+		return "", sendErr(out, err)
+	}
+	return string(out), nil
+}
+
 // childTable is the process table as parent → children, nil when it could not
 // be read. One read, because a session's panes are asked about together.
 //
