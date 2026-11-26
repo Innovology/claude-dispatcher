@@ -98,13 +98,23 @@ func runHandoff(args []string, out io.Writer) error {
 	dispatch.ScrubSessionEnv()
 	d, err := handoff(src, to, *title, brief, m, mo, dispatch.Root(*root), acct)
 	if err != nil {
-		if d != nil {
+		// "Handed off" is said only over a claude that reported in (ADR 0038):
+		// the session reading this ends its turn on it. A start nothing could
+		// confirm is still a dispatch on the table — most likely stopped on a
+		// startup prompt — so it is named as one, and as not a handoff yet.
+		var se *dispatch.StartError
+		switch {
+		case errors.As(err, &se) && se.Outcome == dispatch.StartUnconfirmed:
+			return fmt.Errorf("%s in %s is %w — so this is not a handoff yet: %q is still yours, and the cockpit shows the two linked; end your turn telling the human",
+				quote(d.Feature), d.RepoName, err, src.Feature)
+		case d != nil:
 			return fmt.Errorf("%w — the launch is kept in the cockpit as a row that did not start, and %q is still yours to finish", err, src.Feature)
 		}
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "handed off to %s in %s · branch %s · id %s · session %s\n",
-		quote(d.Feature), d.RepoName, d.Branch, d.ID, d.TmuxSession)
+	_, _ = fmt.Fprintf(out, "handed off to %s in %s · branch %s · id %s · session %s · %s\n",
+		quote(d.Feature), d.RepoName, d.Branch, d.ID, d.TmuxSession,
+		dispatch.StartReport(dispatch.StartConfirmed, d, dispatch.StartWait))
 	if *from == "" {
 		_, _ = fmt.Fprintf(out, "%s is finished: the cockpit holds its row as handed off, and %s carries on in %s. End your turn here.\n",
 			quote(src.Feature), quote(d.Feature), d.RepoName)

@@ -80,7 +80,7 @@ func TestHandoffFromInsideASession(t *testing.T) {
 	if os.Getenv("CLAUDECODE") != "" {
 		t.Error("the session's variables were left for the new pane to inherit")
 	}
-	for _, line := range []string{`handed off to "show orders" in app · branch feature/show-orders · id next · session disp-show-orders`,
+	for _, line := range []string{`handed off to "show orders" in app · branch feature/show-orders · id next · session disp-show-orders · claude reported in`,
 		`"orders endpoint" is finished`, "End your turn here."} {
 		if !strings.Contains(out.String(), line) {
 			t.Errorf("the output does not say %q:\n%s", line, out.String())
@@ -261,5 +261,42 @@ func TestDiscoverReadsTheConfig(t *testing.T) {
 	all, cfg, err := discover()
 	if err != nil || cfg == nil || len(all) != 1 || all[0].Product != "shop" {
 		t.Errorf("discover: %+v, %v", all, err)
+	}
+}
+
+// A session reading "handed off" ends its turn on it, so it is said only over a
+// claude that reported in. One that died is the start's failure in claude's
+// words; one nothing could confirm is named as not a handoff yet. Neither tells
+// the session it is finished.
+func TestHandoffSaysHandedOffOnlyOverAClaudeThatReportedIn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		wants []string
+	}{
+		{"died", &dispatch.StartError{Outcome: dispatch.StartFailed,
+			Report: "it did not stay up: claude exited before it reported in (status 1): The current directory no longer exists (it was deleted or moved)."},
+			[]string{"claude exited before it reported in (status 1): The current directory no longer exists", "did not start", `"orders endpoint" is still yours`}},
+		{"unconfirmed", &dispatch.StartError{Outcome: dispatch.StartUnconfirmed,
+			Report: "not confirmed: claude has not reported in after 30s — it may be stopped on a startup prompt in session disp-show-orders"},
+			[]string{`"show orders" in app is not confirmed`, "disp-show-orders", "not a handoff yet", `"orders endpoint" is still yours`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withStore(t, source())
+			withHandoff(t, tc.err)
+			t.Setenv("CLAUDE_DISPATCHER_ID", "src")
+			var out, errOut bytes.Buffer
+			if Run("handoff", []string{"--repo", "app", "--title", "show orders", "b"}, &out, &errOut) == 0 {
+				t.Fatal("a start claude never confirmed reported success")
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(errOut.String(), want) {
+					t.Errorf("the failure does not say %q: %s", want, errOut.String())
+				}
+			}
+			if strings.Contains(out.String()+errOut.String(), "handed off to") || strings.Contains(out.String(), "End your turn here") {
+				t.Errorf("said handed off over a claude that did not report in:\n%s%s", out.String(), errOut.String())
+			}
+		})
 	}
 }

@@ -93,6 +93,15 @@ stays with the dispatcher that has it. A launch that failed after its record
 was written is kept, as ADR 0009 keeps one, and still says where it came from.
 The command's error says both of those things.
 
+Worked means claude reporting in, not the supervisor accepting a pane (ADR
+0038). The first handoff in real use, to player-app on 2026-11-26, ended its
+dispatcher's run and said "handed off" over a claude that had died at once in
+a deleted directory. So `Handoff` waits on `AwaitStart` before it ends
+anything. A claude that died comes back as a `StartError` carrying claude's
+own words, and the launch is kept as a row that did not start. One that
+nothing could confirm within `StartWait` is said as not a handoff yet, with
+the two linked in the cockpit. In both cases the run goes on.
+
 **A dispatch is told it can do this.** A launch in a repo that has siblings in
 its product (`repos.Repo.Siblings`, found by discovery) gets one sentence before
 the working contract. The sentence names the product, the repos beside it, and

@@ -451,6 +451,37 @@
   in `$EDITOR` at the error, offered only where there is more than the line.
   The audit keeps all of it (`cause.Full`). Full record:
   `docs/adr/0031-a-failure-is-read-for-its-cause.md`.
+- **A start is confirmed when claude reports in.** A design-system dispatcher
+  handed work to player-app (2026-11-26, `4c6d1447ab92`); `DispatchLaunched`
+  was logged the moment `tmux new-session` returned 0, and claude exited at
+  once — the pane stood in a deleted directory (ADR 0037) — with "The current
+  directory no longer exists … Start Claude Code from an existing directory."
+  The exit shell (nu) took the pane, the session lived on, and the sweep, which
+  retired a launch only when its session had *gone*, left the row at "starting
+  session" while the handing-off session told the human it had worked. A pane
+  existing is not claude running in it. So **a launching record whose live
+  session has fallen to its shell is a start that failed**: past `StartSettle`
+  (3s — before the launch line's sh forks anything it is a shell with nothing
+  under it), `SessionIdle` known and idle, retired to exited by
+  `ReconcileSessions` with the pane's own words (`CapturePane`, read through
+  `internal/cause`) and the whole screen as `StartOutput` for `l`; held, ⏎
+  starts it again. **Only an idle shell is evidence** — a busy pane is a claude
+  starting or on a startup prompt (the next dispatch that afternoon took eleven
+  minutes), unknown is unknown — and the write is under the hook lock against a
+  fresh read, so a `SessionStart` landing meanwhile wins. **The pane says when
+  claude exits**: the launch line's tail prints `[claude-dispatcher] claude
+  exited with status N` (`ExitMark`) before the exit shell, reading `$?` first;
+  what precedes the last mark is claude's, what follows is the shell's and is
+  never quoted as the cause. Weighed against recording the exit in a file: the
+  marker carries the status where the sweep already reads, and a file is state
+  a resume would have to clear or it reads the last run's death as its own.
+  **Whatever reports a launch to a caller waits for the verdict and says
+  which**: `dispatch.AwaitStart` (up to `StartWait`, `LaunchStallAfter`+10s,
+  each look the sweep over the one record) is confirmed, failed or unconfirmed,
+  and `StartReport` is the clause every caller prints — `swap` here, `handoff`
+  (which ends its dispatcher's run only on confirmed) and the CLI `dispatch` on
+  their own branches. The cockpit does not wait: it has the sweep. Full record:
+  `docs/adr/0038-a-start-is-confirmed-when-claude-reports-in.md`.
 - **`origin/HEAD` is a cache, not an answer — and the root branch is a
   choice.** Reported as "the dispatcher attempts to fork a dead branch", with
   the launch that did it sitting in the event log 0009 had just added:
@@ -1240,7 +1271,12 @@
   wind-down cannot reopen it**: the turn the handoff ran in ends and claude
   idles, so hookcmd holds a record in the handoff's ending (`HandedOff`, read
   off `ReasonHandedOff`) as it holds a done one, and only a prompt or a dialog
-  reopens it. A launch that failed ends nothing. **A dispatch is told it can do
+  reopens it. A launch that failed ends nothing, and **a launch has worked only
+  once claude in it reports in** (ADR 0038): `Handoff` waits on `AwaitStart`
+  before ending anything, so a claude that died at once (player-app,
+  2026-11-26) or one nothing could confirm within `StartWait` comes back as a
+  `StartError`, the run going on, and the command says "handed off" over
+  neither. **A dispatch is told it can do
   this.** A launch in a repo with siblings (`repos.Repo.Siblings`) gets one
   sentence before the contract, naming the product, the repos beside it and
   the command at the binary's durable path (`internal/binpath`, which `init`
@@ -1362,7 +1398,10 @@
   the human started (ADR 0026) and `brief.go` is the convention it is then
   sent; `swap.go` moves a conversation to another
   account (ADR 0027); `stall.go` is when a silent launch counts as stopped on a startup
-  prompt; `trust.go` copies a repo's trust onto its worktree.
+  prompt; `startdied.go` is when a launch's claude died before reporting in,
+  `exitmark.go` the line its pane prints when claude exits, and `await.go` the
+  wait a caller makes before saying a launch worked (ADR 0038); `trust.go`
+  copies a repo's trust onto its worktree.
   `handoff.go` is a dispatcher handing its work on to another repo of its
   product, and the sentence a launch is told it can with (ADR 0034).
 - `internal/binpath` — the durable path to name this binary by in anything
@@ -1372,7 +1411,7 @@
   Unix, a console window per session on Windows. A session is addressed by
   `Session` (socket + name), never by name alone.
 - `internal/tmux` — the tmux CLI, per `-L` server: sessions, panes, send-keys,
-  and what a pane is running (ADRs 0008, 0014, 0025).
+  what a pane is running, and what it printed (ADRs 0008, 0014, 0025, 0038).
 - `internal/config` — `config.toml`: load, and `Save`, which writes the file
   whole with its explanatory comments, so a table the cockpit edits keeps them.
 - `internal/gh` — the GitHub CLI for PR, check and deploy signals, every call
