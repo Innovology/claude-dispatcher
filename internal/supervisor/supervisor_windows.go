@@ -25,6 +25,7 @@ package supervisor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -265,6 +266,13 @@ func KnowShell(shell string) {}
 // process tree we can enumerate from here. Adoption falls back to the event
 // log, which is platform-independent.
 func SessionPIDs(sess Session) []int { return nil }
+
+// CapturePane has no console-window answer: a detached window's screen is not
+// something this backend can read back. Nothing asks it here, because the only
+// caller reads a pane SessionIdle has called idle, and that is never known.
+func CapturePane(sess Session) (string, error) {
+	return "", errors.New("a console window's screen cannot be read back")
+}
 
 // AttachSwitches is true here for the same reason it is true inside tmux: the
 // Windows handover raises the session's own console window and returns at once,

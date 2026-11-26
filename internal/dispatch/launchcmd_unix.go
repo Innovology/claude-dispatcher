@@ -75,8 +75,18 @@ func StewardCommand(stateDir, opening string) string {
 // through instead of killing the pane the moment claude exits. Nothing here
 // touches the line claude is launched with: that is POSIX and runs under
 // /bin/sh whatever the human's shell is. Full record: docs/adr/0025.
+//
+// Before any of that it prints claude's exit status into the pane (ExitMark),
+// first, while $? is still claude's. It is the line between what claude printed
+// and what the exit shell prints after it: a claude that died before reporting
+// in is told in its own words (see startdied.go), and an exit shell that
+// complains about its directory at every prompt — nu did, in the deleted folder
+// that killed the claude — would otherwise be read as the reason. It is also
+// the one thing in the pane that says claude has gone, to a human who attaches
+// and finds a prompt. Full record: docs/adr/0038.
 func exitShell(shell string) string {
-	return "; cdsh=" + shellQuote(strings.TrimSpace(shell)) +
+	return `; cdst=$?; printf '\n%s%s\n' '` + ExitMark + `' "$cdst"` +
+		"; cdsh=" + shellQuote(strings.TrimSpace(shell)) +
 		`; [ -n "$cdsh" ] || cdsh=$(tmux display -p '#{default-shell}' 2>/dev/null)` +
 		`; [ -x "$cdsh" ] || cdsh=${SHELL:-/bin/sh}; exec "$cdsh"`
 }

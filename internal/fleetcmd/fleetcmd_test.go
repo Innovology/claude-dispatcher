@@ -270,15 +270,79 @@ func TestSwap(t *testing.T) {
 		got = to
 		return dispatch.ResumeStarted, "disp-pay", nil
 	}
+	withAwait(t, dispatch.StartConfirmed, nil)
 
 	var out bytes.Buffer
 	if err := runSwap([]string{"d1", "work"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != "work" || !strings.Contains(out.String(), `"pay" resumed on work`) {
+	if got.Name != "work" || !strings.Contains(out.String(), `"pay" resumed on work · session disp-pay · claude reported in`) {
 		t.Errorf("swapped to %+v, said %q", got, out.String())
 	}
 	if err := runSwap([]string{"d1", "nobody"}, &out); err == nil || !strings.Contains(err.Error(), `no account "nobody"`) {
 		t.Errorf("unknown account: %v", err)
+	}
+}
+
+// withAwait stands in for the wait on claude reporting in. A nil record is the
+// one the store holds under the waited-for id.
+func withAwait(t *testing.T, o dispatch.StartOutcome, d *state.Dispatch) {
+	t.Helper()
+	prev := awaitStart
+	t.Cleanup(func() { awaitStart = prev })
+	awaitStart = func(id string, _ time.Duration) (dispatch.StartOutcome, *state.Dispatch) {
+		if d != nil {
+			return o, d
+		}
+		for _, r := range state.LoadAll() {
+			if r.ID == id {
+				return o, r
+			}
+		}
+		return o, nil
+	}
+}
+
+// swap's line is about claude, not about the supervisor. A conversation that
+// will not open under the new login is a claude that exits at once, and
+// "resumed on work" said over it was the handoff's false report in another
+// verb. It says which of the three it was.
+func TestSwapSaysWhatClaudeDid(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, ".config", "claude-dispatcher"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "claude-dispatcher", "config.toml"),
+		[]byte("[accounts]\nwork = \"~/.claude-work\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withStore(t, &state.Dispatch{ID: "d1", Feature: "pay", Status: state.StatusExited, SessionID: "s"})
+	prev := swapAccount
+	t.Cleanup(func() { swapAccount = prev })
+	swapAccount = func(*state.Dispatch, account.Account, string) (dispatch.ResumeMode, string, error) {
+		return dispatch.ResumeStarted, "disp-pay", nil
+	}
+
+	died := &state.Dispatch{ID: "d1", Feature: "pay", Status: state.StatusExited,
+		StatusReason: "claude exited before it reported in (status 1): No conversation found with session ID: s"}
+	withAwait(t, dispatch.StartFailed, died)
+	var out bytes.Buffer
+	err := runSwap([]string{"d1", "work"}, &out)
+	if err == nil || !strings.Contains(err.Error(), `"pay" is on work now, but it did not stay up: claude exited before it reported in (status 1): No conversation found`) {
+		t.Errorf("a claude that died was reported as %v / %q", err, out.String())
+	}
+	if strings.Contains(out.String(), "resumed") {
+		t.Errorf("said resumed over a claude that died: %q", out.String())
+	}
+
+	slow := &state.Dispatch{ID: "d1", Feature: "pay", Status: state.StatusLaunching, TmuxSession: "disp-pay"}
+	withAwait(t, dispatch.StartUnconfirmed, slow)
+	out.Reset()
+	if err := runSwap([]string{"d1", "work"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "not confirmed: claude has not reported in after 30s") {
+		t.Errorf("an unconfirmed start read %q", out.String())
 	}
 }
