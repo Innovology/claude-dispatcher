@@ -105,3 +105,35 @@ func TestASweepRetiresAYoungerSessionWhenThereIsNoConversationToFind(t *testing.
 		t.Errorf("asked the machine %d times about a record with no conversation", *asked)
 	}
 }
+
+// A sweep decides on the load's copy, and a load is slow. When the record has
+// moved on before the sweep writes — a resume gave it a new session, a hook a
+// new status — the verdict was about a record that no longer exists, and
+// writing it would put the copy's old session back over the new one. It is
+// left for the next load to judge.
+func TestASweepDoesNotRetireARecordThatMovedOnSinceTheLoad(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	held := time.Date(2026, 11, 26, 14, 32, 21, 0, time.Local)
+	saveAll(t, &state.Dispatch{ID: "r", Feature: "r", Status: state.StatusWorking,
+		TmuxSession: "disp-r", TmuxSocket: "s", SessionID: "sess-r", SessionStartedAt: &held})
+	ds := state.LoadAll() // the load's copy
+
+	// The resume, landing after the load read the records.
+	resumed := held.Add(3 * time.Minute)
+	now := *ds[0]
+	now.Status, now.StatusReason, now.TmuxSession, now.SessionStartedAt = state.StatusLaunching, "resuming its session", "disp-r-2", &resumed
+	saveAll(t, &now)
+
+	withListing(t, map[string]time.Time{}) // disp-r is gone, disp-r-2 not yet listed
+	withConversations(t, nil)
+	if retired, _ := ReconcileSessions(ds); retired != 0 {
+		t.Errorf("retired %d, want 0 — the record the verdict was about has been resumed", retired)
+	}
+	got := onDisk(t, "r")
+	if got.Status != state.StatusLaunching || got.TmuxSession != "disp-r-2" || !got.SessionStartedAt.Equal(resumed) {
+		t.Errorf("on disk: %s %q hold %v — the load's copy was written over the resume", got.Status, got.TmuxSession, got.SessionStartedAt)
+	}
+	if ds[0].TmuxSession != "disp-r-2" {
+		t.Errorf("the load's copy names %q, want the record as it now is", ds[0].TmuxSession)
+	}
+}

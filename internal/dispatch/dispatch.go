@@ -601,16 +601,49 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 			live++
 			continue
 		}
-		d.Stop(state.StatusExited, reason, time.Now())
-		// The session died without a SessionEnd, so its fan-out died without
-		// SubagentStops: settle the annotation here, where the death is
-		// proven, or the history row claims live subagents forever.
-		d.SweepSubagents(time.Now())
-		if state.Save(d) == nil {
+		if retireSwept(d, reason) {
 			retired++
 		}
 	}
 	return retired, live
+}
+
+// retireSwept marks d exited for reason, on the record as it stands on disk:
+// the verdict was reached on d, the load's copy, and a resume or a hook may have
+// written the record since. It retires only the record the verdict was about —
+// the same status, the same session address, the same hold — and leaves one that
+// has moved on for the next load to judge. Saving d whole instead put a resume's
+// new session back to the copy's old one. d is left as the record now is, so the
+// collectors that read the load's slice see what the sweep did.
+func retireSwept(d *state.Dispatch, reason string) bool {
+	now := time.Now()
+	at, hold, was := SessionOf(d), d.SessionStartedAt, d.Status
+	done := false
+	cur, err := state.Edit(d.ID, func(cur *state.Dispatch) bool {
+		if cur.Status != was || SessionOf(cur) != at || !sameInstant(cur.SessionStartedAt, hold) {
+			return false
+		}
+		cur.Stop(state.StatusExited, reason, now)
+		// The session died without a SessionEnd, so its fan-out died without
+		// SubagentStops: settle the annotation here, where the death is
+		// proven, or the history row claims live subagents forever.
+		cur.SweepSubagents(now)
+		done = true
+		return true
+	})
+	if cur != nil {
+		*d = *cur
+	}
+	return done && err == nil
+}
+
+// sameInstant reports whether two optional times are both unset or the same
+// instant.
+func sameInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }
 
 // ensureWorktree adds a worktree for the branch at path, creating the branch
