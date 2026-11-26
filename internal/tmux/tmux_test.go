@@ -251,6 +251,66 @@ func TestAPaneStandsInItsDirectoryAfterTheServersHasGone(t *testing.T) {
 	}
 }
 
+// The other half of that report: the server was standing in the finished
+// dispatch's worktree because the client that started it stood there. A server
+// NewSession starts must stand somewhere no dispatch removes, with and without
+// an environment prefix, and the prefix must still run in the worktree, where
+// `nix develop` looks for its flake.
+func TestAServerIsNotStartedInsideTheWorktreeItWasStartedFor(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	if _, err := os.Stat("/proc/self/cwd"); err != nil {
+		t.Skip("no /proc to read a server's working directory from")
+	}
+	tmp := t.TempDir()
+	home, worktree := filepath.Join(tmp, "home"), filepath.Join(tmp, "worktree")
+	for _, d := range []string{home, worktree} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	marker := filepath.Join(tmp, "prefix-ran-in")
+	prefix := filepath.Join(tmp, "record-cwd")
+	if err := os.WriteFile(prefix, []byte("#!/bin/sh\npwd -P > "+shellQuote(marker)+"\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realHome, _ := filepath.EvalSymlinks(home)
+	realWorktree, _ := filepath.EvalSymlinks(worktree)
+
+	for _, tc := range []struct{ name, env string }{{"plain", ""}, {"prefixed", prefix}} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := Server{Socket: "disp-test-born-in-" + tc.name + "-" + itoa(os.Getpid())}
+			t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+			if err := srv.NewSession("s", worktree, "sleep 30", tc.env); err != nil {
+				t.Fatalf("NewSession: %v", err)
+			}
+			out, err := srv.cmd("display-message", "-p", "#{pid}").Output()
+			if err != nil {
+				t.Fatalf("asking the server its pid: %v", err)
+			}
+			stands, err := os.Readlink("/proc/" + strings.TrimSpace(string(out)) + "/cwd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stands != realHome {
+				t.Errorf("the server stands in %q, want the home directory %q", stands, realHome)
+			}
+			if tc.env == "" {
+				return
+			}
+			ran, err := os.ReadFile(marker)
+			if err != nil {
+				t.Fatalf("the prefix never ran: %v", err)
+			}
+			if got := strings.TrimSpace(string(ran)); got != realWorktree {
+				t.Errorf("the prefix ran in %q, want the worktree %q", got, realWorktree)
+			}
+		})
+	}
+}
+
 // A directory that is not there ends the pane instead of starting the command
 // wherever tmux put it.
 func TestAPaneWhoseDirectoryIsMissingRunsNothing(t *testing.T) {
