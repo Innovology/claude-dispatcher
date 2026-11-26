@@ -208,6 +208,70 @@ func TestSavingALiveStatusClearsTheEnding(t *testing.T) {
 	}
 }
 
+// An act decided on a copy that has since gone stale must land on the record as
+// it is now, not put the copy back. The case it was written for: a relaunch
+// stamped a new session's hold, and a copy read before it was saved back over
+// it, so the record held the session the relaunch had replaced.
+func TestEditActsOnTheRecordAsItIsNow(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	before := time.Date(2026, 11, 26, 14, 32, 21, 0, time.Local)
+	after := before.Add(159 * time.Second)
+	stale := &Dispatch{ID: "r", Status: StatusExited, TmuxSession: "disp-r", SessionStartedAt: &before}
+	if err := Save(stale); err != nil {
+		t.Fatal(err)
+	}
+	stale = LoadAll()[0]
+
+	// The relaunch, written by someone else after the copy was read.
+	fresh := *stale
+	fresh.Status, fresh.SessionStartedAt, fresh.SessionID = StatusLaunching, &after, "sess-new"
+	if err := Save(&fresh); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	got, err := Edit(stale.ID, func(d *Dispatch) bool { d.Dismiss(now); return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.SessionStartedAt == nil || !got.SessionStartedAt.Equal(after) || got.SessionID != "sess-new" {
+		t.Fatalf("Edit returned %+v, want the relaunched record", got)
+	}
+	disk := LoadAll()[0]
+	if !disk.SessionStartedAt.Equal(after) || disk.Status != StatusLaunching || disk.SessionID != "sess-new" {
+		t.Errorf("on disk: hold %v status %s session %q — the stale copy came back", disk.SessionStartedAt, disk.Status, disk.SessionID)
+	}
+	// A dismissal of a dispatcher that is running again is about nothing:
+	// Save's own invariant drops it, so the row does not leave the table.
+	if disk.DismissedAt != nil {
+		t.Error("a running record was dismissed")
+	}
+}
+
+// Edit writes only when the act says it changed something, and a record that is
+// not there is nothing to act on.
+func TestEditWritesOnlyWhatChanged(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	if err := Save(&Dispatch{ID: "r", Status: StatusWorking}); err != nil {
+		t.Fatal(err)
+	}
+	was := LoadAll()[0].UpdatedAt
+	time.Sleep(2 * time.Millisecond)
+	if _, err := Edit("r", func(*Dispatch) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if got := LoadAll()[0].UpdatedAt; !got.Equal(was) {
+		t.Errorf("an act that changed nothing rewrote the record (%v → %v)", was, got)
+	}
+	called := false
+	if got, err := Edit("missing", func(*Dispatch) bool { called = true; return true }); got != nil || err != nil || called {
+		t.Errorf("Edit on a missing record = %v, %v (act called: %v), want nothing", got, err, called)
+	}
+	if got, _ := Edit("../r", func(*Dispatch) bool { return true }); got != nil {
+		t.Error("an id with a path in it reached a file")
+	}
+}
+
 // An adopted session's directory is the human's own checkout. Every caller that
 // deletes a folder or offers a kill asks these first, so they must say no for
 // an adopted record and yes only for a worktree this cockpit cut.
