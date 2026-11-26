@@ -83,6 +83,60 @@ func TestSwapCarriesTheConversationAcross(t *testing.T) {
 	}
 }
 
+// A session that never had a turn has no conversation to carry, and the swap
+// refused it as "gone" exactly as resume did (ADR 0039). It starts the
+// dispatch again under the new login instead; one whose conversation existed
+// and has gone still refuses, since there is nothing to carry and the brief
+// would redo its work.
+func TestSwapStartsAConversationThatNeverBeganOnTheNewAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		turn    bool
+		refused bool
+	}{
+		{"never began", false, false},
+		{"began and has gone", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, _ := onDefault(t)
+			if err := os.Remove(d.TranscriptPath); err != nil {
+				t.Fatal(err)
+			}
+			state.AppendEvent(state.Event{Event: "SessionStart", SessionID: "sess-abc"})
+			if tc.turn {
+				state.AppendEvent(state.Event{Event: "UserPromptSubmit", SessionID: "sess-abc"})
+			}
+			state.AppendEvent(state.Event{Event: "SessionEnd", SessionID: "sess-abc"})
+			sup := &stubSupervisor{alive: map[string]bool{}}
+			stubSessions(t, sup)
+			stubProbe(t, account.Auth{Known: true, LoggedIn: true})
+			to := readyAccount(t)
+
+			mode, _, err := SwapAccount(d, to, "")
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "is gone") || sup.started.name != "" {
+					t.Errorf("SwapAccount = %v, started %q; want the transcript refused as gone", err, sup.started.name)
+				}
+				return
+			}
+			if err != nil || mode != ResumeRelaunched {
+				t.Fatalf("SwapAccount = %q, %v; want the dispatch started again", mode, err)
+			}
+			if !strings.HasPrefix(sup.started.cmd, "CLAUDE_CONFIG_DIR="+shellQuote(to.Dir)+" ") ||
+				strings.Contains(sup.started.cmd, "--resume") || !strings.Contains(sup.started.cmd, state.PromptPath(d.ID)) {
+				t.Errorf("command %q is not the original launch under the new login", sup.started.cmd)
+			}
+			if _, err := os.Stat(filepath.Join(to.Dir, "projects", "-wt-acme-payment-retry", "sess-abc.jsonl")); err == nil {
+				t.Error("a transcript appeared under the new login for a conversation that never existed")
+			}
+			got := recordByIDForTest(t, d.ID)
+			if got.Account != "work" || got.ConfigDir != to.Dir || got.SessionID != "" {
+				t.Errorf("record: account %q dir %q session %q", got.Account, got.ConfigDir, got.SessionID)
+			}
+		})
+	}
+}
+
 // Running out is an API error ending the turn, and nothing inside the session
 // will start another; the swap says "continue" for the human. A turn that
 // ended on a question gets nothing typed at it.

@@ -35,10 +35,13 @@
 // session is still going — see reopensDone.
 //
 // Events are attributed to a dispatch by, in order: the CLAUDE_DISPATCHER_ID
-// env var (set at launch, inherited through tmux -> claude -> hook), the
-// session_id, or — for SessionStart only — the newest still-launching
-// dispatch for the event's cwd. Unattributed events (sessions started outside
-// the cockpit) are logged to events.jsonl and otherwise ignored for now.
+// env var (set at launch, inherited through tmux -> claude -> hook), or the
+// session_id a record already carries (an adopted session, which has no
+// dispatcher id, is found that way). Never by where the session started: a
+// claude with no dispatcher id is one the dispatcher did not start, even in
+// its own worktree (ADR 0039).
+// Unattributed events (sessions started outside the cockpit) are logged to
+// events.jsonl and otherwise ignored.
 //
 // This process must never disturb the Claude session: it always exits 0.
 package hookcmd
@@ -49,7 +52,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -159,7 +161,7 @@ func Run(args []string) int {
 	release := state.Lock()
 	defer release()
 
-	d := resolve(dispatcherID, event, in)
+	d := resolve(dispatcherID, in)
 	if d == nil {
 		return 0
 	}
@@ -193,7 +195,7 @@ func refreshCommits(d *state.Dispatch) bool {
 	return true
 }
 
-func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
+func resolve(dispatcherID string, in hookInput) *state.Dispatch {
 	all := state.LoadAll()
 	if dispatcherID != "" {
 		for _, d := range all {
@@ -209,23 +211,17 @@ func resolve(dispatcherID, event string, in hookInput) *state.Dispatch {
 			}
 		}
 	}
-	// A freshly launched dispatch has no session id yet; bind the first
-	// SessionStart arriving from its worktree (or repo, for records from
-	// before per-dispatch worktrees). Records are sorted newest-first within
-	// a status, so the most recent launch wins.
-	if event == "SessionStart" && in.Cwd != "" {
-		for _, d := range all {
-			if d.Status != state.StatusLaunching {
-				continue
-			}
-			if d.WorktreePath != "" && samePath(d.WorktreePath, in.Cwd) {
-				return d
-			}
-			if d.WorktreePath == "" && samePath(d.RepoPath, in.Cwd) {
-				return d
-			}
-		}
-	}
+	// Nothing else. A SessionStart used to bind the newest launching record
+	// whose worktree it started in, for "a freshly launched dispatch has no
+	// session id yet" — but a fresh launch has its dispatcher id, carried
+	// inline on every launch and resume command since the first one, so the
+	// join only ever caught a claude the dispatcher did not start. In the
+	// reporting store it had bound one record of 90: a claude the human ran by
+	// hand in a dead dispatch's pane (the exit shell does not inherit the id),
+	// which never had a turn, and whose id then made every resume refuse
+	// (ADR 0039). On a resumed record that has not come up it would do worse,
+	// replacing the dispatch's own conversation with the stranger's. A
+	// session the human started is brought under a record by adopting it.
 	return nil
 }
 
@@ -548,13 +544,4 @@ func plural(n int, word string) string {
 		return word
 	}
 	return word + "s"
-}
-
-func samePath(a, b string) bool {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true
-	}
-	ra, errA := filepath.EvalSymlinks(a)
-	rb, errB := filepath.EvalSymlinks(b)
-	return errA == nil && errB == nil && ra == rb
 }

@@ -2,6 +2,7 @@ package hookcmd
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -189,31 +190,104 @@ func TestResolve(t *testing.T) {
 		}
 	}
 
-	if d := resolve("id2", "Stop", hookInput{}); d == nil || d.ID != "id2" {
+	if d := resolve("id2", hookInput{}); d == nil || d.ID != "id2" {
 		t.Error("env dispatcher id should win")
 	}
-	if d := resolve("", "Stop", hookInput{SessionID: "sess1"}); d == nil || d.ID != "id1" {
+	if d := resolve("", hookInput{SessionID: "sess1"}); d == nil || d.ID != "id1" {
 		t.Error("session id should match")
 	}
-	if d := resolve("", "SessionStart", hookInput{Cwd: "/repo/two"}); d == nil || d.ID != "id2" {
-		t.Error("SessionStart should bind launching dispatch by cwd")
+	if d := resolve("", hookInput{SessionID: "unknown"}); d != nil {
+		t.Error("foreign session should not resolve")
 	}
+	// Where a session started says nothing about whose it is (ADR 0039).
 	worktreed := &state.Dispatch{ID: "id3", RepoPath: "/repo/three",
 		WorktreePath: "/wt/three", Status: state.StatusLaunching}
 	if err := state.Save(worktreed); err != nil {
 		t.Fatal(err)
 	}
-	if d := resolve("", "SessionStart", hookInput{Cwd: "/wt/three"}); d == nil || d.ID != "id3" {
-		t.Error("SessionStart should bind launching dispatch by worktree cwd")
+	for _, cwd := range []string{"/repo/two", "/wt/three", "/repo/three"} {
+		if d := resolve("", hookInput{SessionID: "stranger", Cwd: cwd}); d != nil {
+			t.Errorf("a session with no dispatcher id, started in %s, resolved to %s", cwd, d.ID)
+		}
 	}
-	if d := resolve("", "SessionStart", hookInput{Cwd: "/repo/three"}); d != nil {
-		t.Error("a worktree-backed dispatch must not bind by repo cwd")
+}
+
+// runHook is Claude Code calling the hook: the payload on stdin, the
+// dispatcher id in the environment or not at all.
+func runHook(t *testing.T, event, dispatcherID string, in hookInput) {
+	t.Helper()
+	t.Setenv("CLAUDE_DISPATCHER_ID", dispatcherID)
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if d := resolve("", "Stop", hookInput{Cwd: "/repo/two"}); d != nil {
-		t.Error("cwd binding must be SessionStart-only")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if d := resolve("", "Stop", hookInput{SessionID: "unknown"}); d != nil {
-		t.Error("foreign session should not resolve")
+	if _, err := w.Write(b); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	stdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = stdin; _ = r.Close() }()
+	if code := Run([]string{event}); code != 0 {
+		t.Fatalf("hook %s exited %d", event, code)
+	}
+}
+
+// The claude that gave record 4c6d1447ab92 its session id was one the human
+// ran by hand in the pane of a dispatch whose own claude never came up: no
+// dispatcher id (the pane's exit shell does not inherit it), started in the
+// dispatch's worktree, and joined to the launching record on that alone. It
+// never had a turn, and its id made every resume refuse. A session the
+// dispatcher did not start binds nothing now — not on a fresh launch, and not
+// on a resumed one, where it would have put a stranger's conversation in place
+// of the dispatch's own — while the dispatcher's own claude still binds by its
+// id, and the stranger's start is still in the log.
+func TestASessionTheDispatcherDidNotStartBindsNothing(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	fresh := &state.Dispatch{ID: "fresh1", WorktreePath: "/wt/adopt-ds",
+		RepoPath: "/repo/player-app", Status: state.StatusLaunching, StatusReason: "starting session"}
+	resumed := &state.Dispatch{ID: "resumed1", WorktreePath: "/wt/payment-retry",
+		RepoPath: "/repo/acme", SessionID: "sess-own", TranscriptPath: "/p/sess-own.jsonl",
+		Status: state.StatusLaunching, StatusReason: "resuming its session"}
+	for _, d := range []*state.Dispatch{fresh, resumed} {
+		if err := state.Save(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runHook(t, "SessionStart", "", hookInput{SessionID: "sess-by-hand",
+		TranscriptPath: "/p/sess-by-hand.jsonl", Cwd: "/wt/adopt-ds"})
+	runHook(t, "SessionStart", "", hookInput{SessionID: "sess-by-hand-2",
+		TranscriptPath: "/p/sess-by-hand-2.jsonl", Cwd: "/wt/payment-retry"})
+
+	byID := map[string]*state.Dispatch{}
+	for _, d := range state.LoadAll() {
+		byID[d.ID] = d
+	}
+	if d := byID["fresh1"]; d.SessionID != "" || d.TranscriptPath != "" || d.Status != state.StatusLaunching {
+		t.Errorf("fresh launch took the hand-run session: %q %q %q", d.SessionID, d.TranscriptPath, d.Status)
+	}
+	if d := byID["resumed1"]; d.SessionID != "sess-own" || d.TranscriptPath != "/p/sess-own.jsonl" {
+		t.Errorf("resumed record's conversation replaced by a stranger's: %q %q", d.SessionID, d.TranscriptPath)
+	}
+	logged := false
+	for _, ev := range state.LoadEvents() {
+		logged = logged || (ev.Event == "SessionStart" && ev.SessionID == "sess-by-hand")
+	}
+	if !logged {
+		t.Error("the hand-run session's start is not in the event log")
+	}
+
+	runHook(t, "SessionStart", "fresh1", hookInput{SessionID: "sess-launched",
+		TranscriptPath: "/p/sess-launched.jsonl", Cwd: "/wt/adopt-ds"})
+	for _, d := range state.LoadAll() {
+		if d.ID == "fresh1" && (d.SessionID != "sess-launched" || d.Status != state.StatusWorking) {
+			t.Errorf("the dispatcher's own claude did not bind: %q %q", d.SessionID, d.Status)
+		}
 	}
 }
 
@@ -244,15 +318,6 @@ func TestRefreshCommits(t *testing.T) {
 	}
 	if d := (&state.Dispatch{RepoPath: repo, Branch: "feature/f"}); refreshCommits(d) {
 		t.Error("missing BaseSHA must be a no-op")
-	}
-}
-
-func TestSamePath(t *testing.T) {
-	if !samePath("/a/b/../b", "/a/b") {
-		t.Error("cleaned paths should match")
-	}
-	if samePath("/a", "/b") {
-		t.Error("different paths should not match")
 	}
 }
 

@@ -132,7 +132,9 @@
   stateless viewer — "jump in" hands the terminal to tmux.
 - Status truth comes from one global Claude Code hook in
   `~/.claude/settings.json` (hooks cannot be injected at launch time). The
-  `CLAUDE_DISPATCHER_ID` env var is the join key from session to record.
+  `CLAUDE_DISPATCHER_ID` env var is the join key from session to record —
+  with a session id the record already holds, the only one; never the
+  directory a session started in (ADR 0039).
   Transcript JSONL parsing is best-effort preview only (format is internal).
   The one thing no hook can report is a session dying without getting a
   `SessionEnd` out (SIGKILL, an outside `tmux kill-session`, a tmux server
@@ -427,6 +429,41 @@
   The `+` form's `CharLimit = 500` went with it: a silent truncation and a loud
   refusal are not two settings of one dial. Full record:
   `docs/adr/0009-a-dispatch-that-did-not-happen-is-a-thing-that-happened.md`.
+- **A session id is not a conversation.** Record `4c6d1447ab92` refused every
+  ⏎ with "the transcript … is gone", eight times from 14:25 to 14:33, and nothing
+  on its row could start it. Its dispatched claude never came up (ADR 0037).
+  The human ran `claude` by hand in the dead pane, and that claude's
+  SessionStart carried no dispatcher id. The hook joined it to the launching
+  record by its cwd, it ended four minutes later without a turn, and Claude
+  Code writes a transcript only when the first message goes in. So `Resume`
+  (and `SwapAccount`'s copy) refused a conversation that never existed.
+  **A recorded session that never had a turn is started again from its
+  brief**, the way ADR 0009 restarts a launch with no session id, and leaves
+  the record once the relaunch is certain. The missing file is not the test,
+  because a transcript that existed and has gone looks the same and is the
+  common case: 105 of 126 sessions with turns older than 25 days had lost
+  theirs. Relaunching the brief there would redo work already on the branch.
+  `dispatch.neverBegan` (`began.go`) needs all of these: no transcript at the
+  path or under the config dir; no commits on the record or in
+  `BaseSHA..branch`; the event log, read to its end (`state.EventsMentioning`,
+  17ms against `LoadEvents`' 215ms on 30MB), holds the session's
+  SessionStart, so its silence is evidence; and no turn in the log under that
+  session, or under the dispatcher's own id in any session. A turn is what a
+  turn writes (prompt, stop, stop failure, tool, dialog, subagent), never the
+  cockpit's own audit lines, which carry the session id too. An idle prompt
+  is not a turn (measured firing at an untouched prompt), and a lone `Stop`
+  is one (measured with no prompt logged). Anything short of that refuses as
+  before. Checked against the reporting store, it picks out that record and
+  none of the 23 others with a session id and no transcript.
+  **And a claude the dispatcher did not start is not joined to a record.**
+  Every launch and resume has carried the id inline since the scaffold, so the
+  join by cwd only ever caught strangers. It bound 1 of 90 records, this one.
+  On a resumed record still launching it would put a stranger's id over the
+  dispatch's own conversation. Attribution is the dispatcher id or a session id
+  the record already holds (adoption), and nothing else. `NeverStarted` stays a
+  read of the record, because the row asks it on every draw. Such a row offers
+  ⏎ resume, and the notice says the dispatch was started again. Full record:
+  `docs/adr/0039-a-session-id-is-not-a-conversation.md`.
 - **A failure is read for its cause, and the rest is kept.** Reported as "on
   macos build i could see more errors … not so here on nixos". Two causes,
   neither about NixOS. The footer `spread` the help and the notice, and spread

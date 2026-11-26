@@ -76,6 +76,13 @@ func SwapAccount(d *state.Dispatch, to account.Account, prompt string) (ResumeMo
 
 	from := accountLabel(d.Account)
 	sid := SessionIDOf(d)
+	// A session that never had a turn has no conversation to take across, and
+	// copyConversation would refuse it as gone. It goes the way a record with
+	// no session does: nothing is copied, and Resume starts the dispatch again
+	// from its brief under the new login (neverBegan, ADR 0039).
+	if sid != "" && neverBegan(d, sid) {
+		sid = ""
+	}
 	newTranscript := ""
 	if sid != "" {
 		p, err := copyConversation(d, sid, to.ConfigDir())

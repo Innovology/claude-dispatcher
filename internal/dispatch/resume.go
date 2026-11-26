@@ -67,7 +67,14 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// say exactly that and stop, leaving the human to type the whole dispatch
 	// again. What it can do is what was asked in the first place: launch it
 	// again, in the worktree it already cut, with the prompt it was sent with.
-	relaunch := sid == ""
+	//
+	// A session that never had a turn is the same case wearing a session id:
+	// claude started and ended without a word, so Claude Code never wrote the
+	// transcript, and the refusal below stranded it for good (ADR 0039). It is
+	// started again only on evidence that it never began (neverBegan), because
+	// a transcript that existed and has gone looks the same from here, and
+	// that one must still refuse.
+	relaunch := sid == "" || neverBegan(d, sid)
 	if relaunch && strings.TrimSpace(d.Prompt) == "" {
 		return "", "", fmt.Errorf("%q never started, and recorded no prompt to start it with", d.Feature)
 	}
@@ -205,6 +212,14 @@ func Resume(d *state.Dispatch, prompt string) (ResumeMode, string, error) {
 	// `nix develop` that finds no flake in a worktree whose branch has none —
 	// which is the very launch a relaunch is retrying.
 	d.EnvCommand = repos.EnvIn(d.EnvCommand, d.RepoPath, dir)
+	if relaunch {
+		// A session that never began is no part of this dispatch, so it leaves
+		// the record here, where the relaunch is certain: the new claude's own
+		// SessionStart is the one the record goes on to carry, and a relaunch
+		// that fails leaves a row offering to start again rather than to
+		// resume a conversation that does not exist.
+		d.SessionID, d.TranscriptPath = "", ""
+	}
 	if err := newSession(sess, dir, cmd, d.EnvCommand); err != nil {
 		if relaunch {
 			return "", "", failLaunch(d, err)
@@ -254,6 +269,11 @@ func holdsOwnSession(d *state.Dispatch) bool {
 // was bound and no transcript recorded, which is a launch that failed before
 // claude ran. Resume starts such a record again rather than resuming it, and
 // the row says so.
+//
+// It reads the record alone, because the row asks it on every draw. A session
+// id with nothing behind it (neverBegan) takes the event log to tell from a
+// conversation whose transcript has gone, so the row offers ⏎ resume there,
+// and the notice says it was started again once Resume has found out.
 func NeverStarted(d *state.Dispatch) bool { return d != nil && SessionIDOf(d) == "" }
 
 // SessionIDOf is the Claude Code session id to resume: the one the hook bound

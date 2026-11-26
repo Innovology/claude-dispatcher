@@ -392,6 +392,42 @@ func TestTheEventLogSurvivesATornLine(t *testing.T) {
 	}
 }
 
+// One session's history is the lines that name it, oldest first, whatever else
+// the log holds — a line far longer than a scanner's token, a torn line, other
+// sessions — and the read says it reached the end. A missing log says it did
+// not, since a caller asking what is NOT in the log must not hear "nothing".
+func TestEventsMentioningReadsOneSessionsHistory(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_DISPATCHER_STATE", dir)
+	if evs, complete := EventsMentioning("sess-a"); evs != nil || complete {
+		t.Fatalf("a missing log = %+v, complete %v; want nothing, not complete", evs, complete)
+	}
+	AppendEvent(Event{Event: "SessionStart", SessionID: "sess-a", Cwd: "/wt/a"})
+	AppendEvent(Event{Event: EventDispatchFailed, Reason: strings.Repeat("x", 2<<20)})
+	f, err := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("{\"event\":\"Sto sess-a\n")
+	_ = f.Close()
+	AppendEvent(Event{Event: "UserPromptSubmit", SessionID: "sess-b"})
+	AppendEvent(Event{Event: "UserPromptSubmit", DispatcherID: "d1", SessionID: "sess-c"})
+	AppendEvent(Event{Event: "SessionEnd", SessionID: "sess-a"})
+
+	evs, complete := EventsMentioning("sess-a", "d1", "")
+	if !complete {
+		t.Error("a log read to its end says it was not")
+	}
+	var got []string
+	for _, ev := range evs {
+		got = append(got, ev.Event+"/"+ev.SessionID)
+	}
+	want := []string{"SessionStart/sess-a", "UserPromptSubmit/sess-c", "SessionEnd/sess-a"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("read %v, want %v", got, want)
+	}
+}
+
 // Ids name the record file and the session's join key, so two dispatches must
 // not share one.
 func TestNewIDsAreDistinct(t *testing.T) {
