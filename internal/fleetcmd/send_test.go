@@ -34,6 +34,7 @@ func TestDispatchSendsADispatcherOfTheConversationsOwn(t *testing.T) {
 		acct                  account.Account
 		env                   []string
 	}
+	withAwait(t, dispatch.StartConfirmed, nil)
 	prev := launch
 	launch = func(r repos.Repo, feature, prompt string, _ dispatch.Mode, _ dispatch.Model, root dispatch.Root, _ bool, acct account.Account) (*state.Dispatch, error) {
 		asked.repo, asked.feature, asked.prompt, asked.root, asked.acct = r.Name, feature, prompt, root, acct
@@ -61,7 +62,7 @@ func TestDispatchSendsADispatcherOfTheConversationsOwn(t *testing.T) {
 	if w, _ := find("w1"); w == nil || w.DispatchedBy != "c1" {
 		t.Errorf("sent = %+v, want it recorded as sent by c1", w)
 	}
-	if !strings.Contains(out.String(), `dispatched "sync" → api on feature/sync · id w1`) {
+	if !strings.Contains(out.String(), `dispatched "sync" → api on feature/sync · id w1 · session disp-sync · claude reported in`) {
 		t.Errorf("output: %s", out.String())
 	}
 
@@ -76,6 +77,7 @@ func TestDispatchSendsADispatcherOfTheConversationsOwn(t *testing.T) {
 // stubLaunch records each launch `dispatch` asks for and saves a record for it.
 func stubLaunch(t *testing.T) *[]string {
 	t.Helper()
+	withAwait(t, dispatch.StartConfirmed, nil)
 	var launched []string
 	prev := launch
 	launch = func(r repos.Repo, feature, _ string, _ dispatch.Mode, _ dispatch.Model, _ dispatch.Root, _ bool, _ account.Account) (*state.Dispatch, error) {
@@ -140,6 +142,7 @@ func TestDispatchKeepsTheSendersAccountAndSaysWhenConfigLostIt(t *testing.T) {
 	withStore(t,
 		&state.Dispatch{ID: "c1", Feature: "talk", Product: "pp", Account: "gone", ConfigDir: "/cfg/gone", Status: state.StatusWorking},
 		&state.Dispatch{ID: "c2", Feature: "lost", Product: "pp", Account: "gone", Status: state.StatusWorking})
+	withAwait(t, dispatch.StartConfirmed, nil)
 	var acct account.Account
 	prev := launch
 	launch = func(r repos.Repo, feature, _ string, _ dispatch.Mode, _ dispatch.Model, _ dispatch.Root, _ bool, a account.Account) (*state.Dispatch, error) {
@@ -188,5 +191,51 @@ func TestDispatchBoundsWhatOneDispatcherHasOut(t *testing.T) {
 	}
 	if len(*launched) != 1 {
 		t.Errorf("launched %v", *launched)
+	}
+}
+
+// The session that sends work out acts on what this prints, so it says what
+// claude did rather than what the supervisor did. A claude that died is an
+// error in claude's own words, with the row kept to start again; one nothing
+// could confirm is said as such, and is not an error, since nothing was ended
+// on its account and the work is on the table either way.
+func TestDispatchSaysWhatClaudeDid(t *testing.T) {
+	died := "claude exited before it reported in (status 1): The current directory no longer exists (it was deleted or moved)."
+	for _, tc := range []struct {
+		name    string
+		outcome dispatch.StartOutcome
+		status  state.Status
+		reason  string
+		fails   bool
+		want    string
+	}{
+		{"died", dispatch.StartFailed, state.StatusExited, died, true,
+			`sent "sync" → api as w-sync, but it did not stay up: ` + died + " — the row is kept in the cockpit"},
+		{"unconfirmed", dispatch.StartUnconfirmed, state.StatusLaunching, "", false,
+			`· id w-sync · session  · not confirmed: claude has not reported in after 30s`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			portfolio(t)
+			withStore(t)
+			stubLaunch(t)
+			t.Setenv("CLAUDE_DISPATCHER_ID", "") // sent from a plain shell
+			withAwait(t, tc.outcome, &state.Dispatch{ID: "w-sync", Feature: "sync", RepoName: "api",
+				Status: tc.status, StatusReason: tc.reason})
+			var out bytes.Buffer
+			err := runDispatch([]string{"--repo", "api", "--title", "sync", "rework", "it"}, &out)
+			if tc.fails != (err != nil) {
+				t.Fatalf("err = %v, want failure %v", err, tc.fails)
+			}
+			got := out.String()
+			if err != nil {
+				got = err.Error()
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("said %q\nwant it to contain %q", got, tc.want)
+			}
+			if tc.fails && strings.Contains(out.String(), "dispatched") {
+				t.Errorf("said dispatched over a claude that died: %q", out.String())
+			}
+		})
 	}
 }
