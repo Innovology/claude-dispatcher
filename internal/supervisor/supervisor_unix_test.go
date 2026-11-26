@@ -245,3 +245,27 @@ func eventually(cond func() bool) bool {
 	}
 	return cond()
 }
+
+// A session's screen is read back through the backend on the session's own
+// server, and a session that is not there is an error rather than an empty
+// screen: an empty screen is a claim about what was printed.
+func TestCapturePaneReadsTheSessionsOwnServer(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	sess := Session{Name: "s", Socket: "disp-test-sv-capture-" + strconv.Itoa(os.Getpid())}
+	t.Cleanup(func() { _ = exec.Command("tmux", "-L", sess.Socket, "kill-server").Run() })
+	if err := NewSession(sess, t.TempDir(), "echo read-me-back; sleep 30", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	var screen string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline) && !strings.Contains(screen, "read-me-back"); time.Sleep(50 * time.Millisecond) {
+		screen, _ = CapturePane(sess)
+	}
+	if !strings.Contains(screen, "read-me-back") {
+		t.Errorf("the pane did not read back what it printed: %q", screen)
+	}
+	if _, err := CapturePane(Session{Name: "s", Socket: sess.Socket + "-other"}); err == nil {
+		t.Error("a session on another server read back as a screen")
+	}
+}
