@@ -351,3 +351,31 @@ exit 1
 		t.Errorf("the rest of what it printed is gone: %q", out)
 	}
 }
+
+// A claude that exits before any hook fires leaves its reason on the screen and
+// nowhere else, so reading the screen back is how the launch sweep says why.
+// Measured on 2.1.332 in a deleted directory: one line, then exit 1, then the
+// exit shell. A long line comes back whole (-J), not cut where the pane wrapped.
+func TestCapturePaneReadsBackWhatThePanePrinted(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	srv := Server{Socket: "disp-test-capture-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	said := "The current directory no longer exists (it was deleted or moved). Start Claude Code from an existing directory."
+	if err := srv.NewSession("s", t.TempDir(), "echo "+shellQuoteTest(said)+"; echo done-printing; sleep 30", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	var got string
+	if !eventually(t, func() bool { got, _ = srv.CapturePane("s"); return strings.Contains(got, "done-printing") }) {
+		t.Fatalf("the pane never showed what it printed:\n%s", got)
+	}
+	if !strings.Contains(got, said+"\n") {
+		t.Errorf("the line did not come back whole:\n%s", got)
+	}
+	if _, err := srv.CapturePane("no-such-session"); err == nil {
+		t.Error("a session that is not there read back as a screen, not an error")
+	}
+}
+
+func shellQuoteTest(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

@@ -75,3 +75,45 @@ func TestResumeCarriesTheShellToo(t *testing.T) {
 		t.Errorf("resume dropped the shell:\n%s", line)
 	}
 }
+
+// The tail says that claude has gone, and how, before the exit shell takes the
+// pane: the status is read while $? is still claude's, so whatever the tail
+// runs after it cannot change what the mark says.
+func TestThePaneSaysClaudeExitedAndWithWhatStatus(t *testing.T) {
+	sh, err := exec.LookPath("true")
+	if err != nil {
+		t.Skip("no true(1) to stand in for the exit shell")
+	}
+	out, err := exec.Command("/bin/sh", "-c", "echo claude said this; (exit 3)"+exitShell(sh)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the line did not run: %v: %s", err, out)
+	}
+	said, status, found := cutAtExit(string(out))
+	if !found || status != "3" {
+		t.Errorf("the mark reads status %q (found %v), want 3:\n%s", status, found, out)
+	}
+	if !strings.Contains(said, "claude said this") {
+		t.Errorf("what claude printed is not before the mark:\n%s", out)
+	}
+}
+
+// The incident's screen, as the pane showed it: claude's one line and its exit,
+// then the exit shell complaining about the directory it was left in. What
+// claude said is what comes before the mark; the shell's lines are not it.
+func TestWhatClaudeSaidIsWhatCameBeforeItsExit(t *testing.T) {
+	screen := "shell-init: error retrieving current directory: getcwd: cannot access parent directories: No such file or directory\n" +
+		"The current directory no longer exists (it was deleted or moved). Start Claude Code from an existing directory.\n" +
+		"\n" + ExitMark + "1\n" +
+		"Error: nu::shell::directory_not_found\n" +
+		"~/gone> \n\n"
+	said, status, found := cutAtExit(screen)
+	if !found || status != "1" {
+		t.Fatalf("cutAtExit = status %q, found %v", status, found)
+	}
+	if strings.Contains(said, "nu::shell") || strings.Contains(said, ExitMark) {
+		t.Errorf("the exit shell's lines were kept as claude's:\n%s", said)
+	}
+	if _, _, found := cutAtExit("no mark here\n"); found {
+		t.Error("a pane with no mark was read as one whose claude exited")
+	}
+}
