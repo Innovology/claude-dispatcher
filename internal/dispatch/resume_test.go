@@ -5,6 +5,7 @@ package dispatch
 import (
 	"claude-dispatcher/internal/supervisor"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -329,6 +330,153 @@ func TestResumeRefusesWhatItCannotResume(t *testing.T) {
 	}
 	if sup.started.name != "" {
 		t.Error("a session was started for something that cannot be resumed")
+	}
+}
+
+// turnless is the reported record (ADR 0039): a dispatch whose session id came
+// from a claude that started and ended without a turn, so the transcript it
+// names was never written. The log holds what the reporting log held — the
+// launch, the session's start and end, and a refused resume of the cockpit's
+// own carrying the session's id — plus the idle prompt another turnless
+// session in that log drew, and nothing else.
+func turnless(t *testing.T) *state.Dispatch {
+	t.Helper()
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	d := finished(t, initRepo(t))
+	if err := os.Remove(d.TranscriptPath); err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range []state.Event{
+		{Event: state.EventDispatchLaunched, DispatcherID: d.ID, Feature: d.Feature},
+		{Event: "SessionStart", SessionID: "sess-abc", Cwd: d.WorktreePath},
+		{Event: "Notification:idle_prompt", SessionID: "sess-abc", Cwd: d.WorktreePath},
+		{Event: "SessionEnd", SessionID: "sess-abc", Cwd: d.WorktreePath},
+		{Event: "Resumed", DispatcherID: d.ID, SessionID: "sess-abc", Reason: "failed: the transcript is gone"},
+	} {
+		state.AppendEvent(ev)
+	}
+	return d
+}
+
+// A session id is not a conversation. One that never had a turn — the claude
+// a human opened in a dead dispatch's pane and closed again — left the record
+// refusing every ⏎ with "the transcript is gone", and nothing on the row could
+// start the dispatch. It is started again from its brief, as a launch that
+// never ran is, and the stranger's session leaves the record.
+func TestResumeStartsAConversationThatNeverBeganAgain(t *testing.T) {
+	sup := &stubSupervisor{alive: map[string]bool{}}
+	stubSessions(t, sup)
+	d := turnless(t)
+
+	mode, session, err := Resume(d, "")
+	if err != nil {
+		t.Fatalf("Resume = %v, want the dispatch started again", err)
+	}
+	if mode != ResumeRelaunched || session == "" {
+		t.Fatalf("mode = %q session = %q, want a relaunch", mode, session)
+	}
+	if strings.Contains(sup.started.cmd, "--resume") || !strings.Contains(sup.started.cmd, state.PromptPath(d.ID)) {
+		t.Errorf("command %q is not the original launch", sup.started.cmd)
+	}
+	if b, err := os.ReadFile(state.PromptPath(d.ID)); err != nil || string(b) != "retry the payments" {
+		t.Errorf("prompt file = %q, %v; want what it was dispatched with", b, err)
+	}
+	got := recordByIDForTest(t, d.ID)
+	if got.SessionID != "" || got.TranscriptPath != "" {
+		t.Errorf("record kept session %q / %q, which was never this dispatch's conversation", got.SessionID, got.TranscriptPath)
+	}
+	if got.Status != state.StatusLaunching || got.StatusReason != "starting again" {
+		t.Errorf("record left at %q / %q", got.Status, got.StatusReason)
+	}
+}
+
+// A conversation that existed and whose transcript has gone (Claude Code's
+// cleanup, a human's rm) looks the same on the record as one that never began,
+// and relaunching the brief there would do the work over again. So the refusal
+// stands wherever the evidence is anything short of a session the log saw
+// start and saw do nothing — and a branch nobody has worked on.
+func TestResumeStillRefusesAConversationThatHasGone(t *testing.T) {
+	git := func(t *testing.T, dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=t@t", "-c", "user.name=t"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	cases := []struct {
+		name string
+		make func(t *testing.T, d *state.Dispatch)
+	}{
+		{"a prompt reached it", func(t *testing.T, d *state.Dispatch) {
+			state.AppendEvent(state.Event{Event: "UserPromptSubmit", SessionID: "sess-abc"})
+		}},
+		// Measured: a session with two Stops and no prompt on record.
+		{"it answered with no prompt on record", func(t *testing.T, d *state.Dispatch) {
+			state.AppendEvent(state.Event{Event: "Stop", SessionID: "sess-abc"})
+		}},
+		{"an API error ended a turn", func(t *testing.T, d *state.Dispatch) {
+			state.AppendEvent(state.Event{Event: "StopFailure", SessionID: "sess-abc", Reason: "rate_limit"})
+		}},
+		{"it asked a question", func(t *testing.T, d *state.Dispatch) {
+			state.AppendEvent(state.Event{Event: "PreToolUse:AskUserQuestion", SessionID: "sess-abc"})
+		}},
+		{"its own claude worked under another session", func(t *testing.T, d *state.Dispatch) {
+			state.AppendEvent(state.Event{Event: "UserPromptSubmit", DispatcherID: d.ID, SessionID: "sess-first"})
+		}},
+		{"the log never saw it start", func(t *testing.T, d *state.Dispatch) {
+			t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+			if err := state.Save(d); err != nil {
+				t.Fatal(err)
+			}
+			state.AppendEvent(state.Event{Event: "SessionEnd", SessionID: "sess-abc"})
+		}},
+		{"its transcript is under its config dir", func(t *testing.T, d *state.Dispatch) {
+			p := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "projects", "-elsewhere", "sess-abc.jsonl")
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte("{}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"the record has commits", func(t *testing.T, d *state.Dispatch) {
+			d.Commits = []string{"0123abc"}
+		}},
+		{"the branch has moved since the dispatch", func(t *testing.T, d *state.Dispatch) {
+			d.BaseSHA = git(t, d.WorktreePath, "rev-parse", "HEAD")
+			git(t, d.WorktreePath, "commit", "--allow-empty", "-m", "by hand")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sup := &stubSupervisor{alive: map[string]bool{}}
+			stubSessions(t, sup)
+			d := turnless(t)
+			c.make(t, d)
+
+			if _, _, err := Resume(d, ""); err == nil || !strings.Contains(err.Error(), "is gone") {
+				t.Errorf("Resume = %v, want the transcript refused as gone", err)
+			}
+			if sup.started.name != "" {
+				t.Errorf("started %q over a conversation that existed", sup.started.name)
+			}
+			if d.SessionID != "sess-abc" {
+				t.Errorf("session id dropped to %q", d.SessionID)
+			}
+		})
+	}
+	// The branch check, at its edges: a branch that has not moved, or is not
+	// there at all, carries no work.
+	d := turnless(t)
+	d.BaseSHA = git(t, d.WorktreePath, "rev-parse", "HEAD")
+	if branchMoved(d) {
+		t.Error("a branch still at its base reads as moved")
+	}
+	d.Branch = "feature/not-there"
+	if branchMoved(d) {
+		t.Error("a branch that does not exist reads as moved")
 	}
 }
 
