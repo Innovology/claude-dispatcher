@@ -12,9 +12,11 @@ package state
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -936,4 +938,57 @@ func LoadEvents() []Event {
 		out = append(out, ev)
 	}
 	return out
+}
+
+// EventsMentioning is the events whose line mentions any of keys, oldest first,
+// and whether the log was read to its end — the history of one session or one
+// dispatcher, read without decoding everything else.
+//
+// The log is append-only and never trimmed: 139,000 lines and 30MB on the
+// machine this was written for, of which one session is a handful. So a line is
+// matched as text before it is decoded, and the caller compares the fields: a
+// key found in a cwd or a reason is a line handed back, not one vouched for.
+//
+// complete is false for a log that is missing or could not be read through,
+// because what a caller learns from the log is often that something is NOT in
+// it, and a log that stopped part-way has not said that. Lines are read whole
+// however long they are (a failed launch's reason can carry a builder's log),
+// for the same reason: a scanner that gave up on one long line would hand back
+// a history with its end missing.
+func EventsMentioning(keys ...string) (events []Event, complete bool) {
+	f, err := os.Open(filepath.Join(Dir(), "events.jsonl"))
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	var needles [][]byte
+	for _, k := range keys {
+		if k != "" {
+			needles = append(needles, []byte(k))
+		}
+	}
+	r := bufio.NewReaderSize(f, 64*1024)
+	for {
+		line, err := r.ReadBytes('\n')
+		if mentionsAny(line, needles) {
+			var ev Event
+			if json.Unmarshal(line, &ev) == nil {
+				events = append(events, ev)
+			}
+		}
+		if err != nil {
+			// EOF is the end of the log, and a torn last line is normal (the
+			// writer swallows its failures); any other error is a log not read.
+			return events, err == io.EOF
+		}
+	}
+}
+
+func mentionsAny(line []byte, needles [][]byte) bool {
+	for _, n := range needles {
+		if bytes.Contains(line, n) {
+			return true
+		}
+	}
+	return false
 }
