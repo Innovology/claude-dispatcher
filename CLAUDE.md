@@ -1271,7 +1271,12 @@
   wind-down cannot reopen it**: the turn the handoff ran in ends and claude
   idles, so hookcmd holds a record in the handoff's ending (`HandedOff`, read
   off `ReasonHandedOff`) as it holds a done one, and only a prompt or a dialog
-  reopens it. A launch that failed ends nothing. **A dispatch is told it can do
+  reopens it. A launch that failed ends nothing, and **a launch has worked only
+  once claude in it reports in** (ADR 0038): `Handoff` waits on `AwaitStart`
+  before ending anything, so a claude that died at once (player-app,
+  2026-11-26) or one nothing could confirm within `StartWait` comes back as a
+  `StartError`, the run going on, and the command says "handed off" over
+  neither. **A dispatch is told it can do
   this.** A launch in a repo with siblings (`repos.Repo.Siblings`) gets one
   sentence before the contract, naming the product, the repos beside it and
   the command at the binary's durable path (`internal/binpath`, which `init`
