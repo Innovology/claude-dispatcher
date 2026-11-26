@@ -247,6 +247,68 @@ func TestDismissWritesTheRecord(t *testing.T) {
 	}
 }
 
+// The incident: ⏎ "start again" relaunched a dispatcher that never ran, and the
+// row it was pressed on stayed on screen until a load read the relaunch back.
+// An act on that row acted on the screen's copy and saved it whole, putting the
+// old session's hold back over the new one's; the sweep then took the
+// dispatcher's own session for a younger one that had its name, and retired it
+// on every load while it worked. Every act now writes the record as it stands.
+func TestAnActOnAStaleRowKeepsTheSessionARelaunchGaveIt(t *testing.T) {
+	t.Setenv("CLAUDE_DISPATCHER_STATE", t.TempDir())
+	saved := captureVars()
+	defer restoreVars(saved)
+
+	launched := time.Date(2026, 11, 26, 14, 32, 21, 0, time.Local)
+	relaunched := launched.Add(159 * time.Second)
+	row := &state.Dispatch{ID: "ds", Feature: "DS adoption", TmuxSession: "disp-ds",
+		SessionStartedAt: &launched}
+	row.Stop(state.StatusExited, "its tmux session ended before claude reported in", launched.Add(time.Minute))
+	if err := state.Save(row); err != nil {
+		t.Fatal(err)
+	}
+	row = loadRecord(t, "ds") // the copy the screen was drawn from
+
+	// The relaunch, written after the screen's load read the record.
+	now := *row
+	now.Status, now.StatusReason, now.SessionStartedAt = state.StatusLaunching, "starting again", &relaunched
+	if err := state.Save(&now); err != nil {
+		t.Fatal(err)
+	}
+	liveByID = map[string]*state.Dispatch{"ds": row}
+	liveRecords = map[string]*state.Dispatch{"DS adoption": row}
+
+	check := func(act string) {
+		t.Helper()
+		got := loadRecord(t, "ds")
+		if got.SessionStartedAt == nil || !got.SessionStartedAt.Equal(relaunched) {
+			t.Errorf("after %s the record holds the session from %v, want the relaunch's %v", act, got.SessionStartedAt, relaunched)
+		}
+	}
+
+	msg := dismissCmd("ds")()
+	am, ok := msg.(actionMsg)
+	if !ok || !strings.Contains(am.notice, "running again") {
+		t.Errorf("x on a row a relaunch had overtaken said %#v, want it to say the dispatcher is running again", msg)
+	}
+	if got := loadRecord(t, "ds"); got.Status != state.StatusLaunching || got.DismissedAt != nil {
+		t.Errorf("the relaunched record was dismissed: status %s dismissed %v", got.Status, got.DismissedAt)
+	}
+	check("dismiss")
+
+	_ = parkCmd("ds", "waiting on legal")()
+	check("park")
+	if got := loadRecord(t, "ds"); got.ParkedReason != "waiting on legal" {
+		t.Errorf("the park did not land: %q", got.ParkedReason)
+	}
+	_ = unparkCmd("ds")()
+	check("unpark")
+	_ = markDoneCmd("DS adoption")()
+	check("mark shipped")
+	if got := loadRecord(t, "ds"); got.Status != state.StatusDone {
+		t.Errorf("mark shipped did not land: %s", got.Status)
+	}
+}
+
 // ---- the screen, before the record comes back ------------------------------------
 
 // heldFleet is one held row and one live one, the table a human dismisses from.

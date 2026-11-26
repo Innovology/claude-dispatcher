@@ -49,9 +49,9 @@ func TestXReleasesAnAdoptedSessionAndLeavesItRunning(t *testing.T) {
 	if err := exec.Command("tmux", "-L", sock, "has-session", "-t", "=theirs").Run(); err != nil {
 		t.Fatal("the human's session was killed")
 	}
-	if rec.ReleasedAt == nil || rec.SessionID != "" || rec.Status != state.StatusExited || rec.DismissedAt == nil {
+	if got := loadRecord(t, rec.ID); got.ReleasedAt == nil || got.SessionID != "" || got.Status != state.StatusExited || got.DismissedAt == nil {
 		t.Errorf("record not released: released=%v session=%q status=%q dismissed=%v",
-			rec.ReleasedAt, rec.SessionID, rec.Status, rec.DismissedAt)
+			got.ReleasedAt, got.SessionID, got.Status, got.DismissedAt)
 	}
 	if _, err := os.Stat(rec.WorktreePath); err != nil {
 		t.Errorf("the human's directory went: %v", err)

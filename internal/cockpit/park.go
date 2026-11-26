@@ -85,13 +85,14 @@ func (m model) viewPark(w, h int) string {
 // parkCmd shelves the record under the human's reason.
 func parkCmd(id, reason string) tea.Cmd {
 	return func() tea.Msg {
-		rec := recordByID(id)
+		now := time.Now()
+		rec, _ := editRecord(id, func(rec *state.Dispatch) bool {
+			rec.ParkedReason, rec.ParkedAt = reason, &now
+			return true
+		})
 		if rec == nil {
 			return actionMsg{notice: "no dispatch record to park"}
 		}
-		now := time.Now()
-		rec.ParkedReason, rec.ParkedAt = reason, &now
-		_ = state.Save(rec)
 		return actionMsg{notice: "parked \"" + rec.Feature + "\" · " + reason}
 	}
 }
@@ -111,14 +112,28 @@ type dismissedMsg struct{ id, notice string }
 // dismissal the cockpit only remembered would come back on the next load — and
 // would come back for every finished dispatcher the moment the cockpit was
 // restarted, which is the whole fleet.
+//
+// The row it was pressed on can be older than the record: ⏎ "start again" keeps
+// its row until a load reads the relaunch back, and x on that row is x on a
+// dispatcher that is running again. That dismisses nothing — there is no ending
+// left to read — and says so, rather than moving a running dispatcher to
+// history on the screen's word (fleetNow) or writing the row's copy back over
+// the session it now has.
 func dismissCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		rec := recordByID(id)
+		rec, _ := editRecord(id, func(rec *state.Dispatch) bool {
+			if !rec.Finished() {
+				return false
+			}
+			rec.Dismiss(time.Now())
+			return true
+		})
 		if rec == nil {
 			return actionMsg{notice: "no dispatch record to dismiss"}
 		}
-		rec.Dismiss(time.Now())
-		_ = state.Save(rec)
+		if !rec.Finished() {
+			return actionMsg{notice: "\"" + rec.Feature + "\" is running again — nothing to dismiss"}
+		}
 		return dismissedMsg{id: id,
 			notice: "dismissed \"" + rec.Feature + "\" · h for history"}
 	}
@@ -128,12 +143,13 @@ func dismissCmd(id string) tea.Cmd {
 // snapshot re-ranks the row from its real status like any other.
 func unparkCmd(id string) tea.Cmd {
 	return func() tea.Msg {
-		rec := recordByID(id)
+		rec, _ := editRecord(id, func(rec *state.Dispatch) bool {
+			rec.ParkedReason, rec.ParkedAt = "", nil
+			return true
+		})
 		if rec == nil {
 			return actionMsg{notice: "no dispatch record to unpark"}
 		}
-		rec.ParkedReason, rec.ParkedAt = "", nil
-		_ = state.Save(rec)
 		return actionMsg{notice: "\"" + rec.Feature + "\" back on the fleet"}
 	}
 }
