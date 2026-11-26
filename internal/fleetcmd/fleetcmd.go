@@ -37,6 +37,7 @@ var (
 	sessionIdle  = supervisor.SessionIdle
 	sendKeys     = supervisor.SendKeys
 	swapAccount  = dispatch.SwapAccount
+	awaitStart   = dispatch.AwaitStart
 )
 
 // Entry is one dispatcher as `status --json` prints it. The field names are the
@@ -443,7 +444,21 @@ func runSwap(args []string, out io.Writer) error {
 	if mode == dispatch.ResumeRelaunched {
 		verb = "started again"
 	}
-	_, _ = fmt.Fprintf(out, "%s %s on %s · session %s\n", quote(d.Feature), verb, to.Name, session)
+	if mode == dispatch.ResumeLive {
+		_, _ = fmt.Fprintf(out, "%s %s on %s · session %s\n", quote(d.Feature), verb, to.Name, session)
+		return nil
+	}
+	// Resume returning is the supervisor accepting a session, not claude coming
+	// back in it — and a conversation that will not open under the new login
+	// ("No conversation found") is a claude that exits at once. So the line
+	// says what claude did, waited for (ADR 0038): reported in, died, or not
+	// yet known.
+	o, now := awaitStart(d.ID, dispatch.StartWait)
+	report := dispatch.StartReport(o, now, dispatch.StartWait)
+	if o == dispatch.StartFailed {
+		return fmt.Errorf("%s is on %s now, but %s", quote(d.Feature), to.Name, report)
+	}
+	_, _ = fmt.Fprintf(out, "%s %s on %s · session %s · %s\n", quote(d.Feature), verb, to.Name, session, report)
 	return nil
 }
 

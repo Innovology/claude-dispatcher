@@ -603,6 +603,15 @@ func socketsOf(ds []*state.Dispatch) []string {
 // drops to a shell so the session survives for inspection, and SessionEnd
 // fires on the way out. A missing session means something took it away.
 //
+// Except before claude has reported in, where there is no SessionEnd to fire:
+// a claude that dies starting leaves the session alive at its exit shell, and
+// a launching record whose session is there would claim "starting session" for
+// as long as the human left the pane alone. So a launching record's live
+// session is asked one thing more — whether it has fallen to its shell
+// (diedStarting) — and one that has is retired with what its pane says
+// (retireDiedStarting, ADR 0038). A busy pane is left alone: it is a claude
+// still starting, or one waiting on a startup prompt.
+//
 // The three statuses swept are a boundary, not caution. Each is reachable only
 // through a hook fired from inside the session, so the session provably
 // existed and its absence now proves it ended. A launching record has had no
@@ -643,12 +652,19 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 			listed[supervisor.Session{Name: s.Name, Socket: sock}] = s.Created
 		}
 	}
+	now := time.Now()
 	for _, d := range ds {
 		if d.TmuxSession == "" {
 			continue
 		}
 		born, named := listed[SessionOf(d)]
 		if named && d.HoldsSessionBorn(born) {
+			// Alive is not started. Asked only of a launching record past the
+			// settle, so a fleet of running dispatchers costs nothing more.
+			if diedStarting(d, now) && retireDiedStarting(d, now) {
+				retired++
+				continue
+			}
 			live++
 			continue
 		}

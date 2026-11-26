@@ -93,7 +93,19 @@ func runDispatch(args []string, out io.Writer) error {
 	if err := dispatch.MarkDispatchedBy(d.ID, parent); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "dispatched %s → %s on %s · id %s · session %s\n", quote(d.Feature), d.RepoName, d.Branch, d.ID, d.TmuxSession)
+	// Launch returning is the supervisor accepting a pane, not claude running in
+	// it (ADR 0038), and the session that sent this acts on what it reads here.
+	// So the line says what claude did, waited for: reported in, died — an
+	// error, in claude's words, with the row kept to start again — or not yet
+	// known, which is said rather than passed off as either.
+	o, now := awaitStart(d.ID, dispatch.StartWait)
+	report := dispatch.StartReport(o, now, dispatch.StartWait)
+	if o == dispatch.StartFailed {
+		return fmt.Errorf("sent %s → %s as %s, but %s — the row is kept in the cockpit, where ⏎ starts it again",
+			quote(d.Feature), d.RepoName, d.ID, report)
+	}
+	_, _ = fmt.Fprintf(out, "dispatched %s → %s on %s · id %s · session %s · %s\n",
+		quote(d.Feature), d.RepoName, d.Branch, d.ID, d.TmuxSession, report)
 	return nil
 }
 
