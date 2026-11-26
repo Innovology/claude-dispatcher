@@ -584,6 +584,15 @@ func ReconcileSessions(ds []*state.Dispatch) (retired, live int) {
 		default:
 			continue
 		}
+		// A session younger than the hold is a stranger's by the hold's account,
+		// and the hold is a field a stale copy can put back. Asked directly, the
+		// session may be running this record's own conversation — then it is the
+		// record's, and the hold is what was wrong (hold.go).
+		if named && runsOwnConversation(d) {
+			restampHold(d, born)
+			live++
+			continue
+		}
 		// The probe is for a listing that came back without the name, which may
 		// be a listing that failed. One that named it, younger than the record's
 		// hold, answered: the session this record held is gone, and asking the
