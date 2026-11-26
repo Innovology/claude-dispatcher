@@ -208,6 +208,129 @@ func TestARealSessionListsWhenItWasMade(t *testing.T) {
 	}
 }
 
+// The report: a design-system dispatcher handed its work to player-app, and
+// the new session opened on "The current directory no longer exists" in the
+// folder of a dispatch finished an hour before. player-app's server had been
+// started from that dispatch's worktree, `x` had since removed it, and tmux
+// 3.7b then ignores -c for every pane the server opens. The server here is
+// started in a folder that is then deleted, the same way; the pane must still
+// stand in the directory it was asked for.
+func TestAPaneStandsInItsDirectoryAfterTheServersHasGone(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	tmp := t.TempDir()
+	gone, want := filepath.Join(tmp, "finished-dispatch"), filepath.Join(tmp, "new-dispatch")
+	for _, d := range []string{gone, want} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := Server{Socket: "disp-test-gone-" + itoa(os.Getpid())}
+	t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+	first := srv.cmd("new-session", "-d", "-s", "first", "sleep 30")
+	first.Dir = gone
+	if out, err := first.CombinedOutput(); err != nil {
+		t.Fatalf("starting the server in %s: %v: %s", gone, err, out)
+	}
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	marker := filepath.Join(tmp, "cwd")
+	if err := srv.NewSession("s", want, "pwd -P > "+shellQuote(marker)+"; sleep 30", ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	var got []byte
+	if !eventually(t, func() bool { got, _ = os.ReadFile(marker); return len(got) > 0 }) {
+		t.Fatal("the pane never got as far as its command: it could not stand in its directory")
+	}
+	ran := strings.TrimSpace(string(got))
+	if real, _ := filepath.EvalSymlinks(want); ran != real {
+		t.Errorf("the pane started in %q, want %q", ran, real)
+	}
+}
+
+// The other half of that report: the server was standing in the finished
+// dispatch's worktree because the client that started it stood there. A server
+// NewSession starts must stand somewhere no dispatch removes, with and without
+// an environment prefix, and the prefix must still run in the worktree, where
+// `nix develop` looks for its flake.
+func TestAServerIsNotStartedInsideTheWorktreeItWasStartedFor(t *testing.T) {
+	if !Available() {
+		t.Skip("tmux not installed")
+	}
+	if _, err := os.Stat("/proc/self/cwd"); err != nil {
+		t.Skip("no /proc to read a server's working directory from")
+	}
+	tmp := t.TempDir()
+	home, worktree := filepath.Join(tmp, "home"), filepath.Join(tmp, "worktree")
+	for _, d := range []string{home, worktree} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	marker := filepath.Join(tmp, "prefix-ran-in")
+	prefix := filepath.Join(tmp, "record-cwd")
+	if err := os.WriteFile(prefix, []byte("#!/bin/sh\npwd -P > "+shellQuote(marker)+"\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realHome, _ := filepath.EvalSymlinks(home)
+	realWorktree, _ := filepath.EvalSymlinks(worktree)
+
+	for _, tc := range []struct{ name, env string }{{"plain", ""}, {"prefixed", prefix}} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := Server{Socket: "disp-test-born-in-" + tc.name + "-" + itoa(os.Getpid())}
+			t.Cleanup(func() { _ = srv.cmd("kill-server").Run() })
+			if err := srv.NewSession("s", worktree, "sleep 30", tc.env); err != nil {
+				t.Fatalf("NewSession: %v", err)
+			}
+			out, err := srv.cmd("display-message", "-p", "#{pid}").Output()
+			if err != nil {
+				t.Fatalf("asking the server its pid: %v", err)
+			}
+			stands, err := os.Readlink("/proc/" + strings.TrimSpace(string(out)) + "/cwd")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stands != realHome {
+				t.Errorf("the server stands in %q, want the home directory %q", stands, realHome)
+			}
+			if tc.env == "" {
+				return
+			}
+			ran, err := os.ReadFile(marker)
+			if err != nil {
+				t.Fatalf("the prefix never ran: %v", err)
+			}
+			if got := strings.TrimSpace(string(ran)); got != realWorktree {
+				t.Errorf("the prefix ran in %q, want the worktree %q", got, realWorktree)
+			}
+		})
+	}
+}
+
+// A directory that is not there ends the pane instead of starting the command
+// wherever tmux put it.
+func TestAPaneWhoseDirectoryIsMissingRunsNothing(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "ran")
+	out, err := exec.Command("/bin/sh", "-c", standIn(filepath.Join(tmp, "gone"), "touch "+shellQuote(marker))).CombinedOutput()
+	if err == nil {
+		t.Errorf("the line exited 0 in a directory that is not there: %s", out)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the command ran although its directory is missing")
+	}
+	if got := standIn("", "true"); got != "true" {
+		t.Errorf("no directory still changed the command: %q", got)
+	}
+	if got := standIn("/it's/here", "true"); got != `cd '/it'\''s/here' || exit; true` {
+		t.Errorf("a quote in the path was not escaped: %q", got)
+	}
+}
+
 // The launch that reported this: dispatching into a flake repo from a cockpit
 // started in ~ died with `path "/home/…" does not contain a 'flake.nix'`,
 // because the `nix develop` wrapping the client looked for its flake where the
