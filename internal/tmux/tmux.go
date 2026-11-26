@@ -96,6 +96,56 @@ func (s Server) clientIn(dir, env string, args ...string) *exec.Cmd {
 	return c
 }
 
+// starterIn is clientIn for new-session, the one command here that can start
+// a server. The prefix still runs from dir, where it finds its environment, and
+// then hands over to a tmux client standing in the home directory.
+//
+// A server stands for its whole life where the client that started it stood,
+// and that was a dispatch's worktree: clientIn put it there for the prefix, and
+// without a prefix it stood wherever the cockpit, or a dispatcher running the
+// CLI from inside its own worktree, happened to be. A worktree is the folder
+// `x` removes once its dispatch is done, and a server whose directory has gone
+// opens every later pane in that dead directory, the human's own splits and
+// windows included (see standIn). Measured on one machine, 2026-11-26: two of
+// five servers were standing in deleted worktrees, and a third was standing in
+// a branchless conversation's folder, which goes the same way when that
+// conversation is finished. Home is a directory no dispatch removes.
+//
+// The hand-over is a fixed `/bin/sh -c 'cd "$1" && shift && exec "$@"'` after
+// the prefix. Changing the client's directory before the prefix runs would
+// lose the flake that `nix develop` finds by looking where it stands, and tmux
+// has no flag for where its server stands. Nothing else changes: the client
+// keeps the environment the prefix built, and the pane is placed by -c and by
+// standIn.
+func (s Server) starterIn(dir, env string, args ...string) *exec.Cmd {
+	home := birthplace()
+	if strings.TrimSpace(env) == "" {
+		c := s.cmd(args...)
+		c.Dir = home
+		return c
+	}
+	argv := append(strings.Fields(env), "/bin/sh", "-c", `cd "$1" && shift && exec "$@"`, "sh", home)
+	argv = append(argv, s.cmd(args...).Args...)
+	c := exec.Command(argv[0], argv[1:]...)
+	if dir != "" {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			c.Dir = dir
+		}
+	}
+	return c
+}
+
+// birthplace is where a server this package starts will stand: the home
+// directory, or / when there is no home to stand in.
+func birthplace() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		if fi, err := os.Stat(home); err == nil && fi.IsDir() {
+			return home
+		}
+	}
+	return "/"
+}
+
 func (s Server) HasSession(name string) bool {
 	return s.cmd("has-session", "-t", "="+name).Run() == nil
 }
@@ -148,14 +198,51 @@ func (s Server) ListSessions() []string {
 // it builds before the error — 883 lines, measured, of which the first was the
 // one the record kept: "copying path '…-nss-cacert-3.115' from
 // 'https://cache.nixos.org'...".
+//
+// And the command changes into dir itself (standIn): `-c dir` alone is not
+// where the pane starts once the server's own directory has gone. And a server
+// this starts stands in the home directory (starterIn), not in the worktree it
+// was started for, so removing that worktree cannot leave the server there.
 func (s Server) NewSession(name, dir, shellCommand, env string) error {
-	out, err := s.clientIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, "--", "/bin/sh", "-c", shellCommand).CombinedOutput()
+	out, err := s.starterIn(dir, env, "new-session", "-d", "-s", name, "-c", dir, "--", "/bin/sh", "-c", standIn(dir, shellCommand)).CombinedOutput()
 	if err != nil {
 		return cause.Failed("tmux new-session", out, err)
 	}
 	s.EnsureDetachKey()
 	s.SetStatusHint(name)
 	return nil
+}
+
+// standIn is shellCommand run from dir by a cd of its own, not by -c alone.
+//
+// -c is a request the server carries out, and a server whose own working
+// directory has been deleted does not carry it out. Measured on tmux 3.7b:
+// once that directory was removed, every pane the server opened started in it,
+// whatever -c said — new-session and new-window, the argv form and the
+// one-string form alike — and `-e PWD=…` changed only what the pane was told,
+// not where it stood. Nothing reports it: new-session returns 0 and the session
+// lists the right path, while claude, which will not start anywhere it cannot
+// getcwd, prints "The current directory no longer exists" and exits to the
+// shell, and nu then complains about $PWD at every prompt. A server stands
+// wherever the client that started it stood (see starterIn), which was the
+// first dispatch's worktree — the folder that dispatch's `x` removes — so on a
+// real machine (player-app's server, 2026-11-26) every dispatch after that one
+// came up dead in the folder of a dispatch long finished.
+//
+// The cd runs inside the pane, once it exists, where the server's directory has
+// no say. `|| exit` because a directory that is not there must end the pane
+// rather than start claude wherever it happened to land; the launch sweep then
+// retires the record as a session that ended before claude reported in.
+func standIn(dir, shellCommand string) string {
+	if dir == "" {
+		return shellCommand
+	}
+	return "cd " + shellQuote(dir) + " || exit; " + shellCommand
+}
+
+// shellQuote single-quotes s for a POSIX shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // SetStatusHint puts the way home in the session's status line. Note the

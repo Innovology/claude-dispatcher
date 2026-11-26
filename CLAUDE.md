@@ -168,6 +168,24 @@
   `default-shell` the first time one of its panes shows a command we cannot
   place, once per server per run. Full record:
   `docs/adr/0025-a-panes-command-names-its-own-shell.md`.
+- **A pane stands in its own directory, and a server stands in home.** A
+  handoff to player-app (2026-11-26) opened on "The current directory no longer
+  exists" in the worktree of a dispatch that had finished an hour earlier. A
+  tmux server stands for its whole life where the client that started it
+  stood. With a prefix, `clientIn` puts that client in the dispatch's worktree,
+  so the first dispatch on a server started the server there. Once `x` removed
+  that worktree, tmux 3.7b ignored `-c` for every pane the server opened:
+  new-session and new-window, argv and string form. `-e PWD`/
+  `set-environment PWD` changed only what the pane was told, and the launch
+  still reported success. That day two of five servers stood in deleted
+  worktrees. So `standIn` puts `cd '<dir>' || exit;` in front of every
+  `NewSession` line, which covers stranded servers without restarting them.
+  `starterIn` makes the client that can start a server stand in `$HOME`: the
+  prefix still runs in the worktree to find its flake, then hands over through
+  a fixed `sh -c 'cd "$1" && shift && exec "$@"'`. The launch still reports
+  success for a claude that died before any hook fired, and resume still
+  refuses a conversation that never began. Each of those is its own decision.
+  Full record: `docs/adr/0037-a-pane-stands-in-its-own-directory.md`.
 - **A ghost cannot clear itself, so every load looks.** That sweep ran in one
   place — `recheckCmd`, the reload after a jump-in — so a record whose session
   had been taken away claimed *working* for as long as the cockpit stayed open
